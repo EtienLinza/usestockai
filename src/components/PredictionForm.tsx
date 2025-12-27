@@ -6,23 +6,101 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { format, addDays } from "date-fns";
-import { CalendarIcon, TrendingUp, Eye, EyeOff, Loader2, Sparkles } from "lucide-react";
+import { format, addDays, isAfter, isBefore, addMonths } from "date-fns";
+import { CalendarIcon, TrendingUp, Eye, EyeOff, Loader2, Sparkles, RefreshCw, AlertCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { toast } from "sonner";
 
 interface PredictionFormProps {
   onSubmit: (data: { ticker: string; targetDate: Date; newsApiKey?: string }) => void;
   isLoading: boolean;
+  onRefresh?: () => void;
 }
 
-export const PredictionForm = ({ onSubmit, isLoading }: PredictionFormProps) => {
+// Validation schemas
+const TICKER_REGEX = /^[A-Z]{1,5}$/;
+const API_KEY_MIN_LENGTH = 20;
+
+export const PredictionForm = ({ onSubmit, isLoading, onRefresh }: PredictionFormProps) => {
   const [ticker, setTicker] = useState("");
   const [targetDate, setTargetDate] = useState<Date | undefined>(addDays(new Date(), 1));
   const [newsApiKey, setNewsApiKey] = useState("");
   const [showApiKey, setShowApiKey] = useState(false);
+  
+  // Validation states
+  const [errors, setErrors] = useState<{
+    ticker?: string;
+    date?: string;
+    apiKey?: string;
+  }>({});
+
+  const validateTicker = (value: string): string | undefined => {
+    if (!value) return "Ticker is required";
+    if (!TICKER_REGEX.test(value.toUpperCase())) {
+      return "Invalid ticker format (1-5 uppercase letters)";
+    }
+    return undefined;
+  };
+
+  const validateDate = (date: Date | undefined): string | undefined => {
+    if (!date) return "Target date is required";
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    if (isBefore(date, today)) {
+      return "Date must be in the future";
+    }
+    const maxDate = addMonths(today, 12);
+    if (isAfter(date, maxDate)) {
+      return "Date cannot be more than 1 year in the future";
+    }
+    return undefined;
+  };
+
+  const validateApiKey = (value: string): string | undefined => {
+    if (value && value.length < API_KEY_MIN_LENGTH) {
+      return "API key seems too short";
+    }
+    return undefined;
+  };
+
+  const handleTickerChange = (value: string) => {
+    const upperValue = value.toUpperCase();
+    setTicker(upperValue);
+    const error = validateTicker(upperValue);
+    setErrors(prev => ({ ...prev, ticker: error }));
+  };
+
+  const handleDateChange = (date: Date | undefined) => {
+    setTargetDate(date);
+    const error = validateDate(date);
+    setErrors(prev => ({ ...prev, date: error }));
+  };
+
+  const handleApiKeyChange = (value: string) => {
+    setNewsApiKey(value);
+    const error = validateApiKey(value);
+    setErrors(prev => ({ ...prev, apiKey: error }));
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    
+    // Validate all fields
+    const tickerError = validateTicker(ticker);
+    const dateError = validateDate(targetDate);
+    const apiKeyError = validateApiKey(newsApiKey);
+    
+    setErrors({
+      ticker: tickerError,
+      date: dateError,
+      apiKey: apiKeyError,
+    });
+
+    if (tickerError || dateError || apiKeyError) {
+      toast.error("Please fix the validation errors");
+      return;
+    }
+
     if (ticker && targetDate) {
       onSubmit({ 
         ticker: ticker.toUpperCase(), 
@@ -33,13 +111,28 @@ export const PredictionForm = ({ onSubmit, isLoading }: PredictionFormProps) => 
   };
 
   const popularTickers = ["AAPL", "GOOGL", "MSFT", "TSLA", "NVDA", "AMZN"];
+  const isFormValid = ticker && targetDate && !errors.ticker && !errors.date && !errors.apiKey;
 
   return (
     <Card variant="glass" className="w-full max-w-xl">
       <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Sparkles className="w-5 h-5 text-primary" />
-          Run Prediction
+        <CardTitle className="flex items-center justify-between">
+          <span className="flex items-center gap-2">
+            <Sparkles className="w-5 h-5 text-primary" />
+            Run Prediction
+          </span>
+          {onRefresh && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={onRefresh}
+              disabled={isLoading}
+              className="h-8 w-8 p-0"
+            >
+              <RefreshCw className={cn("w-4 h-4", isLoading && "animate-spin")} />
+            </Button>
+          )}
         </CardTitle>
         <CardDescription>
           Enter a stock ticker and target date to generate AI-powered price predictions
@@ -55,10 +148,19 @@ export const PredictionForm = ({ onSubmit, isLoading }: PredictionFormProps) => 
               variant="glow"
               placeholder="e.g., AAPL"
               value={ticker}
-              onChange={(e) => setTicker(e.target.value.toUpperCase())}
-              className="font-mono uppercase"
+              onChange={(e) => handleTickerChange(e.target.value)}
+              className={cn(
+                "font-mono uppercase",
+                errors.ticker && "border-destructive focus:ring-destructive"
+              )}
               maxLength={5}
             />
+            {errors.ticker && (
+              <p className="text-xs text-destructive flex items-center gap-1">
+                <AlertCircle className="w-3 h-3" />
+                {errors.ticker}
+              </p>
+            )}
             <div className="flex flex-wrap gap-2 mt-2">
               {popularTickers.map((t) => (
                 <motion.button
@@ -66,7 +168,7 @@ export const PredictionForm = ({ onSubmit, isLoading }: PredictionFormProps) => 
                   type="button"
                   whileHover={{ scale: 1.05 }}
                   whileTap={{ scale: 0.95 }}
-                  onClick={() => setTicker(t)}
+                  onClick={() => handleTickerChange(t)}
                   className={cn(
                     "px-3 py-1 text-xs font-mono rounded-full border transition-colors",
                     ticker === t
@@ -89,7 +191,8 @@ export const PredictionForm = ({ onSubmit, isLoading }: PredictionFormProps) => 
                   variant="outline"
                   className={cn(
                     "w-full justify-start text-left font-normal",
-                    !targetDate && "text-muted-foreground"
+                    !targetDate && "text-muted-foreground",
+                    errors.date && "border-destructive"
                   )}
                 >
                   <CalendarIcon className="mr-2 h-4 w-4" />
@@ -100,12 +203,22 @@ export const PredictionForm = ({ onSubmit, isLoading }: PredictionFormProps) => 
                 <Calendar
                   mode="single"
                   selected={targetDate}
-                  onSelect={setTargetDate}
-                  disabled={(date) => date < new Date()}
+                  onSelect={handleDateChange}
+                  disabled={(date) => {
+                    const today = new Date();
+                    today.setHours(0, 0, 0, 0);
+                    return date < today || date > addMonths(today, 12);
+                  }}
                   initialFocus
                 />
               </PopoverContent>
             </Popover>
+            {errors.date && (
+              <p className="text-xs text-destructive flex items-center gap-1">
+                <AlertCircle className="w-3 h-3" />
+                {errors.date}
+              </p>
+            )}
           </div>
 
           {/* NewsAPI Key (Optional) */}
@@ -121,8 +234,11 @@ export const PredictionForm = ({ onSubmit, isLoading }: PredictionFormProps) => 
                 type={showApiKey ? "text" : "password"}
                 placeholder="For sentiment analysis"
                 value={newsApiKey}
-                onChange={(e) => setNewsApiKey(e.target.value)}
-                className="pr-10"
+                onChange={(e) => handleApiKeyChange(e.target.value)}
+                className={cn(
+                  "pr-10",
+                  errors.apiKey && "border-warning focus:ring-warning"
+                )}
               />
               <button
                 type="button"
@@ -132,9 +248,16 @@ export const PredictionForm = ({ onSubmit, isLoading }: PredictionFormProps) => 
                 {showApiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
               </button>
             </div>
-            <p className="text-xs text-muted-foreground">
-              Add your NewsAPI key to enable sentiment-enhanced predictions
-            </p>
+            {errors.apiKey ? (
+              <p className="text-xs text-warning flex items-center gap-1">
+                <AlertCircle className="w-3 h-3" />
+                {errors.apiKey}
+              </p>
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                Add your NewsAPI key to enable sentiment-enhanced predictions
+              </p>
+            )}
           </div>
 
           {/* Submit Button */}
@@ -143,7 +266,7 @@ export const PredictionForm = ({ onSubmit, isLoading }: PredictionFormProps) => 
             variant="glow"
             size="lg"
             className="w-full"
-            disabled={!ticker || !targetDate || isLoading}
+            disabled={!isFormValid || isLoading}
           >
             {isLoading ? (
               <>
