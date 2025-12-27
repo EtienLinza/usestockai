@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { PriceChart } from "./PriceChart";
 import { FeatureImportance } from "./FeatureImportance";
+import { ShareReport } from "./ShareReport";
 
 export interface PredictionData {
   ticker: string;
@@ -89,6 +90,7 @@ export const PredictionResult = ({ data }: PredictionResultProps) => {
         </div>
         <div className="flex items-center gap-2">
           {getRegimeBadge(data.regime)}
+          <ShareReport data={data} />
         </div>
       </motion.div>
 

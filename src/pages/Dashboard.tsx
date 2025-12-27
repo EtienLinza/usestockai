@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { motion } from "framer-motion";
 import { Navbar } from "@/components/Navbar";
 import { PredictionForm } from "@/components/PredictionForm";
@@ -69,9 +69,11 @@ const Dashboard = () => {
   const { user } = useAuth();
   const [isLoading, setIsLoading] = useState(false);
   const [prediction, setPrediction] = useState<PredictionData | null>(null);
+  const [lastFormData, setLastFormData] = useState<{ ticker: string; targetDate: Date; newsApiKey?: string } | null>(null);
 
   const handleSubmit = async (data: { ticker: string; targetDate: Date; newsApiKey?: string }) => {
     setIsLoading(true);
+    setLastFormData(data);
     
     try {
       // Simulate API call delay
@@ -112,6 +114,14 @@ const Dashboard = () => {
     }
   };
 
+  const handleRefresh = useCallback(() => {
+    if (lastFormData) {
+      handleSubmit(lastFormData);
+    } else {
+      toast.info("Enter a ticker and date first to refresh data");
+    }
+  }, [lastFormData]);
+
   return (
     <div className="min-h-screen bg-background">
       <Navbar />
@@ -144,7 +154,11 @@ const Dashboard = () => {
               className="lg:col-span-5"
             >
               <div className="sticky top-24">
-                <PredictionForm onSubmit={handleSubmit} isLoading={isLoading} />
+                <PredictionForm 
+                  onSubmit={handleSubmit} 
+                  isLoading={isLoading} 
+                  onRefresh={handleRefresh}
+                />
               </div>
             </motion.div>
 

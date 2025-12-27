@@ -6,33 +6,33 @@
 
 @layer base {
   :root {
-    /* Deep charcoal/navy dark theme */
-    --background: 228 15% 6%;
-    --foreground: 210 40% 96%;
+    /* Black & Sage Green theme */
+    --background: 0 0% 4%;
+    --foreground: 120 10% 94%;
 
-    --card: 228 18% 10%;
-    --card-foreground: 210 40% 96%;
+    --card: 0 0% 8%;
+    --card-foreground: 120 10% 94%;
 
-    --popover: 228 18% 10%;
-    --popover-foreground: 210 40% 96%;
+    --popover: 0 0% 8%;
+    --popover-foreground: 120 10% 94%;
 
-    /* Electric cyan primary */
-    --primary: 187 100% 42%;
-    --primary-foreground: 228 15% 6%;
+    /* Sage green primary */
+    --primary: 143 35% 45%;
+    --primary-foreground: 0 0% 4%;
 
-    /* Muted teal secondary */
-    --secondary: 220 20% 16%;
-    --secondary-foreground: 210 40% 90%;
+    /* Muted dark secondary */
+    --secondary: 0 0% 12%;
+    --secondary-foreground: 120 10% 85%;
 
-    --muted: 220 15% 18%;
-    --muted-foreground: 215 15% 55%;
+    --muted: 0 0% 14%;
+    --muted-foreground: 0 0% 55%;
 
-    --accent: 187 80% 35%;
-    --accent-foreground: 210 40% 98%;
+    --accent: 143 30% 38%;
+    --accent-foreground: 120 10% 98%;
 
-    /* Success green */
-    --success: 145 65% 42%;
-    --success-foreground: 145 65% 96%;
+    /* Success - lighter sage */
+    --success: 143 45% 50%;
+    --success-foreground: 0 0% 4%;
 
     /* Warning amber */
     --warning: 38 92% 50%;
@@ -41,38 +41,38 @@
     --destructive: 0 72% 51%;
     --destructive-foreground: 0 0% 98%;
 
-    --border: 220 20% 18%;
-    --input: 220 20% 14%;
-    --ring: 187 100% 42%;
+    --border: 0 0% 16%;
+    --input: 0 0% 10%;
+    --ring: 143 35% 45%;
 
     --radius: 0.75rem;
 
     /* Glass effect tokens */
-    --glass-bg: 228 18% 12% / 0.6;
-    --glass-border: 187 100% 42% / 0.15;
-    --glass-shadow: 187 100% 42% / 0.1;
+    --glass-bg: 0 0% 8% / 0.6;
+    --glass-border: 143 35% 45% / 0.15;
+    --glass-shadow: 143 35% 45% / 0.1;
 
     /* Gradient tokens */
-    --gradient-primary: linear-gradient(135deg, hsl(187 100% 42%), hsl(200 100% 50%));
-    --gradient-glow: radial-gradient(ellipse at center, hsl(187 100% 42% / 0.15), transparent 70%);
-    --gradient-card: linear-gradient(145deg, hsl(228 18% 12%), hsl(228 18% 8%));
-    --gradient-hero: radial-gradient(ellipse 80% 50% at 50% -20%, hsl(187 100% 42% / 0.2), transparent);
+    --gradient-primary: linear-gradient(135deg, hsl(143 35% 45%), hsl(143 40% 55%));
+    --gradient-glow: radial-gradient(ellipse at center, hsl(143 35% 45% / 0.15), transparent 70%);
+    --gradient-card: linear-gradient(145deg, hsl(0 0% 10%), hsl(0 0% 6%));
+    --gradient-hero: radial-gradient(ellipse 80% 50% at 50% -20%, hsl(143 35% 45% / 0.2), transparent);
 
-    /* Chart colors */
-    --chart-1: 187 100% 42%;
-    --chart-2: 145 65% 42%;
+    /* Chart colors - sage green palette */
+    --chart-1: 143 35% 45%;
+    --chart-2: 143 45% 55%;
     --chart-3: 38 92% 50%;
-    --chart-4: 280 65% 60%;
+    --chart-4: 200 60% 50%;
     --chart-5: 0 72% 51%;
 
-    --sidebar-background: 228 18% 8%;
-    --sidebar-foreground: 210 40% 90%;
-    --sidebar-primary: 187 100% 42%;
-    --sidebar-primary-foreground: 228 15% 6%;
-    --sidebar-accent: 220 20% 16%;
-    --sidebar-accent-foreground: 210 40% 90%;
-    --sidebar-border: 220 20% 18%;
-    --sidebar-ring: 187 100% 42%;
+    --sidebar-background: 0 0% 6%;
+    --sidebar-foreground: 120 10% 90%;
+    --sidebar-primary: 143 35% 45%;
+    --sidebar-primary-foreground: 0 0% 4%;
+    --sidebar-accent: 0 0% 12%;
+    --sidebar-accent-foreground: 120 10% 90%;
+    --sidebar-border: 0 0% 16%;
+    --sidebar-ring: 143 35% 45%;
   }
 }
 
@@ -99,11 +99,11 @@
   /* Glassmorphism card */
   .glass-card {
     @apply relative overflow-hidden rounded-xl border;
-    background: linear-gradient(145deg, hsl(var(--card)), hsl(228 18% 8%));
+    background: linear-gradient(145deg, hsl(var(--card)), hsl(0 0% 6%));
     border-color: hsl(var(--glass-border));
     box-shadow: 
       0 8px 32px hsl(var(--glass-shadow)),
-      inset 0 1px 0 hsl(187 100% 42% / 0.05);
+      inset 0 1px 0 hsl(143 35% 45% / 0.05);
     backdrop-filter: blur(12px);
   }
 
@@ -114,26 +114,26 @@
     left: 0;
     right: 0;
     height: 1px;
-    background: linear-gradient(90deg, transparent, hsl(187 100% 42% / 0.3), transparent);
+    background: linear-gradient(90deg, transparent, hsl(143 35% 45% / 0.3), transparent);
   }
 
   /* Glowing border effect */
   .glow-border {
     @apply relative;
     box-shadow: 
-      0 0 20px hsl(187 100% 42% / 0.2),
-      0 0 40px hsl(187 100% 42% / 0.1);
+      0 0 20px hsl(143 35% 45% / 0.2),
+      0 0 40px hsl(143 35% 45% / 0.1);
   }
 
   /* Text gradient */
   .text-gradient {
     @apply bg-clip-text text-transparent;
-    background-image: linear-gradient(135deg, hsl(187 100% 50%), hsl(200 100% 60%));
+    background-image: linear-gradient(135deg, hsl(143 40% 50%), hsl(143 45% 60%));
   }
 
   /* Animated gradient background */
   .animated-gradient {
-    background: linear-gradient(-45deg, hsl(228 15% 6%), hsl(228 18% 10%), hsl(220 20% 12%), hsl(228 15% 8%));
+    background: linear-gradient(-45deg, hsl(0 0% 4%), hsl(0 0% 8%), hsl(0 0% 10%), hsl(0 0% 6%));
     background-size: 400% 400%;
     animation: gradient-shift 15s ease infinite;
   }
@@ -152,26 +152,26 @@
     transform: translateY(-2px);
     box-shadow: 
       0 12px 40px hsl(var(--glass-shadow)),
-      0 0 30px hsl(187 100% 42% / 0.15);
+      0 0 30px hsl(143 35% 45% / 0.15);
   }
 
   /* Input with glow focus */
   .input-glow:focus {
     box-shadow: 
       0 0 0 2px hsl(var(--background)),
-      0 0 0 4px hsl(187 100% 42% / 0.3),
-      0 0 20px hsl(187 100% 42% / 0.2);
+      0 0 0 4px hsl(143 35% 45% / 0.3),
+      0 0 20px hsl(143 35% 45% / 0.2);
   }
 
   /* Button variants */
   .btn-primary-glow {
     @apply relative overflow-hidden;
-    background: linear-gradient(135deg, hsl(187 100% 42%), hsl(200 100% 50%));
-    box-shadow: 0 4px 20px hsl(187 100% 42% / 0.4);
+    background: linear-gradient(135deg, hsl(143 35% 45%), hsl(143 40% 55%));
+    box-shadow: 0 4px 20px hsl(143 35% 45% / 0.4);
   }
 
   .btn-primary-glow:hover {
-    box-shadow: 0 6px 30px hsl(187 100% 42% / 0.5);
+    box-shadow: 0 6px 30px hsl(143 35% 45% / 0.5);
     transform: translateY(-1px);
   }
 
@@ -202,7 +202,7 @@
     left: -100%;
     width: 100%;
     height: 100%;
-    background: linear-gradient(90deg, transparent, hsl(187 100% 42% / 0.1), transparent);
+    background: linear-gradient(90deg, transparent, hsl(143 35% 45% / 0.1), transparent);
     animation: shimmer 1.5s infinite;
   }
 }
@@ -238,11 +238,11 @@
 @keyframes pulse-glow {
   0%, 100% { 
     opacity: 1;
-    box-shadow: 0 0 20px hsl(187 100% 42% / 0.3);
+    box-shadow: 0 0 20px hsl(143 35% 45% / 0.3);
   }
   50% { 
     opacity: 0.8;
-    box-shadow: 0 0 40px hsl(187 100% 42% / 0.5);
+    box-shadow: 0 0 40px hsl(143 35% 45% / 0.5);
   }
 }
 
