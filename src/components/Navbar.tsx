@@ -10,7 +10,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { User, LogOut, History, LayoutDashboard } from "lucide-react";
+import { User, LogOut, LayoutDashboard, BookOpen } from "lucide-react";
 
 export const Navbar = () => {
   const location = useLocation();
@@ -19,7 +19,7 @@ export const Navbar = () => {
 
   const navLinks = [
     { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-    { href: "/history", label: "History", icon: History },
+    { href: "/guide", label: "Guide", icon: BookOpen },
   ];
 
   const handleSignOut = async () => {
@@ -31,10 +31,10 @@ export const Navbar = () => {
     <motion.header
       initial={{ y: -20, opacity: 0 }}
       animate={{ y: 0, opacity: 1 }}
-      className="fixed top-0 left-0 right-0 z-50 border-b border-border/50 bg-background/80 backdrop-blur-lg"
+      className="fixed top-0 left-0 right-0 z-50 border-b border-border/30 bg-background/90 backdrop-blur-md"
     >
-      <div className="container mx-auto px-4">
-        <div className="flex h-16 items-center justify-between">
+      <div className="container mx-auto px-6">
+        <div className="flex h-14 items-center justify-between">
           <Link to="/" className="flex items-center">
             <Logo size="sm" />
           </Link>
@@ -48,9 +48,9 @@ export const Navbar = () => {
                   <Button
                     variant={isActive ? "secondary" : "ghost"}
                     size="sm"
-                    className={isActive ? "text-primary" : ""}
+                    className={`gap-2 ${isActive ? "text-primary" : "text-muted-foreground hover:text-foreground"}`}
                   >
-                    <Icon className="w-4 h-4 mr-1.5" />
+                    <Icon className="w-4 h-4" />
                     {link.label}
                   </Button>
                 </Link>
@@ -62,9 +62,9 @@ export const Navbar = () => {
             {user ? (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="glass" size="sm" className="gap-2">
+                  <Button variant="ghost" size="sm" className="gap-2">
                     <User className="w-4 h-4" />
-                    <span className="hidden sm:inline max-w-[120px] truncate">
+                    <span className="hidden sm:inline max-w-[100px] truncate text-muted-foreground">
                       {user.email}
                     </span>
                   </Button>
@@ -74,9 +74,9 @@ export const Navbar = () => {
                     <LayoutDashboard className="w-4 h-4 mr-2" />
                     Dashboard
                   </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => navigate("/history")}>
-                    <History className="w-4 h-4 mr-2" />
-                    History
+                  <DropdownMenuItem onClick={() => navigate("/guide")}>
+                    <BookOpen className="w-4 h-4 mr-2" />
+                    Guide
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem onClick={handleSignOut} className="text-destructive">
@@ -88,12 +88,12 @@ export const Navbar = () => {
             ) : (
               <>
                 <Link to="/auth">
-                  <Button variant="ghost" size="sm">
+                  <Button variant="ghost" size="sm" className="text-muted-foreground">
                     Sign In
                   </Button>
                 </Link>
                 <Link to="/auth?mode=signup">
-                  <Button variant="glow" size="sm">
+                  <Button variant="default" size="sm">
                     Get Started
                   </Button>
                 </Link>

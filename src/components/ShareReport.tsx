@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -23,13 +22,11 @@ import {
   FileSpreadsheet, 
   Link2, 
   Mail, 
-  Copy, 
   Check,
-  Download,
   Loader2
 } from "lucide-react";
 import { toast } from "sonner";
-import { PredictionData } from "./PredictionResult";
+import { PredictionData } from "@/pages/Dashboard";
 
 interface ShareReportProps {
   data: PredictionData;
@@ -51,7 +48,7 @@ export const ShareReport = ({ data }: ShareReportProps) => {
       ...rows.map(row => row.join(","))
     ].join("\n");
 
-    const metadata = `\n\nPrediction Summary\nTicker,${data.ticker}\nTarget Date,${data.targetDate}\nCurrent Price,$${data.currentPrice.toFixed(2)}\nPredicted Price,$${data.predictedPrice.toFixed(2)}\nUncertainty Range,$${data.uncertaintyLow.toFixed(2)} - $${data.uncertaintyHigh.toFixed(2)}\nConfidence,${data.confidence.toFixed(1)}%\nRegime,${data.regime}\nSentiment Score,${data.sentimentScore.toFixed(2)}\n\nFeature Importance\n${data.featureImportance.map(f => `${f.name},${(f.importance * 100).toFixed(1)}%`).join("\n")}`;
+    const metadata = `\n\nPrediction Summary\nTicker,${data.ticker}\nTarget Date,${data.targetDate}\nCurrent Price,$${data.currentPrice.toFixed(2)}\nPredicted Price,$${data.predictedPrice.toFixed(2)}\nConfidence,${data.confidence.toFixed(1)}%\nRegime,${data.regime}`;
 
     return csvContent + metadata;
   };
@@ -64,14 +61,14 @@ export const ShareReport = ({ data }: ShareReportProps) => {
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `${data.ticker}_prediction_${data.targetDate}.csv`;
+      a.download = `${data.ticker}_stockai_${data.targetDate}.csv`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
-      toast.success("CSV exported successfully");
+      toast.success("CSV exported");
     } catch (error) {
-      toast.error("Failed to export CSV");
+      toast.error("Export failed");
     } finally {
       setIsExporting(null);
     }
@@ -80,72 +77,128 @@ export const ShareReport = ({ data }: ShareReportProps) => {
   const handleExportPDF = async () => {
     setIsExporting("pdf");
     try {
-      // Generate a simple HTML report and trigger print dialog
       const reportHtml = `
         <!DOCTYPE html>
         <html>
         <head>
-          <title>${data.ticker} Prediction Report</title>
+          <title>${data.ticker} - StockAI Report</title>
           <style>
-            body { font-family: 'Segoe UI', sans-serif; padding: 40px; background: #fff; color: #333; }
-            h1 { color: #2d5a4a; border-bottom: 2px solid #5a8a7a; padding-bottom: 10px; }
-            .header { display: flex; justify-content: space-between; align-items: center; }
-            .badge { background: #5a8a7a; color: white; padding: 4px 12px; border-radius: 4px; font-size: 14px; }
-            .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin: 30px 0; }
-            .stat-card { background: #f5f5f5; padding: 20px; border-radius: 8px; border-left: 4px solid #5a8a7a; }
-            .stat-label { font-size: 12px; color: #666; margin-bottom: 5px; }
-            .stat-value { font-size: 24px; font-weight: bold; color: #333; }
-            .feature-table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-            .feature-table th, .feature-table td { padding: 10px; text-align: left; border-bottom: 1px solid #ddd; }
-            .feature-table th { background: #f0f0f0; }
-            .bar { height: 8px; background: #5a8a7a; border-radius: 4px; }
-            .disclaimer { background: #fff3cd; border: 1px solid #ffc107; padding: 15px; border-radius: 8px; margin-top: 30px; font-size: 12px; }
-            .footer { margin-top: 40px; padding-top: 20px; border-top: 1px solid #ddd; font-size: 12px; color: #666; }
+            * { margin: 0; padding: 0; box-sizing: border-box; }
+            body { 
+              font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; 
+              padding: 48px; 
+              background: #0a0a0a; 
+              color: #fafafa;
+              min-height: 100vh;
+            }
+            .header { 
+              display: flex; 
+              justify-content: space-between; 
+              align-items: center; 
+              margin-bottom: 40px;
+              padding-bottom: 20px;
+              border-bottom: 1px solid #262626;
+            }
+            .logo { font-size: 24px; font-weight: 500; }
+            .logo span { color: #5a8a6a; }
+            .badge { 
+              background: #1a2a1f; 
+              color: #5a8a6a; 
+              padding: 6px 12px; 
+              border-radius: 4px; 
+              font-size: 12px;
+              text-transform: capitalize;
+            }
+            .ticker { font-size: 48px; font-weight: 600; margin-bottom: 8px; font-family: monospace; }
+            .ticker span { color: #5a8a6a; }
+            .date { color: #737373; font-size: 14px; margin-bottom: 40px; }
+            .stats { 
+              display: grid; 
+              grid-template-columns: repeat(4, 1fr); 
+              gap: 20px; 
+              margin-bottom: 40px;
+            }
+            .stat { 
+              background: #141414; 
+              padding: 20px; 
+              border-radius: 8px;
+              border: 1px solid #262626;
+            }
+            .stat-label { font-size: 11px; color: #737373; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px; }
+            .stat-value { font-size: 24px; font-weight: 500; font-family: monospace; }
+            .stat-value.positive { color: #5a8a6a; }
+            .stat-value.negative { color: #ef4444; }
+            .reasoning { 
+              background: #141414; 
+              padding: 24px; 
+              border-radius: 8px; 
+              margin-bottom: 40px;
+              border: 1px solid #262626;
+            }
+            .reasoning-title { font-size: 12px; color: #737373; margin-bottom: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
+            .reasoning-text { font-size: 14px; line-height: 1.7; color: #a3a3a3; }
+            .disclaimer { 
+              background: #1a1a0f; 
+              border: 1px solid #3d3d00; 
+              padding: 16px; 
+              border-radius: 8px; 
+              font-size: 11px; 
+              color: #a3a3a3;
+              margin-top: 40px;
+            }
+            .footer { 
+              margin-top: 40px; 
+              padding-top: 20px; 
+              border-top: 1px solid #262626; 
+              font-size: 11px; 
+              color: #525252;
+              display: flex;
+              justify-content: space-between;
+            }
           </style>
         </head>
         <body>
           <div class="header">
-            <h1>${data.ticker} Stock Prediction Report</h1>
-            <span class="badge">${data.regime.charAt(0).toUpperCase() + data.regime.slice(1)}</span>
+            <div class="logo">Stock<span>AI</span></div>
+            <span class="badge">${data.regime}</span>
           </div>
-          <p>Target Date: ${data.targetDate} | Generated: ${new Date().toLocaleDateString()}</p>
+          
+          <div class="ticker">${data.ticker}</div>
+          <div class="date">Target: ${data.targetDate}</div>
           
           <div class="stats">
-            <div class="stat-card">
+            <div class="stat">
+              <div class="stat-label">Current Price</div>
+              <div class="stat-value">$${data.currentPrice.toFixed(2)}</div>
+            </div>
+            <div class="stat">
               <div class="stat-label">Predicted Price</div>
-              <div class="stat-value">$${data.predictedPrice.toFixed(2)}</div>
-              <div style="color: ${data.predictedPrice >= data.currentPrice ? '#22c55e' : '#ef4444'}">
-                ${data.predictedPrice >= data.currentPrice ? '↑' : '↓'} ${((data.predictedPrice - data.currentPrice) / data.currentPrice * 100).toFixed(2)}%
-              </div>
+              <div class="stat-value ${data.predictedPrice >= data.currentPrice ? 'positive' : 'negative'}">$${data.predictedPrice.toFixed(2)}</div>
             </div>
-            <div class="stat-card">
-              <div class="stat-label">Uncertainty Range</div>
-              <div class="stat-value">$${data.uncertaintyLow.toFixed(2)} - $${data.uncertaintyHigh.toFixed(2)}</div>
+            <div class="stat">
+              <div class="stat-label">Confidence</div>
+              <div class="stat-value">${data.confidence.toFixed(0)}%</div>
             </div>
-            <div class="stat-card">
-              <div class="stat-label">Model Confidence</div>
-              <div class="stat-value">${data.confidence.toFixed(1)}%</div>
+            <div class="stat">
+              <div class="stat-label">Range</div>
+              <div class="stat-value" style="font-size: 16px;">$${data.uncertaintyLow.toFixed(2)} - $${data.uncertaintyHigh.toFixed(2)}</div>
             </div>
           </div>
 
-          <h2>Feature Importance</h2>
-          <table class="feature-table">
-            <tr><th>Feature</th><th>Importance</th><th></th></tr>
-            ${data.featureImportance.map(f => `
-              <tr>
-                <td>${f.name}</td>
-                <td>${(f.importance * 100).toFixed(1)}%</td>
-                <td style="width: 200px"><div class="bar" style="width: ${f.importance * 100 * 3}%"></div></td>
-              </tr>
-            `).join('')}
-          </table>
+          ${data.reasoning ? `
+          <div class="reasoning">
+            <div class="reasoning-title">AI Analysis</div>
+            <div class="reasoning-text">${data.reasoning}</div>
+          </div>
+          ` : ''}
 
           <div class="disclaimer">
-            <strong>⚠️ Disclaimer:</strong> This is a simulated prediction for demonstration purposes only. Do not use for actual trading decisions. Past performance does not guarantee future results.
+            ⚠️ This is AI-generated analysis for informational purposes only. Not financial advice. Do not use for actual trading decisions.
           </div>
 
           <div class="footer">
-            Generated by GodStockAI | Sentiment Score: ${data.sentimentScore.toFixed(2)}
+            <span>Generated by StockAI</span>
+            <span>${new Date().toLocaleDateString()}</span>
           </div>
         </body>
         </html>
@@ -156,10 +209,10 @@ export const ShareReport = ({ data }: ShareReportProps) => {
         printWindow.document.write(reportHtml);
         printWindow.document.close();
         printWindow.print();
-        toast.success("PDF export ready - use print dialog to save");
+        toast.success("PDF ready - use print dialog to save");
       }
     } catch (error) {
-      toast.error("Failed to export PDF");
+      toast.error("Export failed");
     } finally {
       setIsExporting(null);
     }
@@ -167,7 +220,6 @@ export const ShareReport = ({ data }: ShareReportProps) => {
 
   const handleCopyLink = async () => {
     try {
-      // Generate a shareable link with encoded data
       const shareData = {
         ticker: data.ticker,
         targetDate: data.targetDate,
@@ -180,22 +232,22 @@ export const ShareReport = ({ data }: ShareReportProps) => {
       
       await navigator.clipboard.writeText(shareUrl);
       setIsCopied(true);
-      toast.success("Link copied to clipboard");
+      toast.success("Link copied");
       setTimeout(() => setIsCopied(false), 2000);
     } catch (error) {
-      toast.error("Failed to copy link");
+      toast.error("Copy failed");
     }
   };
 
   const handleEmailReport = () => {
     if (!email) {
-      toast.error("Please enter an email address");
+      toast.error("Enter an email address");
       return;
     }
     
-    const subject = encodeURIComponent(`${data.ticker} Stock Prediction Report - ${data.targetDate}`);
+    const subject = encodeURIComponent(`${data.ticker} StockAI Report - ${data.targetDate}`);
     const body = encodeURIComponent(`
-${data.ticker} Stock Prediction Report
+${data.ticker} Stock Prediction
 =====================================
 
 Target Date: ${data.targetDate}
@@ -203,17 +255,12 @@ Current Price: $${data.currentPrice.toFixed(2)}
 Predicted Price: $${data.predictedPrice.toFixed(2)}
 Change: ${((data.predictedPrice - data.currentPrice) / data.currentPrice * 100).toFixed(2)}%
 
-Uncertainty Range: $${data.uncertaintyLow.toFixed(2)} - $${data.uncertaintyHigh.toFixed(2)}
-Model Confidence: ${data.confidence.toFixed(1)}%
+Confidence: ${data.confidence.toFixed(1)}%
 Market Regime: ${data.regime}
-Sentiment Score: ${data.sentimentScore.toFixed(2)}
-
-Top Features:
-${data.featureImportance.slice(0, 3).map(f => `- ${f.name}: ${(f.importance * 100).toFixed(1)}%`).join('\n')}
 
 ---
-Generated by GodStockAI
-Disclaimer: This is for educational purposes only.
+Generated by StockAI
+Not financial advice.
     `);
     
     window.open(`mailto:${email}?subject=${subject}&body=${body}`);
@@ -228,17 +275,17 @@ Disclaimer: This is for educational purposes only.
         <DropdownMenuTrigger asChild>
           <Button variant="outline" size="sm" className="gap-2">
             <Share2 className="w-4 h-4" />
-            Share Report
+            Share
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-48">
+        <DropdownMenuContent align="end" className="w-44">
           <DropdownMenuItem onClick={handleExportPDF} disabled={isExporting === "pdf"}>
             {isExporting === "pdf" ? (
               <Loader2 className="w-4 h-4 mr-2 animate-spin" />
             ) : (
               <FileText className="w-4 h-4 mr-2" />
             )}
-            Export as PDF
+            Export PDF
           </DropdownMenuItem>
           <DropdownMenuItem onClick={handleExportCSV} disabled={isExporting === "csv"}>
             {isExporting === "csv" ? (
@@ -246,7 +293,7 @@ Disclaimer: This is for educational purposes only.
             ) : (
               <FileSpreadsheet className="w-4 h-4 mr-2" />
             )}
-            Export as CSV
+            Export CSV
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem onClick={handleCopyLink}>
@@ -255,7 +302,7 @@ Disclaimer: This is for educational purposes only.
             ) : (
               <Link2 className="w-4 h-4 mr-2" />
             )}
-            {isCopied ? "Copied!" : "Copy Link"}
+            {isCopied ? "Copied" : "Copy Link"}
           </DropdownMenuItem>
           <DropdownMenuItem onClick={() => setIsEmailDialogOpen(true)}>
             <Mail className="w-4 h-4 mr-2" />
@@ -269,12 +316,12 @@ Disclaimer: This is for educational purposes only.
           <DialogHeader>
             <DialogTitle>Email Report</DialogTitle>
             <DialogDescription>
-              Enter an email address to send the prediction report
+              Send prediction report to an email address
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 pt-4">
             <div className="space-y-2">
-              <Label htmlFor="email">Email Address</Label>
+              <Label htmlFor="email">Email</Label>
               <Input
                 id="email"
                 type="email"
@@ -289,7 +336,7 @@ Disclaimer: This is for educational purposes only.
               </Button>
               <Button onClick={handleEmailReport}>
                 <Mail className="w-4 h-4 mr-2" />
-                Send Email
+                Send
               </Button>
             </div>
           </div>

@@ -2,11 +2,28 @@ import { useState, useCallback } from "react";
 import { motion } from "framer-motion";
 import { Navbar } from "@/components/Navbar";
 import { PredictionForm } from "@/components/PredictionForm";
-import { PredictionResult, PredictionData } from "@/components/PredictionResult";
+import { StockPredictionCard } from "@/components/StockPredictionCard";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { format } from "date-fns";
+
+export interface PredictionData {
+  ticker: string;
+  targetDate: string;
+  currentPrice: number;
+  predictedPrice: number;
+  uncertaintyLow: number;
+  uncertaintyHigh: number;
+  confidence: number;
+  regime: string;
+  sentimentScore: number;
+  featureImportance: { name: string; importance: number }[];
+  historicalData: { date: string; price: number }[];
+  reasoning?: string;
+  volatility?: number;
+  currency?: string;
+}
 
 const Dashboard = () => {
   const { user } = useAuth();
@@ -19,7 +36,6 @@ const Dashboard = () => {
     setLastFormData(data);
     
     try {
-      // Call the real edge function
       const response = await fetch(
         `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/stock-predict`,
         {
@@ -44,7 +60,6 @@ const Dashboard = () => {
       const result: PredictionData = await response.json();
       setPrediction(result);
       
-      // Save to database if user is logged in
       if (user) {
         const { error } = await supabase.from("prediction_runs").insert({
           user_id: user.id,
@@ -63,12 +78,10 @@ const Dashboard = () => {
         
         if (error) {
           console.error("Failed to save prediction:", error);
-        } else {
-          toast.success("Prediction saved to history");
         }
       }
       
-      toast.success(`Prediction generated for ${data.ticker}`);
+      toast.success(`Analysis complete for ${data.ticker}`);
     } catch (error) {
       console.error("Prediction error:", error);
       toast.error(error instanceof Error ? error.message : "Failed to generate prediction");
@@ -80,8 +93,6 @@ const Dashboard = () => {
   const handleRefresh = useCallback(() => {
     if (lastFormData) {
       handleSubmit(lastFormData);
-    } else {
-      toast.info("Enter a ticker and date first to refresh data");
     }
   }, [lastFormData]);
 
@@ -89,34 +100,33 @@ const Dashboard = () => {
     <div className="min-h-screen bg-background">
       <Navbar />
       
-      {/* Background effects */}
-      <div className="fixed inset-0 bg-gradient-hero pointer-events-none" />
+      {/* Subtle background */}
+      <div className="fixed inset-0 pointer-events-none">
+        <div className="absolute top-1/4 left-1/2 -translate-x-1/2 w-[800px] h-[800px] bg-primary/2 rounded-full blur-[150px]" />
+      </div>
       
-      <main className="pt-24 pb-12 px-4 relative z-10">
+      <main className="pt-20 pb-12 px-6 relative z-10">
         <div className="container mx-auto max-w-6xl">
           <motion.div
-            initial={{ opacity: 0, y: 20 }}
+            initial={{ opacity: 0, y: 16 }}
             animate={{ opacity: 1, y: 0 }}
             className="mb-8"
           >
-            <h1 className="text-3xl font-bold mb-2">
-              Stock Prediction <span className="text-gradient">Dashboard</span>
-            </h1>
-            <p className="text-muted-foreground">
-              Enter a ticker symbol and target date to generate AI-powered predictions
-              {!user && " — sign in to save your prediction history"}
+            <h1 className="text-2xl font-medium mb-1">Dashboard</h1>
+            <p className="text-sm text-muted-foreground">
+              Enter a stock symbol to analyze
             </p>
           </motion.div>
 
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
             {/* Form Section */}
             <motion.div
-              initial={{ opacity: 0, x: -20 }}
+              initial={{ opacity: 0, x: -16 }}
               animate={{ opacity: 1, x: 0 }}
               transition={{ delay: 0.1 }}
-              className="lg:col-span-5"
+              className="lg:col-span-4"
             >
-              <div className="sticky top-24">
+              <div className="sticky top-20">
                 <PredictionForm 
                   onSubmit={handleSubmit} 
                   isLoading={isLoading} 
@@ -127,18 +137,18 @@ const Dashboard = () => {
 
             {/* Results Section */}
             <motion.div
-              initial={{ opacity: 0, x: 20 }}
+              initial={{ opacity: 0, x: 16 }}
               animate={{ opacity: 1, x: 0 }}
               transition={{ delay: 0.2 }}
-              className="lg:col-span-7"
+              className="lg:col-span-8"
             >
               {prediction ? (
-                <PredictionResult data={prediction} />
+                <StockPredictionCard data={prediction} />
               ) : (
-                <div className="glass-card p-12 text-center">
-                  <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-4">
+                <div className="glass-card p-16 text-center">
+                  <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-4">
                     <svg
-                      className="w-8 h-8 text-primary"
+                      className="w-6 h-6 text-primary"
                       fill="none"
                       stroke="currentColor"
                       viewBox="0 0 24 24"
@@ -151,10 +161,9 @@ const Dashboard = () => {
                       />
                     </svg>
                   </div>
-                  <h3 className="text-lg font-semibold mb-2">No Prediction Yet</h3>
-                  <p className="text-muted-foreground text-sm max-w-xs mx-auto">
-                    Enter a stock ticker and target date on the left to generate 
-                    your first AI-powered prediction.
+                  <h3 className="text-sm font-medium mb-2">No Analysis Yet</h3>
+                  <p className="text-xs text-muted-foreground max-w-xs mx-auto">
+                    Enter a stock ticker to generate AI-powered predictions.
                   </p>
                 </div>
               )}
