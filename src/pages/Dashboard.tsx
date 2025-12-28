@@ -6,64 +6,7 @@ import { PredictionResult, PredictionData } from "@/components/PredictionResult"
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
-import { format, subDays } from "date-fns";
-
-// Simulated prediction function (in production, this would call a Python backend)
-const generatePrediction = (ticker: string, targetDate: Date): PredictionData => {
-  // Generate realistic mock historical data
-  const historicalData = [];
-  const basePrice = 150 + Math.random() * 100;
-  let currentPrice = basePrice;
-  
-  for (let i = 30; i >= 0; i--) {
-    const date = subDays(new Date(), i);
-    const change = (Math.random() - 0.48) * 5; // Slight upward bias
-    currentPrice = Math.max(currentPrice + change, basePrice * 0.7);
-    historicalData.push({
-      date: format(date, "yyyy-MM-dd"),
-      price: parseFloat(currentPrice.toFixed(2)),
-    });
-  }
-
-  const lastPrice = historicalData[historicalData.length - 1].price;
-  
-  // Generate prediction with some variance
-  const trend = (Math.random() - 0.4) * 0.1; // Slight bullish bias
-  const predictedPrice = lastPrice * (1 + trend);
-  const volatility = 0.03 + Math.random() * 0.04;
-  
-  // Regime detection simulation
-  const regimes = ["bullish", "bearish", "neutral", "volatile"];
-  const regime = regimes[Math.floor(Math.random() * regimes.length)];
-  
-  // Feature importance simulation
-  const features = [
-    { name: "EMA Crossover", importance: 0.15 + Math.random() * 0.1 },
-    { name: "RSI Divergence", importance: 0.12 + Math.random() * 0.08 },
-    { name: "MACD Signal", importance: 0.1 + Math.random() * 0.1 },
-    { name: "Volume Trend", importance: 0.08 + Math.random() * 0.08 },
-    { name: "Volatility Index", importance: 0.06 + Math.random() * 0.06 },
-    { name: "News Sentiment", importance: 0.04 + Math.random() * 0.04 },
-  ].sort((a, b) => b.importance - a.importance);
-
-  // Normalize importance
-  const totalImportance = features.reduce((sum, f) => sum + f.importance, 0);
-  features.forEach(f => f.importance = f.importance / totalImportance);
-
-  return {
-    ticker,
-    targetDate: format(targetDate, "yyyy-MM-dd"),
-    currentPrice: lastPrice,
-    predictedPrice: parseFloat(predictedPrice.toFixed(2)),
-    uncertaintyLow: parseFloat((predictedPrice * (1 - volatility)).toFixed(2)),
-    uncertaintyHigh: parseFloat((predictedPrice * (1 + volatility)).toFixed(2)),
-    confidence: 55 + Math.random() * 35,
-    regime,
-    sentimentScore: (Math.random() - 0.5) * 2,
-    featureImportance: features,
-    historicalData,
-  };
-};
+import { format } from "date-fns";
 
 const Dashboard = () => {
   const { user } = useAuth();
@@ -76,10 +19,29 @@ const Dashboard = () => {
     setLastFormData(data);
     
     try {
-      // Simulate API call delay
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      
-      const result = generatePrediction(data.ticker, data.targetDate);
+      // Call the real edge function
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/stock-predict`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+          },
+          body: JSON.stringify({
+            ticker: data.ticker,
+            targetDate: format(data.targetDate, "yyyy-MM-dd"),
+            newsApiKey: data.newsApiKey,
+          }),
+        }
+      );
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Failed to generate prediction");
+      }
+
+      const result: PredictionData = await response.json();
       setPrediction(result);
       
       // Save to database if user is logged in
@@ -108,7 +70,8 @@ const Dashboard = () => {
       
       toast.success(`Prediction generated for ${data.ticker}`);
     } catch (error) {
-      toast.error("Failed to generate prediction");
+      console.error("Prediction error:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to generate prediction");
     } finally {
       setIsLoading(false);
     }
