@@ -27,6 +27,8 @@ export interface PredictionData {
   sentimentScore: number;
   featureImportance: { name: string; importance: number }[];
   historicalData: { date: string; price: number }[];
+  reasoning?: string;
+  currency?: string;
 }
 
 interface PredictionResultProps {
@@ -215,11 +217,19 @@ export const PredictionResult = ({ data }: PredictionResultProps) => {
               </div>
             </div>
 
+            {/* AI Reasoning */}
+            {data.reasoning && (
+              <div className="space-y-2 pt-4 border-t border-border">
+                <h4 className="text-sm font-medium text-muted-foreground">AI Analysis</h4>
+                <p className="text-sm text-foreground">{data.reasoning}</p>
+              </div>
+            )}
+
             {/* Disclaimer */}
             <div className="flex items-start gap-2 p-3 rounded-lg bg-warning/10 border border-warning/20 mt-4">
               <AlertTriangle className="w-4 h-4 text-warning mt-0.5 shrink-0" />
               <p className="text-xs text-muted-foreground">
-                <span className="font-semibold text-warning">Disclaimer:</span> This is a simulated prediction for demonstration purposes. 
+                <span className="font-semibold text-warning">Disclaimer:</span> This prediction uses real market data analyzed by AI. 
                 Do not use for actual trading decisions. Past performance does not guarantee future results.
               </p>
             </div>
