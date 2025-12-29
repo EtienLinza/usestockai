@@ -292,14 +292,165 @@ Based on technical analysis, market regime, and sentiment, provide your predicti
   }
 }
 
+// Analyze a single stock for the Guide mode
+async function analyzeStockForGuide(ticker: string): Promise<any | null> {
+  try {
+    const stockData = await fetchStockData(ticker);
+    
+    if (!stockData.close || stockData.close.length < 60) {
+      return null;
+    }
+    
+    const closePrices = stockData.close.filter((p: number) => p != null);
+    
+    const indicators = {
+      ema12: calculateEMA(closePrices, 12),
+      ema26: calculateEMA(closePrices, 26),
+      sma50: calculateSMA(closePrices, 50),
+      rsi: calculateRSI(closePrices, 14),
+      macd: calculateMACD(closePrices),
+      volatility: calculateVolatility(closePrices, 20),
+    };
+    
+    const regime = detectRegime(closePrices, indicators.rsi, indicators.volatility);
+    const currentPrice = closePrices[closePrices.length - 1];
+    const latestRSI = indicators.rsi[indicators.rsi.length - 1];
+    const latestMACD = indicators.macd.macd[indicators.macd.macd.length - 1];
+    const latestSignal = indicators.macd.signal[indicators.macd.signal.length - 1];
+    const latestVolatility = indicators.volatility[indicators.volatility.length - 1];
+    
+    // Calculate momentum score
+    const priceChange5d = (closePrices[closePrices.length - 1] - closePrices[closePrices.length - 6]) / closePrices[closePrices.length - 6];
+    const priceChange20d = (closePrices[closePrices.length - 1] - closePrices[closePrices.length - 21]) / closePrices[closePrices.length - 21];
+    
+    // Score the opportunity
+    let score = 0;
+    let direction: "bullish" | "bearish" | "neutral" = "neutral";
+    let signals: string[] = [];
+    
+    // RSI signals
+    if (latestRSI < 30) {
+      score += 2;
+      signals.push("oversold RSI");
+      direction = "bullish";
+    } else if (latestRSI > 70) {
+      score += 2;
+      signals.push("overbought RSI");
+      direction = "bearish";
+    }
+    
+    // MACD crossover
+    if (latestMACD > latestSignal && indicators.macd.macd[indicators.macd.macd.length - 2] <= indicators.macd.signal[indicators.macd.signal.length - 2]) {
+      score += 2;
+      signals.push("bullish MACD crossover");
+      direction = "bullish";
+    } else if (latestMACD < latestSignal && indicators.macd.macd[indicators.macd.macd.length - 2] >= indicators.macd.signal[indicators.macd.signal.length - 2]) {
+      score += 2;
+      signals.push("bearish MACD crossover");
+      direction = "bearish";
+    }
+    
+    // Momentum
+    if (priceChange5d > 0.03 && priceChange20d > 0.05) {
+      score += 1;
+      signals.push("strong upward momentum");
+      if (direction === "neutral") direction = "bullish";
+    } else if (priceChange5d < -0.03 && priceChange20d < -0.05) {
+      score += 1;
+      signals.push("strong downward momentum");
+      if (direction === "neutral") direction = "bearish";
+    }
+    
+    // Volatility (lower is better for predictions)
+    if (latestVolatility < 0.02) {
+      score += 1;
+      signals.push("low volatility");
+    }
+    
+    // Regime alignment
+    if ((regime === "bullish" && direction === "bullish") || (regime === "bearish" && direction === "bearish")) {
+      score += 1;
+    }
+    
+    // Only return if there's a meaningful signal
+    if (score < 2 || signals.length === 0) {
+      return null;
+    }
+    
+    // Calculate confidence based on score
+    const confidence = Math.min(90, 50 + score * 8);
+    
+    return {
+      ticker,
+      direction,
+      confidence,
+      explanation: `${signals.join(", ")}. Current price $${currentPrice.toFixed(2)}.`,
+      strength: Math.min(5, Math.ceil(score)),
+      score,
+    };
+  } catch (error) {
+    console.error(`Failed to analyze ${ticker}:`, error);
+    return null;
+  }
+}
+
+// Generate guide opportunities
+async function generateGuideOpportunities(): Promise<any[]> {
+  // Popular stocks to scan
+  const stocksToScan = [
+    "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "TSLA",
+    "JPM", "V", "JNJ", "WMT", "PG", "UNH", "HD",
+    "DIS", "NFLX", "AMD", "INTC", "CRM", "PYPL"
+  ];
+  
+  console.log("Scanning stocks for opportunities...");
+  
+  const opportunities: any[] = [];
+  
+  // Analyze stocks in batches to avoid rate limits
+  for (let i = 0; i < stocksToScan.length; i += 5) {
+    const batch = stocksToScan.slice(i, i + 5);
+    const results = await Promise.all(batch.map(ticker => analyzeStockForGuide(ticker)));
+    
+    for (const result of results) {
+      if (result) {
+        opportunities.push(result);
+      }
+    }
+    
+    // Small delay between batches
+    if (i + 5 < stocksToScan.length) {
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+  }
+  
+  // Sort by score descending and take top 5
+  opportunities.sort((a, b) => b.score - a.score);
+  
+  return opportunities.slice(0, 5).map(({ score, ...opp }) => opp);
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
-    const { ticker, targetDate, newsApiKey } = await req.json();
+    const body = await req.json();
+    const { mode, ticker, targetDate, newsApiKey } = body;
     
+    // Handle guide mode
+    if (mode === "guide") {
+      console.log("Processing guide mode - scanning for opportunities");
+      const opportunities = await generateGuideOpportunities();
+      
+      return new Response(
+        JSON.stringify({ opportunities }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+    
+    // Regular prediction mode
     if (!ticker || !targetDate) {
       return new Response(
         JSON.stringify({ error: "Ticker and targetDate are required" }),
