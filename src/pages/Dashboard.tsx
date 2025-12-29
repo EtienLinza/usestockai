@@ -1,4 +1,5 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
+import { useSearchParams } from "react-router-dom";
 import { motion } from "framer-motion";
 import { Navbar } from "@/components/Navbar";
 import { PredictionForm } from "@/components/PredictionForm";
@@ -6,7 +7,8 @@ import { StockPredictionCard } from "@/components/StockPredictionCard";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
-import { format } from "date-fns";
+import { format, addDays } from "date-fns";
+import { Brain, TrendingUp, Shield, Sparkles } from "lucide-react";
 
 export interface PredictionData {
   ticker: string;
@@ -27,9 +29,19 @@ export interface PredictionData {
 
 const Dashboard = () => {
   const { user } = useAuth();
+  const [searchParams] = useSearchParams();
   const [isLoading, setIsLoading] = useState(false);
   const [prediction, setPrediction] = useState<PredictionData | null>(null);
   const [lastFormData, setLastFormData] = useState<{ ticker: string; targetDate: Date; newsApiKey?: string } | null>(null);
+  const [initialTicker, setInitialTicker] = useState<string>("");
+
+  // Handle ticker from URL params (from Guide page)
+  useEffect(() => {
+    const tickerParam = searchParams.get("ticker");
+    if (tickerParam) {
+      setInitialTicker(tickerParam.toUpperCase());
+    }
+  }, [searchParams]);
 
   const handleSubmit = async (data: { ticker: string; targetDate: Date; newsApiKey?: string }) => {
     setIsLoading(true);
@@ -131,6 +143,7 @@ const Dashboard = () => {
                   onSubmit={handleSubmit} 
                   isLoading={isLoading} 
                   onRefresh={handleRefresh}
+                  initialTicker={initialTicker}
                 />
               </div>
             </motion.div>
@@ -145,26 +158,52 @@ const Dashboard = () => {
               {prediction ? (
                 <StockPredictionCard data={prediction} />
               ) : (
-                <div className="glass-card p-16 text-center">
-                  <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-4">
-                    <svg
-                      className="w-6 h-6 text-primary"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={1.5}
-                        d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"
-                      />
-                    </svg>
+                <div className="space-y-6">
+                  {/* How it works */}
+                  <div className="glass-card p-8">
+                    <h3 className="text-lg font-medium mb-6 flex items-center gap-2">
+                      <Sparkles className="w-5 h-5 text-primary" />
+                      How StockAI Works
+                    </h3>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                      <div className="space-y-3">
+                        <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
+                          <TrendingUp className="w-5 h-5 text-primary" />
+                        </div>
+                        <h4 className="text-sm font-medium">Real Market Data</h4>
+                        <p className="text-xs text-muted-foreground leading-relaxed">
+                          We pull live price data and compute technical indicators like RSI, MACD, EMA, and volatility metrics.
+                        </p>
+                      </div>
+                      <div className="space-y-3">
+                        <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
+                          <Brain className="w-5 h-5 text-primary" />
+                        </div>
+                        <h4 className="text-sm font-medium">AI Analysis</h4>
+                        <p className="text-xs text-muted-foreground leading-relaxed">
+                          Advanced AI models analyze patterns, market regime, and sentiment to generate price predictions with confidence intervals.
+                        </p>
+                      </div>
+                      <div className="space-y-3">
+                        <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
+                          <Shield className="w-5 h-5 text-primary" />
+                        </div>
+                        <h4 className="text-sm font-medium">Risk Assessment</h4>
+                        <p className="text-xs text-muted-foreground leading-relaxed">
+                          Every prediction includes uncertainty ranges, confidence levels, and volatility metrics to help you assess risk.
+                        </p>
+                      </div>
+                    </div>
                   </div>
-                  <h3 className="text-sm font-medium mb-2">No Analysis Yet</h3>
-                  <p className="text-xs text-muted-foreground max-w-xs mx-auto">
-                    Enter a stock ticker to generate AI-powered predictions.
-                  </p>
+
+                  {/* Disclaimer */}
+                  <div className="flex items-start gap-3 p-4 border border-border/30 rounded-lg">
+                    <Shield className="w-4 h-4 text-warning mt-0.5 shrink-0" />
+                    <p className="text-xs text-muted-foreground leading-relaxed">
+                      <span className="font-medium text-foreground">Important:</span> StockAI provides AI-generated analysis for informational purposes only. 
+                      This is not financial advice. Always conduct your own research and consult with a qualified financial advisor before making investment decisions.
+                    </p>
+                  </div>
                 </div>
               )}
             </motion.div>

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,16 +15,23 @@ interface PredictionFormProps {
   onSubmit: (data: { ticker: string; targetDate: Date; newsApiKey?: string }) => void;
   isLoading: boolean;
   onRefresh?: () => void;
+  initialTicker?: string;
 }
 
 const TICKER_REGEX = /^[A-Z]{1,5}$/;
 
-export const PredictionForm = ({ onSubmit, isLoading, onRefresh }: PredictionFormProps) => {
-  const [ticker, setTicker] = useState("");
+export const PredictionForm = ({ onSubmit, isLoading, onRefresh, initialTicker }: PredictionFormProps) => {
+  const [ticker, setTicker] = useState(initialTicker || "");
   const [targetDate, setTargetDate] = useState<Date | undefined>(addDays(new Date(), 1));
   const [newsApiKey, setNewsApiKey] = useState("");
   const [showApiKey, setShowApiKey] = useState(false);
 
+  // Update ticker when initialTicker changes
+  useEffect(() => {
+    if (initialTicker) {
+      setTicker(initialTicker);
+    }
+  }, [initialTicker]);
   const handleTickerChange = (value: string) => {
     setTicker(value.toUpperCase());
   };

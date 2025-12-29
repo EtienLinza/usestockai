@@ -1,25 +1,46 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { Navbar } from "@/components/Navbar";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { TrendingUp, TrendingDown, Minus, RefreshCw, Loader2, AlertCircle } from "lucide-react";
+import { TrendingUp, TrendingDown, Minus, RefreshCw, Loader2, AlertCircle, AlertTriangle, ChevronRight } from "lucide-react";
 import { toast } from "sonner";
-
 interface StockOpportunity {
   ticker: string;
   direction: "bullish" | "bearish" | "neutral";
   confidence: number;
   explanation: string;
   strength: number;
+  riskLevel?: "low" | "medium" | "high";
 }
 
 const Guide = () => {
+  const navigate = useNavigate();
   const [opportunities, setOpportunities] = useState<StockOpportunity[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [noOpportunities, setNoOpportunities] = useState(false);
+
+  const handleStockClick = (ticker: string) => {
+    navigate(`/dashboard?ticker=${ticker}`);
+  };
+
+  const getRiskBadge = (riskLevel?: string) => {
+    const level = riskLevel || "medium";
+    const colors: Record<string, string> = {
+      low: "text-success bg-success/10 border-success/20",
+      medium: "text-warning bg-warning/10 border-warning/20",
+      high: "text-destructive bg-destructive/10 border-destructive/20",
+    };
+    return (
+      <Badge variant="outline" className={`${colors[level]} border gap-1 text-xs`}>
+        <AlertTriangle className="w-3 h-3" />
+        {level.charAt(0).toUpperCase() + level.slice(1)} Risk
+      </Badge>
+    );
+  };
 
   const fetchOpportunities = async () => {
     setIsLoading(true);
@@ -162,11 +183,14 @@ const Guide = () => {
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: index * 0.1 }}
                 >
-                  <Card className="glass-card p-6">
+                  <Card 
+                    className="glass-card p-6 cursor-pointer transition-all duration-200 hover:border-primary/30 hover:bg-primary/5 group"
+                    onClick={() => handleStockClick(opp.ticker)}
+                  >
                     <div className="flex items-start justify-between gap-4">
                       <div className="flex-1">
                         <div className="flex items-center gap-3 mb-3">
-                          <span className="font-mono text-lg font-medium text-primary">
+                          <span className="font-mono text-lg font-medium text-primary group-hover:text-primary/90">
                             {opp.ticker}
                           </span>
                           <Badge 
@@ -176,12 +200,13 @@ const Guide = () => {
                             {getDirectionIcon(opp.direction)}
                             {opp.direction.charAt(0).toUpperCase() + opp.direction.slice(1)}
                           </Badge>
+                          {getRiskBadge(opp.riskLevel)}
                         </div>
                         <p className="text-sm text-muted-foreground leading-relaxed">
                           {opp.explanation}
                         </p>
                       </div>
-                      <div className="text-right">
+                      <div className="text-right flex flex-col items-end">
                         <div className="text-2xl font-mono font-medium text-foreground">
                           {opp.confidence}%
                         </div>
@@ -203,6 +228,7 @@ const Guide = () => {
                             />
                           ))}
                         </div>
+                        <ChevronRight className="w-4 h-4 text-muted-foreground mt-2 group-hover:text-primary transition-colors" />
                       </div>
                     </div>
                   </Card>
