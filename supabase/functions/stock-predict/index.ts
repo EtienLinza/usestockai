@@ -6,6 +6,39 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+// In-memory rate limiting store (per instance)
+const rateLimitStore = new Map<string, { count: number; resetTime: number }>();
+
+// Rate limit configuration
+const RATE_LIMIT_WINDOW_MS = 60 * 1000; // 1 minute
+const RATE_LIMIT_MAX_REQUESTS = 10; // 10 requests per minute per user
+
+function checkRateLimit(userId: string): { allowed: boolean; remaining: number; resetIn: number } {
+  const now = Date.now();
+  const userLimit = rateLimitStore.get(userId);
+
+  if (!userLimit || now > userLimit.resetTime) {
+    // Reset or initialize rate limit
+    rateLimitStore.set(userId, { count: 1, resetTime: now + RATE_LIMIT_WINDOW_MS });
+    return { allowed: true, remaining: RATE_LIMIT_MAX_REQUESTS - 1, resetIn: RATE_LIMIT_WINDOW_MS };
+  }
+
+  if (userLimit.count >= RATE_LIMIT_MAX_REQUESTS) {
+    return { 
+      allowed: false, 
+      remaining: 0, 
+      resetIn: userLimit.resetTime - now 
+    };
+  }
+
+  userLimit.count++;
+  return { 
+    allowed: true, 
+    remaining: RATE_LIMIT_MAX_REQUESTS - userLimit.count, 
+    resetIn: userLimit.resetTime - now 
+  };
+}
+
 // Helper function to verify authentication
 async function verifyAuth(req: Request): Promise<{ user: any; error: Response | null }> {
   const authHeader = req.headers.get("Authorization");
@@ -146,7 +179,6 @@ function detectRegime(prices: number[], rsi: number[], volatility: number[]): st
 }
 
 async function fetchStockData(ticker: string): Promise<any> {
-  // Use Yahoo Finance via a CORS proxy or direct API
   const endDate = Math.floor(Date.now() / 1000);
   const startDate = endDate - (365 * 2 * 24 * 60 * 60); // 2 years
   
@@ -201,7 +233,6 @@ async function fetchNewsSentiment(ticker: string, apiKey: string): Promise<numbe
       return 0;
     }
     
-    // Simple sentiment scoring based on keywords
     const positiveWords = ['surge', 'gain', 'rise', 'up', 'growth', 'profit', 'beat', 'strong', 'bull', 'buy', 'upgrade'];
     const negativeWords = ['fall', 'drop', 'decline', 'down', 'loss', 'miss', 'weak', 'bear', 'sell', 'downgrade', 'crash'];
     
@@ -326,7 +357,6 @@ Based on technical analysis, market regime, and sentiment, provide your predicti
     throw new Error("No response from AI");
   }
   
-  // Parse JSON from response (handle markdown code blocks)
   let jsonStr = content;
   const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/);
   if (jsonMatch) {
@@ -341,8 +371,40 @@ Based on technical analysis, market regime, and sentiment, provide your predicti
   }
 }
 
+// Trading style configurations
+const tradingStyles = {
+  scalping: {
+    volatilityPreference: "high",
+    holdingPeriod: "Minutes to hours",
+    minVolatility: 0.02,
+    preferredRegimes: ["volatile"],
+    scoreMultiplier: (volatility: number) => volatility > 0.03 ? 1.5 : 1,
+  },
+  daytrading: {
+    volatilityPreference: "medium-high",
+    holdingPeriod: "Hours (same day)",
+    minVolatility: 0.015,
+    preferredRegimes: ["volatile", "bullish", "bearish"],
+    scoreMultiplier: (volatility: number) => volatility > 0.02 ? 1.3 : 1,
+  },
+  swing: {
+    volatilityPreference: "medium",
+    holdingPeriod: "Days to weeks",
+    minVolatility: 0.01,
+    preferredRegimes: ["bullish", "bearish"],
+    scoreMultiplier: (volatility: number) => volatility > 0.01 && volatility < 0.03 ? 1.4 : 1,
+  },
+  position: {
+    volatilityPreference: "low",
+    holdingPeriod: "Weeks to months",
+    minVolatility: 0,
+    preferredRegimes: ["bullish", "neutral"],
+    scoreMultiplier: (volatility: number) => volatility < 0.02 ? 1.5 : 1,
+  },
+};
+
 // Analyze a single stock for the Guide mode
-async function analyzeStockForGuide(ticker: string): Promise<any | null> {
+async function analyzeStockForGuide(ticker: string, tradingStyle: string = "swing"): Promise<any | null> {
   try {
     const stockData = await fetchStockData(ticker);
     
@@ -367,6 +429,9 @@ async function analyzeStockForGuide(ticker: string): Promise<any | null> {
     const latestMACD = indicators.macd.macd[indicators.macd.macd.length - 1];
     const latestSignal = indicators.macd.signal[indicators.macd.signal.length - 1];
     const latestVolatility = indicators.volatility[indicators.volatility.length - 1];
+    
+    // Get trading style config
+    const styleConfig = tradingStyles[tradingStyle as keyof typeof tradingStyles] || tradingStyles.swing;
     
     // Calculate momentum score
     const priceChange5d = (closePrices[closePrices.length - 1] - closePrices[closePrices.length - 6]) / closePrices[closePrices.length - 6];
@@ -410,16 +475,13 @@ async function analyzeStockForGuide(ticker: string): Promise<any | null> {
       if (direction === "neutral") direction = "bearish";
     }
     
-    // Volatility (lower is better for predictions)
-    if (latestVolatility < 0.02) {
+    // Trading style specific scoring
+    if (styleConfig.preferredRegimes.includes(regime)) {
       score += 1;
-      signals.push("low volatility");
     }
     
-    // Regime alignment
-    if ((regime === "bullish" && direction === "bullish") || (regime === "bearish" && direction === "bearish")) {
-      score += 1;
-    }
+    // Apply style-specific volatility multiplier
+    score = score * styleConfig.scoreMultiplier(latestVolatility);
     
     // Only return if there's a meaningful signal
     if (score < 2 || signals.length === 0) {
@@ -429,6 +491,19 @@ async function analyzeStockForGuide(ticker: string): Promise<any | null> {
     // Calculate confidence based on score
     const confidence = Math.min(90, 50 + score * 8);
     
+    // Calculate risk level based on volatility and trading style
+    let riskLevel: "low" | "medium" | "high" = "medium";
+    if (latestVolatility > 0.03) {
+      riskLevel = "high";
+    } else if (latestVolatility < 0.015) {
+      riskLevel = "low";
+    }
+    
+    // Calculate predicted price change
+    const priceChangeMultiplier = direction === "bullish" ? 1 : -1;
+    const predictedChange = priceChangeMultiplier * Math.min(0.08, latestVolatility * 2 + 0.02);
+    const predictedPrice = currentPrice * (1 + predictedChange);
+    
     return {
       ticker,
       direction,
@@ -436,6 +511,12 @@ async function analyzeStockForGuide(ticker: string): Promise<any | null> {
       explanation: `${signals.join(", ")}. Current price $${currentPrice.toFixed(2)}.`,
       strength: Math.min(5, Math.ceil(score)),
       score,
+      currentPrice,
+      predictedPrice,
+      volatility: latestVolatility,
+      riskLevel,
+      holdingPeriod: styleConfig.holdingPeriod,
+      regime,
     };
   } catch (error) {
     console.error(`Failed to analyze ${ticker}:`, error);
@@ -444,7 +525,7 @@ async function analyzeStockForGuide(ticker: string): Promise<any | null> {
 }
 
 // Generate guide opportunities
-async function generateGuideOpportunities(): Promise<any[]> {
+async function generateGuideOpportunities(tradingStyle: string = "swing"): Promise<any[]> {
   // Popular stocks to scan
   const stocksToScan = [
     "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "TSLA",
@@ -452,14 +533,14 @@ async function generateGuideOpportunities(): Promise<any[]> {
     "DIS", "NFLX", "AMD", "INTC", "CRM", "PYPL"
   ];
   
-  console.log("Scanning stocks for opportunities...");
+  console.log(`Scanning stocks for ${tradingStyle} opportunities...`);
   
   const opportunities: any[] = [];
   
   // Analyze stocks in batches to avoid rate limits
   for (let i = 0; i < stocksToScan.length; i += 5) {
     const batch = stocksToScan.slice(i, i + 5);
-    const results = await Promise.all(batch.map(ticker => analyzeStockForGuide(ticker)));
+    const results = await Promise.all(batch.map(ticker => analyzeStockForGuide(ticker, tradingStyle)));
     
     for (const result of results) {
       if (result) {
@@ -473,10 +554,10 @@ async function generateGuideOpportunities(): Promise<any[]> {
     }
   }
   
-  // Sort by score descending and take top 5
+  // Sort by score descending and take top 6
   opportunities.sort((a, b) => b.score - a.score);
   
-  return opportunities.slice(0, 5).map(({ score, ...opp }) => opp);
+  return opportunities.slice(0, 6).map(({ score, ...opp }) => opp);
 }
 
 serve(async (req) => {
@@ -491,19 +572,46 @@ serve(async (req) => {
       return authError;
     }
     
-    console.log(`Authenticated request from user: ${user.id}`);
+    // Check rate limit
+    const rateLimit = checkRateLimit(user.id);
+    if (!rateLimit.allowed) {
+      console.log(`Rate limit exceeded for user ${user.id}`);
+      return new Response(
+        JSON.stringify({ 
+          error: "Rate limit exceeded. Please wait before making more requests.",
+          retryAfter: Math.ceil(rateLimit.resetIn / 1000)
+        }),
+        { 
+          status: 429, 
+          headers: { 
+            ...corsHeaders, 
+            "Content-Type": "application/json",
+            "X-RateLimit-Remaining": "0",
+            "X-RateLimit-Reset": String(Math.ceil(rateLimit.resetIn / 1000))
+          } 
+        }
+      );
+    }
+    
+    console.log(`Authenticated request from user: ${user.id} (${rateLimit.remaining} requests remaining)`);
     
     const body = await req.json();
-    const { mode, ticker, targetDate, newsApiKey } = body;
+    const { mode, ticker, targetDate, newsApiKey, tradingStyle } = body;
     
     // Handle guide mode
     if (mode === "guide") {
-      console.log("Processing guide mode - scanning for opportunities");
-      const opportunities = await generateGuideOpportunities();
+      console.log(`Processing guide mode for ${tradingStyle || "swing"} trading style`);
+      const opportunities = await generateGuideOpportunities(tradingStyle || "swing");
       
       return new Response(
         JSON.stringify({ opportunities }),
-        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        { 
+          headers: { 
+            ...corsHeaders, 
+            "Content-Type": "application/json",
+            "X-RateLimit-Remaining": String(rateLimit.remaining)
+          } 
+        }
       );
     }
     
@@ -590,7 +698,11 @@ serve(async (req) => {
     console.log("Prediction complete:", result.ticker, result.predictedPrice);
     
     return new Response(JSON.stringify(result), {
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+      headers: { 
+        ...corsHeaders, 
+        "Content-Type": "application/json",
+        "X-RateLimit-Remaining": String(rateLimit.remaining)
+      },
     });
   } catch (error) {
     console.error("Error in stock-predict:", error);
