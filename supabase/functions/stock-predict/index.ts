@@ -1,9 +1,58 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
+
+// Helper function to verify authentication
+async function verifyAuth(req: Request): Promise<{ user: any; error: Response | null }> {
+  const authHeader = req.headers.get("Authorization");
+  
+  if (!authHeader) {
+    return {
+      user: null,
+      error: new Response(
+        JSON.stringify({ error: "Unauthorized - Missing authorization header" }),
+        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      ),
+    };
+  }
+
+  const supabaseUrl = Deno.env.get("SUPABASE_URL");
+  const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY");
+
+  if (!supabaseUrl || !supabaseAnonKey) {
+    console.error("Missing Supabase configuration");
+    return {
+      user: null,
+      error: new Response(
+        JSON.stringify({ error: "Server configuration error" }),
+        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      ),
+    };
+  }
+
+  const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+    global: { headers: { Authorization: authHeader } },
+  });
+
+  const { data: { user }, error } = await supabase.auth.getUser();
+
+  if (error || !user) {
+    console.error("Auth error:", error?.message);
+    return {
+      user: null,
+      error: new Response(
+        JSON.stringify({ error: "Unauthorized - Invalid or expired token" }),
+        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      ),
+    };
+  }
+
+  return { user, error: null };
+}
 
 // Technical indicator calculations
 function calculateEMA(prices: number[], period: number): number[] {
@@ -436,6 +485,14 @@ serve(async (req) => {
   }
 
   try {
+    // Verify authentication before processing any request
+    const { user, error: authError } = await verifyAuth(req);
+    if (authError) {
+      return authError;
+    }
+    
+    console.log(`Authenticated request from user: ${user.id}`);
+    
     const body = await req.json();
     const { mode, ticker, targetDate, newsApiKey } = body;
     
