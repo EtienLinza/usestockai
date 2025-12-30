@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useSearchParams, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { Navbar } from "@/components/Navbar";
 import { PredictionForm } from "@/components/PredictionForm";
@@ -32,7 +32,8 @@ export interface PredictionData {
 }
 
 const Dashboard = () => {
-  const { user } = useAuth();
+  const { user, session } = useAuth();
+  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [isLoading, setIsLoading] = useState(false);
   const [predictions, setPredictions] = useState<PredictionData[]>([]);
@@ -58,6 +59,12 @@ const Dashboard = () => {
   }, [predictions.length]);
 
   const handleSubmit = async (data: { ticker: string; targetDate: Date; newsApiKey?: string }) => {
+    if (!session?.access_token) {
+      toast.error("Please sign in to generate predictions");
+      navigate("/auth");
+      return;
+    }
+
     // Check if this ticker already exists
     const existingIndex = predictions.findIndex(p => p.ticker === data.ticker);
     if (existingIndex !== -1) {
@@ -74,7 +81,7 @@ const Dashboard = () => {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+            Authorization: `Bearer ${session.access_token}`,
           },
           body: JSON.stringify({
             ticker: data.ticker,
@@ -83,6 +90,18 @@ const Dashboard = () => {
           }),
         }
       );
+
+      if (response.status === 401) {
+        toast.error("Session expired. Please sign in again.");
+        navigate("/auth");
+        return;
+      }
+
+      if (response.status === 429) {
+        const errorData = await response.json();
+        toast.error(`Rate limit exceeded. Please wait ${errorData.retryAfter || 60} seconds.`);
+        return;
+      }
 
       if (!response.ok) {
         const errorData = await response.json();
