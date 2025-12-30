@@ -615,15 +615,25 @@ serve(async (req) => {
       );
     }
     
-    // Regular prediction mode
-    if (!ticker || !targetDate) {
+    // Regular prediction mode - validate inputs server-side
+    const TICKER_REGEX = /^[A-Z]{1,5}$/;
+    const DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
+
+    if (!ticker || !TICKER_REGEX.test(ticker.toUpperCase())) {
       return new Response(
-        JSON.stringify({ error: "Ticker and targetDate are required" }),
+        JSON.stringify({ error: "Invalid ticker format. Must be 1-5 uppercase letters." }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    console.log(`Processing prediction for ${ticker} targeting ${targetDate}`);
+    if (!targetDate || !DATE_REGEX.test(targetDate)) {
+      return new Response(
+        JSON.stringify({ error: "Invalid date format. Must be YYYY-MM-DD." }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    console.log(`Processing prediction for ${ticker.toUpperCase()} targeting ${targetDate}`);
     
     // Fetch real stock data
     const stockData = await fetchStockData(ticker.toUpperCase());
