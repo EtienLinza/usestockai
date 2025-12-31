@@ -18,7 +18,8 @@ interface PredictionFormProps {
   initialTicker?: string;
 }
 
-const TICKER_REGEX = /^[A-Z]{1,5}$/;
+// Supports both stocks (AAPL) and crypto (BTC-USD) formats
+const TICKER_REGEX = /^[A-Z]{1,10}(-[A-Z]{2,4})?$/;
 
 export const PredictionForm = ({ onSubmit, isLoading, onRefresh, initialTicker }: PredictionFormProps) => {
   const [ticker, setTicker] = useState(initialTicker || "");
@@ -40,7 +41,7 @@ export const PredictionForm = ({ onSubmit, isLoading, onRefresh, initialTicker }
     e.preventDefault();
     
     if (!ticker || !TICKER_REGEX.test(ticker)) {
-      toast.error("Enter a valid ticker (1-5 letters)");
+      toast.error("Enter a valid ticker (e.g., AAPL or BTC-USD)");
       return;
     }
 
@@ -56,7 +57,7 @@ export const PredictionForm = ({ onSubmit, isLoading, onRefresh, initialTicker }
     });
   };
 
-  const popularTickers = ["AAPL", "GOOGL", "MSFT", "TSLA", "NVDA"];
+  const popularTickers = ["AAPL", "TSLA", "NVDA", "BTC-USD", "ETH-USD"];
   const isFormValid = ticker && TICKER_REGEX.test(ticker) && targetDate;
 
   return (
@@ -85,12 +86,15 @@ export const PredictionForm = ({ onSubmit, isLoading, onRefresh, initialTicker }
           </Label>
           <Input
             id="ticker"
-            placeholder="AAPL"
+            placeholder="AAPL or BTC-USD"
             value={ticker}
             onChange={(e) => handleTickerChange(e.target.value)}
             className="font-mono uppercase bg-secondary/50 border-border/50 focus:border-primary/50"
-            maxLength={5}
+            maxLength={10}
           />
+          <p className="text-xs text-muted-foreground/60 mt-1">
+            Use -USD suffix for crypto (e.g., BTC-USD, ETH-USD)
+          </p>
           <div className="flex flex-wrap gap-2 mt-3">
             {popularTickers.map((t) => (
               <motion.button
