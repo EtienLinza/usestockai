@@ -271,10 +271,18 @@ async function generateAIPrediction(
     throw new Error("LOVABLE_API_KEY is not configured");
   }
   
+  const currentPrice = stockData.close[stockData.close.length - 1];
+  
+  // Handle null/undefined values safely for crypto and stocks
+  const safeToFixed = (val: number | null | undefined, digits: number = 2): string => {
+    if (val === null || val === undefined || isNaN(val)) return "N/A";
+    return val.toFixed(digits);
+  };
+  
   const recentData = {
     prices: stockData.close.slice(-30),
     dates: stockData.timestamps.slice(-30),
-    currentPrice: stockData.close[stockData.close.length - 1],
+    currentPrice: currentPrice,
     ema12: indicators.ema12.slice(-5),
     ema26: indicators.ema26.slice(-5),
     sma50: indicators.sma50.slice(-5),
@@ -284,25 +292,25 @@ async function generateAIPrediction(
     volatility: indicators.volatility.slice(-5),
   };
   
-  const prompt = `You are an expert quantitative analyst. Analyze this stock data and provide a prediction.
+  const prompt = `You are an expert quantitative analyst. Analyze this ${ticker.includes('-') ? 'cryptocurrency' : 'stock'} data and provide a prediction.
 
-STOCK: ${ticker}
+ASSET: ${ticker}
 TARGET DATE: ${targetDate}
-CURRENT PRICE: $${recentData.currentPrice.toFixed(2)}
+CURRENT PRICE: $${safeToFixed(recentData.currentPrice)}
 MARKET REGIME: ${regime}
-NEWS SENTIMENT: ${sentiment.toFixed(2)} (scale -1 to 1)
+NEWS SENTIMENT: ${safeToFixed(sentiment)} (scale -1 to 1)
 
 RECENT PRICE DATA (last 30 days):
-${recentData.dates.map((d: string, i: number) => `${d}: $${recentData.prices[i]?.toFixed(2)}`).join('\n')}
+${recentData.dates.map((d: string, i: number) => `${d}: $${safeToFixed(recentData.prices[i])}`).join('\n')}
 
 TECHNICAL INDICATORS (last 5 values):
-- EMA12: ${recentData.ema12.map((v: number) => v?.toFixed(2)).join(', ')}
-- EMA26: ${recentData.ema26.map((v: number) => v?.toFixed(2)).join(', ')}
-- SMA50: ${recentData.sma50.map((v: number) => v?.toFixed(2)).join(', ')}
-- RSI14: ${recentData.rsi.map((v: number) => v?.toFixed(1)).join(', ')}
-- MACD: ${recentData.macd.map((v: number) => v?.toFixed(3)).join(', ')}
-- MACD Signal: ${recentData.macdSignal.map((v: number) => v?.toFixed(3)).join(', ')}
-- Volatility: ${recentData.volatility.map((v: number) => (v * 100)?.toFixed(2) + '%').join(', ')}
+- EMA12: ${recentData.ema12.map((v: number) => safeToFixed(v)).join(', ')}
+- EMA26: ${recentData.ema26.map((v: number) => safeToFixed(v)).join(', ')}
+- SMA50: ${recentData.sma50.map((v: number) => safeToFixed(v)).join(', ')}
+- RSI14: ${recentData.rsi.map((v: number) => safeToFixed(v, 1)).join(', ')}
+- MACD: ${recentData.macd.map((v: number) => safeToFixed(v, 3)).join(', ')}
+- MACD Signal: ${recentData.macdSignal.map((v: number) => safeToFixed(v, 3)).join(', ')}
+- Volatility: ${recentData.volatility.map((v: number) => v != null ? safeToFixed(v * 100) + '%' : 'N/A').join(', ')}
 
 Based on technical analysis, market regime, and sentiment, provide your prediction. You MUST respond with ONLY valid JSON in this exact format:
 {
@@ -526,11 +534,12 @@ async function analyzeStockForGuide(ticker: string, tradingStyle: string = "swin
 
 // Generate guide opportunities
 async function generateGuideOpportunities(tradingStyle: string = "swing"): Promise<any[]> {
-  // Popular stocks to scan
+// Popular stocks and crypto to scan
   const stocksToScan = [
     "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "TSLA",
     "JPM", "V", "JNJ", "WMT", "PG", "UNH", "HD",
-    "DIS", "NFLX", "AMD", "INTC", "CRM", "PYPL"
+    "DIS", "NFLX", "AMD", "INTC", "CRM", "PYPL",
+    "BTC-USD", "ETH-USD", "SOL-USD", "XRP-USD", "ADA-USD"
   ];
   
   console.log(`Scanning stocks for ${tradingStyle} opportunities...`);
@@ -616,12 +625,13 @@ serve(async (req) => {
     }
     
     // Regular prediction mode - validate inputs server-side
-    const TICKER_REGEX = /^[A-Z]{1,5}$/;
+    // Supports both stocks (AAPL) and crypto (BTC-USD) formats
+    const TICKER_REGEX = /^[A-Z]{1,10}(-[A-Z]{2,4})?$/;
     const DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
 
     if (!ticker || !TICKER_REGEX.test(ticker.toUpperCase())) {
       return new Response(
-        JSON.stringify({ error: "Invalid ticker format. Must be 1-5 uppercase letters." }),
+        JSON.stringify({ error: "Invalid ticker format. Use AAPL for stocks or BTC-USD for crypto." }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
