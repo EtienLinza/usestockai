@@ -10,7 +10,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { User, LogOut, LayoutDashboard, BookOpen } from "lucide-react";
+import { User, LogOut, LayoutDashboard, BookOpen, Heart } from "lucide-react";
 
 export const Navbar = () => {
   const location = useLocation();
@@ -20,6 +20,7 @@ export const Navbar = () => {
   const navLinks = [
     { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
     { href: "/guide", label: "Guide", icon: BookOpen },
+    { href: "/watchlist", label: "Watchlist", icon: Heart },
   ];
 
   const handleSignOut = async () => {
@@ -77,6 +78,10 @@ export const Navbar = () => {
                   <DropdownMenuItem onClick={() => navigate("/guide")}>
                     <BookOpen className="w-4 h-4 mr-2" />
                     Guide
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => navigate("/watchlist")}>
+                    <Heart className="w-4 h-4 mr-2" />
+                    Watchlist
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem onClick={handleSignOut} className="text-destructive">

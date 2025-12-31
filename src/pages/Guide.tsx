@@ -34,12 +34,19 @@ import {
   Shield,
   Zap,
   Calendar,
-  BarChart3
+  BarChart3,
+  Sparkles,
+  ArrowUpRight,
+  ArrowDownRight,
+  Lightbulb,
+  AlertOctagon
 } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/useAuth";
+import { AddToWatchlistButton } from "@/components/AddToWatchlistButton";
 
 type TradingStyle = "scalping" | "daytrading" | "swing" | "position";
+type SortOption = "roi" | "confidence" | "risk";
 
 interface StockOpportunity {
   ticker: string;
@@ -50,9 +57,15 @@ interface StockOpportunity {
   riskLevel?: "low" | "medium" | "high";
   currentPrice?: number;
   predictedPrice?: number;
+  expectedROI?: number;
+  riskAdjustedROI?: number;
   volatility?: number;
   holdingPeriod?: string;
   regime?: string;
+  aiReasoning?: string;
+  keyCatalyst?: string;
+  riskFactor?: string;
+  aiEnhanced?: boolean;
 }
 
 const tradingStyleInfo: Record<TradingStyle, { 
@@ -100,6 +113,7 @@ const Guide = () => {
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [noOpportunities, setNoOpportunities] = useState(false);
   const [tradingStyle, setTradingStyle] = useState<TradingStyle>("swing");
+  const [sortBy, setSortBy] = useState<SortOption>("roi");
 
   const handleStockClick = (ticker: string) => {
     navigate(`/dashboard?ticker=${ticker}`);
@@ -116,6 +130,22 @@ const Guide = () => {
       <Badge variant="outline" className={`${colors[level]} border gap-1 text-xs`}>
         <AlertTriangle className="w-3 h-3" />
         {level.charAt(0).toUpperCase() + level.slice(1)} Risk
+      </Badge>
+    );
+  };
+
+  const getROIBadge = (roi?: number) => {
+    if (roi === undefined || roi === null) return null;
+    const isPositive = roi >= 0;
+    const color = isPositive 
+      ? "text-success bg-success/10 border-success/20" 
+      : "text-destructive bg-destructive/10 border-destructive/20";
+    const Icon = isPositive ? ArrowUpRight : ArrowDownRight;
+    
+    return (
+      <Badge variant="outline" className={`${color} border gap-1 text-xs font-mono`}>
+        <Icon className="w-3 h-3" />
+        {isPositive ? "+" : ""}{roi.toFixed(1)}% ROI
       </Badge>
     );
   };
@@ -188,6 +218,21 @@ const Guide = () => {
     }
   }, [tradingStyle, session?.access_token]);
 
+  // Sort opportunities based on selected option
+  const sortedOpportunities = [...opportunities].sort((a, b) => {
+    switch (sortBy) {
+      case "roi":
+        return Math.abs(b.expectedROI || 0) - Math.abs(a.expectedROI || 0);
+      case "confidence":
+        return b.confidence - a.confidence;
+      case "risk":
+        const riskOrder = { low: 1, medium: 2, high: 3 };
+        return (riskOrder[a.riskLevel || "medium"] || 2) - (riskOrder[b.riskLevel || "medium"] || 2);
+      default:
+        return 0;
+    }
+  });
+
   const getDirectionIcon = (direction: string) => {
     switch (direction) {
       case "bullish":
@@ -220,6 +265,14 @@ const Guide = () => {
     return `$${price.toFixed(2)}`;
   };
 
+  // Calculate summary stats
+  const avgROI = opportunities.length > 0 
+    ? opportunities.reduce((sum, o) => sum + (o.expectedROI || 0), 0) / opportunities.length 
+    : 0;
+  const topPick = opportunities.length > 0 
+    ? opportunities.reduce((max, o) => (Math.abs(o.expectedROI || 0) > Math.abs(max.expectedROI || 0) ? o : max), opportunities[0])
+    : null;
+
   const currentStyleInfo = tradingStyleInfo[tradingStyle];
   const StyleIcon = currentStyleInfo.icon;
 
@@ -245,7 +298,7 @@ const Guide = () => {
                 <div>
                   <h1 className="text-xl sm:text-2xl font-medium mb-1">Guide</h1>
                   <p className="text-xs sm:text-sm text-muted-foreground">
-                    AI-identified opportunities for your trading style
+                    AI-identified opportunities from market-wide scanning
                   </p>
                 </div>
                 <Button
@@ -325,6 +378,40 @@ const Guide = () => {
                 </div>
               </Card>
 
+              {/* Summary Stats & Sort */}
+              {opportunities.length > 0 && (
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mt-4">
+                  <div className="flex flex-wrap items-center gap-4">
+                    <div className="flex items-center gap-2 text-xs">
+                      <span className="text-muted-foreground">Avg ROI:</span>
+                      <span className={`font-mono font-medium ${avgROI >= 0 ? 'text-success' : 'text-destructive'}`}>
+                        {avgROI >= 0 ? '+' : ''}{avgROI.toFixed(1)}%
+                      </span>
+                    </div>
+                    {topPick && (
+                      <div className="flex items-center gap-2 text-xs">
+                        <span className="text-muted-foreground">Top Pick:</span>
+                        <span className="font-mono font-medium text-primary">{topPick.ticker}</span>
+                        <span className={`font-mono ${(topPick.expectedROI || 0) >= 0 ? 'text-success' : 'text-destructive'}`}>
+                          ({(topPick.expectedROI || 0) >= 0 ? '+' : ''}{(topPick.expectedROI || 0).toFixed(1)}%)
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                  
+                  <Select value={sortBy} onValueChange={(v) => setSortBy(v as SortOption)}>
+                    <SelectTrigger className="w-full sm:w-[160px]">
+                      <SelectValue placeholder="Sort by..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="roi">Highest ROI</SelectItem>
+                      <SelectItem value="confidence">Highest Confidence</SelectItem>
+                      <SelectItem value="risk">Lowest Risk</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+
               {lastUpdated && (
                 <p className="text-xs text-muted-foreground mt-3">
                   Last updated: {lastUpdated.toLocaleTimeString()}
@@ -344,7 +431,10 @@ const Guide = () => {
                 >
                   <Loader2 className="w-8 h-8 text-primary mx-auto mb-4 animate-spin" />
                   <p className="text-sm text-muted-foreground">
-                    Analyzing market conditions for {tradingStyleInfo[tradingStyle].name.toLowerCase()}...
+                    Scanning market for {tradingStyleInfo[tradingStyle].name.toLowerCase()} opportunities...
+                  </p>
+                  <p className="text-xs text-muted-foreground/60 mt-2">
+                    Analyzing 30+ assets with AI enhancement
                   </p>
                 </motion.div>
               ) : noOpportunities ? (
@@ -372,7 +462,7 @@ const Guide = () => {
                   exit={{ opacity: 0 }}
                   className="space-y-3"
                 >
-                  {opportunities.map((opp, index) => (
+                  {sortedOpportunities.map((opp, index) => (
                     <motion.div
                       key={opp.ticker}
                       initial={{ opacity: 0, y: 16 }}
@@ -397,12 +487,48 @@ const Guide = () => {
                                 {getDirectionIcon(opp.direction)}
                                 {opp.direction.charAt(0).toUpperCase() + opp.direction.slice(1)}
                               </Badge>
+                              {getROIBadge(opp.expectedROI)}
                               {getRiskBadge(opp.riskLevel)}
+                              {opp.aiEnhanced && (
+                                <Badge variant="outline" className="text-primary bg-primary/10 border-primary/20 gap-1 text-xs">
+                                  <Sparkles className="w-3 h-3" />
+                                  AI Enhanced
+                                </Badge>
+                              )}
                             </div>
                             
-                            <p className="text-xs sm:text-sm text-muted-foreground leading-relaxed mb-3">
-                              {opp.explanation}
-                            </p>
+                            {/* AI Reasoning */}
+                            {opp.aiReasoning ? (
+                              <p className="text-xs sm:text-sm text-foreground leading-relaxed mb-3">
+                                {opp.aiReasoning}
+                              </p>
+                            ) : (
+                              <p className="text-xs sm:text-sm text-muted-foreground leading-relaxed mb-3">
+                                {opp.explanation}
+                              </p>
+                            )}
+
+                            {/* Catalyst & Risk */}
+                            {(opp.keyCatalyst || opp.riskFactor) && (
+                              <div className="flex flex-wrap gap-3 mb-3">
+                                {opp.keyCatalyst && (
+                                  <div className="flex items-start gap-1.5 text-xs">
+                                    <Lightbulb className="w-3.5 h-3.5 text-warning mt-0.5 shrink-0" />
+                                    <span className="text-muted-foreground">
+                                      <span className="font-medium text-foreground">Catalyst:</span> {opp.keyCatalyst}
+                                    </span>
+                                  </div>
+                                )}
+                                {opp.riskFactor && (
+                                  <div className="flex items-start gap-1.5 text-xs">
+                                    <AlertOctagon className="w-3.5 h-3.5 text-destructive mt-0.5 shrink-0" />
+                                    <span className="text-muted-foreground">
+                                      <span className="font-medium text-foreground">Risk:</span> {opp.riskFactor}
+                                    </span>
+                                  </div>
+                                )}
+                              </div>
+                            )}
 
                             {/* Metrics Row */}
                             <div className="flex flex-wrap gap-3 sm:gap-4">
@@ -446,34 +572,47 @@ const Guide = () => {
                             </div>
                           </div>
 
-                          {/* Right: Confidence & Strength */}
-                          <div className="flex sm:flex-col items-center sm:items-end justify-between sm:justify-start gap-2 sm:gap-0 pt-2 sm:pt-0 border-t sm:border-t-0 border-border/30">
-                            <div className="text-right">
-                              <div className="text-xl sm:text-2xl font-mono font-medium text-foreground">
-                                {opp.confidence}%
-                              </div>
-                              <div className="text-[10px] sm:text-xs text-muted-foreground">confidence</div>
-                            </div>
+                          {/* Right: Confidence & Actions */}
+                          <div className="flex sm:flex-col items-center gap-3 sm:gap-2">
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <div className="relative w-14 h-14 shrink-0">
+                                  <svg className="w-14 h-14 -rotate-90">
+                                    <circle
+                                      cx="28"
+                                      cy="28"
+                                      r="24"
+                                      strokeWidth="4"
+                                      fill="none"
+                                      className="stroke-muted/20"
+                                    />
+                                    <circle
+                                      cx="28"
+                                      cy="28"
+                                      r="24"
+                                      strokeWidth="4"
+                                      fill="none"
+                                      strokeLinecap="round"
+                                      className="stroke-primary"
+                                      strokeDasharray={`${(opp.confidence / 100) * 150.8} 150.8`}
+                                    />
+                                  </svg>
+                                  <div className="absolute inset-0 flex items-center justify-center">
+                                    <span className="text-xs font-mono font-medium">{opp.confidence}%</span>
+                                  </div>
+                                </div>
+                              </TooltipTrigger>
+                              <TooltipContent>
+                                <p className="text-xs">AI Confidence Score</p>
+                              </TooltipContent>
+                            </Tooltip>
                             
-                            {/* Strength indicator */}
-                            <div className="flex items-center gap-2 sm:gap-0 sm:flex-col sm:items-end">
-                              <div className="flex gap-1 sm:mt-2 sm:justify-end">
-                                {[1, 2, 3, 4, 5].map((level) => (
-                                  <div
-                                    key={level}
-                                    className={`w-1.5 h-4 rounded-sm ${
-                                      level <= opp.strength
-                                        ? opp.direction === "bullish"
-                                          ? "bg-success"
-                                          : opp.direction === "bearish"
-                                          ? "bg-destructive"
-                                          : "bg-warning"
-                                        : "bg-muted"
-                                    }`}
-                                  />
-                                ))}
-                              </div>
-                              <ChevronRight className="w-4 h-4 text-muted-foreground sm:mt-2 group-hover:text-primary transition-colors" />
+                            <div className="flex items-center gap-2">
+                              <AddToWatchlistButton 
+                                ticker={opp.ticker} 
+                                assetType={opp.ticker.includes('-') ? 'crypto' : 'stock'}
+                              />
+                              <ChevronRight className="w-4 h-4 text-muted-foreground group-hover:text-primary transition-colors hidden sm:block" />
                             </div>
                           </div>
                         </div>
@@ -489,21 +628,15 @@ const Guide = () => {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               transition={{ delay: 0.5 }}
-              className="mt-8 space-y-3"
+              className="mt-8 p-4 rounded-lg bg-warning/5 border border-warning/10"
             >
-              <Card className="p-4 border-warning/20 bg-warning/5">
-                <div className="flex gap-3">
-                  <Shield className="w-4 h-4 text-warning mt-0.5 shrink-0" />
-                  <div className="space-y-1">
-                    <p className="text-xs font-medium text-foreground">Educational Purpose Only</p>
-                    <p className="text-[11px] sm:text-xs text-muted-foreground leading-relaxed">
-                      This tool provides AI-generated analysis for educational and informational purposes. 
-                      No trades are executed. This is not financial advice. Always conduct your own research 
-                      and consider consulting a qualified financial advisor before making investment decisions.
-                    </p>
-                  </div>
-                </div>
-              </Card>
+              <div className="flex gap-3">
+                <AlertCircle className="w-4 h-4 text-warning shrink-0 mt-0.5" />
+                <p className="text-xs text-muted-foreground leading-relaxed">
+                  <span className="font-medium text-warning">Disclaimer:</span> These AI-generated insights are for educational purposes only and should not be considered financial advice. 
+                  Always conduct your own research and consult with a qualified financial advisor before making investment decisions.
+                </p>
+              </div>
             </motion.div>
           </div>
         </main>
