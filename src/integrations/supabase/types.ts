@@ -95,6 +95,36 @@ export type Database = {
         }
         Relationships: []
       }
+      watchlist: {
+        Row: {
+          asset_type: string | null
+          created_at: string
+          display_name: string | null
+          id: string
+          notes: string | null
+          ticker: string
+          user_id: string
+        }
+        Insert: {
+          asset_type?: string | null
+          created_at?: string
+          display_name?: string | null
+          id?: string
+          notes?: string | null
+          ticker: string
+          user_id: string
+        }
+        Update: {
+          asset_type?: string | null
+          created_at?: string
+          display_name?: string | null
+          id?: string
+          notes?: string | null
+          ticker?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never

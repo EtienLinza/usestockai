@@ -387,6 +387,7 @@ const tradingStyles = {
     minVolatility: 0.02,
     preferredRegimes: ["volatile"],
     scoreMultiplier: (volatility: number) => volatility > 0.03 ? 1.5 : 1,
+    roiMultiplier: 1.0, // Short-term, smaller moves
   },
   daytrading: {
     volatilityPreference: "medium-high",
@@ -394,6 +395,7 @@ const tradingStyles = {
     minVolatility: 0.015,
     preferredRegimes: ["volatile", "bullish", "bearish"],
     scoreMultiplier: (volatility: number) => volatility > 0.02 ? 1.3 : 1,
+    roiMultiplier: 1.2,
   },
   swing: {
     volatilityPreference: "medium",
@@ -401,6 +403,7 @@ const tradingStyles = {
     minVolatility: 0.01,
     preferredRegimes: ["bullish", "bearish"],
     scoreMultiplier: (volatility: number) => volatility > 0.01 && volatility < 0.03 ? 1.4 : 1,
+    roiMultiplier: 1.5,
   },
   position: {
     volatilityPreference: "low",
@@ -408,10 +411,75 @@ const tradingStyles = {
     minVolatility: 0,
     preferredRegimes: ["bullish", "neutral"],
     scoreMultiplier: (volatility: number) => volatility < 0.02 ? 1.5 : 1,
+    roiMultiplier: 2.0, // Long-term, larger potential moves
   },
 };
 
-// Analyze a single stock for the Guide mode
+// Fetch market movers from Yahoo Finance screener
+async function fetchMarketScreener(): Promise<{ ticker: string; percentChange: number; volume: number; marketCap: number }[]> {
+  const screenerUrls = [
+    "https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved?scrIds=day_gainers&count=25",
+    "https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved?scrIds=day_losers&count=25",
+    "https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved?scrIds=most_actives&count=25",
+  ];
+  
+  const allTickers: Map<string, { ticker: string; percentChange: number; volume: number; marketCap: number }> = new Map();
+  
+  // Add crypto tickers
+  const cryptoTickers = ["BTC-USD", "ETH-USD", "SOL-USD", "XRP-USD", "ADA-USD", "DOGE-USD", "AVAX-USD", "DOT-USD"];
+  for (const ticker of cryptoTickers) {
+    allTickers.set(ticker, { ticker, percentChange: 0, volume: 0, marketCap: 0 });
+  }
+  
+  for (const url of screenerUrls) {
+    try {
+      console.log(`Fetching screener: ${url}`);
+      const response = await fetch(url, {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        }
+      });
+      
+      if (!response.ok) {
+        console.warn(`Screener fetch failed: ${response.status}`);
+        continue;
+      }
+      
+      const data = await response.json();
+      const quotes = data?.finance?.result?.[0]?.quotes || [];
+      
+      for (const quote of quotes) {
+        if (quote.symbol && !quote.symbol.includes('.') && quote.marketCap > 1000000000) { // Min $1B market cap
+          allTickers.set(quote.symbol, {
+            ticker: quote.symbol,
+            percentChange: Math.abs(quote.regularMarketChangePercent || 0),
+            volume: quote.regularMarketVolume || 0,
+            marketCap: quote.marketCap || 0,
+          });
+        }
+      }
+    } catch (error) {
+      console.error("Screener fetch error:", error);
+    }
+  }
+  
+  // Convert to array and sort by percentage change
+  const tickers = Array.from(allTickers.values());
+  tickers.sort((a, b) => b.percentChange - a.percentChange);
+  
+  console.log(`Fetched ${tickers.length} tickers from market screener`);
+  return tickers.slice(0, 40); // Return top 40 for analysis
+}
+
+// Fallback stock list if screener fails
+const fallbackStocks = [
+  "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "TSLA",
+  "JPM", "V", "JNJ", "WMT", "PG", "UNH", "HD",
+  "DIS", "NFLX", "AMD", "INTC", "CRM", "PYPL",
+  "BTC-USD", "ETH-USD", "SOL-USD", "XRP-USD", "ADA-USD"
+];
+
+// Analyze a single stock for the Guide mode with ROI calculation
 async function analyzeStockForGuide(ticker: string, tradingStyle: string = "swing"): Promise<any | null> {
   try {
     const stockData = await fetchStockData(ticker);
@@ -507,10 +575,15 @@ async function analyzeStockForGuide(ticker: string, tradingStyle: string = "swin
       riskLevel = "low";
     }
     
-    // Calculate predicted price change
+    // Calculate predicted price change and ROI
     const priceChangeMultiplier = direction === "bullish" ? 1 : -1;
-    const predictedChange = priceChangeMultiplier * Math.min(0.08, latestVolatility * 2 + 0.02);
+    const baseChange = Math.min(0.08, latestVolatility * 2 + 0.02);
+    const predictedChange = priceChangeMultiplier * baseChange * styleConfig.roiMultiplier;
     const predictedPrice = currentPrice * (1 + predictedChange);
+    
+    // Calculate expected ROI
+    const expectedROI = ((predictedPrice - currentPrice) / currentPrice) * 100;
+    const riskAdjustedROI = expectedROI / (1 + latestVolatility * 10);
     
     return {
       ticker,
@@ -521,6 +594,8 @@ async function analyzeStockForGuide(ticker: string, tradingStyle: string = "swin
       score,
       currentPrice,
       predictedPrice,
+      expectedROI: parseFloat(expectedROI.toFixed(2)),
+      riskAdjustedROI: parseFloat(riskAdjustedROI.toFixed(2)),
       volatility: latestVolatility,
       riskLevel,
       holdingPeriod: styleConfig.holdingPeriod,
@@ -532,23 +607,136 @@ async function analyzeStockForGuide(ticker: string, tradingStyle: string = "swin
   }
 }
 
-// Generate guide opportunities
-async function generateGuideOpportunities(tradingStyle: string = "swing"): Promise<any[]> {
-// Popular stocks and crypto to scan
-  const stocksToScan = [
-    "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "TSLA",
-    "JPM", "V", "JNJ", "WMT", "PG", "UNH", "HD",
-    "DIS", "NFLX", "AMD", "INTC", "CRM", "PYPL",
-    "BTC-USD", "ETH-USD", "SOL-USD", "XRP-USD", "ADA-USD"
-  ];
+// Enhance top opportunities with AI insights
+async function enhanceWithAI(opportunities: any[], tradingStyle: string): Promise<any[]> {
+  const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
+  if (!LOVABLE_API_KEY || opportunities.length === 0) {
+    return opportunities;
+  }
   
-  console.log(`Scanning stocks for ${tradingStyle} opportunities...`);
+  const styleInfo = tradingStyles[tradingStyle as keyof typeof tradingStyles] || tradingStyles.swing;
+  
+  const prompt = `You are an expert trading analyst. Analyze these ${tradingStyle} trading opportunities and provide enhanced insights.
+
+TRADING STYLE: ${tradingStyle.toUpperCase()}
+HOLDING PERIOD: ${styleInfo.holdingPeriod}
+
+OPPORTUNITIES TO ANALYZE:
+${opportunities.map((o, i) => `
+${i + 1}. ${o.ticker}
+   - Direction: ${o.direction}
+   - Current Price: $${o.currentPrice.toFixed(2)}
+   - Predicted Price: $${o.predictedPrice.toFixed(2)}
+   - Expected ROI: ${o.expectedROI}%
+   - Volatility: ${(o.volatility * 100).toFixed(1)}%
+   - Technical Signals: ${o.explanation}
+   - Market Regime: ${o.regime}
+`).join('\n')}
+
+For each opportunity, provide enhanced analysis. Respond with ONLY valid JSON array:
+[
+  {
+    "ticker": "<ticker>",
+    "refinedConfidence": <40-95>,
+    "aiReasoning": "<1-2 sentence detailed analysis>",
+    "keyCatalyst": "<short catalyst to watch>",
+    "riskFactor": "<main risk>",
+    "refinedROI": <expected ROI percentage>
+  }
+]`;
+
+  try {
+    console.log("Enhancing opportunities with AI...");
+    
+    const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${LOVABLE_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "google/gemini-2.5-flash",
+        messages: [
+          { role: "system", content: "You are an expert trading analyst. Respond only with valid JSON array." },
+          { role: "user", content: prompt }
+        ],
+        temperature: 0.7,
+      }),
+    });
+
+    if (!response.ok) {
+      console.warn("AI enhancement failed, returning original opportunities");
+      return opportunities;
+    }
+
+    const aiData = await response.json();
+    const content = aiData.choices?.[0]?.message?.content;
+    
+    if (!content) {
+      return opportunities;
+    }
+    
+    let jsonStr = content;
+    const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/);
+    if (jsonMatch) {
+      jsonStr = jsonMatch[1];
+    }
+    
+    const enhancements = JSON.parse(jsonStr.trim());
+    
+    // Merge AI insights with original data
+    return opportunities.map(opp => {
+      const enhancement = enhancements.find((e: any) => e.ticker === opp.ticker);
+      if (enhancement) {
+        return {
+          ...opp,
+          confidence: enhancement.refinedConfidence || opp.confidence,
+          aiReasoning: enhancement.aiReasoning || null,
+          keyCatalyst: enhancement.keyCatalyst || null,
+          riskFactor: enhancement.riskFactor || null,
+          expectedROI: enhancement.refinedROI || opp.expectedROI,
+          aiEnhanced: true,
+        };
+      }
+      return { ...opp, aiEnhanced: false };
+    });
+  } catch (error) {
+    console.error("AI enhancement error:", error);
+    return opportunities;
+  }
+}
+
+// Generate guide opportunities with market-wide scanning
+async function generateGuideOpportunities(tradingStyle: string = "swing"): Promise<any[]> {
+  console.log(`Scanning market for ${tradingStyle} opportunities...`);
+  
+  // Try to fetch from market screener first
+  let tickersToScan: string[] = [];
+  
+  try {
+    const screenerResults = await fetchMarketScreener();
+    if (screenerResults.length >= 10) {
+      tickersToScan = screenerResults.map(r => r.ticker);
+      console.log(`Using ${tickersToScan.length} tickers from market screener`);
+    }
+  } catch (error) {
+    console.warn("Market screener failed, using fallback list");
+  }
+  
+  // Fallback to hardcoded list if screener fails
+  if (tickersToScan.length < 10) {
+    tickersToScan = fallbackStocks;
+    console.log("Using fallback stock list");
+  }
+  
+  // Limit to top 30 for technical analysis
+  tickersToScan = tickersToScan.slice(0, 30);
   
   const opportunities: any[] = [];
   
   // Analyze stocks in batches to avoid rate limits
-  for (let i = 0; i < stocksToScan.length; i += 5) {
-    const batch = stocksToScan.slice(i, i + 5);
+  for (let i = 0; i < tickersToScan.length; i += 5) {
+    const batch = tickersToScan.slice(i, i + 5);
     const results = await Promise.all(batch.map(ticker => analyzeStockForGuide(ticker, tradingStyle)));
     
     for (const result of results) {
@@ -558,15 +746,22 @@ async function generateGuideOpportunities(tradingStyle: string = "swing"): Promi
     }
     
     // Small delay between batches
-    if (i + 5 < stocksToScan.length) {
-      await new Promise(resolve => setTimeout(resolve, 500));
+    if (i + 5 < tickersToScan.length) {
+      await new Promise(resolve => setTimeout(resolve, 300));
     }
   }
   
-  // Sort by score descending and take top 6
-  opportunities.sort((a, b) => b.score - a.score);
+  // Sort by expected ROI (highest first)
+  opportunities.sort((a, b) => Math.abs(b.expectedROI) - Math.abs(a.expectedROI));
   
-  return opportunities.slice(0, 6).map(({ score, ...opp }) => opp);
+  // Take top 8 for AI enhancement
+  const topOpportunities = opportunities.slice(0, 8);
+  
+  // Enhance with AI
+  const enhancedOpportunities = await enhanceWithAI(topOpportunities, tradingStyle);
+  
+  // Return top 6 with score removed from output
+  return enhancedOpportunities.slice(0, 6).map(({ score, ...opp }) => opp);
 }
 
 serve(async (req) => {
