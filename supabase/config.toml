@@ -2,3 +2,6 @@ project_id = "mgudiiwaadvmpznpfmsg"
 
 [functions.stock-predict]
 verify_jwt = false
+
+[functions.check-price-alerts]
+verify_jwt = false

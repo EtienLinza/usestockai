@@ -415,12 +415,19 @@ const tradingStyles = {
   },
 };
 
-// Fetch market movers from Yahoo Finance screener
+// Fetch market movers from Yahoo Finance screener - expanded to 8 categories for 150+ stocks
 async function fetchMarketScreener(): Promise<{ ticker: string; percentChange: number; volume: number; marketCap: number }[]> {
   const screenerUrls = [
+    // Original screeners
     "https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved?scrIds=day_gainers&count=25",
     "https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved?scrIds=day_losers&count=25",
     "https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved?scrIds=most_actives&count=25",
+    // New screeners for expanded coverage
+    "https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved?scrIds=undervalued_growth_stocks&count=25",
+    "https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved?scrIds=growth_technology_stocks&count=25",
+    "https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved?scrIds=small_cap_gainers&count=25",
+    "https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved?scrIds=aggressive_small_caps&count=25",
+    "https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved?scrIds=undervalued_large_caps&count=25",
   ];
   
   const allTickers: Map<string, { ticker: string; percentChange: number; volume: number; marketCap: number }> = new Map();
@@ -467,8 +474,8 @@ async function fetchMarketScreener(): Promise<{ ticker: string; percentChange: n
   const tickers = Array.from(allTickers.values());
   tickers.sort((a, b) => b.percentChange - a.percentChange);
   
-  console.log(`Fetched ${tickers.length} tickers from market screener`);
-  return tickers.slice(0, 40); // Return top 40 for analysis
+  console.log(`Fetched ${tickers.length} tickers from market screener (8 categories)`);
+  return tickers.slice(0, 50); // Return top 50 for analysis (increased from 40)
 }
 
 // Fallback stock list if screener fails
