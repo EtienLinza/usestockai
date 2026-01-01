@@ -65,6 +65,50 @@ export type Database = {
         }
         Relationships: []
       }
+      price_alerts: {
+        Row: {
+          created_at: string | null
+          direction: string
+          id: string
+          is_triggered: boolean | null
+          target_price: number
+          ticker: string
+          triggered_at: string | null
+          user_id: string
+          watchlist_item_id: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          direction: string
+          id?: string
+          is_triggered?: boolean | null
+          target_price: number
+          ticker: string
+          triggered_at?: string | null
+          user_id: string
+          watchlist_item_id?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          direction?: string
+          id?: string
+          is_triggered?: boolean | null
+          target_price?: number
+          ticker?: string
+          triggered_at?: string | null
+          user_id?: string
+          watchlist_item_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "price_alerts_watchlist_item_id_fkey"
+            columns: ["watchlist_item_id"]
+            isOneToOne: false
+            referencedRelation: "watchlist"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       profiles: {
         Row: {
           avatar_url: string | null
