@@ -37,7 +37,7 @@ const Dashboard = () => {
   const [searchParams] = useSearchParams();
   const [isLoading, setIsLoading] = useState(false);
   const [predictions, setPredictions] = useState<PredictionData[]>([]);
-  const [lastFormData, setLastFormData] = useState<{ ticker: string; targetDate: Date; newsApiKey?: string } | null>(null);
+  const [lastFormData, setLastFormData] = useState<{ ticker: string; targetDate: Date } | null>(null);
   const [initialTicker, setInitialTicker] = useState<string>("");
   const [viewMode, setViewMode] = useState<'single' | 'compare'>('single');
 
@@ -58,7 +58,7 @@ const Dashboard = () => {
     }
   }, [predictions.length]);
 
-  const handleSubmit = async (data: { ticker: string; targetDate: Date; newsApiKey?: string }) => {
+  const handleSubmit = async (data: { ticker: string; targetDate: Date }) => {
     if (!session?.access_token) {
       toast.error("Please sign in to generate predictions");
       navigate("/auth");
@@ -86,7 +86,6 @@ const Dashboard = () => {
           body: JSON.stringify({
             ticker: data.ticker,
             targetDate: format(data.targetDate, "yyyy-MM-dd"),
-            newsApiKey: data.newsApiKey,
           }),
         }
       );

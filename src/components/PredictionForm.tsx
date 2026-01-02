@@ -6,13 +6,13 @@ import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { format, addDays, isAfter, isBefore, addMonths } from "date-fns";
-import { CalendarIcon, TrendingUp, Eye, EyeOff, Loader2, RefreshCw } from "lucide-react";
+import { format, addDays, addMonths } from "date-fns";
+import { CalendarIcon, TrendingUp, Loader2, RefreshCw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
 interface PredictionFormProps {
-  onSubmit: (data: { ticker: string; targetDate: Date; newsApiKey?: string }) => void;
+  onSubmit: (data: { ticker: string; targetDate: Date }) => void;
   isLoading: boolean;
   onRefresh?: () => void;
   initialTicker?: string;
@@ -24,8 +24,6 @@ const TICKER_REGEX = /^[A-Z]{1,10}(-[A-Z]{2,4})?$/;
 export const PredictionForm = ({ onSubmit, isLoading, onRefresh, initialTicker }: PredictionFormProps) => {
   const [ticker, setTicker] = useState(initialTicker || "");
   const [targetDate, setTargetDate] = useState<Date | undefined>(addDays(new Date(), 1));
-  const [newsApiKey, setNewsApiKey] = useState("");
-  const [showApiKey, setShowApiKey] = useState(false);
 
   // Update ticker when initialTicker changes
   useEffect(() => {
@@ -33,6 +31,7 @@ export const PredictionForm = ({ onSubmit, isLoading, onRefresh, initialTicker }
       setTicker(initialTicker);
     }
   }, [initialTicker]);
+
   const handleTickerChange = (value: string) => {
     setTicker(value.toUpperCase());
   };
@@ -52,8 +51,7 @@ export const PredictionForm = ({ onSubmit, isLoading, onRefresh, initialTicker }
 
     onSubmit({ 
       ticker, 
-      targetDate,
-      newsApiKey: newsApiKey || undefined 
+      targetDate
     });
   };
 
@@ -146,31 +144,6 @@ export const PredictionForm = ({ onSubmit, isLoading, onRefresh, initialTicker }
               />
             </PopoverContent>
           </Popover>
-        </div>
-
-        {/* NewsAPI Key (Optional) */}
-        <div className="space-y-2">
-          <Label htmlFor="newsApiKey" className="text-xs text-muted-foreground flex items-center gap-2">
-            NewsAPI Key
-            <span className="text-muted-foreground/60">(optional)</span>
-          </Label>
-          <div className="relative">
-            <Input
-              id="newsApiKey"
-              type={showApiKey ? "text" : "password"}
-              placeholder="For sentiment analysis"
-              value={newsApiKey}
-              onChange={(e) => setNewsApiKey(e.target.value)}
-              className="pr-10 bg-secondary/50 border-border/50"
-            />
-            <button
-              type="button"
-              onClick={() => setShowApiKey(!showApiKey)}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
-            >
-              {showApiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-            </button>
-          </div>
         </div>
 
         {/* Submit Button */}
