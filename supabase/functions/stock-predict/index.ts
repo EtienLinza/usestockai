@@ -218,14 +218,17 @@ async function fetchStockData(ticker: string): Promise<any> {
   };
 }
 
-async function fetchNewsSentiment(ticker: string, apiKey: string): Promise<number> {
+async function fetchNewsSentiment(ticker: string): Promise<number> {
+  // Use server-side NewsAPI key from secrets - never accept from client
+  const apiKey = Deno.env.get("NEWSAPI_KEY");
+  
   if (!apiKey || apiKey.length < 20) {
-    console.log("No valid NewsAPI key provided, skipping sentiment analysis");
+    console.log("No NewsAPI key configured, skipping sentiment analysis");
     return 0;
   }
   
   try {
-    const url = `https://newsapi.org/v2/everything?q=${ticker}&sortBy=publishedAt&apiKey=${apiKey}&pageSize=20`;
+    const url = `https://newsapi.org/v2/everything?q=${encodeURIComponent(ticker)}&sortBy=publishedAt&apiKey=${apiKey}&pageSize=20`;
     const response = await fetch(url);
     const data = await response.json();
     
@@ -925,7 +928,7 @@ serve(async (req) => {
     console.log(`Authenticated request from user: ${user.id} (${rateLimit.remaining} requests remaining)`);
     
     const body = await req.json();
-    const { mode, ticker, targetDate, newsApiKey, tradingStyle } = body;
+    const { mode, ticker, targetDate, tradingStyle } = body;
     
     // Handle guide mode
     if (mode === "guide") {
@@ -987,8 +990,8 @@ serve(async (req) => {
     // Detect market regime
     const regime = detectRegime(closePrices, indicators.rsi, indicators.volatility);
     
-    // Fetch news sentiment
-    const sentiment = await fetchNewsSentiment(ticker, newsApiKey || "");
+    // Fetch news sentiment using server-side API key
+    const sentiment = await fetchNewsSentiment(ticker);
     
     // Get AI prediction
     const aiPrediction = await generateAIPrediction(
