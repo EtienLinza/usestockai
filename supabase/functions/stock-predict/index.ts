@@ -415,27 +415,48 @@ const tradingStyles = {
   },
 };
 
-// Fetch market movers from Yahoo Finance screener - expanded to 8 categories for 150+ stocks
-async function fetchMarketScreener(): Promise<{ ticker: string; percentChange: number; volume: number; marketCap: number }[]> {
-  const screenerUrls = [
-    // Original screeners
-    "https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved?scrIds=day_gainers&count=25",
-    "https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved?scrIds=day_losers&count=25",
-    "https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved?scrIds=most_actives&count=25",
-    // New screeners for expanded coverage
-    "https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved?scrIds=undervalued_growth_stocks&count=25",
-    "https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved?scrIds=growth_technology_stocks&count=25",
-    "https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved?scrIds=small_cap_gainers&count=25",
-    "https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved?scrIds=aggressive_small_caps&count=25",
-    "https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved?scrIds=undervalued_large_caps&count=25",
-  ];
+// Style-specific screener configurations
+const screenersByStyle: Record<string, string[]> = {
+  scalping: [
+    "most_actives",        // High volume - essential for scalping
+    "day_gainers",         // Big movers
+    "day_losers",          // Big movers (short opportunities)
+    "small_cap_gainers",   // High volatility small caps
+  ],
+  daytrading: [
+    "most_actives",
+    "day_gainers",
+    "day_losers",
+    "growth_technology_stocks",  // Tech tends to have good intraday moves
+  ],
+  swing: [
+    "undervalued_growth_stocks",
+    "growth_technology_stocks",
+    "day_gainers",
+    "day_losers",
+  ],
+  position: [
+    "undervalued_large_caps",     // Value plays for long-term
+    "undervalued_growth_stocks",
+    "most_actives",               // Include some liquid names
+  ],
+};
+
+// Fetch market movers from Yahoo Finance screener - style-specific
+async function fetchMarketScreener(tradingStyle: string): Promise<{ ticker: string; percentChange: number; volume: number; marketCap: number }[]> {
+  const screenerIds = screenersByStyle[tradingStyle] || screenersByStyle.swing;
+  const screenerUrls = screenerIds.map(id => 
+    `https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved?scrIds=${id}&count=30`
+  );
   
   const allTickers: Map<string, { ticker: string; percentChange: number; volume: number; marketCap: number }> = new Map();
   
-  // Add crypto tickers
-  const cryptoTickers = ["BTC-USD", "ETH-USD", "SOL-USD", "XRP-USD", "ADA-USD", "DOGE-USD", "AVAX-USD", "DOT-USD"];
-  for (const ticker of cryptoTickers) {
-    allTickers.set(ticker, { ticker, percentChange: 0, volume: 0, marketCap: 0 });
+  // Add crypto tickers (good for scalping/daytrading due to volatility)
+  if (tradingStyle === "scalping" || tradingStyle === "daytrading") {
+    const cryptoTickers = ["BTC-USD", "ETH-USD", "SOL-USD", "XRP-USD", "DOGE-USD", "AVAX-USD"];
+    for (const ticker of cryptoTickers) {
+      allTickers.set(ticker, { ticker, percentChange: 5, volume: 1000000000, marketCap: 100000000000 });
+    }
   }
   
   for (const url of screenerUrls) {
@@ -455,8 +476,21 @@ async function fetchMarketScreener(): Promise<{ ticker: string; percentChange: n
       const data = await response.json();
       const quotes = data?.finance?.result?.[0]?.quotes || [];
       
+      // Different market cap requirements per style
+      const minMarketCap = tradingStyle === "position" ? 10000000000 : // $10B for position
+                          tradingStyle === "scalping" ? 500000000 :   // $500M for scalping (need liquidity, not size)
+                          1000000000;                                  // $1B default
+      
+      // Different volume requirements per style
+      const minVolume = tradingStyle === "scalping" ? 5000000 :       // High volume for scalping
+                       tradingStyle === "daytrading" ? 2000000 :      // Good volume for daytrading
+                       500000;                                         // Lower for swing/position
+      
       for (const quote of quotes) {
-        if (quote.symbol && !quote.symbol.includes('.') && quote.marketCap > 1000000000) { // Min $1B market cap
+        if (quote.symbol && 
+            !quote.symbol.includes('.') && 
+            (quote.marketCap || 0) >= minMarketCap &&
+            (quote.regularMarketVolume || 0) >= minVolume) {
           allTickers.set(quote.symbol, {
             ticker: quote.symbol,
             percentChange: Math.abs(quote.regularMarketChangePercent || 0),
@@ -470,12 +504,22 @@ async function fetchMarketScreener(): Promise<{ ticker: string; percentChange: n
     }
   }
   
-  // Convert to array and sort by percentage change
   const tickers = Array.from(allTickers.values());
-  tickers.sort((a, b) => b.percentChange - a.percentChange);
   
-  console.log(`Fetched ${tickers.length} tickers from market screener (8 categories)`);
-  return tickers.slice(0, 50); // Return top 50 for analysis (increased from 40)
+  // Sort differently based on style
+  if (tradingStyle === "scalping" || tradingStyle === "daytrading") {
+    // For short-term: prioritize volume and movement
+    tickers.sort((a, b) => (b.percentChange * b.volume) - (a.percentChange * a.volume));
+  } else if (tradingStyle === "position") {
+    // For long-term: prioritize market cap (stability)
+    tickers.sort((a, b) => b.marketCap - a.marketCap);
+  } else {
+    // Swing: balance of movement and volume
+    tickers.sort((a, b) => b.percentChange - a.percentChange);
+  }
+  
+  console.log(`Fetched ${tickers.length} tickers from screener for ${tradingStyle} style`);
+  return tickers.slice(0, 50);
 }
 
 // Fallback stock list if screener fails
@@ -486,16 +530,19 @@ const fallbackStocks = [
   "BTC-USD", "ETH-USD", "SOL-USD", "XRP-USD", "ADA-USD"
 ];
 
-// Analyze a single stock for the Guide mode with ROI calculation
-async function analyzeStockForGuide(ticker: string, tradingStyle: string = "swing"): Promise<any | null> {
+// Analyze a single stock for the Guide mode with ROI calculation - now with hard filters
+async function analyzeStockForGuide(ticker: string, tradingStyle: string = "swing", volumeData?: number): Promise<any | null> {
   try {
     const stockData = await fetchStockData(ticker);
     
     if (!stockData.close || stockData.close.length < 60) {
+      console.log(`${ticker} rejected: insufficient data (${stockData.close?.length || 0} days)`);
       return null;
     }
     
     const closePrices = stockData.close.filter((p: number) => p != null);
+    const volumes = stockData.volume?.filter((v: number) => v != null) || [];
+    const latestVolume = volumes[volumes.length - 1] || volumeData || 0;
     
     const indicators = {
       ema12: calculateEMA(closePrices, 12),
@@ -511,16 +558,65 @@ async function analyzeStockForGuide(ticker: string, tradingStyle: string = "swin
     const latestRSI = indicators.rsi[indicators.rsi.length - 1];
     const latestMACD = indicators.macd.macd[indicators.macd.macd.length - 1];
     const latestSignal = indicators.macd.signal[indicators.macd.signal.length - 1];
-    const latestVolatility = indicators.volatility[indicators.volatility.length - 1];
+    const latestVolatility = indicators.volatility[indicators.volatility.length - 1] || 0;
     
-    // Get trading style config
     const styleConfig = tradingStyles[tradingStyle as keyof typeof tradingStyles] || tradingStyles.swing;
     
-    // Calculate momentum score
+    // === HARD REJECTION RULES BASED ON TRADING STYLE ===
+    
+    // Scalping: MUST have high volatility and volume
+    if (tradingStyle === "scalping") {
+      if (latestVolatility < 0.02) {
+        console.log(`${ticker} rejected for scalping: volatility too low (${(latestVolatility * 100).toFixed(1)}%)`);
+        return null;
+      }
+      if (latestVolume < 3000000) {
+        console.log(`${ticker} rejected for scalping: volume too low (${latestVolume.toLocaleString()})`);
+        return null;
+      }
+    }
+    
+    // Day trading: needs decent volatility and volume
+    if (tradingStyle === "daytrading") {
+      if (latestVolatility < 0.015) {
+        console.log(`${ticker} rejected for daytrading: volatility too low (${(latestVolatility * 100).toFixed(1)}%)`);
+        return null;
+      }
+      if (latestVolume < 1000000) {
+        console.log(`${ticker} rejected for daytrading: volume too low`);
+        return null;
+      }
+    }
+    
+    // Position trading: reject extremely volatile stocks
+    if (tradingStyle === "position") {
+      if (latestVolatility > 0.05) {
+        console.log(`${ticker} rejected for position: too volatile (${(latestVolatility * 100).toFixed(1)}%)`);
+        return null;
+      }
+      // Also reject meme-like regimes for position trading
+      if (regime === "volatile") {
+        console.log(`${ticker} rejected for position: volatile regime`);
+        return null;
+      }
+    }
+    
+    // Swing trading: reject extremes
+    if (tradingStyle === "swing") {
+      if (latestVolatility > 0.06) {
+        console.log(`${ticker} rejected for swing: too volatile`);
+        return null;
+      }
+      if (latestVolatility < 0.008) {
+        console.log(`${ticker} rejected for swing: volatility too low`);
+        return null;
+      }
+    }
+    
+    // === SCORING ===
     const priceChange5d = (closePrices[closePrices.length - 1] - closePrices[closePrices.length - 6]) / closePrices[closePrices.length - 6];
     const priceChange20d = (closePrices[closePrices.length - 1] - closePrices[closePrices.length - 21]) / closePrices[closePrices.length - 21];
     
-    // Score the opportunity
     let score = 0;
     let direction: "bullish" | "bearish" | "neutral" = "neutral";
     let signals: string[] = [];
@@ -547,7 +643,7 @@ async function analyzeStockForGuide(ticker: string, tradingStyle: string = "swin
       direction = "bearish";
     }
     
-    // Momentum
+    // Momentum signals
     if (priceChange5d > 0.03 && priceChange20d > 0.05) {
       score += 1;
       signals.push("strong upward momentum");
@@ -558,23 +654,35 @@ async function analyzeStockForGuide(ticker: string, tradingStyle: string = "swin
       if (direction === "neutral") direction = "bearish";
     }
     
-    // Trading style specific scoring
+    // === STYLE-WEIGHTED SCORING (major impact) ===
+    
+    // Regime matching - now a 1.5x multiplier instead of +1
     if (styleConfig.preferredRegimes.includes(regime)) {
-      score += 1;
+      score *= 1.5;
+      signals.push(`${regime} regime match`);
     }
     
-    // Apply style-specific volatility multiplier
+    // Volatility preference matching - 1.3x boost
+    if (styleConfig.volatilityPreference === "high" && latestVolatility > 0.025) {
+      score *= 1.3;
+    } else if (styleConfig.volatilityPreference === "low" && latestVolatility < 0.015) {
+      score *= 1.3;
+    } else if (styleConfig.volatilityPreference === "medium" && latestVolatility >= 0.01 && latestVolatility <= 0.025) {
+      score *= 1.2;
+    }
+    
+    // Apply style-specific volatility multiplier (existing)
     score = score * styleConfig.scoreMultiplier(latestVolatility);
     
-    // Only return if there's a meaningful signal
-    if (score < 2 || signals.length === 0) {
+    // Require meaningful signal
+    if (score < 2.5 || signals.length === 0) {
       return null;
     }
     
-    // Calculate confidence based on score
-    const confidence = Math.min(90, 50 + score * 8);
+    // Confidence based on score
+    const confidence = Math.min(92, 45 + score * 7);
     
-    // Calculate risk level based on volatility and trading style
+    // Risk level
     let riskLevel: "low" | "medium" | "high" = "medium";
     if (latestVolatility > 0.03) {
       riskLevel = "high";
@@ -582,13 +690,12 @@ async function analyzeStockForGuide(ticker: string, tradingStyle: string = "swin
       riskLevel = "low";
     }
     
-    // Calculate predicted price change and ROI
+    // ROI calculation
     const priceChangeMultiplier = direction === "bullish" ? 1 : -1;
     const baseChange = Math.min(0.08, latestVolatility * 2 + 0.02);
     const predictedChange = priceChangeMultiplier * baseChange * styleConfig.roiMultiplier;
     const predictedPrice = currentPrice * (1 + predictedChange);
     
-    // Calculate expected ROI
     const expectedROI = ((predictedPrice - currentPrice) / currentPrice) * 100;
     const riskAdjustedROI = expectedROI / (1 + latestVolatility * 10);
     
@@ -604,6 +711,7 @@ async function analyzeStockForGuide(ticker: string, tradingStyle: string = "swin
       expectedROI: parseFloat(expectedROI.toFixed(2)),
       riskAdjustedROI: parseFloat(riskAdjustedROI.toFixed(2)),
       volatility: latestVolatility,
+      volume: latestVolume,
       riskLevel,
       holdingPeriod: styleConfig.holdingPeriod,
       regime,
@@ -713,38 +821,46 @@ For each opportunity, provide enhanced analysis. Respond with ONLY valid JSON ar
   }
 }
 
-// Generate guide opportunities with market-wide scanning
+// Generate guide opportunities with market-wide scanning - now style-aware
 async function generateGuideOpportunities(tradingStyle: string = "swing"): Promise<any[]> {
   console.log(`Scanning market for ${tradingStyle} opportunities...`);
   
-  // Try to fetch from market screener first
-  let tickersToScan: string[] = [];
+  // Fetch style-specific tickers from market screener
+  let screenerResults: { ticker: string; percentChange: number; volume: number; marketCap: number }[] = [];
   
   try {
-    const screenerResults = await fetchMarketScreener();
-    if (screenerResults.length >= 10) {
-      tickersToScan = screenerResults.map(r => r.ticker);
-      console.log(`Using ${tickersToScan.length} tickers from market screener`);
-    }
+    screenerResults = await fetchMarketScreener(tradingStyle);
+    console.log(`Using ${screenerResults.length} tickers from ${tradingStyle} screener`);
   } catch (error) {
     console.warn("Market screener failed, using fallback list");
   }
   
-  // Fallback to hardcoded list if screener fails
-  if (tickersToScan.length < 10) {
-    tickersToScan = fallbackStocks;
-    console.log("Using fallback stock list");
+  // Style-specific fallback lists
+  const fallbackByStyle: Record<string, string[]> = {
+    scalping: ["NVDA", "AMD", "TSLA", "META", "AAPL", "GOOGL", "AMZN", "NFLX", "BTC-USD", "ETH-USD", "SOL-USD"],
+    daytrading: ["NVDA", "AMD", "TSLA", "META", "AAPL", "MSFT", "GOOGL", "AMZN", "CRM", "NFLX", "BTC-USD", "ETH-USD"],
+    swing: ["AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "TSLA", "JPM", "V", "JNJ", "DIS", "AMD"],
+    position: ["JNJ", "PG", "WMT", "KO", "PEP", "MCD", "VZ", "T", "IBM", "XOM", "CVX", "UNH", "MSFT", "AAPL"],
+  };
+  
+  // Use fallback if screener failed
+  if (screenerResults.length < 10) {
+    const fallbackTickers = fallbackByStyle[tradingStyle] || fallbackByStyle.swing;
+    screenerResults = fallbackTickers.map(t => ({ ticker: t, percentChange: 0, volume: 0, marketCap: 0 }));
+    console.log(`Using ${tradingStyle} fallback stock list`);
   }
   
-  // Limit to top 30 for technical analysis
-  tickersToScan = tickersToScan.slice(0, 30);
+  // Analyze top 40 candidates (increased to account for rejections)
+  const tickersToScan = screenerResults.slice(0, 40);
   
   const opportunities: any[] = [];
   
-  // Analyze stocks in batches to avoid rate limits
+  // Analyze stocks in batches
   for (let i = 0; i < tickersToScan.length; i += 5) {
     const batch = tickersToScan.slice(i, i + 5);
-    const results = await Promise.all(batch.map(ticker => analyzeStockForGuide(ticker, tradingStyle)));
+    const results = await Promise.all(
+      batch.map(item => analyzeStockForGuide(item.ticker, tradingStyle, item.volume))
+    );
     
     for (const result of results) {
       if (result) {
@@ -754,12 +870,14 @@ async function generateGuideOpportunities(tradingStyle: string = "swing"): Promi
     
     // Small delay between batches
     if (i + 5 < tickersToScan.length) {
-      await new Promise(resolve => setTimeout(resolve, 300));
+      await new Promise(resolve => setTimeout(resolve, 250));
     }
   }
   
-  // Sort by expected ROI (highest first)
-  opportunities.sort((a, b) => Math.abs(b.expectedROI) - Math.abs(a.expectedROI));
+  console.log(`Found ${opportunities.length} valid ${tradingStyle} opportunities after filtering`);
+  
+  // Sort by score (which now incorporates style matching)
+  opportunities.sort((a, b) => b.score - a.score);
   
   // Take top 8 for AI enhancement
   const topOpportunities = opportunities.slice(0, 8);
