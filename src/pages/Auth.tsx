@@ -10,6 +10,12 @@ import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
 import { Loader2, Mail, Lock, ArrowLeft } from "lucide-react";
 import { Link } from "react-router-dom";
+import { z } from "zod";
+
+const authSchema = z.object({
+  email: z.string().trim().email("Please enter a valid email address"),
+  password: z.string().min(8, "Password must be at least 8 characters")
+});
 
 const Auth = () => {
   const navigate = useNavigate();
@@ -23,6 +29,14 @@ const Auth = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    // Validate inputs with Zod
+    const result = authSchema.safeParse({ email, password });
+    if (!result.success) {
+      toast.error(result.error.errors[0].message);
+      return;
+    }
+
     setIsLoading(true);
 
     try {
@@ -123,9 +137,11 @@ const Auth = () => {
                       onChange={(e) => setPassword(e.target.value)}
                       className="pl-10"
                       required
-                      minLength={6}
                     />
                   </div>
+                  <p className="text-xs text-muted-foreground">
+                    {isSignUp ? "Password must be at least 8 characters" : ""}
+                  </p>
                 </div>
 
                 <Button

@@ -155,11 +155,11 @@ const Dashboard = () => {
     }
   };
 
-  const handleRefresh = useCallback(() => {
+  const handleRefresh = useCallback(async () => {
     if (lastFormData) {
-      handleSubmit(lastFormData);
+      await handleSubmit(lastFormData);
     }
-  }, [lastFormData]);
+  }, [lastFormData, session?.access_token]);
 
   const handleRemovePrediction = (index: number) => {
     setPredictions(prev => prev.filter((_, i) => i !== index));
@@ -254,7 +254,6 @@ const Dashboard = () => {
                 <PredictionForm 
                   onSubmit={handleSubmit} 
                   isLoading={isLoading} 
-                  onRefresh={handleRefresh}
                   initialTicker={initialTicker}
                 />
 

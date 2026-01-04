@@ -5,3 +5,6 @@ verify_jwt = false
 
 [functions.check-price-alerts]
 verify_jwt = false
+
+[functions.fetch-stock-price]
+verify_jwt = false

@@ -7,21 +7,20 @@ import { Card } from "@/components/ui/card";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { format, addDays, addMonths } from "date-fns";
-import { CalendarIcon, TrendingUp, Loader2, RefreshCw } from "lucide-react";
+import { CalendarIcon, TrendingUp, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
 interface PredictionFormProps {
   onSubmit: (data: { ticker: string; targetDate: Date }) => void;
   isLoading: boolean;
-  onRefresh?: () => void;
   initialTicker?: string;
 }
 
 // Supports both stocks (AAPL) and crypto (BTC-USD) formats
 const TICKER_REGEX = /^[A-Z]{1,10}(-[A-Z]{2,4})?$/;
 
-export const PredictionForm = ({ onSubmit, isLoading, onRefresh, initialTicker }: PredictionFormProps) => {
+export const PredictionForm = ({ onSubmit, isLoading, initialTicker }: PredictionFormProps) => {
   const [ticker, setTicker] = useState(initialTicker || "");
   const [targetDate, setTargetDate] = useState<Date | undefined>(addDays(new Date(), 1));
 
@@ -62,18 +61,6 @@ export const PredictionForm = ({ onSubmit, isLoading, onRefresh, initialTicker }
     <Card className="glass-card p-6">
       <div className="flex items-center justify-between mb-6">
         <h3 className="text-sm font-medium">Analyze Stock</h3>
-        {onRefresh && (
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            onClick={onRefresh}
-            disabled={isLoading}
-            className="h-8 w-8 p-0 text-muted-foreground"
-          >
-            <RefreshCw className={cn("w-4 h-4", isLoading && "animate-spin")} />
-          </Button>
-        )}
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-5">
