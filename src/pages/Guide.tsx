@@ -216,6 +216,7 @@ const Guide = () => {
     if (session?.access_token) {
       fetchOpportunities();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tradingStyle, session?.access_token]);
 
   // Sort opportunities based on selected option
@@ -434,7 +435,7 @@ const Guide = () => {
                     Scanning market for {tradingStyleInfo[tradingStyle].name.toLowerCase()} opportunities...
                   </p>
                   <p className="text-xs text-muted-foreground/60 mt-2">
-                    Analyzing 30+ assets with AI enhancement
+                    Scanning markets and analyzing opportunities...
                   </p>
                 </motion.div>
               ) : noOpportunities ? (

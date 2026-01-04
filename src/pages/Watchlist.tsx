@@ -145,6 +145,16 @@ const Watchlist = () => {
     if (!user || !newTicker.trim()) return;
 
     const ticker = newTicker.toUpperCase().trim();
+    
+    // Check for duplicate before making API call
+    const existingItem = watchlist.find(
+      item => item.ticker.toUpperCase() === ticker
+    );
+    if (existingItem) {
+      toast.error(`${ticker} is already in your watchlist`);
+      return;
+    }
+    
     const isCrypto = ticker.includes("-USD");
     
     setIsAdding(true);

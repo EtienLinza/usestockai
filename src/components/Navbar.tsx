@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
@@ -10,12 +11,20 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { User, LogOut, LayoutDashboard, BookOpen, Heart, History } from "lucide-react";
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "@/components/ui/sheet";
+import { User, LogOut, LayoutDashboard, BookOpen, Heart, History, Menu, X } from "lucide-react";
 
 export const Navbar = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const { user, signOut } = useAuth();
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const navLinks = [
     { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -26,7 +35,13 @@ export const Navbar = () => {
 
   const handleSignOut = async () => {
     await signOut();
+    setMobileMenuOpen(false);
     navigate("/");
+  };
+
+  const handleNavigation = (href: string) => {
+    setMobileMenuOpen(false);
+    navigate(href);
   };
 
   return (
@@ -41,6 +56,7 @@ export const Navbar = () => {
             <Logo size="sm" />
           </Link>
 
+          {/* Desktop Navigation */}
           <nav className="hidden md:flex items-center gap-1">
             {navLinks.map((link) => {
               const isActive = location.pathname === link.href;
@@ -61,12 +77,82 @@ export const Navbar = () => {
           </nav>
 
           <div className="flex items-center gap-3">
+            {/* Mobile Menu */}
+            <Sheet open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
+              <SheetTrigger asChild className="md:hidden">
+                <Button variant="ghost" size="sm" className="p-2">
+                  <Menu className="w-5 h-5" />
+                </Button>
+              </SheetTrigger>
+              <SheetContent side="right" className="w-[280px] sm:w-[320px]">
+                <SheetHeader>
+                  <SheetTitle className="flex items-center gap-2">
+                    <Logo size="sm" showText={false} />
+                    <span>StockAI</span>
+                  </SheetTitle>
+                </SheetHeader>
+                <nav className="flex flex-col gap-2 mt-6">
+                  {navLinks.map((link) => {
+                    const isActive = location.pathname === link.href;
+                    const Icon = link.icon;
+                    return (
+                      <Button
+                        key={link.href}
+                        variant={isActive ? "secondary" : "ghost"}
+                        className={`justify-start gap-3 ${isActive ? "text-primary" : "text-muted-foreground"}`}
+                        onClick={() => handleNavigation(link.href)}
+                      >
+                        <Icon className="w-4 h-4" />
+                        {link.label}
+                      </Button>
+                    );
+                  })}
+                  
+                  <div className="border-t border-border/30 my-4" />
+                  
+                  {user ? (
+                    <>
+                      <div className="px-3 py-2 text-sm text-muted-foreground truncate">
+                        {user.email}
+                      </div>
+                      <Button
+                        variant="ghost"
+                        className="justify-start gap-3 text-destructive hover:text-destructive"
+                        onClick={handleSignOut}
+                      >
+                        <LogOut className="w-4 h-4" />
+                        Sign Out
+                      </Button>
+                    </>
+                  ) : (
+                    <>
+                      <Button
+                        variant="ghost"
+                        className="justify-start"
+                        onClick={() => handleNavigation("/auth")}
+                      >
+                        Sign In
+                      </Button>
+                      <Button
+                        variant="default"
+                        className="justify-start"
+                        onClick={() => handleNavigation("/auth?mode=signup")}
+                      >
+                        Get Started
+                      </Button>
+                    </>
+                  )}
+                </nav>
+              </SheetContent>
+            </Sheet>
+
+            {/* Desktop Auth */}
             {user ? (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" size="sm" className="gap-2">
+                  <Button variant="ghost" size="sm" className="gap-2 hidden sm:flex">
                     <User className="w-4 h-4" />
-                    <span className="hidden sm:inline max-w-[100px] truncate text-muted-foreground">
+                    <span className="max-w-[100px] truncate text-muted-foreground">
                       {user.email}
                     </span>
                   </Button>
@@ -96,7 +182,7 @@ export const Navbar = () => {
                 </DropdownMenuContent>
               </DropdownMenu>
             ) : (
-              <>
+              <div className="hidden md:flex items-center gap-3">
                 <Link to="/auth">
                   <Button variant="ghost" size="sm" className="text-muted-foreground">
                     Sign In
@@ -107,7 +193,7 @@ export const Navbar = () => {
                     Get Started
                   </Button>
                 </Link>
-              </>
+              </div>
             )}
           </div>
         </div>

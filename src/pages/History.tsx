@@ -121,70 +121,79 @@ const History = () => {
       }
     });
 
-    // Fetch actual prices for past predictions
+    // Fetch actual prices for past predictions using edge function
     const uniqueTickers = [...new Set(pastPredictions.map((p) => p.ticker))];
 
-    for (const ticker of uniqueTickers) {
+    // Fetch all tickers in parallel
+    const pricePromises = uniqueTickers.map(async (ticker) => {
       try {
         const response = await fetch(
-          `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=5d`,
+          `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/fetch-stock-price`,
           {
+            method: "POST",
             headers: {
-              "User-Agent": "Mozilla/5.0",
+              "Content-Type": "application/json",
             },
+            body: JSON.stringify({ ticker }),
           }
         );
 
-        if (!response.ok) continue;
+        if (!response.ok) return { ticker, data: null };
 
         const data = await response.json();
-        const closes = data?.chart?.result?.[0]?.indicators?.quote?.[0]?.close;
-        const timestamps = data?.chart?.result?.[0]?.timestamp;
-
-        if (!closes || !timestamps) continue;
-
-        // Find predictions for this ticker
-        const tickerPredictions = pastPredictions.filter(
-          (p) => p.ticker === ticker
-        );
-
-        for (const pred of tickerPredictions) {
-          const targetTs = new Date(pred.target_date).getTime() / 1000;
-
-          // Find closest price to target date
-          let closestIdx = 0;
-          let minDiff = Math.abs(timestamps[0] - targetTs);
-
-          for (let i = 1; i < timestamps.length; i++) {
-            const diff = Math.abs(timestamps[i] - targetTs);
-            if (diff < minDiff) {
-              minDiff = diff;
-              closestIdx = i;
-            }
-          }
-
-          const actualPrice = closes[closestIdx];
-
-          if (actualPrice && pred.current_price) {
-            const isWithinRange =
-              actualPrice >= pred.uncertainty_low &&
-              actualPrice <= pred.uncertainty_high;
-
-            const predictedUp = pred.predicted_price > pred.current_price;
-            const actualUp = actualPrice > pred.current_price;
-            const directionCorrect = predictedUp === actualUp;
-
-            accuracyData.set(pred.id, {
-              ticker: pred.ticker,
-              actualPrice,
-              isAccurate: isWithinRange,
-              directionCorrect,
-              isPending: false,
-            });
-          }
-        }
+        return { ticker, data };
       } catch (error) {
         console.error(`Failed to fetch price for ${ticker}:`, error);
+        return { ticker, data: null };
+      }
+    });
+
+    const priceResults = await Promise.all(pricePromises);
+
+    for (const { ticker, data } of priceResults) {
+      if (!data || !data.priceHistory) continue;
+
+      const priceHistory = data.priceHistory;
+      
+      // Find predictions for this ticker
+      const tickerPredictions = pastPredictions.filter(
+        (p) => p.ticker === ticker
+      );
+
+      for (const pred of tickerPredictions) {
+        const targetTs = new Date(pred.target_date).getTime() / 1000;
+
+        // Find closest price to target date
+        let closestIdx = 0;
+        let minDiff = Math.abs(priceHistory[0]?.timestamp - targetTs);
+
+        for (let i = 1; i < priceHistory.length; i++) {
+          const diff = Math.abs(priceHistory[i].timestamp - targetTs);
+          if (diff < minDiff) {
+            minDiff = diff;
+            closestIdx = i;
+          }
+        }
+
+        const actualPrice = priceHistory[closestIdx]?.price;
+
+        if (actualPrice && pred.current_price) {
+          const isWithinRange =
+            actualPrice >= pred.uncertainty_low &&
+            actualPrice <= pred.uncertainty_high;
+
+          const predictedUp = pred.predicted_price > pred.current_price;
+          const actualUp = actualPrice > pred.current_price;
+          const directionCorrect = predictedUp === actualUp;
+
+          accuracyData.set(pred.id, {
+            ticker: pred.ticker,
+            actualPrice,
+            isAccurate: isWithinRange,
+            directionCorrect,
+            isPending: false,
+          });
+        }
       }
     }
 
