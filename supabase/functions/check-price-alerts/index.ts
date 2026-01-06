@@ -141,6 +141,31 @@ serve(async (req) => {
               target_price: alert.target_price,
               current_price: currentPrice,
             });
+
+            // Send email notification
+            try {
+              const emailResponse = await fetch(
+                `${supabaseUrl}/functions/v1/send-alert-email`,
+                {
+                  method: "POST",
+                  headers: {
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${supabaseServiceKey}`,
+                  },
+                  body: JSON.stringify({
+                    userId: alert.user_id,
+                    ticker: alert.ticker,
+                    targetPrice: alert.target_price,
+                    currentPrice: currentPrice,
+                    direction: alert.direction,
+                  }),
+                }
+              );
+              const emailResult = await emailResponse.json();
+              console.log(`Email notification result for ${alert.ticker}:`, emailResult);
+            } catch (emailError) {
+              console.error(`Failed to send email for alert ${alert.id}:`, emailError);
+            }
           }
         }
       }

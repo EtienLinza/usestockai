@@ -14,6 +14,39 @@ export type Database = {
   }
   public: {
     Tables: {
+      market_sentiment: {
+        Row: {
+          dow_change: number | null
+          fear_greed_score: number | null
+          id: string
+          market_trend: string | null
+          nasdaq_change: number | null
+          sp500_change: number | null
+          updated_at: string | null
+          vix_value: number | null
+        }
+        Insert: {
+          dow_change?: number | null
+          fear_greed_score?: number | null
+          id?: string
+          market_trend?: string | null
+          nasdaq_change?: number | null
+          sp500_change?: number | null
+          updated_at?: string | null
+          vix_value?: number | null
+        }
+        Update: {
+          dow_change?: number | null
+          fear_greed_score?: number | null
+          id?: string
+          market_trend?: string | null
+          nasdaq_change?: number | null
+          sp500_change?: number | null
+          updated_at?: string | null
+          vix_value?: number | null
+        }
+        Relationships: []
+      }
       prediction_runs: {
         Row: {
           confidence: number
@@ -111,31 +144,70 @@ export type Database = {
       }
       profiles: {
         Row: {
+          alert_email_enabled: boolean | null
           avatar_url: string | null
           created_at: string
+          dashboard_layout: Json | null
           email: string | null
           full_name: string | null
           id: string
           updated_at: string
           user_id: string
+          weekly_digest_enabled: boolean | null
         }
         Insert: {
+          alert_email_enabled?: boolean | null
           avatar_url?: string | null
           created_at?: string
+          dashboard_layout?: Json | null
           email?: string | null
           full_name?: string | null
           id?: string
           updated_at?: string
           user_id: string
+          weekly_digest_enabled?: boolean | null
         }
         Update: {
+          alert_email_enabled?: boolean | null
           avatar_url?: string | null
           created_at?: string
+          dashboard_layout?: Json | null
           email?: string | null
           full_name?: string | null
           id?: string
           updated_at?: string
           user_id?: string
+          weekly_digest_enabled?: boolean | null
+        }
+        Relationships: []
+      }
+      sector_performance: {
+        Row: {
+          daily_change: number | null
+          etf_ticker: string
+          id: string
+          monthly_change: number | null
+          sector: string
+          updated_at: string | null
+          weekly_change: number | null
+        }
+        Insert: {
+          daily_change?: number | null
+          etf_ticker: string
+          id?: string
+          monthly_change?: number | null
+          sector: string
+          updated_at?: string | null
+          weekly_change?: number | null
+        }
+        Update: {
+          daily_change?: number | null
+          etf_ticker?: string
+          id?: string
+          monthly_change?: number | null
+          sector?: string
+          updated_at?: string | null
+          weekly_change?: number | null
         }
         Relationships: []
       }
