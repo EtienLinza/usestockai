@@ -6,6 +6,73 @@
 
 @layer base {
   :root {
+    /* Light theme */
+    --background: 0 0% 98%;
+    --foreground: 0 0% 8%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 0 0% 8%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 8%;
+
+    /* Sage green primary - darker for light mode */
+    --primary: 143 40% 35%;
+    --primary-foreground: 0 0% 98%;
+
+    --secondary: 0 0% 94%;
+    --secondary-foreground: 0 0% 20%;
+
+    --muted: 0 0% 92%;
+    --muted-foreground: 0 0% 45%;
+
+    --accent: 143 35% 90%;
+    --accent-foreground: 143 40% 30%;
+
+    /* Success - sage */
+    --success: 143 50% 40%;
+    --success-foreground: 0 0% 98%;
+
+    /* Warning amber */
+    --warning: 38 92% 50%;
+    --warning-foreground: 38 92% 10%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 98%;
+
+    --border: 0 0% 88%;
+    --input: 0 0% 92%;
+    --ring: 143 40% 35%;
+
+    --radius: 0.5rem;
+
+    /* Glass effect tokens */
+    --glass-bg: 0 0% 100% / 0.9;
+    --glass-border: 143 35% 35% / 0.1;
+    --glass-shadow: 0 0% 0% / 0.05;
+
+    /* Gradient tokens */
+    --gradient-primary: linear-gradient(135deg, hsl(143 40% 35%), hsl(143 45% 45%));
+    --gradient-glow: radial-gradient(ellipse at center, hsl(143 35% 35% / 0.05), transparent 60%);
+
+    /* Chart colors */
+    --chart-1: 143 40% 35%;
+    --chart-2: 143 50% 45%;
+    --chart-3: 38 92% 50%;
+    --chart-4: 200 60% 50%;
+    --chart-5: 0 72% 51%;
+
+    --sidebar-background: 0 0% 96%;
+    --sidebar-foreground: 0 0% 20%;
+    --sidebar-primary: 143 40% 35%;
+    --sidebar-primary-foreground: 0 0% 98%;
+    --sidebar-accent: 0 0% 92%;
+    --sidebar-accent-foreground: 0 0% 20%;
+    --sidebar-border: 0 0% 88%;
+    --sidebar-ring: 143 40% 35%;
+  }
+
+  .dark {
     /* StockAI - Black + Sage Green Japanese-inspired theme */
     --background: 0 0% 3%;
     --foreground: 0 0% 98%;
@@ -44,8 +111,6 @@
     --border: 0 0% 12%;
     --input: 0 0% 8%;
     --ring: 143 35% 45%;
-
-    --radius: 0.5rem;
 
     /* Glass effect tokens */
     --glass-bg: 0 0% 5% / 0.8;
@@ -98,12 +163,12 @@
   /* Glassmorphism card - refined */
   .glass-card {
     @apply relative overflow-hidden rounded-lg border;
-    background: hsl(0 0% 5% / 0.9);
-    border-color: hsl(0 0% 15%);
+    background: hsl(var(--card));
+    border-color: hsl(var(--border));
     backdrop-filter: blur(12px);
   }
 
-  .glass-card::before {
+  .dark .glass-card::before {
     content: '';
     position: absolute;
     top: 0;
@@ -121,6 +186,10 @@
   /* Text gradient - sage */
   .text-gradient {
     @apply bg-clip-text text-transparent;
+    background-image: linear-gradient(135deg, hsl(143 40% 50%), hsl(143 50% 60%));
+  }
+
+  .dark .text-gradient {
     background-image: linear-gradient(135deg, hsl(143 40% 50%), hsl(143 50% 60%));
   }
 

@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Logo } from "@/components/Logo";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { useAuth } from "@/hooks/useAuth";
 import { 
   DropdownMenu,
@@ -18,7 +19,7 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
-import { User, LogOut, LayoutDashboard, BookOpen, Heart, History, Menu, X } from "lucide-react";
+import { User, LogOut, LayoutDashboard, BookOpen, Heart, History, Menu, Activity, PieChart } from "lucide-react";
 
 export const Navbar = () => {
   const location = useLocation();
@@ -28,7 +29,9 @@ export const Navbar = () => {
 
   const navLinks = [
     { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+    { href: "/market", label: "Market", icon: Activity },
     { href: "/guide", label: "Guide", icon: BookOpen },
+    { href: "/sectors", label: "Sectors", icon: PieChart },
     { href: "/watchlist", label: "Watchlist", icon: Heart },
     { href: "/history", label: "History", icon: History },
   ];
@@ -77,6 +80,9 @@ export const Navbar = () => {
           </nav>
 
           <div className="flex items-center gap-3">
+            {/* Theme Toggle */}
+            <ThemeToggle />
+
             {/* Mobile Menu */}
             <Sheet open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
               <SheetTrigger asChild className="md:hidden">
@@ -162,9 +168,17 @@ export const Navbar = () => {
                     <LayoutDashboard className="w-4 h-4 mr-2" />
                     Dashboard
                   </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => navigate("/market")}>
+                    <Activity className="w-4 h-4 mr-2" />
+                    Market
+                  </DropdownMenuItem>
                   <DropdownMenuItem onClick={() => navigate("/guide")}>
                     <BookOpen className="w-4 h-4 mr-2" />
                     Guide
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => navigate("/sectors")}>
+                    <PieChart className="w-4 h-4 mr-2" />
+                    Sectors
                   </DropdownMenuItem>
                   <DropdownMenuItem onClick={() => navigate("/watchlist")}>
                     <Heart className="w-4 h-4 mr-2" />

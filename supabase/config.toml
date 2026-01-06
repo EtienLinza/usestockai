@@ -8,3 +8,15 @@ verify_jwt = false
 
 [functions.fetch-stock-price]
 verify_jwt = false
+
+[functions.market-sentiment]
+verify_jwt = false
+
+[functions.sector-analysis]
+verify_jwt = false
+
+[functions.send-alert-email]
+verify_jwt = false
+
+[functions.weekly-digest]
+verify_jwt = false
