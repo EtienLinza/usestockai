@@ -2,9 +2,10 @@ import { useState, useCallback, useEffect } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { Navbar } from "@/components/Navbar";
-import { PredictionForm } from "@/components/PredictionForm";
+import { PredictionForm, PredictionMode } from "@/components/PredictionForm";
 import { StockPredictionCard } from "@/components/StockPredictionCard";
 import { StockComparisonView } from "@/components/StockComparisonView";
+import { PriceTargetResult, PriceTargetData } from "@/components/PriceTargetResult";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
@@ -37,7 +38,8 @@ const Dashboard = () => {
   const [searchParams] = useSearchParams();
   const [isLoading, setIsLoading] = useState(false);
   const [predictions, setPredictions] = useState<PredictionData[]>([]);
-  const [lastFormData, setLastFormData] = useState<{ ticker: string; targetDate: Date } | null>(null);
+  const [priceTargetResult, setPriceTargetResult] = useState<PriceTargetData | null>(null);
+  const [lastFormData, setLastFormData] = useState<{ ticker: string; targetDate?: Date; targetPrice?: number; mode: PredictionMode } | null>(null);
   const [initialTicker, setInitialTicker] = useState<string>("");
   const [viewMode, setViewMode] = useState<'single' | 'compare'>('single');
 
@@ -58,95 +60,128 @@ const Dashboard = () => {
     }
   }, [predictions.length]);
 
-  const handleSubmit = async (data: { ticker: string; targetDate: Date }) => {
+  const handleSubmit = async (data: { ticker: string; targetDate?: Date; targetPrice?: number; mode: PredictionMode }) => {
     if (!session?.access_token) {
       toast.error("Please sign in to generate predictions");
       navigate("/auth");
       return;
     }
 
-    // Check if this ticker already exists
-    const existingIndex = predictions.findIndex(p => p.ticker === data.ticker);
-    if (existingIndex !== -1) {
-      toast.info(`${data.ticker} is already being compared. Refreshing...`);
-    }
-
     setIsLoading(true);
     setLastFormData(data);
     
     try {
-      const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/stock-predict`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${session.access_token}`,
-          },
-          body: JSON.stringify({
-            ticker: data.ticker,
-            targetDate: format(data.targetDate, "yyyy-MM-dd"),
-          }),
+      if (data.mode === 'price' && data.targetPrice) {
+        // Price Target Mode - estimate when price will be reached
+        setPriceTargetResult(null);
+        
+        const response = await fetch(
+          `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/stock-predict`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${session.access_token}`,
+            },
+            body: JSON.stringify({
+              ticker: data.ticker,
+              targetPrice: data.targetPrice,
+              mode: 'price-target',
+            }),
+          }
+        );
+
+        if (response.status === 401) {
+          toast.error("Session expired. Please sign in again.");
+          navigate("/auth");
+          return;
         }
-      );
 
-      if (response.status === 401) {
-        toast.error("Session expired. Please sign in again.");
-        navigate("/auth");
-        return;
-      }
-
-      if (response.status === 429) {
-        const errorData = await response.json();
-        toast.error(`Rate limit exceeded. Please wait ${errorData.retryAfter || 60} seconds.`);
-        return;
-      }
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || "Failed to generate prediction");
-      }
-
-      const result: PredictionData = await response.json();
-      
-      setPredictions(prev => {
-        // If ticker exists, replace it
-        const existingIdx = prev.findIndex(p => p.ticker === result.ticker);
-        if (existingIdx !== -1) {
-          const updated = [...prev];
-          updated[existingIdx] = result;
-          return updated;
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.error || "Failed to estimate timeline");
         }
-        // Otherwise add new (max 6 for comparison)
-        if (prev.length >= 6) {
-          toast.info("Maximum 6 stocks for comparison. Removing oldest.");
-          return [...prev.slice(1), result];
+
+        const result: PriceTargetData = await response.json();
+        setPriceTargetResult(result);
+        setPredictions([]); // Clear date predictions when using price mode
+        toast.success(`Timeline estimated for ${data.ticker}`);
+      } else if (data.targetDate) {
+        // Date Prediction Mode (existing logic)
+        setPriceTargetResult(null);
+        
+        const existingIndex = predictions.findIndex(p => p.ticker === data.ticker);
+        if (existingIndex !== -1) {
+          toast.info(`${data.ticker} is already being compared. Refreshing...`);
         }
-        return [...prev, result];
-      });
-      
-      if (user) {
-        const { error } = await supabase.from("prediction_runs").insert({
-          user_id: user.id,
-          ticker: result.ticker,
-          target_date: result.targetDate,
-          predicted_price: result.predictedPrice,
-          uncertainty_low: result.uncertaintyLow,
-          uncertainty_high: result.uncertaintyHigh,
-          confidence: result.confidence,
-          current_price: result.currentPrice,
-          feature_importance: result.featureImportance,
-          historical_data: result.historicalData,
-          regime: result.regime,
-          sentiment_score: result.sentimentScore,
+
+        const response = await fetch(
+          `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/stock-predict`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${session.access_token}`,
+            },
+            body: JSON.stringify({
+              ticker: data.ticker,
+              targetDate: format(data.targetDate, "yyyy-MM-dd"),
+            }),
+          }
+        );
+
+        if (response.status === 401) {
+          toast.error("Session expired. Please sign in again.");
+          navigate("/auth");
+          return;
+        }
+
+        if (response.status === 429) {
+          const errorData = await response.json();
+          toast.error(`Rate limit exceeded. Please wait ${errorData.retryAfter || 60} seconds.`);
+          return;
+        }
+
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.error || "Failed to generate prediction");
+        }
+
+        const result: PredictionData = await response.json();
+        
+        setPredictions(prev => {
+          const existingIdx = prev.findIndex(p => p.ticker === result.ticker);
+          if (existingIdx !== -1) {
+            const updated = [...prev];
+            updated[existingIdx] = result;
+            return updated;
+          }
+          if (prev.length >= 6) {
+            toast.info("Maximum 6 stocks for comparison. Removing oldest.");
+            return [...prev.slice(1), result];
+          }
+          return [...prev, result];
         });
         
-        if (error) {
-          console.error("Failed to save prediction:", error);
+        if (user) {
+          await supabase.from("prediction_runs").insert({
+            user_id: user.id,
+            ticker: result.ticker,
+            target_date: result.targetDate,
+            predicted_price: result.predictedPrice,
+            uncertainty_low: result.uncertaintyLow,
+            uncertainty_high: result.uncertaintyHigh,
+            confidence: result.confidence,
+            current_price: result.currentPrice,
+            feature_importance: result.featureImportance,
+            historical_data: result.historicalData,
+            regime: result.regime,
+            sentiment_score: result.sentimentScore,
+          });
         }
+        
+        toast.success(`Analysis complete for ${data.ticker}`);
       }
-      
-      toast.success(`Analysis complete for ${data.ticker}`);
     } catch (error) {
       console.error("Prediction error:", error);
       toast.error(error instanceof Error ? error.message : "Failed to generate prediction");
@@ -168,6 +203,7 @@ const Dashboard = () => {
 
   const handleClearAll = () => {
     setPredictions([]);
+    setPriceTargetResult(null);
     setViewMode('single');
     toast.success("All predictions cleared");
   };
@@ -334,6 +370,15 @@ const Dashboard = () => {
                         This is not financial advice.
                       </p>
                     </div>
+                  </motion.div>
+                ) : priceTargetResult ? (
+                  <motion.div
+                    key="price-target"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                  >
+                    <PriceTargetResult data={priceTargetResult} />
                   </motion.div>
                 ) : predictions.length === 1 && viewMode === 'single' ? (
                   <motion.div

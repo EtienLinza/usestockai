@@ -13,6 +13,7 @@ import Watchlist from "./pages/Watchlist";
 import History from "./pages/History";
 import MarketOverview from "./pages/MarketOverview";
 import Sectors from "./pages/Sectors";
+import Portfolio from "./pages/Portfolio";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -30,6 +31,7 @@ const App = () => (
               <Route path="/auth" element={<Auth />} />
               <Route path="/dashboard" element={<Dashboard />} />
               <Route path="/guide" element={<Guide />} />
+              <Route path="/portfolio" element={<Portfolio />} />
               <Route path="/watchlist" element={<Watchlist />} />
               <Route path="/history" element={<History />} />
               <Route path="/market" element={<MarketOverview />} />
