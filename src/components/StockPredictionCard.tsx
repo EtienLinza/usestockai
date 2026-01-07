@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { PriceChart } from "./PriceChart";
 import { ShareReport } from "./ShareReport";
+import { InvestmentCalculator } from "./InvestmentCalculator";
 import { PredictionData } from "@/pages/Dashboard";
 
 interface StockPredictionCardProps {
@@ -171,6 +172,14 @@ export const StockPredictionCard = ({ data }: StockPredictionCardProps) => {
           targetDate={data.targetDate}
         />
       </Card>
+
+      {/* Investment Calculator */}
+      <InvestmentCalculator
+        currentPrice={data.currentPrice}
+        predictedPrice={data.predictedPrice}
+        uncertaintyLow={data.uncertaintyLow}
+        uncertaintyHigh={data.uncertaintyHigh}
+      />
 
       {/* AI Reasoning */}
       {data.reasoning && (
