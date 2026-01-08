@@ -19,7 +19,7 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
-import { User, LogOut, LayoutDashboard, BookOpen, Heart, History, Menu, Activity, PieChart, Wallet } from "lucide-react";
+import { User, LogOut, LayoutDashboard, BookOpen, Heart, History, Menu, Activity, PieChart } from "lucide-react";
 
 export const Navbar = () => {
   const location = useLocation();
@@ -31,7 +31,6 @@ export const Navbar = () => {
     { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
     { href: "/market", label: "Market", icon: Activity },
     { href: "/guide", label: "Guide", icon: BookOpen },
-    { href: "/portfolio", label: "Portfolio", icon: Wallet },
     { href: "/sectors", label: "Sectors", icon: PieChart },
     { href: "/watchlist", label: "Watchlist", icon: Heart },
     { href: "/history", label: "History", icon: History },
@@ -176,10 +175,6 @@ export const Navbar = () => {
                   <DropdownMenuItem onClick={() => navigate("/guide")}>
                     <BookOpen className="w-4 h-4 mr-2" />
                     Guide
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => navigate("/portfolio")}>
-                    <Wallet className="w-4 h-4 mr-2" />
-                    Portfolio
                   </DropdownMenuItem>
                   <DropdownMenuItem onClick={() => navigate("/sectors")}>
                     <PieChart className="w-4 h-4 mr-2" />

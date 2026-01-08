@@ -1149,6 +1149,11 @@ serve(async (req) => {
         price: parseFloat(stockData.close.slice(-60)[i]?.toFixed(2) || "0"),
       }));
       
+      // Calculate days to target
+      const estimatedDateObj = new Date(aiPrediction.estimatedDate);
+      const today = new Date();
+      const daysToTarget = Math.ceil((estimatedDateObj.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+      
       const result = {
         mode: "price-target",
         ticker: ticker.toUpperCase(),
@@ -1156,6 +1161,7 @@ serve(async (req) => {
         targetPrice: parseFloat(targetPrice.toFixed(2)),
         direction,
         priceChangePercent: parseFloat(priceChangePercent.toFixed(2)),
+        daysToTarget: Math.max(0, daysToTarget),
         estimatedDate: aiPrediction.estimatedDate,
         estimatedDateRangeLow: aiPrediction.estimatedDateRangeLow,
         estimatedDateRangeHigh: aiPrediction.estimatedDateRangeHigh,
