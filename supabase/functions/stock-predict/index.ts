@@ -382,6 +382,142 @@ Based on technical analysis, market regime, and sentiment, provide your predicti
   }
 }
 
+// Price Target Mode: Estimate when a target price might be reached
+async function generatePriceTargetPrediction(
+  ticker: string,
+  targetPrice: number,
+  stockData: any,
+  indicators: any,
+  regime: string,
+  sentiment: number
+): Promise<any> {
+  const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
+  if (!LOVABLE_API_KEY) {
+    throw new Error("LOVABLE_API_KEY is not configured");
+  }
+  
+  const currentPrice = stockData.close[stockData.close.length - 1];
+  const priceChange = ((targetPrice - currentPrice) / currentPrice) * 100;
+  const direction = targetPrice > currentPrice ? "up" : "down";
+  
+  // Handle null/undefined values safely
+  const safeToFixed = (val: number | null | undefined, digits: number = 2): string => {
+    if (val === null || val === undefined || isNaN(val)) return "N/A";
+    return val.toFixed(digits);
+  };
+  
+  // Calculate historical price movement rates
+  const prices = stockData.close.filter((p: number) => p != null);
+  const dailyReturns: number[] = [];
+  for (let i = 1; i < prices.length; i++) {
+    dailyReturns.push((prices[i] - prices[i - 1]) / prices[i - 1]);
+  }
+  const avgDailyReturn = dailyReturns.reduce((a, b) => a + b, 0) / dailyReturns.length;
+  const avgAbsDailyReturn = dailyReturns.map(Math.abs).reduce((a, b) => a + b, 0) / dailyReturns.length;
+  
+  // Calculate 30, 90, 180 day changes for context
+  const change30d = prices.length >= 30 ? ((prices[prices.length - 1] - prices[prices.length - 30]) / prices[prices.length - 30]) * 100 : 0;
+  const change90d = prices.length >= 90 ? ((prices[prices.length - 1] - prices[prices.length - 90]) / prices[prices.length - 90]) * 100 : 0;
+  const change180d = prices.length >= 180 ? ((prices[prices.length - 1] - prices[prices.length - 180]) / prices[prices.length - 180]) * 100 : 0;
+  
+  const recentData = {
+    prices: stockData.close.slice(-30),
+    dates: stockData.timestamps.slice(-30),
+    currentPrice: currentPrice,
+    rsi: indicators.rsi.slice(-5),
+    volatility: indicators.volatility.slice(-5),
+  };
+  
+  const prompt = `You are an expert quantitative analyst. Analyze when this ${ticker.includes('-') ? 'cryptocurrency' : 'stock'} might reach the target price.
+
+ASSET: ${ticker}
+CURRENT PRICE: $${safeToFixed(currentPrice)}
+TARGET PRICE: $${safeToFixed(targetPrice)}
+REQUIRED CHANGE: ${priceChange > 0 ? '+' : ''}${safeToFixed(priceChange)}% (${direction})
+MARKET REGIME: ${regime}
+NEWS SENTIMENT: ${safeToFixed(sentiment)} (scale -1 to 1)
+
+HISTORICAL PERFORMANCE:
+- 30-Day Change: ${safeToFixed(change30d)}%
+- 90-Day Change: ${safeToFixed(change90d)}%
+- 180-Day Change: ${safeToFixed(change180d)}%
+- Average Daily Return: ${safeToFixed(avgDailyReturn * 100, 3)}%
+- Average Daily Volatility: ${safeToFixed(avgAbsDailyReturn * 100, 3)}%
+
+RECENT PRICES (last 30 days):
+${recentData.dates.map((d: string, i: number) => `${d}: $${safeToFixed(recentData.prices[i])}`).join('\n')}
+
+TECHNICAL INDICATORS (last 5 values):
+- RSI14: ${recentData.rsi.map((v: number) => safeToFixed(v, 1)).join(', ')}
+- Volatility: ${recentData.volatility.map((v: number) => v != null ? safeToFixed(v * 100) + '%' : 'N/A').join(', ')}
+
+Analyze the likelihood and timeframe for reaching the target price of $${safeToFixed(targetPrice)}. Consider:
+1. Is this target realistic based on historical movement patterns?
+2. How long might it take based on average daily/monthly returns?
+3. What's the probability of reaching this target?
+
+You MUST respond with ONLY valid JSON in this exact format:
+{
+  "estimatedDate": "<YYYY-MM-DD most likely date>",
+  "estimatedDateRangeLow": "<YYYY-MM-DD best case / earliest>",
+  "estimatedDateRangeHigh": "<YYYY-MM-DD worst case / latest>",
+  "probability": <0-100 percentage chance of hitting target>,
+  "isRealistic": <true or false>,
+  "reasoning": "<2-3 sentence explanation of the analysis and timeline>",
+  "keyFactors": ["<factor 1>", "<factor 2>", "<factor 3>"]
+}`;
+
+  console.log("Calling Lovable AI for price target prediction...");
+  
+  const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${LOVABLE_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: "google/gemini-2.5-flash",
+      messages: [
+        { role: "system", content: "You are a quantitative financial analyst specializing in price target analysis. Respond only with valid JSON." },
+        { role: "user", content: prompt }
+      ],
+      temperature: 0.7,
+    }),
+  });
+
+  if (!response.ok) {
+    if (response.status === 429) {
+      throw new Error("Rate limit exceeded. Please try again later.");
+    }
+    if (response.status === 402) {
+      throw new Error("AI credits exhausted. Please add credits to continue.");
+    }
+    const errorText = await response.text();
+    console.error("AI gateway error:", response.status, errorText);
+    throw new Error("AI price target prediction failed");
+  }
+
+  const aiData = await response.json();
+  const content = aiData.choices?.[0]?.message?.content;
+  
+  if (!content) {
+    throw new Error("No response from AI");
+  }
+  
+  let jsonStr = content;
+  const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (jsonMatch) {
+    jsonStr = jsonMatch[1];
+  }
+  
+  try {
+    return JSON.parse(jsonStr.trim());
+  } catch (e) {
+    console.error("Failed to parse AI response:", content);
+    throw new Error("Failed to parse AI price target prediction");
+  }
+}
+
 // Trading style configurations
 const tradingStyles = {
   scalping: {
@@ -928,7 +1064,7 @@ serve(async (req) => {
     console.log(`Authenticated request from user: ${user.id} (${rateLimit.remaining} requests remaining)`);
     
     const body = await req.json();
-    const { mode, ticker, targetDate, tradingStyle } = body;
+    const { mode, ticker, targetDate, targetPrice, tradingStyle } = body;
     
     // Handle guide mode
     if (mode === "guide") {
@@ -947,17 +1083,105 @@ serve(async (req) => {
       );
     }
     
-    // Regular prediction mode - validate inputs server-side
-    // Supports both stocks (AAPL) and crypto (BTC-USD) formats
+    // Validate ticker for all modes
     const TICKER_REGEX = /^[A-Z]{1,10}(-[A-Z]{2,4})?$/;
-    const DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
-
+    
     if (!ticker || !TICKER_REGEX.test(ticker.toUpperCase())) {
       return new Response(
         JSON.stringify({ error: "Invalid ticker format. Use AAPL for stocks or BTC-USD for crypto." }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
+    
+    // Handle price-target mode (reverse prediction)
+    if (mode === "price-target") {
+      if (!targetPrice || typeof targetPrice !== "number" || targetPrice <= 0) {
+        return new Response(
+          JSON.stringify({ error: "Invalid target price. Must be a positive number." }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+      
+      console.log(`Processing price target prediction for ${ticker.toUpperCase()} targeting $${targetPrice}`);
+      
+      // Fetch real stock data
+      const stockData = await fetchStockData(ticker.toUpperCase());
+      
+      if (!stockData.close || stockData.close.length < 60) {
+        throw new Error("Insufficient historical data for analysis");
+      }
+      
+      // Calculate technical indicators
+      const closePrices = stockData.close.filter((p: number) => p != null);
+      
+      const indicators = {
+        ema12: calculateEMA(closePrices, 12),
+        ema26: calculateEMA(closePrices, 26),
+        sma50: calculateSMA(closePrices, 50),
+        rsi: calculateRSI(closePrices, 14),
+        macd: calculateMACD(closePrices),
+        volatility: calculateVolatility(closePrices, 20),
+      };
+      
+      // Detect market regime
+      const regime = detectRegime(closePrices, indicators.rsi, indicators.volatility);
+      
+      // Fetch news sentiment
+      const sentiment = await fetchNewsSentiment(ticker);
+      
+      // Get AI price target prediction
+      const aiPrediction = await generatePriceTargetPrediction(
+        ticker.toUpperCase(),
+        targetPrice,
+        stockData,
+        indicators,
+        regime,
+        sentiment
+      );
+      
+      const currentPrice = closePrices[closePrices.length - 1];
+      const direction = targetPrice > currentPrice ? "up" : "down";
+      const priceChangePercent = ((targetPrice - currentPrice) / currentPrice) * 100;
+      
+      // Prepare historical data for chart
+      const historicalData = stockData.timestamps.slice(-60).map((date: string, i: number) => ({
+        date,
+        price: parseFloat(stockData.close.slice(-60)[i]?.toFixed(2) || "0"),
+      }));
+      
+      const result = {
+        mode: "price-target",
+        ticker: ticker.toUpperCase(),
+        currentPrice: parseFloat(currentPrice.toFixed(2)),
+        targetPrice: parseFloat(targetPrice.toFixed(2)),
+        direction,
+        priceChangePercent: parseFloat(priceChangePercent.toFixed(2)),
+        estimatedDate: aiPrediction.estimatedDate,
+        estimatedDateRangeLow: aiPrediction.estimatedDateRangeLow,
+        estimatedDateRangeHigh: aiPrediction.estimatedDateRangeHigh,
+        probability: aiPrediction.probability,
+        isRealistic: aiPrediction.isRealistic,
+        reasoning: aiPrediction.reasoning,
+        keyFactors: aiPrediction.keyFactors || [],
+        regime,
+        sentimentScore: sentiment,
+        historicalData,
+        currency: stockData.currency || "USD",
+      };
+      
+      console.log("Price target prediction complete:", result.ticker, `$${result.targetPrice}`, result.estimatedDate);
+      
+      return new Response(JSON.stringify(result), {
+        headers: { 
+          ...corsHeaders, 
+          "Content-Type": "application/json",
+          "X-RateLimit-Remaining": String(rateLimit.remaining)
+        },
+      });
+    }
+    
+    // Regular prediction mode - validate date
+    const DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
 
     if (!targetDate || !DATE_REGEX.test(targetDate)) {
       return new Response(
