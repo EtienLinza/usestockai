@@ -317,7 +317,16 @@ const Dashboard = () => {
               className="lg:col-span-8 xl:col-span-9"
             >
               <AnimatePresence mode="wait">
-                {predictions.length === 0 ? (
+                {priceTargetResult ? (
+                  <motion.div
+                    key="price-target"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                  >
+                    <PriceTargetResult data={priceTargetResult} />
+                  </motion.div>
+                ) : predictions.length === 0 ? (
                   <motion.div
                     key="empty"
                     initial={{ opacity: 0 }}
@@ -370,15 +379,6 @@ const Dashboard = () => {
                         This is not financial advice.
                       </p>
                     </div>
-                  </motion.div>
-                ) : priceTargetResult ? (
-                  <motion.div
-                    key="price-target"
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    exit={{ opacity: 0 }}
-                  >
-                    <PriceTargetResult data={priceTargetResult} />
                   </motion.div>
                 ) : predictions.length === 1 && viewMode === 'single' ? (
                   <motion.div
