@@ -18,7 +18,6 @@ function checkRateLimit(userId: string): { allowed: boolean; remaining: number; 
   const userLimit = rateLimitStore.get(userId);
 
   if (!userLimit || now > userLimit.resetTime) {
-    // Reset or initialize rate limit
     rateLimitStore.set(userId, { count: 1, resetTime: now + RATE_LIMIT_WINDOW_MS });
     return { allowed: true, remaining: RATE_LIMIT_MAX_REQUESTS - 1, resetIn: RATE_LIMIT_WINDOW_MS };
   }
@@ -87,7 +86,10 @@ async function verifyAuth(req: Request): Promise<{ user: any; error: Response | 
   return { user, error: null };
 }
 
-// Technical indicator calculations
+// ============================================================================
+// ENHANCED TECHNICAL INDICATORS
+// ============================================================================
+
 function calculateEMA(prices: number[], period: number): number[] {
   const multiplier = 2 / (period + 1);
   const ema: number[] = [];
@@ -112,26 +114,38 @@ function calculateSMA(prices: number[], period: number): number[] {
   return sma;
 }
 
+// Enhanced RSI using Wilder's Smoothing (more accurate)
 function calculateRSI(prices: number[], period: number = 14): number[] {
   const rsi: number[] = [];
-  const gains: number[] = [];
-  const losses: number[] = [];
-  
-  for (let i = 1; i < prices.length; i++) {
-    const change = prices[i] - prices[i - 1];
-    gains.push(change > 0 ? change : 0);
-    losses.push(change < 0 ? -change : 0);
+  let avgGain = 0;
+  let avgLoss = 0;
+
+  // First, fill with NaN until we have enough data
+  for (let i = 0; i <= period; i++) {
+    rsi[i] = NaN;
   }
-  
-  for (let i = 0; i < prices.length; i++) {
-    if (i < period) {
-      rsi[i] = NaN;
-    } else {
-      const avgGain = gains.slice(i - period, i).reduce((a, b) => a + b, 0) / period;
-      const avgLoss = losses.slice(i - period, i).reduce((a, b) => a + b, 0) / period;
-      const rs = avgLoss === 0 ? 100 : avgGain / avgLoss;
-      rsi[i] = 100 - (100 / (1 + rs));
-    }
+
+  // Calculate initial average gain/loss using SMA
+  for (let i = 1; i <= period; i++) {
+    const change = prices[i] - prices[i - 1];
+    avgGain += change > 0 ? change : 0;
+    avgLoss += change < 0 ? -change : 0;
+  }
+  avgGain /= period;
+  avgLoss /= period;
+
+  rsi[period] = 100 - (100 / (1 + (avgGain / (avgLoss || 0.0001))));
+
+  // Use Wilder's smoothing for subsequent values
+  for (let i = period + 1; i < prices.length; i++) {
+    const change = prices[i] - prices[i - 1];
+    const gain = change > 0 ? change : 0;
+    const loss = change < 0 ? -change : 0;
+
+    avgGain = (avgGain * (period - 1) + gain) / period;
+    avgLoss = (avgLoss * (period - 1) + loss) / period;
+
+    rsi[i] = 100 - (100 / (1 + (avgGain / (avgLoss || 0.0001))));
   }
   return rsi;
 }
@@ -165,6 +179,269 @@ function calculateVolatility(prices: number[], period: number = 20): number[] {
   return volatility;
 }
 
+// NEW: Bollinger Bands
+function calculateBollingerBands(prices: number[], period: number = 20, stdDev: number = 2): { upper: number[]; middle: number[]; lower: number[]; bandwidth: number[] } {
+  const sma = calculateSMA(prices, period);
+  const upper: number[] = [];
+  const lower: number[] = [];
+  const bandwidth: number[] = [];
+
+  for (let i = 0; i < prices.length; i++) {
+    if (i < period - 1) {
+      upper[i] = NaN;
+      lower[i] = NaN;
+      bandwidth[i] = NaN;
+    } else {
+      const slice = prices.slice(i - period + 1, i + 1);
+      const mean = sma[i];
+      const variance = slice.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / period;
+      const std = Math.sqrt(variance) * stdDev;
+      upper[i] = mean + std;
+      lower[i] = mean - std;
+      bandwidth[i] = (upper[i] - lower[i]) / mean;
+    }
+  }
+
+  return { upper, middle: sma, lower, bandwidth };
+}
+
+// NEW: Average True Range (ATR)
+function calculateATR(high: number[], low: number[], close: number[], period: number = 14): number[] {
+  const tr: number[] = [high[0] - low[0]];
+
+  for (let i = 1; i < close.length; i++) {
+    tr.push(Math.max(
+      high[i] - low[i],
+      Math.abs(high[i] - close[i - 1]),
+      Math.abs(low[i] - close[i - 1])
+    ));
+  }
+
+  return calculateEMA(tr, period);
+}
+
+// NEW: Stochastic Oscillator
+function calculateStochastic(close: number[], high: number[], low: number[], kPeriod: number = 14, dPeriod: number = 3): { k: number[]; d: number[] } {
+  const k: number[] = [];
+
+  for (let i = 0; i < close.length; i++) {
+    if (i < kPeriod - 1) {
+      k.push(NaN);
+      continue;
+    }
+    const highSlice = high.slice(i - kPeriod + 1, i + 1);
+    const lowSlice = low.slice(i - kPeriod + 1, i + 1);
+    const highestHigh = Math.max(...highSlice);
+    const lowestLow = Math.min(...lowSlice);
+    const range = highestHigh - lowestLow;
+    k.push(range === 0 ? 50 : ((close[i] - lowestLow) / range) * 100);
+  }
+
+  // Calculate %D (SMA of %K)
+  const validK = k.filter(v => !isNaN(v));
+  const d = calculateSMA(validK, dPeriod);
+  
+  // Pad d to match k length
+  const paddedD: number[] = new Array(k.length - validK.length).fill(NaN).concat(d);
+
+  return { k, d: paddedD };
+}
+
+// NEW: Average Directional Index (ADX)
+function calculateADX(high: number[], low: number[], close: number[], period: number = 14): { adx: number[]; plusDI: number[]; minusDI: number[] } {
+  const plusDM: number[] = [];
+  const minusDM: number[] = [];
+  const tr: number[] = [];
+
+  for (let i = 1; i < close.length; i++) {
+    const upMove = high[i] - high[i - 1];
+    const downMove = low[i - 1] - low[i];
+    plusDM.push(upMove > downMove && upMove > 0 ? upMove : 0);
+    minusDM.push(downMove > upMove && downMove > 0 ? downMove : 0);
+    tr.push(Math.max(
+      high[i] - low[i],
+      Math.abs(high[i] - close[i - 1]),
+      Math.abs(low[i] - close[i - 1])
+    ));
+  }
+
+  const smoothedTR = calculateEMA(tr, period);
+  const smoothedPlusDM = calculateEMA(plusDM, period);
+  const smoothedMinusDM = calculateEMA(minusDM, period);
+
+  const plusDI = smoothedPlusDM.map((v, i) => smoothedTR[i] === 0 ? 0 : (v / smoothedTR[i]) * 100);
+  const minusDI = smoothedMinusDM.map((v, i) => smoothedTR[i] === 0 ? 0 : (v / smoothedTR[i]) * 100);
+
+  const dx = plusDI.map((v, i) => {
+    const sum = v + minusDI[i];
+    return sum === 0 ? 0 : (Math.abs(v - minusDI[i]) / sum) * 100;
+  });
+
+  const adx = calculateEMA(dx.filter(v => !isNaN(v)), period);
+
+  // Pad arrays to match original length
+  const padLength = close.length - adx.length;
+  const paddedADX = new Array(padLength).fill(NaN).concat(adx);
+  const paddedPlusDI = [NaN].concat(plusDI);
+  const paddedMinusDI = [NaN].concat(minusDI);
+
+  return { adx: paddedADX, plusDI: paddedPlusDI, minusDI: paddedMinusDI };
+}
+
+// NEW: On Balance Volume (OBV)
+function calculateOBV(close: number[], volume: number[]): number[] {
+  const obv: number[] = [volume[0] || 0];
+
+  for (let i = 1; i < close.length; i++) {
+    const vol = volume[i] || 0;
+    if (close[i] > close[i - 1]) {
+      obv.push(obv[i - 1] + vol);
+    } else if (close[i] < close[i - 1]) {
+      obv.push(obv[i - 1] - vol);
+    } else {
+      obv.push(obv[i - 1]);
+    }
+  }
+  return obv;
+}
+
+// NEW: OBV Trend (rising, falling, neutral)
+function getOBVTrend(obv: number[], period: number = 20): string {
+  const recent = obv.slice(-period);
+  const older = obv.slice(-period * 2, -period);
+  
+  if (recent.length < period || older.length < period) return "neutral";
+  
+  const recentAvg = recent.reduce((a, b) => a + b, 0) / recent.length;
+  const olderAvg = older.reduce((a, b) => a + b, 0) / older.length;
+  
+  const change = (recentAvg - olderAvg) / Math.abs(olderAvg || 1);
+  
+  if (change > 0.1) return "rising";
+  if (change < -0.1) return "falling";
+  return "neutral";
+}
+
+// NEW: Support & Resistance Detection
+function findSupportResistance(prices: number[], lookback: number = 60): { support: number[]; resistance: number[] } {
+  const support: number[] = [];
+  const resistance: number[] = [];
+  const recent = prices.slice(-lookback);
+
+  // Find local minima (support) and maxima (resistance)
+  for (let i = 2; i < recent.length - 2; i++) {
+    if (recent[i] < recent[i - 1] && recent[i] < recent[i - 2] &&
+        recent[i] < recent[i + 1] && recent[i] < recent[i + 2]) {
+      support.push(recent[i]);
+    }
+    if (recent[i] > recent[i - 1] && recent[i] > recent[i - 2] &&
+        recent[i] > recent[i + 1] && recent[i] > recent[i + 2]) {
+      resistance.push(recent[i]);
+    }
+  }
+
+  // Cluster nearby levels
+  const clusterLevels = (levels: number[], threshold: number = 0.02): number[] => {
+    const clustered: number[] = [];
+    const sorted = [...levels].sort((a, b) => a - b);
+    for (const level of sorted) {
+      if (!clustered.some(c => Math.abs(c - level) / level < threshold)) {
+        clustered.push(level);
+      }
+    }
+    return clustered;
+  };
+
+  return {
+    support: clusterLevels(support).slice(-3),
+    resistance: clusterLevels(resistance).slice(-3),
+  };
+}
+
+// NEW: Fibonacci Retracement Levels
+function calculateFibonacciLevels(prices: number[], lookback: number = 60): { levels: { ratio: number; price: number }[]; trend: string } {
+  const recent = prices.slice(-lookback);
+  const high = Math.max(...recent);
+  const low = Math.min(...recent);
+  const diff = high - low;
+
+  // Determine trend direction
+  const firstHalf = recent.slice(0, Math.floor(recent.length / 2));
+  const secondHalf = recent.slice(Math.floor(recent.length / 2));
+  const avgFirst = firstHalf.reduce((a, b) => a + b, 0) / firstHalf.length;
+  const avgSecond = secondHalf.reduce((a, b) => a + b, 0) / secondHalf.length;
+  const trend = avgSecond > avgFirst ? "uptrend" : "downtrend";
+
+  const fibRatios = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1];
+  const levels = fibRatios.map(ratio => ({
+    ratio,
+    price: trend === "uptrend" ? high - diff * ratio : low + diff * ratio,
+  }));
+
+  return { levels, trend };
+}
+
+// ENHANCED: Regime Detection with ADX
+function detectRegimeEnhanced(
+  prices: number[],
+  rsi: number[],
+  volatility: number[],
+  adx: { adx: number[]; plusDI: number[]; minusDI: number[] },
+  bollingerBands: { upper: number[]; middle: number[]; lower: number[]; bandwidth: number[] }
+): { regime: string; strength: number; description: string } {
+  const latestADX = adx.adx[adx.adx.length - 1] || 0;
+  const latestPlusDI = adx.plusDI[adx.plusDI.length - 1] || 0;
+  const latestMinusDI = adx.minusDI[adx.minusDI.length - 1] || 0;
+  const latestRSI = rsi[rsi.length - 1] || 50;
+  const latestVol = volatility[volatility.length - 1] || 0;
+  const avgVol = volatility.slice(-60).filter(v => !isNaN(v)).reduce((a, b) => a + b, 0) / 60 || 0.02;
+  const currentPrice = prices[prices.length - 1];
+  const bbUpper = bollingerBands.upper[bollingerBands.upper.length - 1];
+  const bbLower = bollingerBands.lower[bollingerBands.lower.length - 1];
+  const bbBandwidth = bollingerBands.bandwidth[bollingerBands.bandwidth.length - 1] || 0;
+
+  // Strong trend detection using ADX
+  if (latestADX > 25) {
+    if (latestPlusDI > latestMinusDI) {
+      return { regime: "strong_bullish", strength: latestADX, description: "Strong uptrend confirmed by ADX > 25 with +DI dominance" };
+    } else {
+      return { regime: "strong_bearish", strength: latestADX, description: "Strong downtrend confirmed by ADX > 25 with -DI dominance" };
+    }
+  }
+
+  // Volatility breakout
+  if (latestVol > avgVol * 1.5 || bbBandwidth > 0.1) {
+    return { regime: "volatile", strength: latestVol / avgVol, description: "High volatility regime - Bollinger Bands expanding" };
+  }
+
+  // Bollinger Band extremes
+  if (currentPrice > bbUpper && latestRSI > 70) {
+    return { regime: "overbought", strength: latestRSI, description: "Price above upper Bollinger Band with RSI > 70" };
+  }
+  if (currentPrice < bbLower && latestRSI < 30) {
+    return { regime: "oversold", strength: 100 - latestRSI, description: "Price below lower Bollinger Band with RSI < 30" };
+  }
+
+  // Weak trend / ranging
+  if (latestADX < 20) {
+    return { regime: "ranging", strength: 20 - latestADX, description: "No clear trend, ADX < 20 indicates ranging/consolidation" };
+  }
+
+  // Moderate trends
+  const recentPrices = prices.slice(-20);
+  const priceChange = (recentPrices[recentPrices.length - 1] - recentPrices[0]) / recentPrices[0];
+  
+  if (priceChange > 0.03 && latestRSI > 50) {
+    return { regime: "bullish", strength: priceChange * 100, description: "Moderate uptrend with positive momentum" };
+  }
+  if (priceChange < -0.03 && latestRSI < 50) {
+    return { regime: "bearish", strength: Math.abs(priceChange) * 100, description: "Moderate downtrend with negative momentum" };
+  }
+
+  return { regime: "neutral", strength: 0, description: "Neutral market conditions, no clear direction" };
+}
+
+// Legacy detectRegime for compatibility
 function detectRegime(prices: number[], rsi: number[], volatility: number[]): string {
   const recentPrices = prices.slice(-20);
   const priceChange = (recentPrices[recentPrices.length - 1] - recentPrices[0]) / recentPrices[0];
@@ -218,56 +495,90 @@ async function fetchStockData(ticker: string): Promise<any> {
   };
 }
 
-async function fetchNewsSentiment(ticker: string): Promise<number> {
-  // Use server-side NewsAPI key from secrets - never accept from client
+// ENHANCED: News Sentiment with Recency Weighting and Expanded Word Lists
+async function fetchNewsSentiment(ticker: string): Promise<{ score: number; articleCount: number; confidence: number }> {
   const apiKey = Deno.env.get("NEWSAPI_KEY");
   
   if (!apiKey || apiKey.length < 20) {
     console.log("No NewsAPI key configured, skipping sentiment analysis");
-    return 0;
+    return { score: 0, articleCount: 0, confidence: 0 };
   }
   
   try {
-    const url = `https://newsapi.org/v2/everything?q=${encodeURIComponent(ticker)}&sortBy=publishedAt&apiKey=${apiKey}&pageSize=20`;
+    const url = `https://newsapi.org/v2/everything?q=${encodeURIComponent(ticker)}&sortBy=publishedAt&apiKey=${apiKey}&pageSize=30`;
     const response = await fetch(url);
     const data = await response.json();
     
     if (data.status !== "ok" || !data.articles?.length) {
-      return 0;
+      return { score: 0, articleCount: 0, confidence: 0 };
     }
     
-    const positiveWords = ['surge', 'gain', 'rise', 'up', 'growth', 'profit', 'beat', 'strong', 'bull', 'buy', 'upgrade'];
-    const negativeWords = ['fall', 'drop', 'decline', 'down', 'loss', 'miss', 'weak', 'bear', 'sell', 'downgrade', 'crash'];
-    
+    // Expanded word lists
+    const positiveWords = [
+      'surge', 'soar', 'jump', 'gain', 'rise', 'rally', 'growth', 'profit', 'beat',
+      'strong', 'bull', 'buy', 'upgrade', 'outperform', 'record', 'breakthrough',
+      'innovative', 'exceed', 'momentum', 'bullish', 'optimistic', 'boom',
+      'recovery', 'rebound', 'accelerate', 'expand', 'success', 'positive',
+      'upside', 'opportunity', 'confident', 'impressive'
+    ];
+    const negativeWords = [
+      'fall', 'drop', 'decline', 'plunge', 'crash', 'down', 'loss', 'miss', 'weak',
+      'bear', 'sell', 'downgrade', 'underperform', 'warning', 'concern', 'fear',
+      'risk', 'lawsuit', 'investigation', 'bearish', 'pessimistic', 'bust',
+      'slump', 'tumble', 'crisis', 'trouble', 'struggle', 'negative',
+      'downside', 'threat', 'uncertain', 'disappointing'
+    ];
+
     let totalScore = 0;
+    const now = Date.now();
+    
     for (const article of data.articles) {
       const text = (article.title + ' ' + (article.description || '')).toLowerCase();
-      let score = 0;
+      const publishedAt = new Date(article.publishedAt).getTime();
+      const hoursAgo = (now - publishedAt) / (1000 * 60 * 60);
       
+      // Recency weight: recent news matters more (decays over 1 week)
+      const recencyWeight = Math.max(0.3, 1 - (hoursAgo / 168));
+      
+      let score = 0;
       for (const word of positiveWords) {
-        if (text.includes(word)) score += 0.1;
+        if (text.includes(word)) score += 0.08;
       }
       for (const word of negativeWords) {
-        if (text.includes(word)) score -= 0.1;
+        if (text.includes(word)) score -= 0.08;
       }
       
-      totalScore += Math.max(-1, Math.min(1, score));
+      totalScore += Math.max(-1, Math.min(1, score)) * recencyWeight;
     }
+
+    const avgScore = totalScore / data.articles.length;
+    const confidence = Math.min(1, data.articles.length / 20); // More articles = higher confidence
     
-    return totalScore / data.articles.length;
+    return { 
+      score: parseFloat(avgScore.toFixed(3)), 
+      articleCount: data.articles.length, 
+      confidence: parseFloat(confidence.toFixed(2)) 
+    };
   } catch (error) {
     console.error("Error fetching news sentiment:", error);
-    return 0;
+    return { score: 0, articleCount: 0, confidence: 0 };
   }
 }
 
+// Helper for safe number formatting
+const safeToFixed = (val: number | null | undefined, digits: number = 2): string => {
+  if (val === null || val === undefined || isNaN(val)) return "N/A";
+  return val.toFixed(digits);
+};
+
+// ENHANCED: AI Prediction with All New Indicators
 async function generateAIPrediction(
   ticker: string,
   targetDate: string,
   stockData: any,
   indicators: any,
-  regime: string,
-  sentiment: number
+  regimeInfo: { regime: string; strength: number; description: string },
+  sentiment: { score: number; articleCount: number; confidence: number }
 ): Promise<any> {
   const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
   if (!LOVABLE_API_KEY) {
@@ -275,12 +586,6 @@ async function generateAIPrediction(
   }
   
   const currentPrice = stockData.close[stockData.close.length - 1];
-  
-  // Handle null/undefined values safely for crypto and stocks
-  const safeToFixed = (val: number | null | undefined, digits: number = 2): string => {
-    if (val === null || val === undefined || isNaN(val)) return "N/A";
-    return val.toFixed(digits);
-  };
   
   const recentData = {
     prices: stockData.close.slice(-30),
@@ -293,20 +598,43 @@ async function generateAIPrediction(
     macd: indicators.macd.macd.slice(-5),
     macdSignal: indicators.macd.signal.slice(-5),
     volatility: indicators.volatility.slice(-5),
+    // New indicators
+    stochK: indicators.stochastic.k.slice(-5),
+    stochD: indicators.stochastic.d.slice(-5),
+    adx: indicators.adx.adx.slice(-5),
+    plusDI: indicators.adx.plusDI.slice(-5),
+    minusDI: indicators.adx.minusDI.slice(-5),
+    atr: indicators.atr.slice(-5),
+    bbUpper: indicators.bollingerBands.upper.slice(-5),
+    bbLower: indicators.bollingerBands.lower.slice(-5),
+    bbBandwidth: indicators.bollingerBands.bandwidth.slice(-5),
   };
   
-  const prompt = `You are an expert quantitative analyst. Analyze this ${ticker.includes('-') ? 'cryptocurrency' : 'stock'} data and provide a prediction.
+  const prompt = `You are an expert quantitative analyst with access to comprehensive technical indicators. Analyze this ${ticker.includes('-') ? 'cryptocurrency' : 'stock'} data and provide a prediction.
 
 ASSET: ${ticker}
 TARGET DATE: ${targetDate}
 CURRENT PRICE: $${safeToFixed(recentData.currentPrice)}
-MARKET REGIME: ${regime}
-NEWS SENTIMENT: ${safeToFixed(sentiment)} (scale -1 to 1)
+
+MARKET REGIME: ${regimeInfo.regime.toUpperCase()}
+Regime Strength: ${safeToFixed(regimeInfo.strength, 1)}
+Regime Description: ${regimeInfo.description}
+
+NEWS SENTIMENT: ${safeToFixed(sentiment.score)} (scale -1 to 1)
+Articles Analyzed: ${sentiment.articleCount}
+Sentiment Confidence: ${safeToFixed(sentiment.confidence * 100)}%
+
+SUPPORT & RESISTANCE LEVELS:
+- Support: ${indicators.supportResistance.support.map((s: number) => `$${safeToFixed(s)}`).join(', ') || 'None detected'}
+- Resistance: ${indicators.supportResistance.resistance.map((r: number) => `$${safeToFixed(r)}`).join(', ') || 'None detected'}
+
+FIBONACCI LEVELS (${indicators.fibonacci.trend}):
+${indicators.fibonacci.levels.map((l: { ratio: number; price: number }) => `- ${(l.ratio * 100).toFixed(1)}%: $${safeToFixed(l.price)}`).join('\n')}
 
 RECENT PRICE DATA (last 30 days):
 ${recentData.dates.map((d: string, i: number) => `${d}: $${safeToFixed(recentData.prices[i])}`).join('\n')}
 
-TECHNICAL INDICATORS (last 5 values):
+CLASSIC INDICATORS (last 5 values):
 - EMA12: ${recentData.ema12.map((v: number) => safeToFixed(v)).join(', ')}
 - EMA26: ${recentData.ema26.map((v: number) => safeToFixed(v)).join(', ')}
 - SMA50: ${recentData.sma50.map((v: number) => safeToFixed(v)).join(', ')}
@@ -315,23 +643,41 @@ TECHNICAL INDICATORS (last 5 values):
 - MACD Signal: ${recentData.macdSignal.map((v: number) => safeToFixed(v, 3)).join(', ')}
 - Volatility: ${recentData.volatility.map((v: number) => v != null ? safeToFixed(v * 100) + '%' : 'N/A').join(', ')}
 
-Based on technical analysis, market regime, and sentiment, provide your prediction. You MUST respond with ONLY valid JSON in this exact format:
+ADVANCED INDICATORS (last 5 values):
+- Stochastic %K: ${recentData.stochK.map((v: number) => safeToFixed(v, 1)).join(', ')}
+- Stochastic %D: ${recentData.stochD.map((v: number) => safeToFixed(v, 1)).join(', ')}
+- ADX (trend strength): ${recentData.adx.map((v: number) => safeToFixed(v, 1)).join(', ')}
+- +DI: ${recentData.plusDI.map((v: number) => safeToFixed(v, 1)).join(', ')}
+- -DI: ${recentData.minusDI.map((v: number) => safeToFixed(v, 1)).join(', ')}
+- ATR: ${recentData.atr.map((v: number) => safeToFixed(v, 2)).join(', ')}
+- Bollinger Upper: ${recentData.bbUpper.map((v: number) => safeToFixed(v)).join(', ')}
+- Bollinger Lower: ${recentData.bbLower.map((v: number) => safeToFixed(v)).join(', ')}
+- BB Bandwidth: ${recentData.bbBandwidth.map((v: number) => safeToFixed(v * 100, 1) + '%').join(', ')}
+
+VOLUME ANALYSIS:
+- OBV Trend: ${indicators.obvTrend}
+
+Based on ALL technical indicators, market regime, support/resistance levels, and sentiment, provide your prediction. You MUST respond with ONLY valid JSON in this exact format:
 {
   "predictedPrice": <number>,
   "uncertaintyPercent": <number between 2 and 15>,
   "confidence": <number between 40 and 95>,
-  "reasoning": "<brief 1-2 sentence explanation>",
+  "reasoning": "<brief 2-3 sentence explanation including key indicators>",
   "featureImportance": [
     {"name": "EMA Crossover", "importance": <0-1>},
     {"name": "RSI Signal", "importance": <0-1>},
     {"name": "MACD Trend", "importance": <0-1>},
-    {"name": "Volatility", "importance": <0-1>},
+    {"name": "Stochastic", "importance": <0-1>},
+    {"name": "ADX Trend Strength", "importance": <0-1>},
+    {"name": "Bollinger Bands", "importance": <0-1>},
+    {"name": "Support/Resistance", "importance": <0-1>},
+    {"name": "Volume (OBV)", "importance": <0-1>},
     {"name": "Market Regime", "importance": <0-1>},
     {"name": "News Sentiment", "importance": <0-1>}
   ]
 }`;
 
-  console.log("Calling Lovable AI for prediction...");
+  console.log("Calling Lovable AI for enhanced prediction...");
   
   const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
     method: "POST",
@@ -342,10 +688,9 @@ Based on technical analysis, market regime, and sentiment, provide your predicti
     body: JSON.stringify({
       model: "google/gemini-2.5-flash",
       messages: [
-        { role: "system", content: "You are a quantitative financial analyst. Respond only with valid JSON." },
+        { role: "system", content: "You are a quantitative financial analyst with expertise in technical analysis. Respond only with valid JSON." },
         { role: "user", content: prompt }
       ],
-      temperature: 0.7,
     }),
   });
 
@@ -382,14 +727,14 @@ Based on technical analysis, market regime, and sentiment, provide your predicti
   }
 }
 
-// Price Target Mode: Estimate when a target price might be reached
+// ENHANCED: Price Target Prediction with All Indicators
 async function generatePriceTargetPrediction(
   ticker: string,
   targetPrice: number,
   stockData: any,
   indicators: any,
-  regime: string,
-  sentiment: number
+  regimeInfo: { regime: string; strength: number; description: string },
+  sentiment: { score: number; articleCount: number; confidence: number }
 ): Promise<any> {
   const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
   if (!LOVABLE_API_KEY) {
@@ -400,12 +745,6 @@ async function generatePriceTargetPrediction(
   const priceChange = ((targetPrice - currentPrice) / currentPrice) * 100;
   const direction = targetPrice > currentPrice ? "up" : "down";
   
-  // Handle null/undefined values safely
-  const safeToFixed = (val: number | null | undefined, digits: number = 2): string => {
-    if (val === null || val === undefined || isNaN(val)) return "N/A";
-    return val.toFixed(digits);
-  };
-  
   // Calculate historical price movement rates
   const prices = stockData.close.filter((p: number) => p != null);
   const dailyReturns: number[] = [];
@@ -415,7 +754,7 @@ async function generatePriceTargetPrediction(
   const avgDailyReturn = dailyReturns.reduce((a, b) => a + b, 0) / dailyReturns.length;
   const avgAbsDailyReturn = dailyReturns.map(Math.abs).reduce((a, b) => a + b, 0) / dailyReturns.length;
   
-  // Calculate 30, 90, 180 day changes for context
+  // Calculate period changes for context
   const change30d = prices.length >= 30 ? ((prices[prices.length - 1] - prices[prices.length - 30]) / prices[prices.length - 30]) * 100 : 0;
   const change90d = prices.length >= 90 ? ((prices[prices.length - 1] - prices[prices.length - 90]) / prices[prices.length - 90]) * 100 : 0;
   const change180d = prices.length >= 180 ? ((prices[prices.length - 1] - prices[prices.length - 180]) / prices[prices.length - 180]) * 100 : 0;
@@ -426,6 +765,9 @@ async function generatePriceTargetPrediction(
     currentPrice: currentPrice,
     rsi: indicators.rsi.slice(-5),
     volatility: indicators.volatility.slice(-5),
+    stochK: indicators.stochastic.k.slice(-5),
+    adx: indicators.adx.adx.slice(-5),
+    atr: indicators.atr.slice(-5),
   };
   
   const prompt = `You are an expert quantitative analyst. Analyze when this ${ticker.includes('-') ? 'cryptocurrency' : 'stock'} might reach the target price.
@@ -434,8 +776,15 @@ ASSET: ${ticker}
 CURRENT PRICE: $${safeToFixed(currentPrice)}
 TARGET PRICE: $${safeToFixed(targetPrice)}
 REQUIRED CHANGE: ${priceChange > 0 ? '+' : ''}${safeToFixed(priceChange)}% (${direction})
-MARKET REGIME: ${regime}
-NEWS SENTIMENT: ${safeToFixed(sentiment)} (scale -1 to 1)
+
+MARKET REGIME: ${regimeInfo.regime.toUpperCase()}
+Regime Description: ${regimeInfo.description}
+
+NEWS SENTIMENT: ${safeToFixed(sentiment.score)} (scale -1 to 1, ${sentiment.articleCount} articles)
+
+SUPPORT & RESISTANCE LEVELS:
+- Support: ${indicators.supportResistance.support.map((s: number) => `$${safeToFixed(s)}`).join(', ') || 'None'}
+- Resistance: ${indicators.supportResistance.resistance.map((r: number) => `$${safeToFixed(r)}`).join(', ') || 'None'}
 
 HISTORICAL PERFORMANCE:
 - 30-Day Change: ${safeToFixed(change30d)}%
@@ -449,12 +798,16 @@ ${recentData.dates.map((d: string, i: number) => `${d}: $${safeToFixed(recentDat
 
 TECHNICAL INDICATORS (last 5 values):
 - RSI14: ${recentData.rsi.map((v: number) => safeToFixed(v, 1)).join(', ')}
+- Stochastic %K: ${recentData.stochK.map((v: number) => safeToFixed(v, 1)).join(', ')}
+- ADX: ${recentData.adx.map((v: number) => safeToFixed(v, 1)).join(', ')}
+- ATR: ${recentData.atr.map((v: number) => safeToFixed(v, 2)).join(', ')}
 - Volatility: ${recentData.volatility.map((v: number) => v != null ? safeToFixed(v * 100) + '%' : 'N/A').join(', ')}
+- OBV Trend: ${indicators.obvTrend}
 
 Analyze the likelihood and timeframe for reaching the target price of $${safeToFixed(targetPrice)}. Consider:
-1. Is this target realistic based on historical movement patterns?
-2. How long might it take based on average daily/monthly returns?
-3. What's the probability of reaching this target?
+1. Is this target realistic based on historical movement patterns and support/resistance?
+2. How long might it take based on average daily/monthly returns and current trend strength (ADX)?
+3. What's the probability of reaching this target given current market regime?
 
 You MUST respond with ONLY valid JSON in this exact format:
 {
@@ -467,7 +820,7 @@ You MUST respond with ONLY valid JSON in this exact format:
   "keyFactors": ["<factor 1>", "<factor 2>", "<factor 3>"]
 }`;
 
-  console.log("Calling Lovable AI for price target prediction...");
+  console.log("Calling Lovable AI for enhanced price target prediction...");
   
   const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
     method: "POST",
@@ -481,7 +834,6 @@ You MUST respond with ONLY valid JSON in this exact format:
         { role: "system", content: "You are a quantitative financial analyst specializing in price target analysis. Respond only with valid JSON." },
         { role: "user", content: prompt }
       ],
-      temperature: 0.7,
     }),
   });
 
@@ -518,6 +870,48 @@ You MUST respond with ONLY valid JSON in this exact format:
   }
 }
 
+// Calculate all enhanced indicators
+function calculateAllIndicators(stockData: any) {
+  const closePrices = stockData.close.filter((p: number) => p != null);
+  const highPrices = stockData.high?.filter((p: number) => p != null) || closePrices;
+  const lowPrices = stockData.low?.filter((p: number) => p != null) || closePrices;
+  const volumes = stockData.volume?.filter((v: number) => v != null) || new Array(closePrices.length).fill(1000000);
+
+  const ema12 = calculateEMA(closePrices, 12);
+  const ema26 = calculateEMA(closePrices, 26);
+  const sma50 = calculateSMA(closePrices, 50);
+  const rsi = calculateRSI(closePrices, 14);
+  const macd = calculateMACD(closePrices);
+  const volatility = calculateVolatility(closePrices, 20);
+  
+  // New indicators
+  const bollingerBands = calculateBollingerBands(closePrices, 20, 2);
+  const atr = calculateATR(highPrices, lowPrices, closePrices, 14);
+  const stochastic = calculateStochastic(closePrices, highPrices, lowPrices, 14, 3);
+  const adx = calculateADX(highPrices, lowPrices, closePrices, 14);
+  const obv = calculateOBV(closePrices, volumes);
+  const obvTrend = getOBVTrend(obv, 20);
+  const supportResistance = findSupportResistance(closePrices, 60);
+  const fibonacci = calculateFibonacciLevels(closePrices, 60);
+
+  return {
+    ema12,
+    ema26,
+    sma50,
+    rsi,
+    macd,
+    volatility,
+    bollingerBands,
+    atr,
+    stochastic,
+    adx,
+    obv,
+    obvTrend,
+    supportResistance,
+    fibonacci,
+  };
+}
+
 // Trading style configurations
 const tradingStyles = {
   scalping: {
@@ -526,13 +920,13 @@ const tradingStyles = {
     minVolatility: 0.02,
     preferredRegimes: ["volatile"],
     scoreMultiplier: (volatility: number) => volatility > 0.03 ? 1.5 : 1,
-    roiMultiplier: 1.0, // Short-term, smaller moves
+    roiMultiplier: 1.0,
   },
   daytrading: {
     volatilityPreference: "medium-high",
     holdingPeriod: "Hours (same day)",
     minVolatility: 0.015,
-    preferredRegimes: ["volatile", "bullish", "bearish"],
+    preferredRegimes: ["volatile", "bullish", "bearish", "strong_bullish", "strong_bearish"],
     scoreMultiplier: (volatility: number) => volatility > 0.02 ? 1.3 : 1,
     roiMultiplier: 1.2,
   },
@@ -540,7 +934,7 @@ const tradingStyles = {
     volatilityPreference: "medium",
     holdingPeriod: "Days to weeks",
     minVolatility: 0.01,
-    preferredRegimes: ["bullish", "bearish"],
+    preferredRegimes: ["bullish", "bearish", "strong_bullish", "strong_bearish"],
     scoreMultiplier: (volatility: number) => volatility > 0.01 && volatility < 0.03 ? 1.4 : 1,
     roiMultiplier: 1.5,
   },
@@ -548,25 +942,25 @@ const tradingStyles = {
     volatilityPreference: "low",
     holdingPeriod: "Weeks to months",
     minVolatility: 0,
-    preferredRegimes: ["bullish", "neutral"],
+    preferredRegimes: ["bullish", "neutral", "strong_bullish"],
     scoreMultiplier: (volatility: number) => volatility < 0.02 ? 1.5 : 1,
-    roiMultiplier: 2.0, // Long-term, larger potential moves
+    roiMultiplier: 2.0,
   },
 };
 
 // Style-specific screener configurations
 const screenersByStyle: Record<string, string[]> = {
   scalping: [
-    "most_actives",        // High volume - essential for scalping
-    "day_gainers",         // Big movers
-    "day_losers",          // Big movers (short opportunities)
-    "small_cap_gainers",   // High volatility small caps
+    "most_actives",
+    "day_gainers",
+    "day_losers",
+    "small_cap_gainers",
   ],
   daytrading: [
     "most_actives",
     "day_gainers",
     "day_losers",
-    "growth_technology_stocks",  // Tech tends to have good intraday moves
+    "growth_technology_stocks",
   ],
   swing: [
     "undervalued_growth_stocks",
@@ -575,13 +969,12 @@ const screenersByStyle: Record<string, string[]> = {
     "day_losers",
   ],
   position: [
-    "undervalued_large_caps",     // Value plays for long-term
+    "undervalued_large_caps",
     "undervalued_growth_stocks",
-    "most_actives",               // Include some liquid names
+    "most_actives",
   ],
 };
 
-// Fetch market movers from Yahoo Finance screener - style-specific
 async function fetchMarketScreener(tradingStyle: string): Promise<{ ticker: string; percentChange: number; volume: number; marketCap: number }[]> {
   const screenerIds = screenersByStyle[tradingStyle] || screenersByStyle.swing;
   const screenerUrls = screenerIds.map(id => 
@@ -590,7 +983,6 @@ async function fetchMarketScreener(tradingStyle: string): Promise<{ ticker: stri
   
   const allTickers: Map<string, { ticker: string; percentChange: number; volume: number; marketCap: number }> = new Map();
   
-  // Add crypto tickers (good for scalping/daytrading due to volatility)
   if (tradingStyle === "scalping" || tradingStyle === "daytrading") {
     const cryptoTickers = ["BTC-USD", "ETH-USD", "SOL-USD", "XRP-USD", "DOGE-USD", "AVAX-USD"];
     for (const ticker of cryptoTickers) {
@@ -615,15 +1007,13 @@ async function fetchMarketScreener(tradingStyle: string): Promise<{ ticker: stri
       const data = await response.json();
       const quotes = data?.finance?.result?.[0]?.quotes || [];
       
-      // Different market cap requirements per style
-      const minMarketCap = tradingStyle === "position" ? 10000000000 : // $10B for position
-                          tradingStyle === "scalping" ? 500000000 :   // $500M for scalping (need liquidity, not size)
-                          1000000000;                                  // $1B default
+      const minMarketCap = tradingStyle === "position" ? 10000000000 :
+                          tradingStyle === "scalping" ? 500000000 :
+                          1000000000;
       
-      // Different volume requirements per style
-      const minVolume = tradingStyle === "scalping" ? 5000000 :       // High volume for scalping
-                       tradingStyle === "daytrading" ? 2000000 :      // Good volume for daytrading
-                       500000;                                         // Lower for swing/position
+      const minVolume = tradingStyle === "scalping" ? 5000000 :
+                       tradingStyle === "daytrading" ? 2000000 :
+                       500000;
       
       for (const quote of quotes) {
         if (quote.symbol && 
@@ -645,15 +1035,11 @@ async function fetchMarketScreener(tradingStyle: string): Promise<{ ticker: stri
   
   const tickers = Array.from(allTickers.values());
   
-  // Sort differently based on style
   if (tradingStyle === "scalping" || tradingStyle === "daytrading") {
-    // For short-term: prioritize volume and movement
     tickers.sort((a, b) => (b.percentChange * b.volume) - (a.percentChange * a.volume));
   } else if (tradingStyle === "position") {
-    // For long-term: prioritize market cap (stability)
     tickers.sort((a, b) => b.marketCap - a.marketCap);
   } else {
-    // Swing: balance of movement and volume
     tickers.sort((a, b) => b.percentChange - a.percentChange);
   }
   
@@ -661,7 +1047,6 @@ async function fetchMarketScreener(tradingStyle: string): Promise<{ ticker: stri
   return tickers.slice(0, 50);
 }
 
-// Fallback stock list if screener fails
 const fallbackStocks = [
   "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "TSLA",
   "JPM", "V", "JNJ", "WMT", "PG", "UNH", "HD",
@@ -669,7 +1054,7 @@ const fallbackStocks = [
   "BTC-USD", "ETH-USD", "SOL-USD", "XRP-USD", "ADA-USD"
 ];
 
-// Analyze a single stock for the Guide mode with ROI calculation - now with hard filters
+// ENHANCED: Guide Analysis with New Indicators
 async function analyzeStockForGuide(ticker: string, tradingStyle: string = "swing", volumeData?: number): Promise<any | null> {
   try {
     const stockData = await fetchStockData(ticker);
@@ -680,30 +1065,40 @@ async function analyzeStockForGuide(ticker: string, tradingStyle: string = "swin
     }
     
     const closePrices = stockData.close.filter((p: number) => p != null);
+    const highPrices = stockData.high?.filter((p: number) => p != null) || closePrices;
+    const lowPrices = stockData.low?.filter((p: number) => p != null) || closePrices;
     const volumes = stockData.volume?.filter((v: number) => v != null) || [];
     const latestVolume = volumes[volumes.length - 1] || volumeData || 0;
     
-    const indicators = {
-      ema12: calculateEMA(closePrices, 12),
-      ema26: calculateEMA(closePrices, 26),
-      sma50: calculateSMA(closePrices, 50),
-      rsi: calculateRSI(closePrices, 14),
-      macd: calculateMACD(closePrices),
-      volatility: calculateVolatility(closePrices, 20),
-    };
+    // Calculate all indicators including new ones
+    const ema12 = calculateEMA(closePrices, 12);
+    const ema26 = calculateEMA(closePrices, 26);
+    const rsi = calculateRSI(closePrices, 14);
+    const macd = calculateMACD(closePrices);
+    const volatility = calculateVolatility(closePrices, 20);
+    const bollingerBands = calculateBollingerBands(closePrices, 20, 2);
+    const adx = calculateADX(highPrices, lowPrices, closePrices, 14);
+    const stochastic = calculateStochastic(closePrices, highPrices, lowPrices, 14, 3);
+    const obv = calculateOBV(closePrices, volumes);
+    const obvTrend = getOBVTrend(obv, 20);
     
-    const regime = detectRegime(closePrices, indicators.rsi, indicators.volatility);
+    // Use enhanced regime detection
+    const regimeInfo = detectRegimeEnhanced(closePrices, rsi, volatility, adx, bollingerBands);
+    const regime = regimeInfo.regime;
+    
     const currentPrice = closePrices[closePrices.length - 1];
-    const latestRSI = indicators.rsi[indicators.rsi.length - 1];
-    const latestMACD = indicators.macd.macd[indicators.macd.macd.length - 1];
-    const latestSignal = indicators.macd.signal[indicators.macd.signal.length - 1];
-    const latestVolatility = indicators.volatility[indicators.volatility.length - 1] || 0;
+    const latestRSI = rsi[rsi.length - 1];
+    const latestMACD = macd.macd[macd.macd.length - 1];
+    const latestSignal = macd.signal[macd.signal.length - 1];
+    const latestVolatility = volatility[volatility.length - 1] || 0;
+    const latestADX = adx.adx[adx.adx.length - 1] || 0;
+    const latestStochK = stochastic.k[stochastic.k.length - 1] || 50;
+    const latestBBUpper = bollingerBands.upper[bollingerBands.upper.length - 1];
+    const latestBBLower = bollingerBands.lower[bollingerBands.lower.length - 1];
     
     const styleConfig = tradingStyles[tradingStyle as keyof typeof tradingStyles] || tradingStyles.swing;
     
-    // === HARD REJECTION RULES BASED ON TRADING STYLE ===
-    
-    // Scalping: MUST have high volatility and volume
+    // === HARD REJECTION RULES ===
     if (tradingStyle === "scalping") {
       if (latestVolatility < 0.02) {
         console.log(`${ticker} rejected for scalping: volatility too low (${(latestVolatility * 100).toFixed(1)}%)`);
@@ -715,7 +1110,6 @@ async function analyzeStockForGuide(ticker: string, tradingStyle: string = "swin
       }
     }
     
-    // Day trading: needs decent volatility and volume
     if (tradingStyle === "daytrading") {
       if (latestVolatility < 0.015) {
         console.log(`${ticker} rejected for daytrading: volatility too low (${(latestVolatility * 100).toFixed(1)}%)`);
@@ -727,20 +1121,17 @@ async function analyzeStockForGuide(ticker: string, tradingStyle: string = "swin
       }
     }
     
-    // Position trading: reject extremely volatile stocks
     if (tradingStyle === "position") {
       if (latestVolatility > 0.05) {
         console.log(`${ticker} rejected for position: too volatile (${(latestVolatility * 100).toFixed(1)}%)`);
         return null;
       }
-      // Also reject meme-like regimes for position trading
       if (regime === "volatile") {
         console.log(`${ticker} rejected for position: volatile regime`);
         return null;
       }
     }
     
-    // Swing trading: reject extremes
     if (tradingStyle === "swing") {
       if (latestVolatility > 0.06) {
         console.log(`${ticker} rejected for swing: too volatile`);
@@ -752,7 +1143,7 @@ async function analyzeStockForGuide(ticker: string, tradingStyle: string = "swin
       }
     }
     
-    // === SCORING ===
+    // === ENHANCED SCORING WITH NEW INDICATORS ===
     const priceChange5d = (closePrices[closePrices.length - 1] - closePrices[closePrices.length - 6]) / closePrices[closePrices.length - 6];
     const priceChange20d = (closePrices[closePrices.length - 1] - closePrices[closePrices.length - 21]) / closePrices[closePrices.length - 21];
     
@@ -771,15 +1162,52 @@ async function analyzeStockForGuide(ticker: string, tradingStyle: string = "swin
       direction = "bearish";
     }
     
+    // Stochastic signals (new)
+    if (latestStochK < 20) {
+      score += 1.5;
+      signals.push("oversold stochastic");
+      if (direction === "neutral") direction = "bullish";
+    } else if (latestStochK > 80) {
+      score += 1.5;
+      signals.push("overbought stochastic");
+      if (direction === "neutral") direction = "bearish";
+    }
+    
     // MACD crossover
-    if (latestMACD > latestSignal && indicators.macd.macd[indicators.macd.macd.length - 2] <= indicators.macd.signal[indicators.macd.signal.length - 2]) {
+    if (latestMACD > latestSignal && macd.macd[macd.macd.length - 2] <= macd.signal[macd.signal.length - 2]) {
       score += 2;
       signals.push("bullish MACD crossover");
       direction = "bullish";
-    } else if (latestMACD < latestSignal && indicators.macd.macd[indicators.macd.macd.length - 2] >= indicators.macd.signal[indicators.macd.signal.length - 2]) {
+    } else if (latestMACD < latestSignal && macd.macd[macd.macd.length - 2] >= macd.signal[macd.signal.length - 2]) {
       score += 2;
       signals.push("bearish MACD crossover");
       direction = "bearish";
+    }
+    
+    // Bollinger Band signals (new)
+    if (currentPrice < latestBBLower) {
+      score += 1.5;
+      signals.push("below lower Bollinger Band");
+      if (direction === "neutral") direction = "bullish";
+    } else if (currentPrice > latestBBUpper) {
+      score += 1.5;
+      signals.push("above upper Bollinger Band");
+      if (direction === "neutral") direction = "bearish";
+    }
+    
+    // ADX trend strength bonus (new)
+    if (latestADX > 25) {
+      score += 1;
+      signals.push(`strong trend (ADX: ${latestADX.toFixed(0)})`);
+    }
+    
+    // Volume confirmation via OBV (new)
+    if (obvTrend === "rising" && direction === "bullish") {
+      score += 1;
+      signals.push("volume confirms bullish");
+    } else if (obvTrend === "falling" && direction === "bearish") {
+      score += 1;
+      signals.push("volume confirms bearish");
     }
     
     // Momentum signals
@@ -793,15 +1221,12 @@ async function analyzeStockForGuide(ticker: string, tradingStyle: string = "swin
       if (direction === "neutral") direction = "bearish";
     }
     
-    // === STYLE-WEIGHTED SCORING (major impact) ===
-    
-    // Regime matching - now a 1.5x multiplier instead of +1
+    // === STYLE-WEIGHTED SCORING ===
     if (styleConfig.preferredRegimes.includes(regime)) {
       score *= 1.5;
       signals.push(`${regime} regime match`);
     }
     
-    // Volatility preference matching - 1.3x boost
     if (styleConfig.volatilityPreference === "high" && latestVolatility > 0.025) {
       score *= 1.3;
     } else if (styleConfig.volatilityPreference === "low" && latestVolatility < 0.015) {
@@ -810,7 +1235,6 @@ async function analyzeStockForGuide(ticker: string, tradingStyle: string = "swin
       score *= 1.2;
     }
     
-    // Apply style-specific volatility multiplier (existing)
     score = score * styleConfig.scoreMultiplier(latestVolatility);
     
     // Require meaningful signal
@@ -818,10 +1242,8 @@ async function analyzeStockForGuide(ticker: string, tradingStyle: string = "swin
       return null;
     }
     
-    // Confidence based on score
-    const confidence = Math.min(92, 45 + score * 7);
+    const confidence = Math.min(92, 45 + score * 6);
     
-    // Risk level
     let riskLevel: "low" | "medium" | "high" = "medium";
     if (latestVolatility > 0.03) {
       riskLevel = "high";
@@ -854,6 +1276,9 @@ async function analyzeStockForGuide(ticker: string, tradingStyle: string = "swin
       riskLevel,
       holdingPeriod: styleConfig.holdingPeriod,
       regime,
+      regimeStrength: regimeInfo.strength,
+      adxStrength: latestADX,
+      obvTrend,
     };
   } catch (error) {
     console.error(`Failed to analyze ${ticker}:`, error);
@@ -861,7 +1286,6 @@ async function analyzeStockForGuide(ticker: string, tradingStyle: string = "swin
   }
 }
 
-// Enhance top opportunities with AI insights
 async function enhanceWithAI(opportunities: any[], tradingStyle: string): Promise<any[]> {
   const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
   if (!LOVABLE_API_KEY || opportunities.length === 0) {
@@ -883,6 +1307,8 @@ ${i + 1}. ${o.ticker}
    - Predicted Price: $${o.predictedPrice.toFixed(2)}
    - Expected ROI: ${o.expectedROI}%
    - Volatility: ${(o.volatility * 100).toFixed(1)}%
+   - ADX Strength: ${o.adxStrength?.toFixed(1) || 'N/A'}
+   - OBV Trend: ${o.obvTrend || 'N/A'}
    - Technical Signals: ${o.explanation}
    - Market Regime: ${o.regime}
 `).join('\n')}
@@ -914,7 +1340,6 @@ For each opportunity, provide enhanced analysis. Respond with ONLY valid JSON ar
           { role: "system", content: "You are an expert trading analyst. Respond only with valid JSON array." },
           { role: "user", content: prompt }
         ],
-        temperature: 0.7,
       }),
     });
 
@@ -938,7 +1363,6 @@ For each opportunity, provide enhanced analysis. Respond with ONLY valid JSON ar
     
     const enhancements = JSON.parse(jsonStr.trim());
     
-    // Merge AI insights with original data
     return opportunities.map(opp => {
       const enhancement = enhancements.find((e: any) => e.ticker === opp.ticker);
       if (enhancement) {
@@ -960,41 +1384,25 @@ For each opportunity, provide enhanced analysis. Respond with ONLY valid JSON ar
   }
 }
 
-// Generate guide opportunities with market-wide scanning - now style-aware
 async function generateGuideOpportunities(tradingStyle: string = "swing"): Promise<any[]> {
-  console.log(`Scanning market for ${tradingStyle} opportunities...`);
+  console.log(`Scanning market for ${tradingStyle} opportunities with enhanced indicators...`);
   
-  // Fetch style-specific tickers from market screener
   let screenerResults: { ticker: string; percentChange: number; volume: number; marketCap: number }[] = [];
   
   try {
     screenerResults = await fetchMarketScreener(tradingStyle);
-    console.log(`Using ${screenerResults.length} tickers from ${tradingStyle} screener`);
   } catch (error) {
-    console.warn("Market screener failed, using fallback list");
+    console.error("Market screener failed:", error);
   }
   
-  // Style-specific fallback lists
-  const fallbackByStyle: Record<string, string[]> = {
-    scalping: ["NVDA", "AMD", "TSLA", "META", "AAPL", "GOOGL", "AMZN", "NFLX", "BTC-USD", "ETH-USD", "SOL-USD"],
-    daytrading: ["NVDA", "AMD", "TSLA", "META", "AAPL", "MSFT", "GOOGL", "AMZN", "CRM", "NFLX", "BTC-USD", "ETH-USD"],
-    swing: ["AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "TSLA", "JPM", "V", "JNJ", "DIS", "AMD"],
-    position: ["JNJ", "PG", "WMT", "KO", "PEP", "MCD", "VZ", "T", "IBM", "XOM", "CVX", "UNH", "MSFT", "AAPL"],
-  };
+  const tickersToScan = screenerResults.length > 0 
+    ? screenerResults.map(r => ({ ticker: r.ticker, volume: r.volume }))
+    : fallbackStocks.map(t => ({ ticker: t, volume: 0 }));
   
-  // Use fallback if screener failed
-  if (screenerResults.length < 10) {
-    const fallbackTickers = fallbackByStyle[tradingStyle] || fallbackByStyle.swing;
-    screenerResults = fallbackTickers.map(t => ({ ticker: t, percentChange: 0, volume: 0, marketCap: 0 }));
-    console.log(`Using ${tradingStyle} fallback stock list`);
-  }
-  
-  // Analyze top 40 candidates (increased to account for rejections)
-  const tickersToScan = screenerResults.slice(0, 40);
+  console.log(`Analyzing ${tickersToScan.length} tickers for ${tradingStyle} opportunities`);
   
   const opportunities: any[] = [];
   
-  // Analyze stocks in batches
   for (let i = 0; i < tickersToScan.length; i += 5) {
     const batch = tickersToScan.slice(i, i + 5);
     const results = await Promise.all(
@@ -1007,24 +1415,19 @@ async function generateGuideOpportunities(tradingStyle: string = "swing"): Promi
       }
     }
     
-    // Small delay between batches
     if (i + 5 < tickersToScan.length) {
       await new Promise(resolve => setTimeout(resolve, 250));
     }
   }
   
-  console.log(`Found ${opportunities.length} valid ${tradingStyle} opportunities after filtering`);
+  console.log(`Found ${opportunities.length} valid ${tradingStyle} opportunities with enhanced analysis`);
   
-  // Sort by score (which now incorporates style matching)
   opportunities.sort((a, b) => b.score - a.score);
   
-  // Take top 8 for AI enhancement
   const topOpportunities = opportunities.slice(0, 8);
   
-  // Enhance with AI
   const enhancedOpportunities = await enhanceWithAI(topOpportunities, tradingStyle);
   
-  // Return top 6 with score removed from output
   return enhancedOpportunities.slice(0, 6).map(({ score, ...opp }) => opp);
 }
 
@@ -1034,13 +1437,11 @@ serve(async (req) => {
   }
 
   try {
-    // Verify authentication before processing any request
     const { user, error: authError } = await verifyAuth(req);
     if (authError) {
       return authError;
     }
     
-    // Check rate limit
     const rateLimit = checkRateLimit(user.id);
     if (!rateLimit.allowed) {
       console.log(`Rate limit exceeded for user ${user.id}`);
@@ -1093,7 +1494,31 @@ serve(async (req) => {
       );
     }
     
-    // Handle price-target mode (reverse prediction)
+    // Fetch stock data
+    console.log(`Fetching data for ${ticker.toUpperCase()}...`);
+    const stockData = await fetchStockData(ticker.toUpperCase());
+    
+    if (!stockData.close || stockData.close.length < 60) {
+      throw new Error("Insufficient historical data for analysis");
+    }
+    
+    // Calculate all enhanced indicators
+    const indicators = calculateAllIndicators(stockData);
+    const closePrices = stockData.close.filter((p: number) => p != null);
+    
+    // Get enhanced regime detection
+    const regimeInfo = detectRegimeEnhanced(
+      closePrices,
+      indicators.rsi,
+      indicators.volatility,
+      indicators.adx,
+      indicators.bollingerBands
+    );
+    
+    // Fetch enhanced news sentiment
+    const sentiment = await fetchNewsSentiment(ticker);
+    
+    // Handle price-target mode
     if (mode === "price-target") {
       if (!targetPrice || typeof targetPrice !== "number" || targetPrice <= 0) {
         return new Response(
@@ -1102,40 +1527,14 @@ serve(async (req) => {
         );
       }
       
-      console.log(`Processing price target prediction for ${ticker.toUpperCase()} targeting $${targetPrice}`);
+      console.log(`Processing enhanced price target prediction for ${ticker.toUpperCase()} targeting $${targetPrice}`);
       
-      // Fetch real stock data
-      const stockData = await fetchStockData(ticker.toUpperCase());
-      
-      if (!stockData.close || stockData.close.length < 60) {
-        throw new Error("Insufficient historical data for analysis");
-      }
-      
-      // Calculate technical indicators
-      const closePrices = stockData.close.filter((p: number) => p != null);
-      
-      const indicators = {
-        ema12: calculateEMA(closePrices, 12),
-        ema26: calculateEMA(closePrices, 26),
-        sma50: calculateSMA(closePrices, 50),
-        rsi: calculateRSI(closePrices, 14),
-        macd: calculateMACD(closePrices),
-        volatility: calculateVolatility(closePrices, 20),
-      };
-      
-      // Detect market regime
-      const regime = detectRegime(closePrices, indicators.rsi, indicators.volatility);
-      
-      // Fetch news sentiment
-      const sentiment = await fetchNewsSentiment(ticker);
-      
-      // Get AI price target prediction
       const aiPrediction = await generatePriceTargetPrediction(
         ticker.toUpperCase(),
         targetPrice,
         stockData,
         indicators,
-        regime,
+        regimeInfo,
         sentiment
       );
       
@@ -1143,13 +1542,11 @@ serve(async (req) => {
       const direction = targetPrice > currentPrice ? "up" : "down";
       const priceChangePercent = ((targetPrice - currentPrice) / currentPrice) * 100;
       
-      // Prepare historical data for chart
       const historicalData = stockData.timestamps.slice(-60).map((date: string, i: number) => ({
         date,
         price: parseFloat(stockData.close.slice(-60)[i]?.toFixed(2) || "0"),
       }));
       
-      // Calculate days to target
       const estimatedDateObj = new Date(aiPrediction.estimatedDate);
       const today = new Date();
       const daysToTarget = Math.ceil((estimatedDateObj.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
@@ -1169,13 +1566,15 @@ serve(async (req) => {
         isRealistic: aiPrediction.isRealistic,
         reasoning: aiPrediction.reasoning,
         keyFactors: aiPrediction.keyFactors || [],
-        regime,
-        sentimentScore: sentiment,
+        regime: regimeInfo.regime,
+        regimeDescription: regimeInfo.description,
+        sentimentScore: sentiment.score,
+        sentimentConfidence: sentiment.confidence,
         historicalData,
         currency: stockData.currency || "USD",
       };
       
-      console.log("Price target prediction complete:", result.ticker, `$${result.targetPrice}`, result.estimatedDate);
+      console.log("Enhanced price target prediction complete:", result.ticker, `$${result.targetPrice}`, result.estimatedDate);
       
       return new Response(JSON.stringify(result), {
         headers: { 
@@ -1196,40 +1595,15 @@ serve(async (req) => {
       );
     }
 
-    console.log(`Processing prediction for ${ticker.toUpperCase()} targeting ${targetDate}`);
+    console.log(`Processing enhanced prediction for ${ticker.toUpperCase()} targeting ${targetDate}`);
     
-    // Fetch real stock data
-    const stockData = await fetchStockData(ticker.toUpperCase());
-    
-    if (!stockData.close || stockData.close.length < 60) {
-      throw new Error("Insufficient historical data for analysis");
-    }
-    
-    // Calculate technical indicators
-    const closePrices = stockData.close.filter((p: number) => p != null);
-    
-    const indicators = {
-      ema12: calculateEMA(closePrices, 12),
-      ema26: calculateEMA(closePrices, 26),
-      sma50: calculateSMA(closePrices, 50),
-      rsi: calculateRSI(closePrices, 14),
-      macd: calculateMACD(closePrices),
-      volatility: calculateVolatility(closePrices, 20),
-    };
-    
-    // Detect market regime
-    const regime = detectRegime(closePrices, indicators.rsi, indicators.volatility);
-    
-    // Fetch news sentiment using server-side API key
-    const sentiment = await fetchNewsSentiment(ticker);
-    
-    // Get AI prediction
+    // Get enhanced AI prediction
     const aiPrediction = await generateAIPrediction(
       ticker.toUpperCase(),
       targetDate,
       stockData,
       indicators,
-      regime,
+      regimeInfo,
       sentiment
     );
     
@@ -1237,7 +1611,6 @@ serve(async (req) => {
     const predictedPrice = aiPrediction.predictedPrice;
     const uncertaintyPercent = aiPrediction.uncertaintyPercent / 100;
     
-    // Prepare historical data for chart
     const historicalData = stockData.timestamps.slice(-60).map((date: string, i: number) => ({
       date,
       price: parseFloat(stockData.close.slice(-60)[i]?.toFixed(2) || "0"),
@@ -1260,15 +1633,23 @@ serve(async (req) => {
       uncertaintyLow: parseFloat((predictedPrice * (1 - uncertaintyPercent)).toFixed(2)),
       uncertaintyHigh: parseFloat((predictedPrice * (1 + uncertaintyPercent)).toFixed(2)),
       confidence: aiPrediction.confidence,
-      regime,
-      sentimentScore: sentiment,
+      regime: regimeInfo.regime,
+      regimeDescription: regimeInfo.description,
+      regimeStrength: regimeInfo.strength,
+      sentimentScore: sentiment.score,
+      sentimentConfidence: sentiment.confidence,
       featureImportance,
       historicalData,
       reasoning: aiPrediction.reasoning,
       currency: stockData.currency || "USD",
+      // Additional enhanced data
+      supportLevels: indicators.supportResistance.support,
+      resistanceLevels: indicators.supportResistance.resistance,
+      fibonacciTrend: indicators.fibonacci.trend,
+      obvTrend: indicators.obvTrend,
     };
 
-    console.log("Prediction complete:", result.ticker, result.predictedPrice);
+    console.log("Enhanced prediction complete:", result.ticker, result.predictedPrice);
     
     return new Response(JSON.stringify(result), {
       headers: { 
