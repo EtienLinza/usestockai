@@ -9,11 +9,15 @@ import {
   Brain,
   Gauge,
   AlertTriangle,
-  Minus
+  Minus,
+  BarChart3,
+  ArrowUp,
+  ArrowDown
 } from "lucide-react";
 import { PriceChart } from "./PriceChart";
 import { ShareReport } from "./ShareReport";
 import { InvestmentCalculator } from "./InvestmentCalculator";
+import { TechnicalIndicatorsPanel } from "./TechnicalIndicatorsPanel";
 import { PredictionData } from "@/pages/Dashboard";
 
 interface StockPredictionCardProps {
@@ -33,10 +37,15 @@ export const StockPredictionCard = ({ data }: StockPredictionCardProps) => {
 
   const getRegimeBadge = (regime: string) => {
     const variants: Record<string, { color: string; label: string; icon: typeof TrendingUp }> = {
+      strong_bullish: { color: "text-success bg-success/10 border-success/20", label: "Strong Bull", icon: TrendingUp },
       bullish: { color: "text-success bg-success/10 border-success/20", label: "Bullish", icon: TrendingUp },
+      strong_bearish: { color: "text-destructive bg-destructive/10 border-destructive/20", label: "Strong Bear", icon: TrendingDown },
       bearish: { color: "text-destructive bg-destructive/10 border-destructive/20", label: "Bearish", icon: TrendingDown },
       neutral: { color: "text-warning bg-warning/10 border-warning/20", label: "Neutral", icon: Minus },
       volatile: { color: "text-chart-4 bg-chart-4/10 border-chart-4/20", label: "Volatile", icon: Activity },
+      ranging: { color: "text-warning bg-warning/10 border-warning/20", label: "Ranging", icon: Minus },
+      overbought: { color: "text-warning bg-warning/10 border-warning/20", label: "Overbought", icon: ArrowUp },
+      oversold: { color: "text-chart-4 bg-chart-4/10 border-chart-4/20", label: "Oversold", icon: ArrowDown },
     };
     const v = variants[regime.toLowerCase()] || variants.neutral;
     const Icon = v.icon;
@@ -128,35 +137,57 @@ export const StockPredictionCard = ({ data }: StockPredictionCardProps) => {
         </Card>
       </div>
 
-      {/* Additional Metrics */}
-      <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-        {/* Sentiment */}
-        <Card className="glass-card p-4">
-          <div className="text-xs text-muted-foreground mb-1">Sentiment</div>
-          <div className={`text-lg font-mono font-medium ${
-            data.sentimentScore > 0 ? "text-success" : 
-            data.sentimentScore < 0 ? "text-destructive" : "text-muted-foreground"
-          }`}>
-            {data.sentimentScore > 0 ? "+" : ""}{data.sentimentScore.toFixed(2)}
-          </div>
-        </Card>
-
+      {/* Additional Metrics - Quick Stats */}
+      <div className="grid grid-cols-3 gap-3">
         {/* Volatility */}
-        <Card className="glass-card p-4">
-          <div className="text-xs text-muted-foreground mb-1">Volatility</div>
-          <div className="text-lg font-mono font-medium">
+        <Card className="glass-card p-3">
+          <div className="text-[10px] text-muted-foreground uppercase tracking-wide mb-1 flex items-center gap-1">
+            <BarChart3 className="w-2.5 h-2.5" />
+            Volatility
+          </div>
+          <div className="text-sm font-mono font-medium">
             {data.volatility ? `${(data.volatility * 100).toFixed(1)}%` : "—"}
           </div>
         </Card>
 
-        {/* Regime */}
-        <Card className="glass-card p-4">
-          <div className="text-xs text-muted-foreground mb-1">Market Regime</div>
-          <div className="text-lg font-medium capitalize">
-            {data.regime}
+        {/* Sentiment Quick */}
+        <Card className="glass-card p-3">
+          <div className="text-[10px] text-muted-foreground uppercase tracking-wide mb-1">Sentiment</div>
+          <div className={`text-sm font-mono font-medium flex items-center gap-1 ${
+            data.sentimentScore > 0.1 ? "text-success" : 
+            data.sentimentScore < -0.1 ? "text-destructive" : "text-muted-foreground"
+          }`}>
+            {data.sentimentScore > 0.1 ? <TrendingUp className="w-3 h-3" /> : 
+             data.sentimentScore < -0.1 ? <TrendingDown className="w-3 h-3" /> : null}
+            {data.sentimentScore > 0 ? "+" : ""}{data.sentimentScore.toFixed(2)}
+          </div>
+        </Card>
+
+        {/* OBV Trend */}
+        <Card className="glass-card p-3">
+          <div className="text-[10px] text-muted-foreground uppercase tracking-wide mb-1">Volume Flow</div>
+          <div className={`text-sm font-medium capitalize ${
+            data.obvTrend === "rising" ? "text-success" :
+            data.obvTrend === "falling" ? "text-destructive" : "text-muted-foreground"
+          }`}>
+            {data.obvTrend || "—"}
           </div>
         </Card>
       </div>
+
+      {/* Technical Indicators Panel */}
+      <TechnicalIndicatorsPanel
+        regime={data.regime}
+        regimeDescription={data.regimeDescription}
+        regimeStrength={data.regimeStrength}
+        sentimentScore={data.sentimentScore}
+        sentimentConfidence={data.sentimentConfidence}
+        supportLevels={data.supportLevels}
+        resistanceLevels={data.resistanceLevels}
+        fibonacciTrend={data.fibonacciTrend}
+        obvTrend={data.obvTrend}
+        currentPrice={data.currentPrice}
+      />
 
       {/* Chart */}
       <Card className="glass-card p-6">
