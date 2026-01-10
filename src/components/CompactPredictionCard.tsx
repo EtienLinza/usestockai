@@ -9,7 +9,11 @@ import {
   Gauge,
   Activity,
   X,
-  Minus
+  Minus,
+  ArrowUp,
+  ArrowDown,
+  Volume2,
+  Layers
 } from "lucide-react";
 import { PredictionData } from "@/pages/Dashboard";
 
@@ -32,10 +36,15 @@ export const CompactPredictionCard = ({ data, onRemove, index }: CompactPredicti
 
   const getRegimeBadge = (regime: string) => {
     const variants: Record<string, { color: string; label: string; icon: typeof TrendingUp }> = {
+      strong_bullish: { color: "text-success bg-success/10 border-success/20", label: "Bull+", icon: TrendingUp },
       bullish: { color: "text-success bg-success/10 border-success/20", label: "Bull", icon: TrendingUp },
+      strong_bearish: { color: "text-destructive bg-destructive/10 border-destructive/20", label: "Bear+", icon: TrendingDown },
       bearish: { color: "text-destructive bg-destructive/10 border-destructive/20", label: "Bear", icon: TrendingDown },
       neutral: { color: "text-warning bg-warning/10 border-warning/20", label: "Neutral", icon: Minus },
       volatile: { color: "text-chart-4 bg-chart-4/10 border-chart-4/20", label: "Volatile", icon: Activity },
+      ranging: { color: "text-warning bg-warning/10 border-warning/20", label: "Range", icon: Minus },
+      overbought: { color: "text-warning bg-warning/10 border-warning/20", label: "OB", icon: ArrowUp },
+      oversold: { color: "text-chart-4 bg-chart-4/10 border-chart-4/20", label: "OS", icon: ArrowDown },
     };
     const v = variants[regime.toLowerCase()] || variants.neutral;
     const Icon = v.icon;
@@ -46,6 +55,10 @@ export const CompactPredictionCard = ({ data, onRemove, index }: CompactPredicti
       </Badge>
     );
   };
+
+  // Find nearest support/resistance
+  const nearestSupport = data.supportLevels?.filter(s => s < data.currentPrice).sort((a, b) => b - a)[0];
+  const nearestResistance = data.resistanceLevels?.filter(r => r > data.currentPrice).sort((a, b) => a - b)[0];
 
   return (
     <motion.div
@@ -90,8 +103,8 @@ export const CompactPredictionCard = ({ data, onRemove, index }: CompactPredicti
           </div>
         </div>
 
-        {/* Metrics */}
-        <div className="grid grid-cols-2 gap-3">
+        {/* Metrics Row 1: Confidence & Range */}
+        <div className="grid grid-cols-2 gap-3 mb-2">
           <div>
             <div className="text-[10px] text-muted-foreground uppercase tracking-wide mb-0.5 flex items-center gap-1">
               <Gauge className="w-2.5 h-2.5" />
@@ -122,8 +135,68 @@ export const CompactPredictionCard = ({ data, onRemove, index }: CompactPredicti
           </div>
         </div>
 
+        {/* Metrics Row 2: Technical Quick View */}
+        <div className="grid grid-cols-3 gap-2 mb-2">
+          {/* Sentiment */}
+          <div className="text-center">
+            <div className="text-[9px] text-muted-foreground uppercase tracking-wide mb-0.5">Sent.</div>
+            <div className={`text-xs font-mono ${
+              data.sentimentScore > 0.1 ? "text-success" : 
+              data.sentimentScore < -0.1 ? "text-destructive" : "text-muted-foreground"
+            }`}>
+              {data.sentimentScore > 0 ? "+" : ""}{data.sentimentScore.toFixed(2)}
+            </div>
+          </div>
+          
+          {/* OBV */}
+          <div className="text-center">
+            <div className="text-[9px] text-muted-foreground uppercase tracking-wide mb-0.5 flex items-center justify-center gap-0.5">
+              <Volume2 className="w-2 h-2" />
+              OBV
+            </div>
+            <div className={`text-xs font-medium capitalize ${
+              data.obvTrend === "rising" ? "text-success" :
+              data.obvTrend === "falling" ? "text-destructive" : "text-muted-foreground"
+            }`}>
+              {data.obvTrend?.charAt(0).toUpperCase() || "—"}
+            </div>
+          </div>
+
+          {/* Fibonacci */}
+          <div className="text-center">
+            <div className="text-[9px] text-muted-foreground uppercase tracking-wide mb-0.5 flex items-center justify-center gap-0.5">
+              <Layers className="w-2 h-2" />
+              Fib
+            </div>
+            <div className={`text-xs font-medium ${
+              data.fibonacciTrend === "uptrend" ? "text-success" :
+              data.fibonacciTrend === "downtrend" ? "text-destructive" : "text-muted-foreground"
+            }`}>
+              {data.fibonacciTrend === "uptrend" ? "↑" : data.fibonacciTrend === "downtrend" ? "↓" : "—"}
+            </div>
+          </div>
+        </div>
+
+        {/* Support/Resistance Quick View */}
+        {(nearestSupport || nearestResistance) && (
+          <div className="flex items-center gap-2 text-[9px] mb-2">
+            {nearestSupport && (
+              <span className="text-success flex items-center gap-0.5">
+                <ArrowDown className="w-2 h-2" />
+                S: ${nearestSupport.toFixed(0)}
+              </span>
+            )}
+            {nearestResistance && (
+              <span className="text-destructive flex items-center gap-0.5">
+                <ArrowUp className="w-2 h-2" />
+                R: ${nearestResistance.toFixed(0)}
+              </span>
+            )}
+          </div>
+        )}
+
         {/* Target Date */}
-        <div className="mt-3 pt-3 border-t border-border/30">
+        <div className="pt-2 border-t border-border/30">
           <div className="text-[10px] text-muted-foreground">
             Target: {data.targetDate}
           </div>

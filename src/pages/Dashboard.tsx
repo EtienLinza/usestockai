@@ -24,12 +24,20 @@ export interface PredictionData {
   uncertaintyHigh: number;
   confidence: number;
   regime: string;
+  regimeDescription?: string;
+  regimeStrength?: number;
   sentimentScore: number;
+  sentimentConfidence?: number;
   featureImportance: { name: string; importance: number }[];
   historicalData: { date: string; price: number }[];
   reasoning?: string;
   volatility?: number;
   currency?: string;
+  // Enhanced technical data
+  supportLevels?: number[];
+  resistanceLevels?: number[];
+  fibonacciTrend?: string;
+  obvTrend?: string;
 }
 
 const Dashboard = () => {
