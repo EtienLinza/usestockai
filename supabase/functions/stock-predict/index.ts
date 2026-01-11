@@ -179,7 +179,7 @@ function calculateVolatility(prices: number[], period: number = 20): number[] {
   return volatility;
 }
 
-// NEW: Bollinger Bands
+// Bollinger Bands
 function calculateBollingerBands(prices: number[], period: number = 20, stdDev: number = 2): { upper: number[]; middle: number[]; lower: number[]; bandwidth: number[] } {
   const sma = calculateSMA(prices, period);
   const upper: number[] = [];
@@ -205,7 +205,7 @@ function calculateBollingerBands(prices: number[], period: number = 20, stdDev: 
   return { upper, middle: sma, lower, bandwidth };
 }
 
-// NEW: Average True Range (ATR)
+// Average True Range (ATR)
 function calculateATR(high: number[], low: number[], close: number[], period: number = 14): number[] {
   const tr: number[] = [high[0] - low[0]];
 
@@ -220,7 +220,7 @@ function calculateATR(high: number[], low: number[], close: number[], period: nu
   return calculateEMA(tr, period);
 }
 
-// NEW: Stochastic Oscillator
+// Stochastic Oscillator
 function calculateStochastic(close: number[], high: number[], low: number[], kPeriod: number = 14, dPeriod: number = 3): { k: number[]; d: number[] } {
   const k: number[] = [];
 
@@ -247,7 +247,7 @@ function calculateStochastic(close: number[], high: number[], low: number[], kPe
   return { k, d: paddedD };
 }
 
-// NEW: Average Directional Index (ADX)
+// Average Directional Index (ADX)
 function calculateADX(high: number[], low: number[], close: number[], period: number = 14): { adx: number[]; plusDI: number[]; minusDI: number[] } {
   const plusDM: number[] = [];
   const minusDM: number[] = [];
@@ -288,7 +288,7 @@ function calculateADX(high: number[], low: number[], close: number[], period: nu
   return { adx: paddedADX, plusDI: paddedPlusDI, minusDI: paddedMinusDI };
 }
 
-// NEW: On Balance Volume (OBV)
+// On Balance Volume (OBV)
 function calculateOBV(close: number[], volume: number[]): number[] {
   const obv: number[] = [volume[0] || 0];
 
@@ -305,7 +305,7 @@ function calculateOBV(close: number[], volume: number[]): number[] {
   return obv;
 }
 
-// NEW: OBV Trend (rising, falling, neutral)
+// OBV Trend (rising, falling, neutral)
 function getOBVTrend(obv: number[], period: number = 20): string {
   const recent = obv.slice(-period);
   const older = obv.slice(-period * 2, -period);
@@ -322,7 +322,7 @@ function getOBVTrend(obv: number[], period: number = 20): string {
   return "neutral";
 }
 
-// NEW: Support & Resistance Detection
+// Support & Resistance Detection
 function findSupportResistance(prices: number[], lookback: number = 60): { support: number[]; resistance: number[] } {
   const support: number[] = [];
   const resistance: number[] = [];
@@ -358,7 +358,7 @@ function findSupportResistance(prices: number[], lookback: number = 60): { suppo
   };
 }
 
-// NEW: Fibonacci Retracement Levels
+// Fibonacci Retracement Levels
 function calculateFibonacciLevels(prices: number[], lookback: number = 60): { levels: { ratio: number; price: number }[]; trend: string } {
   const recent = prices.slice(-lookback);
   const high = Math.max(...recent);
@@ -381,7 +381,486 @@ function calculateFibonacciLevels(prices: number[], lookback: number = 60): { le
   return { levels, trend };
 }
 
+// ============================================================================
+// NEW: VWAP (Volume-Weighted Average Price)
+// ============================================================================
+function calculateVWAP(high: number[], low: number[], close: number[], volume: number[]): number[] {
+  const vwap: number[] = [];
+  let cumulativeTPV = 0;
+  let cumulativeVolume = 0;
+
+  for (let i = 0; i < close.length; i++) {
+    const typicalPrice = (high[i] + low[i] + close[i]) / 3;
+    cumulativeTPV += typicalPrice * (volume[i] || 0);
+    cumulativeVolume += volume[i] || 0;
+    vwap.push(cumulativeVolume === 0 ? typicalPrice : cumulativeTPV / cumulativeVolume);
+  }
+
+  return vwap;
+}
+
+// ============================================================================
+// NEW: Pivot Points (Classic Floor Trader Method)
+// ============================================================================
+function calculatePivotPoints(prevHigh: number, prevLow: number, prevClose: number): {
+  pivot: number;
+  r1: number;
+  r2: number;
+  r3: number;
+  s1: number;
+  s2: number;
+  s3: number;
+} {
+  const pivot = (prevHigh + prevLow + prevClose) / 3;
+  return {
+    pivot,
+    r1: 2 * pivot - prevLow,
+    r2: pivot + (prevHigh - prevLow),
+    r3: prevHigh + 2 * (pivot - prevLow),
+    s1: 2 * pivot - prevHigh,
+    s2: pivot - (prevHigh - prevLow),
+    s3: prevLow - 2 * (prevHigh - pivot),
+  };
+}
+
+// ============================================================================
+// NEW: SIGNAL CONSENSUS SYSTEM
+// ============================================================================
+function calculateSignalConsensus(
+  indicators: any,
+  currentPrice: number
+): {
+  bullishSignals: number;
+  bearishSignals: number;
+  consensusScore: number;
+  alignment: string;
+  signalDetails: string[];
+} {
+  let bullish = 0;
+  let bearish = 0;
+  const signalDetails: string[] = [];
+
+  // RSI Signal (weight: 1.5)
+  const rsi = indicators.rsi[indicators.rsi.length - 1];
+  if (!isNaN(rsi)) {
+    if (rsi < 30) {
+      bullish += 1.5;
+      signalDetails.push(`RSI oversold (${rsi.toFixed(1)})`);
+    } else if (rsi > 70) {
+      bearish += 1.5;
+      signalDetails.push(`RSI overbought (${rsi.toFixed(1)})`);
+    } else if (rsi > 50) {
+      bullish += 0.5;
+      signalDetails.push(`RSI bullish (${rsi.toFixed(1)})`);
+    } else {
+      bearish += 0.5;
+      signalDetails.push(`RSI bearish (${rsi.toFixed(1)})`);
+    }
+  }
+
+  // MACD Signal (weight: 1.5)
+  const macdHist = indicators.macd.histogram[indicators.macd.histogram.length - 1];
+  const prevHist = indicators.macd.histogram[indicators.macd.histogram.length - 2];
+  if (!isNaN(macdHist) && !isNaN(prevHist)) {
+    if (macdHist > 0 && macdHist > prevHist) {
+      bullish += 1.5;
+      signalDetails.push("MACD rising positive");
+    } else if (macdHist < 0 && macdHist < prevHist) {
+      bearish += 1.5;
+      signalDetails.push("MACD falling negative");
+    } else if (macdHist > 0) {
+      bullish += 0.5;
+      signalDetails.push("MACD positive");
+    } else {
+      bearish += 0.5;
+      signalDetails.push("MACD negative");
+    }
+  }
+
+  // EMA Crossover (weight: 1)
+  const ema12 = indicators.ema12[indicators.ema12.length - 1];
+  const ema26 = indicators.ema26[indicators.ema26.length - 1];
+  if (!isNaN(ema12) && !isNaN(ema26)) {
+    if (ema12 > ema26) {
+      bullish += 1;
+      signalDetails.push("EMA12 > EMA26");
+    } else {
+      bearish += 1;
+      signalDetails.push("EMA12 < EMA26");
+    }
+  }
+
+  // Price vs SMA50 (weight: 1)
+  const sma50 = indicators.sma50[indicators.sma50.length - 1];
+  if (!isNaN(sma50)) {
+    if (currentPrice > sma50) {
+      bullish += 1;
+      signalDetails.push("Price above SMA50");
+    } else {
+      bearish += 1;
+      signalDetails.push("Price below SMA50");
+    }
+  }
+
+  // ADX + DI Direction (weight: 2 if strong trend)
+  const adx = indicators.adx.adx[indicators.adx.adx.length - 1] || 0;
+  const plusDI = indicators.adx.plusDI[indicators.adx.plusDI.length - 1] || 0;
+  const minusDI = indicators.adx.minusDI[indicators.adx.minusDI.length - 1] || 0;
+  if (adx > 25) {
+    if (plusDI > minusDI) {
+      bullish += 2;
+      signalDetails.push(`Strong bullish trend (ADX: ${adx.toFixed(1)})`);
+    } else {
+      bearish += 2;
+      signalDetails.push(`Strong bearish trend (ADX: ${adx.toFixed(1)})`);
+    }
+  }
+
+  // Stochastic (weight: 1.5)
+  const stochK = indicators.stochastic.k[indicators.stochastic.k.length - 1];
+  if (!isNaN(stochK)) {
+    if (stochK < 20) {
+      bullish += 1.5;
+      signalDetails.push(`Stochastic oversold (${stochK.toFixed(1)})`);
+    } else if (stochK > 80) {
+      bearish += 1.5;
+      signalDetails.push(`Stochastic overbought (${stochK.toFixed(1)})`);
+    }
+  }
+
+  // Bollinger Bands Position (weight: 1.5)
+  const bbUpper = indicators.bollingerBands.upper[indicators.bollingerBands.upper.length - 1];
+  const bbLower = indicators.bollingerBands.lower[indicators.bollingerBands.lower.length - 1];
+  const bbMid = indicators.bollingerBands.middle[indicators.bollingerBands.middle.length - 1];
+  if (!isNaN(bbUpper) && !isNaN(bbLower)) {
+    if (currentPrice < bbLower) {
+      bullish += 1.5;
+      signalDetails.push("Below lower Bollinger Band");
+    } else if (currentPrice > bbUpper) {
+      bearish += 1.5;
+      signalDetails.push("Above upper Bollinger Band");
+    } else if (currentPrice > bbMid) {
+      bullish += 0.5;
+      signalDetails.push("Above BB midline");
+    } else {
+      bearish += 0.5;
+      signalDetails.push("Below BB midline");
+    }
+  }
+
+  // OBV Trend (weight: 1)
+  if (indicators.obvTrend === "rising") {
+    bullish += 1;
+    signalDetails.push("OBV rising (volume confirms)");
+  } else if (indicators.obvTrend === "falling") {
+    bearish += 1;
+    signalDetails.push("OBV falling (volume confirms)");
+  }
+
+  // VWAP Position (weight: 1)
+  if (indicators.vwap && indicators.vwap.length > 0) {
+    const latestVWAP = indicators.vwap[indicators.vwap.length - 1];
+    if (!isNaN(latestVWAP)) {
+      if (currentPrice > latestVWAP) {
+        bullish += 1;
+        signalDetails.push("Price above VWAP");
+      } else {
+        bearish += 1;
+        signalDetails.push("Price below VWAP");
+      }
+    }
+  }
+
+  // Calculate consensus
+  const total = bullish + bearish;
+  const consensusScore = total === 0 ? 0 : ((bullish - bearish) / total) * 100;
+
+  let alignment = "neutral";
+  if (consensusScore > 60) alignment = "strong_bullish";
+  else if (consensusScore > 25) alignment = "bullish";
+  else if (consensusScore < -60) alignment = "strong_bearish";
+  else if (consensusScore < -25) alignment = "bearish";
+
+  return { 
+    bullishSignals: bullish, 
+    bearishSignals: bearish, 
+    consensusScore, 
+    alignment,
+    signalDetails
+  };
+}
+
+// ============================================================================
+// NEW: RSI DIVERGENCE DETECTION
+// ============================================================================
+function detectRSIDivergence(prices: number[], rsi: number[], lookback: number = 30): {
+  hasDivergence: boolean;
+  type: "bullish" | "bearish" | "none";
+  strength: number;
+  description: string;
+} {
+  const recentPrices = prices.slice(-lookback);
+  const recentRSI = rsi.slice(-lookback).filter(v => !isNaN(v));
+
+  if (recentRSI.length < 10) {
+    return { hasDivergence: false, type: "none", strength: 0, description: "Insufficient data" };
+  }
+
+  // Find price lows and highs
+  const priceLows: { index: number; value: number }[] = [];
+  const priceHighs: { index: number; value: number }[] = [];
+
+  for (let i = 2; i < recentPrices.length - 2; i++) {
+    if (recentPrices[i] < recentPrices[i - 1] && recentPrices[i] < recentPrices[i - 2] &&
+        recentPrices[i] < recentPrices[i + 1] && recentPrices[i] < recentPrices[i + 2]) {
+      priceLows.push({ index: i, value: recentPrices[i] });
+    }
+    if (recentPrices[i] > recentPrices[i - 1] && recentPrices[i] > recentPrices[i - 2] &&
+        recentPrices[i] > recentPrices[i + 1] && recentPrices[i] > recentPrices[i + 2]) {
+      priceHighs.push({ index: i, value: recentPrices[i] });
+    }
+  }
+
+  // Align RSI indices with price indices
+  const rsiOffset = lookback - recentRSI.length;
+
+  // Check for bullish divergence (lower price lows, higher RSI lows)
+  if (priceLows.length >= 2) {
+    const [prev, curr] = priceLows.slice(-2);
+    const prevRSIIdx = prev.index - rsiOffset;
+    const currRSIIdx = curr.index - rsiOffset;
+    
+    if (prevRSIIdx >= 0 && currRSIIdx >= 0 && prevRSIIdx < recentRSI.length && currRSIIdx < recentRSI.length) {
+      const prevRSI = recentRSI[prevRSIIdx];
+      const currRSI = recentRSI[currRSIIdx];
+
+      if (curr.value < prev.value && currRSI > prevRSI) {
+        const strength = Math.min(1, (currRSI - prevRSI) / 20);
+        return {
+          hasDivergence: true,
+          type: "bullish",
+          strength,
+          description: `Bullish divergence: Price made lower low but RSI made higher low (strength: ${(strength * 100).toFixed(0)}%)`
+        };
+      }
+    }
+  }
+
+  // Check for bearish divergence (higher price highs, lower RSI highs)
+  if (priceHighs.length >= 2) {
+    const [prev, curr] = priceHighs.slice(-2);
+    const prevRSIIdx = prev.index - rsiOffset;
+    const currRSIIdx = curr.index - rsiOffset;
+    
+    if (prevRSIIdx >= 0 && currRSIIdx >= 0 && prevRSIIdx < recentRSI.length && currRSIIdx < recentRSI.length) {
+      const prevRSI = recentRSI[prevRSIIdx];
+      const currRSI = recentRSI[currRSIIdx];
+
+      if (curr.value > prev.value && currRSI < prevRSI) {
+        const strength = Math.min(1, (prevRSI - currRSI) / 20);
+        return {
+          hasDivergence: true,
+          type: "bearish",
+          strength,
+          description: `Bearish divergence: Price made higher high but RSI made lower high (strength: ${(strength * 100).toFixed(0)}%)`
+        };
+      }
+    }
+  }
+
+  return { hasDivergence: false, type: "none", strength: 0, description: "No divergence detected" };
+}
+
+// ============================================================================
+// NEW: MACD DIVERGENCE DETECTION
+// ============================================================================
+function detectMACDDivergence(prices: number[], macdHist: number[], lookback: number = 30): {
+  hasDivergence: boolean;
+  type: "bullish" | "bearish" | "none";
+  strength: number;
+  description: string;
+} {
+  const recentPrices = prices.slice(-lookback);
+  const recentMACD = macdHist.slice(-lookback).filter(v => !isNaN(v));
+
+  if (recentMACD.length < 10) {
+    return { hasDivergence: false, type: "none", strength: 0, description: "Insufficient data" };
+  }
+
+  // Find price and MACD lows/highs
+  const priceLows: { index: number; value: number }[] = [];
+  const priceHighs: { index: number; value: number }[] = [];
+
+  for (let i = 2; i < recentPrices.length - 2; i++) {
+    if (recentPrices[i] < recentPrices[i - 1] && recentPrices[i] < recentPrices[i - 2] &&
+        recentPrices[i] < recentPrices[i + 1] && recentPrices[i] < recentPrices[i + 2]) {
+      priceLows.push({ index: i, value: recentPrices[i] });
+    }
+    if (recentPrices[i] > recentPrices[i - 1] && recentPrices[i] > recentPrices[i - 2] &&
+        recentPrices[i] > recentPrices[i + 1] && recentPrices[i] > recentPrices[i + 2]) {
+      priceHighs.push({ index: i, value: recentPrices[i] });
+    }
+  }
+
+  const macdOffset = lookback - recentMACD.length;
+
+  // Check for bullish divergence
+  if (priceLows.length >= 2) {
+    const [prev, curr] = priceLows.slice(-2);
+    const prevMACDIdx = prev.index - macdOffset;
+    const currMACDIdx = curr.index - macdOffset;
+    
+    if (prevMACDIdx >= 0 && currMACDIdx >= 0 && prevMACDIdx < recentMACD.length && currMACDIdx < recentMACD.length) {
+      const prevMACD = recentMACD[prevMACDIdx];
+      const currMACD = recentMACD[currMACDIdx];
+
+      if (curr.value < prev.value && currMACD > prevMACD) {
+        const strength = Math.min(1, Math.abs(currMACD - prevMACD) / Math.abs(prevMACD || 0.01));
+        return {
+          hasDivergence: true,
+          type: "bullish",
+          strength: Math.min(1, strength),
+          description: `Bullish MACD divergence detected`
+        };
+      }
+    }
+  }
+
+  // Check for bearish divergence
+  if (priceHighs.length >= 2) {
+    const [prev, curr] = priceHighs.slice(-2);
+    const prevMACDIdx = prev.index - macdOffset;
+    const currMACDIdx = curr.index - macdOffset;
+    
+    if (prevMACDIdx >= 0 && currMACDIdx >= 0 && prevMACDIdx < recentMACD.length && currMACDIdx < recentMACD.length) {
+      const prevMACD = recentMACD[prevMACDIdx];
+      const currMACD = recentMACD[currMACDIdx];
+
+      if (curr.value > prev.value && currMACD < prevMACD) {
+        const strength = Math.min(1, Math.abs(prevMACD - currMACD) / Math.abs(prevMACD || 0.01));
+        return {
+          hasDivergence: true,
+          type: "bearish",
+          strength: Math.min(1, strength),
+          description: `Bearish MACD divergence detected`
+        };
+      }
+    }
+  }
+
+  return { hasDivergence: false, type: "none", strength: 0, description: "No divergence detected" };
+}
+
+// ============================================================================
+// NEW: MATHEMATICAL CONFIDENCE CALCULATION
+// ============================================================================
+function calculateMathematicalConfidence(
+  consensus: { consensusScore: number; alignment: string },
+  rsiDivergence: { hasDivergence: boolean; type: string; strength: number },
+  macdDivergence: { hasDivergence: boolean; type: string; strength: number },
+  regime: { regime: string; strength: number },
+  sentiment: { score: number; confidence: number },
+  daysToTarget: number,
+  weeklyAlignment: boolean
+): number {
+  let confidence = 50; // Base confidence
+
+  // Signal alignment (+/- 25 points based on consensus score magnitude)
+  confidence += Math.abs(consensus.consensusScore) * 0.25;
+
+  // Strong trend regime bonus (+10)
+  if (regime.regime.includes("strong")) {
+    confidence += 10;
+  }
+
+  // RSI Divergence confirmation (+/- 8 points)
+  if (rsiDivergence.hasDivergence) {
+    const consensusBullish = consensus.consensusScore > 0;
+    const divergenceBullish = rsiDivergence.type === "bullish";
+    
+    if (consensusBullish === divergenceBullish) {
+      confidence += 8 * rsiDivergence.strength; // Aligned divergence
+    } else {
+      confidence -= 5; // Conflicting divergence
+    }
+  }
+
+  // MACD Divergence confirmation (+/- 5 points)
+  if (macdDivergence.hasDivergence) {
+    const consensusBullish = consensus.consensusScore > 0;
+    const divergenceBullish = macdDivergence.type === "bullish";
+    
+    if (consensusBullish === divergenceBullish) {
+      confidence += 5 * macdDivergence.strength;
+    } else {
+      confidence -= 3;
+    }
+  }
+
+  // Sentiment alignment (+/- 5 points)
+  if ((sentiment.score > 0.2 && consensus.consensusScore > 0) ||
+      (sentiment.score < -0.2 && consensus.consensusScore < 0)) {
+    confidence += 5 * sentiment.confidence;
+  } else if ((sentiment.score > 0.2 && consensus.consensusScore < 0) ||
+             (sentiment.score < -0.2 && consensus.consensusScore > 0)) {
+    confidence -= 3; // Sentiment conflicts with technicals
+  }
+
+  // Weekly timeframe alignment
+  if (weeklyAlignment) {
+    confidence += 8;
+  } else {
+    confidence -= 10;
+  }
+
+  // Time decay (longer predictions = less confidence)
+  if (daysToTarget > 90) confidence -= 10;
+  else if (daysToTarget > 60) confidence -= 7;
+  else if (daysToTarget > 30) confidence -= 5;
+
+  // Mixed signals penalty
+  if (Math.abs(consensus.consensusScore) < 20) {
+    confidence -= 15; // Heavy penalty for mixed signals
+  }
+
+  // Clamp between 35 and 92
+  return Math.max(35, Math.min(92, Math.round(confidence)));
+}
+
+// ============================================================================
+// NEW: DYNAMIC UNCERTAINTY CALCULATION
+// ============================================================================
+function calculateDynamicUncertainty(
+  atr: number[],
+  currentPrice: number,
+  regime: { regime: string },
+  daysToTarget: number,
+  volatility: number[]
+): number {
+  const latestATR = atr[atr.length - 1] || 0;
+  const latestVol = volatility[volatility.length - 1] || 0.02;
+  
+  // Base uncertainty on ATR as percentage of price
+  const atrPercent = (latestATR / currentPrice) * 100;
+  
+  // Scale by square root of time (volatility scales with sqrt of time)
+  let uncertainty = atrPercent * Math.sqrt(daysToTarget / 5);
+
+  // Also factor in historical volatility
+  uncertainty = (uncertainty + latestVol * 100 * Math.sqrt(daysToTarget / 5)) / 2;
+
+  // Regime adjustments
+  if (regime.regime === "volatile") uncertainty *= 1.3;
+  if (regime.regime === "ranging") uncertainty *= 0.8;
+  if (regime.regime.includes("strong")) uncertainty *= 0.9; // Trending = more predictable
+
+  // Cap between 3% and 18%
+  return Math.max(3, Math.min(18, uncertainty));
+}
+
+// ============================================================================
 // ENHANCED: Regime Detection with ADX
+// ============================================================================
 function detectRegimeEnhanced(
   prices: number[],
   rsi: number[],
@@ -455,6 +934,94 @@ function detectRegime(prices: number[], rsi: number[], volatility: number[]): st
   return "neutral";
 }
 
+// ============================================================================
+// NEW: WEEKLY TIMEFRAME FUNCTIONS
+// ============================================================================
+async function fetchWeeklyData(ticker: string): Promise<any> {
+  const endDate = Math.floor(Date.now() / 1000);
+  const startDate = endDate - (365 * 2 * 24 * 60 * 60); // 2 years
+  
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?period1=${startDate}&period2=${endDate}&interval=1wk`;
+  
+  console.log(`Fetching weekly data for ${ticker}...`);
+  
+  try {
+    const response = await fetch(url, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+      }
+    });
+    
+    if (!response.ok) {
+      console.warn(`Failed to fetch weekly data: ${response.status}`);
+      return null;
+    }
+    
+    const data = await response.json();
+    
+    if (data.chart.error) {
+      console.warn("Weekly data error:", data.chart.error.description);
+      return null;
+    }
+    
+    const result = data.chart.result[0];
+    const quotes = result.indicators.quote[0];
+    
+    return {
+      timestamps: result.timestamp.map((t: number) => new Date(t * 1000).toISOString().split('T')[0]),
+      close: quotes.close,
+      high: quotes.high,
+      low: quotes.low,
+    };
+  } catch (error) {
+    console.error("Error fetching weekly data:", error);
+    return null;
+  }
+}
+
+function getWeeklyTrendAlignment(
+  weeklyData: any,
+  dailyConsensus: { consensusScore: number; alignment: string }
+): { aligned: boolean; weeklyTrend: string; weeklyRSI: number; description: string } {
+  if (!weeklyData || !weeklyData.close || weeklyData.close.length < 20) {
+    return { aligned: true, weeklyTrend: "unknown", weeklyRSI: 50, description: "Insufficient weekly data" };
+  }
+
+  const closePrices = weeklyData.close.filter((p: number) => p != null);
+  const weeklyRSI = calculateRSI(closePrices, 14);
+  const weeklyEMA12 = calculateEMA(closePrices, 12);
+  const weeklyEMA26 = calculateEMA(closePrices, 26);
+
+  const latestRSI = weeklyRSI[weeklyRSI.length - 1] || 50;
+  const latestEMA12 = weeklyEMA12[weeklyEMA12.length - 1];
+  const latestEMA26 = weeklyEMA26[weeklyEMA26.length - 1];
+
+  let weeklyTrend = "neutral";
+  if (latestEMA12 > latestEMA26 && latestRSI > 50) {
+    weeklyTrend = "bullish";
+  } else if (latestEMA12 < latestEMA26 && latestRSI < 50) {
+    weeklyTrend = "bearish";
+  }
+
+  const dailyBullish = dailyConsensus.consensusScore > 0;
+  const weeklyBullish = weeklyTrend === "bullish";
+  const weeklyBearish = weeklyTrend === "bearish";
+
+  const aligned = (dailyBullish && weeklyBullish) || (!dailyBullish && weeklyBearish) || weeklyTrend === "neutral";
+
+  let description = "";
+  if (aligned) {
+    description = `Weekly trend (${weeklyTrend}) confirms daily signals`;
+  } else {
+    description = `WARNING: Weekly trend (${weeklyTrend}) conflicts with daily signals`;
+  }
+
+  return { aligned, weeklyTrend, weeklyRSI: latestRSI, description };
+}
+
+// ============================================================================
+// DATA FETCHING
+// ============================================================================
 async function fetchStockData(ticker: string): Promise<any> {
   const endDate = Math.floor(Date.now() / 1000);
   const startDate = endDate - (365 * 2 * 24 * 60 * 60); // 2 years
@@ -571,14 +1138,23 @@ const safeToFixed = (val: number | null | undefined, digits: number = 2): string
   return val.toFixed(digits);
 };
 
+// ============================================================================
 // ENHANCED: AI Prediction with All New Indicators
+// ============================================================================
 async function generateAIPrediction(
   ticker: string,
   targetDate: string,
   stockData: any,
   indicators: any,
   regimeInfo: { regime: string; strength: number; description: string },
-  sentiment: { score: number; articleCount: number; confidence: number }
+  sentiment: { score: number; articleCount: number; confidence: number },
+  consensus: { consensusScore: number; alignment: string; signalDetails: string[] },
+  rsiDivergence: { hasDivergence: boolean; type: string; strength: number; description: string },
+  macdDivergence: { hasDivergence: boolean; type: string; strength: number; description: string },
+  mathConfidence: number,
+  dynamicUncertainty: number,
+  weeklyAlignment: { aligned: boolean; weeklyTrend: string; description: string },
+  pivotPoints: { pivot: number; r1: number; r2: number; r3: number; s1: number; s2: number; s3: number }
 ): Promise<any> {
   const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
   if (!LOVABLE_API_KEY) {
@@ -598,7 +1174,6 @@ async function generateAIPrediction(
     macd: indicators.macd.macd.slice(-5),
     macdSignal: indicators.macd.signal.slice(-5),
     volatility: indicators.volatility.slice(-5),
-    // New indicators
     stochK: indicators.stochastic.k.slice(-5),
     stochD: indicators.stochastic.d.slice(-5),
     adx: indicators.adx.adx.slice(-5),
@@ -610,74 +1185,91 @@ async function generateAIPrediction(
     bbBandwidth: indicators.bollingerBands.bandwidth.slice(-5),
   };
   
-  const prompt = `You are an expert quantitative analyst with access to comprehensive technical indicators. Analyze this ${ticker.includes('-') ? 'cryptocurrency' : 'stock'} data and provide a prediction.
+  const prompt = `You are an expert quantitative analyst with access to comprehensive technical indicators and a pre-calculated signal consensus system. Analyze this ${ticker.includes('-') ? 'cryptocurrency' : 'stock'} data and provide a prediction.
 
 ASSET: ${ticker}
 TARGET DATE: ${targetDate}
-CURRENT PRICE: $${safeToFixed(recentData.currentPrice)}
+CURRENT PRICE: $${safeToFixed(currentPrice)}
 
-MARKET REGIME: ${regimeInfo.regime.toUpperCase()}
-Regime Strength: ${safeToFixed(regimeInfo.strength, 1)}
-Regime Description: ${regimeInfo.description}
+===== SIGNAL CONSENSUS SYSTEM =====
+Bullish Signals: ${consensus.consensusScore > 0 ? Math.abs(consensus.consensusScore).toFixed(1) : '0'}
+Bearish Signals: ${consensus.consensusScore < 0 ? Math.abs(consensus.consensusScore).toFixed(1) : '0'}
+Consensus Score: ${consensus.consensusScore.toFixed(1)} (range: -100 to +100)
+Alignment: ${consensus.alignment.toUpperCase()}
+Active Signals: ${consensus.signalDetails.join(', ')}
 
-NEWS SENTIMENT: ${safeToFixed(sentiment.score)} (scale -1 to 1)
+===== DIVERGENCE DETECTION =====
+RSI Divergence: ${rsiDivergence.hasDivergence ? `${rsiDivergence.type.toUpperCase()} (strength: ${(rsiDivergence.strength * 100).toFixed(0)}%)` : 'None'}
+${rsiDivergence.description}
+MACD Divergence: ${macdDivergence.hasDivergence ? `${macdDivergence.type.toUpperCase()} (strength: ${(macdDivergence.strength * 100).toFixed(0)}%)` : 'None'}
+${macdDivergence.description}
+
+===== CALCULATED METRICS =====
+Mathematical Confidence: ${mathConfidence}% (pre-calculated baseline)
+Dynamic Uncertainty: ${dynamicUncertainty.toFixed(1)}% (ATR-based)
+Weekly Trend Alignment: ${weeklyAlignment.aligned ? "CONFIRMED" : "CONFLICTING"} (${weeklyAlignment.weeklyTrend})
+${weeklyAlignment.description}
+
+===== PIVOT POINTS (Today) =====
+Pivot: $${safeToFixed(pivotPoints.pivot)}
+R1: $${safeToFixed(pivotPoints.r1)} | R2: $${safeToFixed(pivotPoints.r2)} | R3: $${safeToFixed(pivotPoints.r3)}
+S1: $${safeToFixed(pivotPoints.s1)} | S2: $${safeToFixed(pivotPoints.s2)} | S3: $${safeToFixed(pivotPoints.s3)}
+
+===== MARKET REGIME =====
+Regime: ${regimeInfo.regime.toUpperCase()}
+Strength: ${safeToFixed(regimeInfo.strength, 1)}
+Description: ${regimeInfo.description}
+
+===== NEWS SENTIMENT =====
+Score: ${safeToFixed(sentiment.score)} (scale -1 to 1)
 Articles Analyzed: ${sentiment.articleCount}
-Sentiment Confidence: ${safeToFixed(sentiment.confidence * 100)}%
+Confidence: ${safeToFixed(sentiment.confidence * 100)}%
 
-SUPPORT & RESISTANCE LEVELS:
-- Support: ${indicators.supportResistance.support.map((s: number) => `$${safeToFixed(s)}`).join(', ') || 'None detected'}
-- Resistance: ${indicators.supportResistance.resistance.map((r: number) => `$${safeToFixed(r)}`).join(', ') || 'None detected'}
+===== SUPPORT & RESISTANCE =====
+Support: ${indicators.supportResistance.support.map((s: number) => `$${safeToFixed(s)}`).join(', ') || 'None detected'}
+Resistance: ${indicators.supportResistance.resistance.map((r: number) => `$${safeToFixed(r)}`).join(', ') || 'None detected'}
 
-FIBONACCI LEVELS (${indicators.fibonacci.trend}):
-${indicators.fibonacci.levels.map((l: { ratio: number; price: number }) => `- ${(l.ratio * 100).toFixed(1)}%: $${safeToFixed(l.price)}`).join('\n')}
+===== FIBONACCI LEVELS (${indicators.fibonacci.trend}) =====
+${indicators.fibonacci.levels.map((l: { ratio: number; price: number }) => `${(l.ratio * 100).toFixed(1)}%: $${safeToFixed(l.price)}`).join(' | ')}
 
-RECENT PRICE DATA (last 30 days):
-${recentData.dates.map((d: string, i: number) => `${d}: $${safeToFixed(recentData.prices[i])}`).join('\n')}
+===== VWAP =====
+Current VWAP: $${safeToFixed(indicators.vwap[indicators.vwap.length - 1])}
+Price vs VWAP: ${currentPrice > indicators.vwap[indicators.vwap.length - 1] ? 'ABOVE' : 'BELOW'}
 
-CLASSIC INDICATORS (last 5 values):
-- EMA12: ${recentData.ema12.map((v: number) => safeToFixed(v)).join(', ')}
-- EMA26: ${recentData.ema26.map((v: number) => safeToFixed(v)).join(', ')}
-- SMA50: ${recentData.sma50.map((v: number) => safeToFixed(v)).join(', ')}
-- RSI14: ${recentData.rsi.map((v: number) => safeToFixed(v, 1)).join(', ')}
-- MACD: ${recentData.macd.map((v: number) => safeToFixed(v, 3)).join(', ')}
-- MACD Signal: ${recentData.macdSignal.map((v: number) => safeToFixed(v, 3)).join(', ')}
-- Volatility: ${recentData.volatility.map((v: number) => v != null ? safeToFixed(v * 100) + '%' : 'N/A').join(', ')}
+===== VOLUME ANALYSIS =====
+OBV Trend: ${indicators.obvTrend}
 
-ADVANCED INDICATORS (last 5 values):
-- Stochastic %K: ${recentData.stochK.map((v: number) => safeToFixed(v, 1)).join(', ')}
-- Stochastic %D: ${recentData.stochD.map((v: number) => safeToFixed(v, 1)).join(', ')}
-- ADX (trend strength): ${recentData.adx.map((v: number) => safeToFixed(v, 1)).join(', ')}
-- +DI: ${recentData.plusDI.map((v: number) => safeToFixed(v, 1)).join(', ')}
-- -DI: ${recentData.minusDI.map((v: number) => safeToFixed(v, 1)).join(', ')}
-- ATR: ${recentData.atr.map((v: number) => safeToFixed(v, 2)).join(', ')}
-- Bollinger Upper: ${recentData.bbUpper.map((v: number) => safeToFixed(v)).join(', ')}
-- Bollinger Lower: ${recentData.bbLower.map((v: number) => safeToFixed(v)).join(', ')}
-- BB Bandwidth: ${recentData.bbBandwidth.map((v: number) => safeToFixed(v * 100, 1) + '%').join(', ')}
+===== RECENT PRICE DATA (last 30 days) =====
+${recentData.dates.slice(-10).map((d: string, i: number) => `${d}: $${safeToFixed(recentData.prices.slice(-10)[i])}`).join('\n')}
 
-VOLUME ANALYSIS:
-- OBV Trend: ${indicators.obvTrend}
+===== INSTRUCTIONS =====
+1. Use the Mathematical Confidence (${mathConfidence}%) as your baseline. You may adjust by +/- 8% based on factors not captured in the formula.
+2. Use the Dynamic Uncertainty (${dynamicUncertainty.toFixed(1)}%) as your baseline for uncertainty bands. You may adjust by +/- 3%.
+3. If weekly trend conflicts with daily signals, REDUCE confidence by 10%.
+4. Pay special attention to divergences - they often precede reversals.
+5. Consider pivot points for near-term price targets.
 
-Based on ALL technical indicators, market regime, support/resistance levels, and sentiment, provide your prediction. You MUST respond with ONLY valid JSON in this exact format:
+You MUST respond with ONLY valid JSON in this exact format:
 {
   "predictedPrice": <number>,
-  "uncertaintyPercent": <number between 2 and 15>,
-  "confidence": <number between 40 and 95>,
-  "reasoning": "<brief 2-3 sentence explanation including key indicators>",
+  "uncertaintyPercent": <number between 3 and 18>,
+  "confidence": <number between 35 and 92>,
+  "reasoning": "<brief 2-3 sentence explanation including key signals from the consensus system>",
   "featureImportance": [
-    {"name": "EMA Crossover", "importance": <0-1>},
-    {"name": "RSI Signal", "importance": <0-1>},
+    {"name": "Signal Consensus", "importance": <0-1>},
+    {"name": "RSI Divergence", "importance": <0-1>},
     {"name": "MACD Trend", "importance": <0-1>},
-    {"name": "Stochastic", "importance": <0-1>},
+    {"name": "Weekly Alignment", "importance": <0-1>},
     {"name": "ADX Trend Strength", "importance": <0-1>},
     {"name": "Bollinger Bands", "importance": <0-1>},
-    {"name": "Support/Resistance", "importance": <0-1>},
-    {"name": "Volume (OBV)", "importance": <0-1>},
+    {"name": "Pivot Points", "importance": <0-1>},
+    {"name": "VWAP Position", "importance": <0-1>},
     {"name": "Market Regime", "importance": <0-1>},
     {"name": "News Sentiment", "importance": <0-1>}
   ]
 }`;
 
-  console.log("Calling Lovable AI for enhanced prediction...");
+  console.log("Calling Lovable AI for ultra-enhanced prediction...");
   
   const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
     method: "POST",
@@ -688,7 +1280,7 @@ Based on ALL technical indicators, market regime, support/resistance levels, and
     body: JSON.stringify({
       model: "google/gemini-2.5-flash",
       messages: [
-        { role: "system", content: "You are a quantitative financial analyst with expertise in technical analysis. Respond only with valid JSON." },
+        { role: "system", content: "You are a quantitative financial analyst with expertise in technical analysis. Respond only with valid JSON. Use the pre-calculated confidence and uncertainty as baselines." },
         { role: "user", content: prompt }
       ],
     }),
@@ -734,7 +1326,10 @@ async function generatePriceTargetPrediction(
   stockData: any,
   indicators: any,
   regimeInfo: { regime: string; strength: number; description: string },
-  sentiment: { score: number; articleCount: number; confidence: number }
+  sentiment: { score: number; articleCount: number; confidence: number },
+  consensus: { consensusScore: number; alignment: string; signalDetails: string[] },
+  rsiDivergence: { hasDivergence: boolean; type: string; strength: number; description: string },
+  weeklyAlignment: { aligned: boolean; weeklyTrend: string; description: string }
 ): Promise<any> {
   const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
   if (!LOVABLE_API_KEY) {
@@ -759,17 +1354,6 @@ async function generatePriceTargetPrediction(
   const change90d = prices.length >= 90 ? ((prices[prices.length - 1] - prices[prices.length - 90]) / prices[prices.length - 90]) * 100 : 0;
   const change180d = prices.length >= 180 ? ((prices[prices.length - 1] - prices[prices.length - 180]) / prices[prices.length - 180]) * 100 : 0;
   
-  const recentData = {
-    prices: stockData.close.slice(-30),
-    dates: stockData.timestamps.slice(-30),
-    currentPrice: currentPrice,
-    rsi: indicators.rsi.slice(-5),
-    volatility: indicators.volatility.slice(-5),
-    stochK: indicators.stochastic.k.slice(-5),
-    adx: indicators.adx.adx.slice(-5),
-    atr: indicators.atr.slice(-5),
-  };
-  
   const prompt = `You are an expert quantitative analyst. Analyze when this ${ticker.includes('-') ? 'cryptocurrency' : 'stock'} might reach the target price.
 
 ASSET: ${ticker}
@@ -777,46 +1361,54 @@ CURRENT PRICE: $${safeToFixed(currentPrice)}
 TARGET PRICE: $${safeToFixed(targetPrice)}
 REQUIRED CHANGE: ${priceChange > 0 ? '+' : ''}${safeToFixed(priceChange)}% (${direction})
 
-MARKET REGIME: ${regimeInfo.regime.toUpperCase()}
-Regime Description: ${regimeInfo.description}
+===== SIGNAL CONSENSUS =====
+Consensus Score: ${consensus.consensusScore.toFixed(1)} (-100 to +100)
+Alignment: ${consensus.alignment}
+Active Signals: ${consensus.signalDetails.slice(0, 5).join(', ')}
 
-NEWS SENTIMENT: ${safeToFixed(sentiment.score)} (scale -1 to 1, ${sentiment.articleCount} articles)
+===== DIVERGENCE WARNING =====
+RSI Divergence: ${rsiDivergence.hasDivergence ? `${rsiDivergence.type.toUpperCase()} - ${rsiDivergence.description}` : 'None'}
 
-SUPPORT & RESISTANCE LEVELS:
-- Support: ${indicators.supportResistance.support.map((s: number) => `$${safeToFixed(s)}`).join(', ') || 'None'}
-- Resistance: ${indicators.supportResistance.resistance.map((r: number) => `$${safeToFixed(r)}`).join(', ') || 'None'}
+===== WEEKLY TREND =====
+${weeklyAlignment.description}
+Alignment: ${weeklyAlignment.aligned ? "CONFIRMS daily signals" : "CONFLICTS with daily signals"}
 
-HISTORICAL PERFORMANCE:
-- 30-Day Change: ${safeToFixed(change30d)}%
-- 90-Day Change: ${safeToFixed(change90d)}%
-- 180-Day Change: ${safeToFixed(change180d)}%
-- Average Daily Return: ${safeToFixed(avgDailyReturn * 100, 3)}%
-- Average Daily Volatility: ${safeToFixed(avgAbsDailyReturn * 100, 3)}%
+===== MARKET REGIME =====
+${regimeInfo.regime.toUpperCase()}: ${regimeInfo.description}
 
-RECENT PRICES (last 30 days):
-${recentData.dates.map((d: string, i: number) => `${d}: $${safeToFixed(recentData.prices[i])}`).join('\n')}
+===== NEWS SENTIMENT =====
+Score: ${safeToFixed(sentiment.score)} (${sentiment.articleCount} articles)
 
-TECHNICAL INDICATORS (last 5 values):
-- RSI14: ${recentData.rsi.map((v: number) => safeToFixed(v, 1)).join(', ')}
-- Stochastic %K: ${recentData.stochK.map((v: number) => safeToFixed(v, 1)).join(', ')}
-- ADX: ${recentData.adx.map((v: number) => safeToFixed(v, 1)).join(', ')}
-- ATR: ${recentData.atr.map((v: number) => safeToFixed(v, 2)).join(', ')}
-- Volatility: ${recentData.volatility.map((v: number) => v != null ? safeToFixed(v * 100) + '%' : 'N/A').join(', ')}
-- OBV Trend: ${indicators.obvTrend}
+===== SUPPORT & RESISTANCE =====
+Support: ${indicators.supportResistance.support.map((s: number) => `$${safeToFixed(s)}`).join(', ') || 'None'}
+Resistance: ${indicators.supportResistance.resistance.map((r: number) => `$${safeToFixed(r)}`).join(', ') || 'None'}
 
-Analyze the likelihood and timeframe for reaching the target price of $${safeToFixed(targetPrice)}. Consider:
-1. Is this target realistic based on historical movement patterns and support/resistance?
-2. How long might it take based on average daily/monthly returns and current trend strength (ADX)?
-3. What's the probability of reaching this target given current market regime?
+===== HISTORICAL PERFORMANCE =====
+30-Day Change: ${safeToFixed(change30d)}%
+90-Day Change: ${safeToFixed(change90d)}%
+180-Day Change: ${safeToFixed(change180d)}%
+Average Daily Return: ${safeToFixed(avgDailyReturn * 100, 3)}%
+Average Daily Volatility: ${safeToFixed(avgAbsDailyReturn * 100, 3)}%
 
-You MUST respond with ONLY valid JSON in this exact format:
+===== KEY INDICATORS =====
+RSI: ${safeToFixed(indicators.rsi[indicators.rsi.length - 1], 1)}
+ADX: ${safeToFixed(indicators.adx.adx[indicators.adx.adx.length - 1], 1)}
+OBV Trend: ${indicators.obvTrend}
+
+Analyze the likelihood and timeframe for reaching $${safeToFixed(targetPrice)}. Consider:
+1. Is this target realistic given support/resistance and historical movement?
+2. How long based on average returns and current trend strength?
+3. Does the weekly trend support or conflict with this target?
+4. Any divergence warnings that might affect timing?
+
+You MUST respond with ONLY valid JSON:
 {
   "estimatedDate": "<YYYY-MM-DD most likely date>",
-  "estimatedDateRangeLow": "<YYYY-MM-DD best case / earliest>",
-  "estimatedDateRangeHigh": "<YYYY-MM-DD worst case / latest>",
-  "probability": <0-100 percentage chance of hitting target>,
+  "estimatedDateRangeLow": "<YYYY-MM-DD best case>",
+  "estimatedDateRangeHigh": "<YYYY-MM-DD worst case>",
+  "probability": <0-100>,
   "isRealistic": <true or false>,
-  "reasoning": "<2-3 sentence explanation of the analysis and timeline>",
+  "reasoning": "<2-3 sentence explanation>",
   "keyFactors": ["<factor 1>", "<factor 2>", "<factor 3>"]
 }`;
 
@@ -884,7 +1476,7 @@ function calculateAllIndicators(stockData: any) {
   const macd = calculateMACD(closePrices);
   const volatility = calculateVolatility(closePrices, 20);
   
-  // New indicators
+  // Core indicators
   const bollingerBands = calculateBollingerBands(closePrices, 20, 2);
   const atr = calculateATR(highPrices, lowPrices, closePrices, 14);
   const stochastic = calculateStochastic(closePrices, highPrices, lowPrices, 14, 3);
@@ -893,6 +1485,9 @@ function calculateAllIndicators(stockData: any) {
   const obvTrend = getOBVTrend(obv, 20);
   const supportResistance = findSupportResistance(closePrices, 60);
   const fibonacci = calculateFibonacciLevels(closePrices, 60);
+  
+  // NEW: VWAP
+  const vwap = calculateVWAP(highPrices, lowPrices, closePrices, volumes);
 
   return {
     ema12,
@@ -909,6 +1504,7 @@ function calculateAllIndicators(stockData: any) {
     obvTrend,
     supportResistance,
     fibonacci,
+    vwap,
   };
 }
 
@@ -926,7 +1522,7 @@ const tradingStyles = {
     volatilityPreference: "medium-high",
     holdingPeriod: "Hours (same day)",
     minVolatility: 0.015,
-    preferredRegimes: ["volatile", "bullish", "bearish", "strong_bullish", "strong_bearish"],
+    preferredRegimes: ["bullish", "bearish", "volatile"],
     scoreMultiplier: (volatility: number) => volatility > 0.02 ? 1.3 : 1,
     roiMultiplier: 1.2,
   },
@@ -935,64 +1531,35 @@ const tradingStyles = {
     holdingPeriod: "Days to weeks",
     minVolatility: 0.01,
     preferredRegimes: ["bullish", "bearish", "strong_bullish", "strong_bearish"],
-    scoreMultiplier: (volatility: number) => volatility > 0.01 && volatility < 0.03 ? 1.4 : 1,
+    scoreMultiplier: () => 1,
     roiMultiplier: 1.5,
   },
   position: {
     volatilityPreference: "low",
     holdingPeriod: "Weeks to months",
-    minVolatility: 0,
-    preferredRegimes: ["bullish", "neutral", "strong_bullish"],
-    scoreMultiplier: (volatility: number) => volatility < 0.02 ? 1.5 : 1,
+    minVolatility: 0.005,
+    preferredRegimes: ["strong_bullish", "strong_bearish", "bullish", "bearish"],
+    scoreMultiplier: (volatility: number) => volatility < 0.02 ? 1.3 : 1,
     roiMultiplier: 2.0,
   },
 };
 
-// Style-specific screener configurations
-const screenersByStyle: Record<string, string[]> = {
-  scalping: [
-    "most_actives",
-    "day_gainers",
-    "day_losers",
-    "small_cap_gainers",
-  ],
-  daytrading: [
-    "most_actives",
-    "day_gainers",
-    "day_losers",
-    "growth_technology_stocks",
-  ],
-  swing: [
-    "undervalued_growth_stocks",
-    "growth_technology_stocks",
-    "day_gainers",
-    "day_losers",
-  ],
-  position: [
-    "undervalued_large_caps",
-    "undervalued_growth_stocks",
-    "most_actives",
-  ],
+// Screeners by trading style
+const screenersByStyle = {
+  scalping: ["day_gainers", "day_losers", "most_actives"],
+  daytrading: ["day_gainers", "day_losers", "most_actives", "undervalued_growth_stocks"],
+  swing: ["day_gainers", "day_losers", "undervalued_growth_stocks", "growth_technology_stocks", "52_wk_high"],
+  position: ["undervalued_growth_stocks", "undervalued_large_caps", "growth_technology_stocks", "52_wk_high", "52_wk_low"],
 };
 
 async function fetchMarketScreener(tradingStyle: string): Promise<{ ticker: string; percentChange: number; volume: number; marketCap: number }[]> {
-  const screenerIds = screenersByStyle[tradingStyle] || screenersByStyle.swing;
-  const screenerUrls = screenerIds.map(id => 
-    `https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved?scrIds=${id}&count=30`
-  );
+  const screeners = screenersByStyle[tradingStyle as keyof typeof screenersByStyle] || screenersByStyle.swing;
+  const allTickers = new Map<string, { ticker: string; percentChange: number; volume: number; marketCap: number }>();
   
-  const allTickers: Map<string, { ticker: string; percentChange: number; volume: number; marketCap: number }> = new Map();
-  
-  if (tradingStyle === "scalping" || tradingStyle === "daytrading") {
-    const cryptoTickers = ["BTC-USD", "ETH-USD", "SOL-USD", "XRP-USD", "DOGE-USD", "AVAX-USD"];
-    for (const ticker of cryptoTickers) {
-      allTickers.set(ticker, { ticker, percentChange: 5, volume: 1000000000, marketCap: 100000000000 });
-    }
-  }
-  
-  for (const url of screenerUrls) {
+  for (const screenerId of screeners) {
     try {
-      console.log(`Fetching screener: ${url}`);
+      const url = `https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved?scrIds=${screenerId}&count=40`;
+      
       const response = await fetch(url, {
         headers: {
           "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
@@ -1073,6 +1640,7 @@ async function analyzeStockForGuide(ticker: string, tradingStyle: string = "swin
     // Calculate all indicators including new ones
     const ema12 = calculateEMA(closePrices, 12);
     const ema26 = calculateEMA(closePrices, 26);
+    const sma50 = calculateSMA(closePrices, 50);
     const rsi = calculateRSI(closePrices, 14);
     const macd = calculateMACD(closePrices);
     const volatility = calculateVolatility(closePrices, 20);
@@ -1081,6 +1649,7 @@ async function analyzeStockForGuide(ticker: string, tradingStyle: string = "swin
     const stochastic = calculateStochastic(closePrices, highPrices, lowPrices, 14, 3);
     const obv = calculateOBV(closePrices, volumes);
     const obvTrend = getOBVTrend(obv, 20);
+    const vwap = calculateVWAP(highPrices, lowPrices, closePrices, volumes);
     
     // Use enhanced regime detection
     const regimeInfo = detectRegimeEnhanced(closePrices, rsi, volatility, adx, bollingerBands);
@@ -1143,71 +1712,33 @@ async function analyzeStockForGuide(ticker: string, tradingStyle: string = "swin
       }
     }
     
-    // === ENHANCED SCORING WITH NEW INDICATORS ===
+    // Build indicators object for consensus
+    const indicators = {
+      rsi, macd, ema12, ema26, sma50, stochastic, adx, bollingerBands, obvTrend, vwap
+    };
+    
+    // Use signal consensus system
+    const consensus = calculateSignalConsensus(indicators, currentPrice);
+    
+    // Detect divergences
+    const rsiDivergence = detectRSIDivergence(closePrices, rsi, 30);
+    
+    // === ENHANCED SCORING WITH CONSENSUS ===
     const priceChange5d = (closePrices[closePrices.length - 1] - closePrices[closePrices.length - 6]) / closePrices[closePrices.length - 6];
     const priceChange20d = (closePrices[closePrices.length - 1] - closePrices[closePrices.length - 21]) / closePrices[closePrices.length - 21];
     
-    let score = 0;
-    let direction: "bullish" | "bearish" | "neutral" = "neutral";
-    let signals: string[] = [];
+    // Use consensus score as base
+    let score = Math.abs(consensus.consensusScore) / 10;
+    let direction: "bullish" | "bearish" | "neutral" = consensus.consensusScore > 0 ? "bullish" : consensus.consensusScore < 0 ? "bearish" : "neutral";
+    let signals = [...consensus.signalDetails];
     
-    // RSI signals
-    if (latestRSI < 30) {
-      score += 2;
-      signals.push("oversold RSI");
-      direction = "bullish";
-    } else if (latestRSI > 70) {
-      score += 2;
-      signals.push("overbought RSI");
-      direction = "bearish";
-    }
-    
-    // Stochastic signals (new)
-    if (latestStochK < 20) {
-      score += 1.5;
-      signals.push("oversold stochastic");
-      if (direction === "neutral") direction = "bullish";
-    } else if (latestStochK > 80) {
-      score += 1.5;
-      signals.push("overbought stochastic");
-      if (direction === "neutral") direction = "bearish";
-    }
-    
-    // MACD crossover
-    if (latestMACD > latestSignal && macd.macd[macd.macd.length - 2] <= macd.signal[macd.signal.length - 2]) {
-      score += 2;
-      signals.push("bullish MACD crossover");
-      direction = "bullish";
-    } else if (latestMACD < latestSignal && macd.macd[macd.macd.length - 2] >= macd.signal[macd.signal.length - 2]) {
-      score += 2;
-      signals.push("bearish MACD crossover");
-      direction = "bearish";
-    }
-    
-    // Bollinger Band signals (new)
-    if (currentPrice < latestBBLower) {
-      score += 1.5;
-      signals.push("below lower Bollinger Band");
-      if (direction === "neutral") direction = "bullish";
-    } else if (currentPrice > latestBBUpper) {
-      score += 1.5;
-      signals.push("above upper Bollinger Band");
-      if (direction === "neutral") direction = "bearish";
-    }
-    
-    // ADX trend strength bonus (new)
-    if (latestADX > 25) {
-      score += 1;
-      signals.push(`strong trend (ADX: ${latestADX.toFixed(0)})`);
-    }
-    
-    // Volume confirmation via OBV (new)
-    if (obvTrend === "rising" && direction === "bullish") {
-      score += 1;
-      signals.push("volume confirms bullish");
-    } else if (obvTrend === "falling" && direction === "bearish") {
-      score += 1;
-      signals.push("volume confirms bearish");
+    // Divergence bonus
+    if (rsiDivergence.hasDivergence) {
+      if ((rsiDivergence.type === "bullish" && direction === "bullish") ||
+          (rsiDivergence.type === "bearish" && direction === "bearish")) {
+        score += 2;
+        signals.push(`${rsiDivergence.type} RSI divergence`);
+      }
     }
     
     // Momentum signals
@@ -1237,8 +1768,8 @@ async function analyzeStockForGuide(ticker: string, tradingStyle: string = "swin
     
     score = score * styleConfig.scoreMultiplier(latestVolatility);
     
-    // Require meaningful signal
-    if (score < 2.5 || signals.length === 0) {
+    // Require meaningful signal - now using consensus alignment
+    if (score < 2.5 || consensus.alignment === "neutral") {
       return null;
     }
     
@@ -1264,7 +1795,7 @@ async function analyzeStockForGuide(ticker: string, tradingStyle: string = "swin
       ticker,
       direction,
       confidence,
-      explanation: `${signals.join(", ")}. Current price $${currentPrice.toFixed(2)}.`,
+      explanation: `${signals.slice(0, 4).join(", ")}. Current price $${currentPrice.toFixed(2)}.`,
       strength: Math.min(5, Math.ceil(score)),
       score,
       currentPrice,
@@ -1279,6 +1810,10 @@ async function analyzeStockForGuide(ticker: string, tradingStyle: string = "swin
       regimeStrength: regimeInfo.strength,
       adxStrength: latestADX,
       obvTrend,
+      consensusScore: consensus.consensusScore,
+      consensusAlignment: consensus.alignment,
+      hasDivergence: rsiDivergence.hasDivergence,
+      divergenceType: rsiDivergence.type,
     };
   } catch (error) {
     console.error(`Failed to analyze ${ticker}:`, error);
@@ -1309,6 +1844,9 @@ ${i + 1}. ${o.ticker}
    - Volatility: ${(o.volatility * 100).toFixed(1)}%
    - ADX Strength: ${o.adxStrength?.toFixed(1) || 'N/A'}
    - OBV Trend: ${o.obvTrend || 'N/A'}
+   - Consensus Score: ${o.consensusScore?.toFixed(1) || 'N/A'}
+   - Consensus Alignment: ${o.consensusAlignment || 'N/A'}
+   - Divergence: ${o.hasDivergence ? o.divergenceType : 'None'}
    - Technical Signals: ${o.explanation}
    - Market Regime: ${o.regime}
 `).join('\n')}
@@ -1385,7 +1923,7 @@ For each opportunity, provide enhanced analysis. Respond with ONLY valid JSON ar
 }
 
 async function generateGuideOpportunities(tradingStyle: string = "swing"): Promise<any[]> {
-  console.log(`Scanning market for ${tradingStyle} opportunities with enhanced indicators...`);
+  console.log(`Scanning market for ${tradingStyle} opportunities with ultra-enhanced indicators...`);
   
   let screenerResults: { ticker: string; percentChange: number; volume: number; marketCap: number }[] = [];
   
@@ -1420,7 +1958,7 @@ async function generateGuideOpportunities(tradingStyle: string = "swing"): Promi
     }
   }
   
-  console.log(`Found ${opportunities.length} valid ${tradingStyle} opportunities with enhanced analysis`);
+  console.log(`Found ${opportunities.length} valid ${tradingStyle} opportunities with ultra-enhanced analysis`);
   
   opportunities.sort((a, b) => b.score - a.score);
   
@@ -1505,6 +2043,7 @@ serve(async (req) => {
     // Calculate all enhanced indicators
     const indicators = calculateAllIndicators(stockData);
     const closePrices = stockData.close.filter((p: number) => p != null);
+    const currentPrice = closePrices[closePrices.length - 1];
     
     // Get enhanced regime detection
     const regimeInfo = detectRegimeEnhanced(
@@ -1518,6 +2057,26 @@ serve(async (req) => {
     // Fetch enhanced news sentiment
     const sentiment = await fetchNewsSentiment(ticker);
     
+    // NEW: Calculate signal consensus
+    const consensus = calculateSignalConsensus(indicators, currentPrice);
+    console.log(`Signal Consensus: ${consensus.consensusScore.toFixed(1)} (${consensus.alignment})`);
+    
+    // NEW: Detect divergences
+    const rsiDivergence = detectRSIDivergence(closePrices, indicators.rsi, 30);
+    const macdDivergence = detectMACDDivergence(closePrices, indicators.macd.histogram, 30);
+    console.log(`RSI Divergence: ${rsiDivergence.type}, MACD Divergence: ${macdDivergence.type}`);
+    
+    // NEW: Fetch weekly data for multi-timeframe analysis
+    const weeklyData = await fetchWeeklyData(ticker.toUpperCase());
+    const weeklyAlignment = getWeeklyTrendAlignment(weeklyData, consensus);
+    console.log(`Weekly Alignment: ${weeklyAlignment.aligned ? 'CONFIRMED' : 'CONFLICTING'} (${weeklyAlignment.weeklyTrend})`);
+    
+    // NEW: Calculate pivot points
+    const prevHigh = stockData.high[stockData.high.length - 2] || currentPrice;
+    const prevLow = stockData.low[stockData.low.length - 2] || currentPrice;
+    const prevClose = closePrices[closePrices.length - 2] || currentPrice;
+    const pivotPoints = calculatePivotPoints(prevHigh, prevLow, prevClose);
+    
     // Handle price-target mode
     if (mode === "price-target") {
       if (!targetPrice || typeof targetPrice !== "number" || targetPrice <= 0) {
@@ -1527,7 +2086,7 @@ serve(async (req) => {
         );
       }
       
-      console.log(`Processing enhanced price target prediction for ${ticker.toUpperCase()} targeting $${targetPrice}`);
+      console.log(`Processing ultra-enhanced price target prediction for ${ticker.toUpperCase()} targeting $${targetPrice}`);
       
       const aiPrediction = await generatePriceTargetPrediction(
         ticker.toUpperCase(),
@@ -1535,10 +2094,12 @@ serve(async (req) => {
         stockData,
         indicators,
         regimeInfo,
-        sentiment
+        sentiment,
+        consensus,
+        rsiDivergence,
+        weeklyAlignment
       );
       
-      const currentPrice = closePrices[closePrices.length - 1];
       const direction = targetPrice > currentPrice ? "up" : "down";
       const priceChangePercent = ((targetPrice - currentPrice) / currentPrice) * 100;
       
@@ -1572,9 +2133,16 @@ serve(async (req) => {
         sentimentConfidence: sentiment.confidence,
         historicalData,
         currency: stockData.currency || "USD",
+        // NEW: Enhanced analysis data
+        consensusScore: consensus.consensusScore,
+        consensusAlignment: consensus.alignment,
+        signalDetails: consensus.signalDetails,
+        rsiDivergence: rsiDivergence.hasDivergence ? rsiDivergence.type : null,
+        weeklyTrend: weeklyAlignment.weeklyTrend,
+        weeklyAligned: weeklyAlignment.aligned,
       };
       
-      console.log("Enhanced price target prediction complete:", result.ticker, `$${result.targetPrice}`, result.estimatedDate);
+      console.log("Ultra-enhanced price target prediction complete:", result.ticker, `$${result.targetPrice}`, result.estimatedDate);
       
       return new Response(JSON.stringify(result), {
         headers: { 
@@ -1595,19 +2163,52 @@ serve(async (req) => {
       );
     }
 
-    console.log(`Processing enhanced prediction for ${ticker.toUpperCase()} targeting ${targetDate}`);
+    // Calculate days to target for mathematical confidence
+    const targetDateObj = new Date(targetDate);
+    const today = new Date();
+    const daysToTarget = Math.ceil((targetDateObj.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+
+    // NEW: Calculate mathematical confidence
+    const mathConfidence = calculateMathematicalConfidence(
+      consensus,
+      rsiDivergence,
+      macdDivergence,
+      regimeInfo,
+      sentiment,
+      daysToTarget,
+      weeklyAlignment.aligned
+    );
+    console.log(`Mathematical Confidence: ${mathConfidence}%`);
+
+    // NEW: Calculate dynamic uncertainty
+    const dynamicUncertainty = calculateDynamicUncertainty(
+      indicators.atr,
+      currentPrice,
+      regimeInfo,
+      daysToTarget,
+      indicators.volatility
+    );
+    console.log(`Dynamic Uncertainty: ${dynamicUncertainty.toFixed(1)}%`);
+
+    console.log(`Processing ultra-enhanced prediction for ${ticker.toUpperCase()} targeting ${targetDate}`);
     
-    // Get enhanced AI prediction
+    // Get enhanced AI prediction with all new signals
     const aiPrediction = await generateAIPrediction(
       ticker.toUpperCase(),
       targetDate,
       stockData,
       indicators,
       regimeInfo,
-      sentiment
+      sentiment,
+      consensus,
+      rsiDivergence,
+      macdDivergence,
+      mathConfidence,
+      dynamicUncertainty,
+      weeklyAlignment,
+      pivotPoints
     );
     
-    const currentPrice = closePrices[closePrices.length - 1];
     const predictedPrice = aiPrediction.predictedPrice;
     const uncertaintyPercent = aiPrediction.uncertaintyPercent / 100;
     
@@ -1642,14 +2243,27 @@ serve(async (req) => {
       historicalData,
       reasoning: aiPrediction.reasoning,
       currency: stockData.currency || "USD",
-      // Additional enhanced data
+      // Enhanced data
       supportLevels: indicators.supportResistance.support,
       resistanceLevels: indicators.supportResistance.resistance,
       fibonacciTrend: indicators.fibonacci.trend,
       obvTrend: indicators.obvTrend,
+      // NEW: Ultra-enhanced analysis data
+      consensusScore: consensus.consensusScore,
+      consensusAlignment: consensus.alignment,
+      signalDetails: consensus.signalDetails,
+      rsiDivergence: rsiDivergence.hasDivergence ? { type: rsiDivergence.type, strength: rsiDivergence.strength, description: rsiDivergence.description } : null,
+      macdDivergence: macdDivergence.hasDivergence ? { type: macdDivergence.type, strength: macdDivergence.strength } : null,
+      mathConfidence,
+      dynamicUncertainty,
+      weeklyTrend: weeklyAlignment.weeklyTrend,
+      weeklyAligned: weeklyAlignment.aligned,
+      weeklyDescription: weeklyAlignment.description,
+      pivotPoints,
+      vwap: indicators.vwap[indicators.vwap.length - 1],
     };
 
-    console.log("Enhanced prediction complete:", result.ticker, result.predictedPrice);
+    console.log("Ultra-enhanced prediction complete:", result.ticker, result.predictedPrice, `Confidence: ${result.confidence}%`);
     
     return new Response(JSON.stringify(result), {
       headers: { 
