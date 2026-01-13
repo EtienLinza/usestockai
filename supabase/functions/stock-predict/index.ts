@@ -87,6 +87,27 @@ async function verifyAuth(req: Request): Promise<{ user: any; error: Response | 
 }
 
 // ============================================================================
+// HELPER FUNCTIONS
+// ============================================================================
+
+// Safe array access helper to prevent undefined/NaN errors
+function safeGetLast<T>(arr: T[] | undefined | null, defaultValue: T): T {
+  if (!arr || arr.length === 0) return defaultValue;
+  const last = arr[arr.length - 1];
+  if (last === undefined || last === null) return defaultValue;
+  if (typeof last === 'number' && isNaN(last)) return defaultValue;
+  return last;
+}
+
+function safeGetAt<T>(arr: T[] | undefined | null, index: number, defaultValue: T): T {
+  if (!arr || index < 0 || index >= arr.length) return defaultValue;
+  const val = arr[index];
+  if (val === undefined || val === null) return defaultValue;
+  if (typeof val === 'number' && isNaN(val)) return defaultValue;
+  return val;
+}
+
+// ============================================================================
 // ENHANCED TECHNICAL INDICATORS
 // ============================================================================
 
@@ -220,7 +241,7 @@ function calculateATR(high: number[], low: number[], close: number[], period: nu
   return calculateEMA(tr, period);
 }
 
-// Stochastic Oscillator
+// Stochastic Oscillator - Fixed array alignment
 function calculateStochastic(close: number[], high: number[], low: number[], kPeriod: number = 14, dPeriod: number = 3): { k: number[]; d: number[] } {
   const k: number[] = [];
 
@@ -237,18 +258,32 @@ function calculateStochastic(close: number[], high: number[], low: number[], kPe
     k.push(range === 0 ? 50 : ((close[i] - lowestLow) / range) * 100);
   }
 
-  // Calculate %D (SMA of %K)
-  const validK = k.filter(v => !isNaN(v));
-  const d = calculateSMA(validK, dPeriod);
-  
-  // Pad d to match k length
-  const paddedD: number[] = new Array(k.length - validK.length).fill(NaN).concat(d);
+  // Calculate %D as SMA of %K, maintaining proper alignment
+  // d array should be same length as k array
+  const d: number[] = [];
+  for (let i = 0; i < k.length; i++) {
+    if (i < kPeriod - 1 + dPeriod - 1 || isNaN(k[i])) {
+      d.push(NaN);
+    } else {
+      // Get the last dPeriod values of k that are valid
+      const kSlice = k.slice(i - dPeriod + 1, i + 1).filter(v => !isNaN(v));
+      if (kSlice.length >= dPeriod) {
+        d.push(kSlice.reduce((a, b) => a + b, 0) / dPeriod);
+      } else {
+        d.push(NaN);
+      }
+    }
+  }
 
-  return { k, d: paddedD };
+  return { k, d };
 }
 
-// Average Directional Index (ADX)
+// Average Directional Index (ADX) - Fixed array padding
 function calculateADX(high: number[], low: number[], close: number[], period: number = 14): { adx: number[]; plusDI: number[]; minusDI: number[] } {
+  if (close.length < 2) {
+    return { adx: [], plusDI: [], minusDI: [] };
+  }
+  
   const plusDM: number[] = [];
   const minusDM: number[] = [];
   const tr: number[] = [];
@@ -277,13 +312,22 @@ function calculateADX(high: number[], low: number[], close: number[], period: nu
     return sum === 0 ? 0 : (Math.abs(v - minusDI[i]) / sum) * 100;
   });
 
-  const adx = calculateEMA(dx.filter(v => !isNaN(v)), period);
+  const validDX = dx.filter(v => !isNaN(v));
+  const adxRaw = validDX.length >= period ? calculateEMA(validDX, period) : validDX;
 
-  // Pad arrays to match original length
-  const padLength = close.length - adx.length;
-  const paddedADX = new Array(padLength).fill(NaN).concat(adx);
-  const paddedPlusDI = [NaN].concat(plusDI);
-  const paddedMinusDI = [NaN].concat(minusDI);
+  // Properly pad all arrays to match close.length
+  // plusDI and minusDI are derived from arrays starting at index 1, so they need 1 NaN at start
+  // then they go through EMA which maintains length, so final length is (close.length - 1)
+  const paddedPlusDI = new Array(1).fill(NaN).concat(plusDI);
+  const paddedMinusDI = new Array(1).fill(NaN).concat(minusDI);
+  
+  // Ensure plusDI and minusDI match close.length
+  while (paddedPlusDI.length < close.length) paddedPlusDI.unshift(NaN);
+  while (paddedMinusDI.length < close.length) paddedMinusDI.unshift(NaN);
+  
+  // ADX needs more padding since it goes through additional smoothing
+  const adxPadLength = close.length - adxRaw.length;
+  const paddedADX = new Array(Math.max(0, adxPadLength)).fill(NaN).concat(adxRaw);
 
   return { adx: paddedADX, plusDI: paddedPlusDI, minusDI: paddedMinusDI };
 }
@@ -424,7 +468,7 @@ function calculatePivotPoints(prevHigh: number, prevLow: number, prevClose: numb
 }
 
 // ============================================================================
-// NEW: SIGNAL CONSENSUS SYSTEM
+// NEW: SIGNAL CONSENSUS SYSTEM - With Safe Array Access
 // ============================================================================
 function calculateSignalConsensus(
   indicators: any,
@@ -440,9 +484,9 @@ function calculateSignalConsensus(
   let bearish = 0;
   const signalDetails: string[] = [];
 
-  // RSI Signal (weight: 1.5)
-  const rsi = indicators.rsi[indicators.rsi.length - 1];
-  if (!isNaN(rsi)) {
+  try {
+    // RSI Signal (weight: 1.5)
+    const rsi = safeGetLast(indicators.rsi, 50);
     if (rsi < 30) {
       bullish += 1.5;
       signalDetails.push(`RSI oversold (${rsi.toFixed(1)})`);
@@ -456,12 +500,14 @@ function calculateSignalConsensus(
       bearish += 0.5;
       signalDetails.push(`RSI bearish (${rsi.toFixed(1)})`);
     }
+  } catch (e) {
+    console.warn("RSI signal calculation failed:", e);
   }
 
-  // MACD Signal (weight: 1.5)
-  const macdHist = indicators.macd.histogram[indicators.macd.histogram.length - 1];
-  const prevHist = indicators.macd.histogram[indicators.macd.histogram.length - 2];
-  if (!isNaN(macdHist) && !isNaN(prevHist)) {
+  try {
+    // MACD Signal (weight: 1.5)
+    const macdHist = safeGetLast(indicators.macd?.histogram, 0);
+    const prevHist = safeGetAt(indicators.macd?.histogram, (indicators.macd?.histogram?.length || 1) - 2, 0);
     if (macdHist > 0 && macdHist > prevHist) {
       bullish += 1.5;
       signalDetails.push("MACD rising positive");
@@ -475,12 +521,14 @@ function calculateSignalConsensus(
       bearish += 0.5;
       signalDetails.push("MACD negative");
     }
+  } catch (e) {
+    console.warn("MACD signal calculation failed:", e);
   }
 
-  // EMA Crossover (weight: 1)
-  const ema12 = indicators.ema12[indicators.ema12.length - 1];
-  const ema26 = indicators.ema26[indicators.ema26.length - 1];
-  if (!isNaN(ema12) && !isNaN(ema26)) {
+  try {
+    // EMA Crossover (weight: 1)
+    const ema12 = safeGetLast(indicators.ema12, currentPrice);
+    const ema26 = safeGetLast(indicators.ema26, currentPrice);
     if (ema12 > ema26) {
       bullish += 1;
       signalDetails.push("EMA12 > EMA26");
@@ -488,11 +536,13 @@ function calculateSignalConsensus(
       bearish += 1;
       signalDetails.push("EMA12 < EMA26");
     }
+  } catch (e) {
+    console.warn("EMA signal calculation failed:", e);
   }
 
-  // Price vs SMA50 (weight: 1)
-  const sma50 = indicators.sma50[indicators.sma50.length - 1];
-  if (!isNaN(sma50)) {
+  try {
+    // Price vs SMA50 (weight: 1)
+    const sma50 = safeGetLast(indicators.sma50, currentPrice);
     if (currentPrice > sma50) {
       bullish += 1;
       signalDetails.push("Price above SMA50");
@@ -500,25 +550,31 @@ function calculateSignalConsensus(
       bearish += 1;
       signalDetails.push("Price below SMA50");
     }
+  } catch (e) {
+    console.warn("SMA50 signal calculation failed:", e);
   }
 
-  // ADX + DI Direction (weight: 2 if strong trend)
-  const adx = indicators.adx.adx[indicators.adx.adx.length - 1] || 0;
-  const plusDI = indicators.adx.plusDI[indicators.adx.plusDI.length - 1] || 0;
-  const minusDI = indicators.adx.minusDI[indicators.adx.minusDI.length - 1] || 0;
-  if (adx > 25) {
-    if (plusDI > minusDI) {
-      bullish += 2;
-      signalDetails.push(`Strong bullish trend (ADX: ${adx.toFixed(1)})`);
-    } else {
-      bearish += 2;
-      signalDetails.push(`Strong bearish trend (ADX: ${adx.toFixed(1)})`);
+  try {
+    // ADX + DI Direction (weight: 2 if strong trend)
+    const adx = safeGetLast(indicators.adx?.adx, 0);
+    const plusDI = safeGetLast(indicators.adx?.plusDI, 0);
+    const minusDI = safeGetLast(indicators.adx?.minusDI, 0);
+    if (adx > 25) {
+      if (plusDI > minusDI) {
+        bullish += 2;
+        signalDetails.push(`Strong bullish trend (ADX: ${adx.toFixed(1)})`);
+      } else {
+        bearish += 2;
+        signalDetails.push(`Strong bearish trend (ADX: ${adx.toFixed(1)})`);
+      }
     }
+  } catch (e) {
+    console.warn("ADX signal calculation failed:", e);
   }
 
-  // Stochastic (weight: 1.5)
-  const stochK = indicators.stochastic.k[indicators.stochastic.k.length - 1];
-  if (!isNaN(stochK)) {
+  try {
+    // Stochastic (weight: 1.5)
+    const stochK = safeGetLast(indicators.stochastic?.k, 50);
     if (stochK < 20) {
       bullish += 1.5;
       signalDetails.push(`Stochastic oversold (${stochK.toFixed(1)})`);
@@ -526,13 +582,15 @@ function calculateSignalConsensus(
       bearish += 1.5;
       signalDetails.push(`Stochastic overbought (${stochK.toFixed(1)})`);
     }
+  } catch (e) {
+    console.warn("Stochastic signal calculation failed:", e);
   }
 
-  // Bollinger Bands Position (weight: 1.5)
-  const bbUpper = indicators.bollingerBands.upper[indicators.bollingerBands.upper.length - 1];
-  const bbLower = indicators.bollingerBands.lower[indicators.bollingerBands.lower.length - 1];
-  const bbMid = indicators.bollingerBands.middle[indicators.bollingerBands.middle.length - 1];
-  if (!isNaN(bbUpper) && !isNaN(bbLower)) {
+  try {
+    // Bollinger Bands Position (weight: 1.5)
+    const bbUpper = safeGetLast(indicators.bollingerBands?.upper, currentPrice * 1.1);
+    const bbLower = safeGetLast(indicators.bollingerBands?.lower, currentPrice * 0.9);
+    const bbMid = safeGetLast(indicators.bollingerBands?.middle, currentPrice);
     if (currentPrice < bbLower) {
       bullish += 1.5;
       signalDetails.push("Below lower Bollinger Band");
@@ -546,21 +604,27 @@ function calculateSignalConsensus(
       bearish += 0.5;
       signalDetails.push("Below BB midline");
     }
+  } catch (e) {
+    console.warn("Bollinger Bands signal calculation failed:", e);
   }
 
-  // OBV Trend (weight: 1)
-  if (indicators.obvTrend === "rising") {
-    bullish += 1;
-    signalDetails.push("OBV rising (volume confirms)");
-  } else if (indicators.obvTrend === "falling") {
-    bearish += 1;
-    signalDetails.push("OBV falling (volume confirms)");
+  try {
+    // OBV Trend (weight: 1)
+    if (indicators.obvTrend === "rising") {
+      bullish += 1;
+      signalDetails.push("OBV rising (volume confirms)");
+    } else if (indicators.obvTrend === "falling") {
+      bearish += 1;
+      signalDetails.push("OBV falling (volume confirms)");
+    }
+  } catch (e) {
+    console.warn("OBV signal calculation failed:", e);
   }
 
-  // VWAP Position (weight: 1)
-  if (indicators.vwap && indicators.vwap.length > 0) {
-    const latestVWAP = indicators.vwap[indicators.vwap.length - 1];
-    if (!isNaN(latestVWAP)) {
+  try {
+    // VWAP Position (weight: 1)
+    const latestVWAP = safeGetLast(indicators.vwap, 0);
+    if (latestVWAP > 0) {
       if (currentPrice > latestVWAP) {
         bullish += 1;
         signalDetails.push("Price above VWAP");
@@ -569,6 +633,8 @@ function calculateSignalConsensus(
         signalDetails.push("Price below VWAP");
       }
     }
+  } catch (e) {
+    console.warn("VWAP signal calculation failed:", e);
   }
 
   // Calculate consensus
@@ -752,7 +818,7 @@ function detectMACDDivergence(prices: number[], macdHist: number[], lookback: nu
 }
 
 // ============================================================================
-// NEW: MATHEMATICAL CONFIDENCE CALCULATION
+// NEW: MATHEMATICAL CONFIDENCE CALCULATION - Rebalanced for realistic scores
 // ============================================================================
 function calculateMathematicalConfidence(
   consensus: { consensusScore: number; alignment: string },
@@ -763,64 +829,65 @@ function calculateMathematicalConfidence(
   daysToTarget: number,
   weeklyAlignment: boolean
 ): number {
-  let confidence = 50; // Base confidence
+  // REBALANCED: Raised base from 50 to 55
+  let confidence = 55;
 
-  // Signal alignment (+/- 25 points based on consensus score magnitude)
+  // Signal alignment (+0 to +25 points based on consensus score magnitude)
   confidence += Math.abs(consensus.consensusScore) * 0.25;
 
-  // Strong trend regime bonus (+10)
+  // Strong trend regime bonus (+8, reduced from +10)
   if (regime.regime.includes("strong")) {
-    confidence += 10;
+    confidence += 8;
   }
 
-  // RSI Divergence confirmation (+/- 8 points)
+  // RSI Divergence confirmation (+/- points, slightly reduced penalties)
   if (rsiDivergence.hasDivergence) {
     const consensusBullish = consensus.consensusScore > 0;
     const divergenceBullish = rsiDivergence.type === "bullish";
     
     if (consensusBullish === divergenceBullish) {
-      confidence += 8 * rsiDivergence.strength; // Aligned divergence
+      confidence += 6 * rsiDivergence.strength; // Aligned divergence (reduced from 8)
     } else {
-      confidence -= 5; // Conflicting divergence
+      confidence -= 3; // Conflicting divergence (reduced from 5)
     }
   }
 
-  // MACD Divergence confirmation (+/- 5 points)
+  // MACD Divergence confirmation (+/- points)
   if (macdDivergence.hasDivergence) {
     const consensusBullish = consensus.consensusScore > 0;
     const divergenceBullish = macdDivergence.type === "bullish";
     
     if (consensusBullish === divergenceBullish) {
-      confidence += 5 * macdDivergence.strength;
+      confidence += 4 * macdDivergence.strength; // Reduced from 5
     } else {
-      confidence -= 3;
+      confidence -= 2; // Reduced from 3
     }
   }
 
-  // Sentiment alignment (+/- 5 points)
+  // Sentiment alignment (+/- points)
   if ((sentiment.score > 0.2 && consensus.consensusScore > 0) ||
       (sentiment.score < -0.2 && consensus.consensusScore < 0)) {
-    confidence += 5 * sentiment.confidence;
+    confidence += 4 * sentiment.confidence; // Reduced from 5
   } else if ((sentiment.score > 0.2 && consensus.consensusScore < 0) ||
              (sentiment.score < -0.2 && consensus.consensusScore > 0)) {
-    confidence -= 3; // Sentiment conflicts with technicals
+    confidence -= 2; // Reduced from 3
   }
 
-  // Weekly timeframe alignment
+  // Weekly timeframe alignment - REBALANCED: symmetric and reduced
   if (weeklyAlignment) {
-    confidence += 8;
+    confidence += 5; // Bonus for alignment
   } else {
-    confidence -= 10;
+    confidence -= 5; // Reduced penalty from -10 to -5
   }
 
-  // Time decay (longer predictions = less confidence)
-  if (daysToTarget > 90) confidence -= 10;
-  else if (daysToTarget > 60) confidence -= 7;
-  else if (daysToTarget > 30) confidence -= 5;
+  // Time decay - REBALANCED: reduced penalties
+  if (daysToTarget > 90) confidence -= 7; // Reduced from -10
+  else if (daysToTarget > 60) confidence -= 5; // Reduced from -7
+  else if (daysToTarget > 30) confidence -= 3; // Reduced from -5
 
-  // Mixed signals penalty
+  // Mixed signals penalty - REBALANCED: reduced from -15 to -8
   if (Math.abs(consensus.consensusScore) < 20) {
-    confidence -= 15; // Heavy penalty for mixed signals
+    confidence -= 8;
   }
 
   // Clamp between 35 and 92
@@ -1319,7 +1386,7 @@ You MUST respond with ONLY valid JSON in this exact format:
   }
 }
 
-// ENHANCED: Price Target Prediction with All Indicators
+// ENHANCED: Price Target Prediction with All Indicators + Date Validation
 async function generatePriceTargetPrediction(
   ticker: string,
   targetPrice: number,
@@ -1354,7 +1421,12 @@ async function generatePriceTargetPrediction(
   const change90d = prices.length >= 90 ? ((prices[prices.length - 1] - prices[prices.length - 90]) / prices[prices.length - 90]) * 100 : 0;
   const change180d = prices.length >= 180 ? ((prices[prices.length - 1] - prices[prices.length - 180]) / prices[prices.length - 180]) * 100 : 0;
   
+  // CRITICAL FIX: Include current date in prompt to prevent past date predictions
+  const currentDate = new Date().toISOString().split('T')[0];
+  
   const prompt = `You are an expert quantitative analyst. Analyze when this ${ticker.includes('-') ? 'cryptocurrency' : 'stock'} might reach the target price.
+
+CRITICAL: TODAY'S DATE IS ${currentDate}. ALL DATES YOU PROVIDE MUST BE IN THE FUTURE (after ${currentDate}).
 
 ASSET: ${ticker}
 CURRENT PRICE: $${safeToFixed(currentPrice)}
@@ -1391,8 +1463,8 @@ Average Daily Return: ${safeToFixed(avgDailyReturn * 100, 3)}%
 Average Daily Volatility: ${safeToFixed(avgAbsDailyReturn * 100, 3)}%
 
 ===== KEY INDICATORS =====
-RSI: ${safeToFixed(indicators.rsi[indicators.rsi.length - 1], 1)}
-ADX: ${safeToFixed(indicators.adx.adx[indicators.adx.adx.length - 1], 1)}
+RSI: ${safeToFixed(safeGetLast(indicators.rsi, 50), 1)}
+ADX: ${safeToFixed(safeGetLast(indicators.adx?.adx, 0), 1)}
 OBV Trend: ${indicators.obvTrend}
 
 Analyze the likelihood and timeframe for reaching $${safeToFixed(targetPrice)}. Consider:
@@ -1401,11 +1473,13 @@ Analyze the likelihood and timeframe for reaching $${safeToFixed(targetPrice)}. 
 3. Does the weekly trend support or conflict with this target?
 4. Any divergence warnings that might affect timing?
 
+REMEMBER: Today is ${currentDate}. All dates must be AFTER this date.
+
 You MUST respond with ONLY valid JSON:
 {
-  "estimatedDate": "<YYYY-MM-DD most likely date>",
-  "estimatedDateRangeLow": "<YYYY-MM-DD best case>",
-  "estimatedDateRangeHigh": "<YYYY-MM-DD worst case>",
+  "estimatedDate": "<YYYY-MM-DD most likely date, MUST be after ${currentDate}>",
+  "estimatedDateRangeLow": "<YYYY-MM-DD best case, MUST be after ${currentDate}>",
+  "estimatedDateRangeHigh": "<YYYY-MM-DD worst case, MUST be after ${currentDate}>",
   "probability": <0-100>,
   "isRealistic": <true or false>,
   "reasoning": "<2-3 sentence explanation>",
@@ -1423,7 +1497,7 @@ You MUST respond with ONLY valid JSON:
     body: JSON.stringify({
       model: "google/gemini-2.5-flash",
       messages: [
-        { role: "system", content: "You are a quantitative financial analyst specializing in price target analysis. Respond only with valid JSON." },
+        { role: "system", content: `You are a quantitative financial analyst specializing in price target analysis. Today's date is ${currentDate}. All dates you provide MUST be in the future. Respond only with valid JSON.` },
         { role: "user", content: prompt }
       ],
     }),
@@ -1455,7 +1529,60 @@ You MUST respond with ONLY valid JSON:
   }
   
   try {
-    return JSON.parse(jsonStr.trim());
+    const parsed = JSON.parse(jsonStr.trim());
+    
+    // CRITICAL FIX: Validate and correct dates if they're in the past
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    const validateAndFixDate = (dateStr: string, minDaysFromNow: number = 1): string => {
+      try {
+        const date = new Date(dateStr);
+        if (isNaN(date.getTime()) || date <= today) {
+          // Date is invalid or in the past - calculate a reasonable future date
+          const futureDate = new Date(today);
+          futureDate.setDate(futureDate.getDate() + minDaysFromNow);
+          return futureDate.toISOString().split('T')[0];
+        }
+        return dateStr;
+      } catch {
+        const futureDate = new Date(today);
+        futureDate.setDate(futureDate.getDate() + minDaysFromNow);
+        return futureDate.toISOString().split('T')[0];
+      }
+    };
+    
+    // Calculate reasonable future dates based on price change required
+    const daysNeeded = Math.max(7, Math.ceil(Math.abs(priceChange) / (avgAbsDailyReturn * 100) * 1.5));
+    
+    // Validate and fix all dates
+    parsed.estimatedDate = validateAndFixDate(parsed.estimatedDate, daysNeeded);
+    parsed.estimatedDateRangeLow = validateAndFixDate(parsed.estimatedDateRangeLow, Math.max(3, Math.floor(daysNeeded * 0.5)));
+    parsed.estimatedDateRangeHigh = validateAndFixDate(parsed.estimatedDateRangeHigh, Math.ceil(daysNeeded * 1.5));
+    
+    // Ensure date range makes sense (low < estimated < high)
+    const estDate = new Date(parsed.estimatedDate);
+    const lowDate = new Date(parsed.estimatedDateRangeLow);
+    const highDate = new Date(parsed.estimatedDateRangeHigh);
+    
+    if (lowDate >= estDate) {
+      const newLow = new Date(estDate);
+      newLow.setDate(newLow.getDate() - Math.max(3, Math.floor(daysNeeded * 0.3)));
+      if (newLow <= today) {
+        newLow.setDate(today.getDate() + 3);
+      }
+      parsed.estimatedDateRangeLow = newLow.toISOString().split('T')[0];
+    }
+    
+    if (highDate <= estDate) {
+      const newHigh = new Date(estDate);
+      newHigh.setDate(newHigh.getDate() + Math.max(7, Math.floor(daysNeeded * 0.5)));
+      parsed.estimatedDateRangeHigh = newHigh.toISOString().split('T')[0];
+    }
+    
+    console.log(`Price target dates validated: ${parsed.estimatedDateRangeLow} - ${parsed.estimatedDate} - ${parsed.estimatedDateRangeHigh}`);
+    
+    return parsed;
   } catch (e) {
     console.error("Failed to parse AI response:", content);
     throw new Error("Failed to parse AI price target prediction");
