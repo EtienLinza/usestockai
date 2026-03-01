@@ -29,9 +29,7 @@ export const Navbar = () => {
 
   const navLinks = [
     { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-    { href: "/market", label: "Market", icon: Activity },
     { href: "/guide", label: "Guide", icon: BookOpen },
-    { href: "/sectors", label: "Sectors", icon: PieChart },
     { href: "/watchlist", label: "Watchlist", icon: Heart },
     { href: "/history", label: "History", icon: History },
   ];
@@ -168,17 +166,9 @@ export const Navbar = () => {
                     <LayoutDashboard className="w-4 h-4 mr-2" />
                     Dashboard
                   </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => navigate("/market")}>
-                    <Activity className="w-4 h-4 mr-2" />
-                    Market
-                  </DropdownMenuItem>
                   <DropdownMenuItem onClick={() => navigate("/guide")}>
                     <BookOpen className="w-4 h-4 mr-2" />
                     Guide
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => navigate("/sectors")}>
-                    <PieChart className="w-4 h-4 mr-2" />
-                    Sectors
                   </DropdownMenuItem>
                   <DropdownMenuItem onClick={() => navigate("/watchlist")}>
                     <Heart className="w-4 h-4 mr-2" />
