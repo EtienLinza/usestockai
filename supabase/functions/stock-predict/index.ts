@@ -2384,7 +2384,8 @@ serve(async (req) => {
       currentPrice,
       regimeInfo,
       daysToTarget,
-      indicators.volatility
+      indicators.volatility,
+      ticker.toUpperCase()
     );
     console.log(`Dynamic Uncertainty: ${dynamicUncertainty.toFixed(1)}%`);
 
