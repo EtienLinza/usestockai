@@ -114,9 +114,27 @@ function safeGetAt<T>(arr: T[] | undefined | null, index: number, defaultValue: 
 function calculateEMA(prices: number[], period: number): number[] {
   const multiplier = 2 / (period + 1);
   const ema: number[] = [];
-  ema[0] = prices[0];
   
-  for (let i = 1; i < prices.length; i++) {
+  if (prices.length < period) {
+    // Not enough data - fallback to simple seed
+    ema[0] = prices[0];
+    for (let i = 1; i < prices.length; i++) {
+      ema[i] = (prices[i] - ema[i - 1]) * multiplier + ema[i - 1];
+    }
+    return ema;
+  }
+  
+  // Seed with SMA of first `period` values
+  const smaSum = prices.slice(0, period).reduce((a, b) => a + b, 0);
+  const smaSeed = smaSum / period;
+  
+  // Fill first period-1 with NaN, then seed at index period-1
+  for (let i = 0; i < period - 1; i++) {
+    ema[i] = NaN;
+  }
+  ema[period - 1] = smaSeed;
+  
+  for (let i = period; i < prices.length; i++) {
     ema[i] = (prices[i] - ema[i - 1]) * multiplier + ema[i - 1];
   }
   return ema;
@@ -428,16 +446,20 @@ function calculateFibonacciLevels(prices: number[], lookback: number = 60): { le
 // ============================================================================
 // NEW: VWAP (Volume-Weighted Average Price)
 // ============================================================================
-function calculateVWAP(high: number[], low: number[], close: number[], volume: number[]): number[] {
+function calculateVWAP(high: number[], low: number[], close: number[], volume: number[], window: number = 20): number[] {
   const vwap: number[] = [];
-  let cumulativeTPV = 0;
-  let cumulativeVolume = 0;
 
   for (let i = 0; i < close.length; i++) {
-    const typicalPrice = (high[i] + low[i] + close[i]) / 3;
-    cumulativeTPV += typicalPrice * (volume[i] || 0);
-    cumulativeVolume += volume[i] || 0;
-    vwap.push(cumulativeVolume === 0 ? typicalPrice : cumulativeTPV / cumulativeVolume);
+    const start = Math.max(0, i - window + 1);
+    let sumTPV = 0;
+    let sumVol = 0;
+    for (let j = start; j <= i; j++) {
+      const tp = (high[j] + low[j] + close[j]) / 3;
+      const vol = volume[j] || 0;
+      sumTPV += tp * vol;
+      sumVol += vol;
+    }
+    vwap.push(sumVol === 0 ? (high[i] + low[i] + close[i]) / 3 : sumTPV / sumVol);
   }
 
   return vwap;
@@ -637,9 +659,12 @@ function calculateSignalConsensus(
     console.warn("VWAP signal calculation failed:", e);
   }
 
-  // Calculate consensus
+  // Calculate consensus with conviction weighting
   const total = bullish + bearish;
-  const consensusScore = total === 0 ? 0 : ((bullish - bearish) / total) * 100;
+  const maxPossibleTotal = 13.5; // Sum of all possible signal weights
+  const direction_score = total === 0 ? 0 : ((bullish - bearish) / total) * 100;
+  const conviction = Math.min(1, total / (maxPossibleTotal * 0.6));
+  const consensusScore = direction_score * conviction;
 
   let alignment = "neutral";
   if (consensusScore > 60) alignment = "strong_bullish";
@@ -666,9 +691,10 @@ function detectRSIDivergence(prices: number[], rsi: number[], lookback: number =
   description: string;
 } {
   const recentPrices = prices.slice(-lookback);
-  const recentRSI = rsi.slice(-lookback).filter(v => !isNaN(v));
+  const recentRSI = rsi.slice(-lookback); // Keep NaN values to preserve index alignment
 
-  if (recentRSI.length < 10) {
+  const validRSICount = recentRSI.filter(v => !isNaN(v)).length;
+  if (validRSICount < 10) {
     return { hasDivergence: false, type: "none", strength: 0, description: "Insufficient data" };
   }
 
@@ -687,18 +713,16 @@ function detectRSIDivergence(prices: number[], rsi: number[], lookback: number =
     }
   }
 
-  // Align RSI indices with price indices
-  const rsiOffset = lookback - recentRSI.length;
+  // RSI indices are now aligned with price indices (same length, same positions)
 
   // Check for bullish divergence (lower price lows, higher RSI lows)
   if (priceLows.length >= 2) {
     const [prev, curr] = priceLows.slice(-2);
-    const prevRSIIdx = prev.index - rsiOffset;
-    const currRSIIdx = curr.index - rsiOffset;
     
-    if (prevRSIIdx >= 0 && currRSIIdx >= 0 && prevRSIIdx < recentRSI.length && currRSIIdx < recentRSI.length) {
-      const prevRSI = recentRSI[prevRSIIdx];
-      const currRSI = recentRSI[currRSIIdx];
+    if (prev.index >= 0 && curr.index >= 0 && prev.index < recentRSI.length && curr.index < recentRSI.length &&
+        !isNaN(recentRSI[prev.index]) && !isNaN(recentRSI[curr.index])) {
+      const prevRSI = recentRSI[prev.index];
+      const currRSI = recentRSI[curr.index];
 
       if (curr.value < prev.value && currRSI > prevRSI) {
         const strength = Math.min(1, (currRSI - prevRSI) / 20);
@@ -715,12 +739,11 @@ function detectRSIDivergence(prices: number[], rsi: number[], lookback: number =
   // Check for bearish divergence (higher price highs, lower RSI highs)
   if (priceHighs.length >= 2) {
     const [prev, curr] = priceHighs.slice(-2);
-    const prevRSIIdx = prev.index - rsiOffset;
-    const currRSIIdx = curr.index - rsiOffset;
     
-    if (prevRSIIdx >= 0 && currRSIIdx >= 0 && prevRSIIdx < recentRSI.length && currRSIIdx < recentRSI.length) {
-      const prevRSI = recentRSI[prevRSIIdx];
-      const currRSI = recentRSI[currRSIIdx];
+    if (prev.index >= 0 && curr.index >= 0 && prev.index < recentRSI.length && curr.index < recentRSI.length &&
+        !isNaN(recentRSI[prev.index]) && !isNaN(recentRSI[curr.index])) {
+      const prevRSI = recentRSI[prev.index];
+      const currRSI = recentRSI[curr.index];
 
       if (curr.value > prev.value && currRSI < prevRSI) {
         const strength = Math.min(1, (prevRSI - currRSI) / 20);
@@ -747,9 +770,10 @@ function detectMACDDivergence(prices: number[], macdHist: number[], lookback: nu
   description: string;
 } {
   const recentPrices = prices.slice(-lookback);
-  const recentMACD = macdHist.slice(-lookback).filter(v => !isNaN(v));
+  const recentMACD = macdHist.slice(-lookback); // Keep NaN to preserve index alignment
 
-  if (recentMACD.length < 10) {
+  const validMACDCount = recentMACD.filter(v => !isNaN(v)).length;
+  if (validMACDCount < 10) {
     return { hasDivergence: false, type: "none", strength: 0, description: "Insufficient data" };
   }
 
@@ -768,17 +792,16 @@ function detectMACDDivergence(prices: number[], macdHist: number[], lookback: nu
     }
   }
 
-  const macdOffset = lookback - recentMACD.length;
+  // MACD indices are now aligned with price indices
 
   // Check for bullish divergence
   if (priceLows.length >= 2) {
     const [prev, curr] = priceLows.slice(-2);
-    const prevMACDIdx = prev.index - macdOffset;
-    const currMACDIdx = curr.index - macdOffset;
     
-    if (prevMACDIdx >= 0 && currMACDIdx >= 0 && prevMACDIdx < recentMACD.length && currMACDIdx < recentMACD.length) {
-      const prevMACD = recentMACD[prevMACDIdx];
-      const currMACD = recentMACD[currMACDIdx];
+    if (prev.index >= 0 && curr.index >= 0 && prev.index < recentMACD.length && curr.index < recentMACD.length &&
+        !isNaN(recentMACD[prev.index]) && !isNaN(recentMACD[curr.index])) {
+      const prevMACD = recentMACD[prev.index];
+      const currMACD = recentMACD[curr.index];
 
       if (curr.value < prev.value && currMACD > prevMACD) {
         const strength = Math.min(1, Math.abs(currMACD - prevMACD) / Math.abs(prevMACD || 0.01));
@@ -795,12 +818,11 @@ function detectMACDDivergence(prices: number[], macdHist: number[], lookback: nu
   // Check for bearish divergence
   if (priceHighs.length >= 2) {
     const [prev, curr] = priceHighs.slice(-2);
-    const prevMACDIdx = prev.index - macdOffset;
-    const currMACDIdx = curr.index - macdOffset;
     
-    if (prevMACDIdx >= 0 && currMACDIdx >= 0 && prevMACDIdx < recentMACD.length && currMACDIdx < recentMACD.length) {
-      const prevMACD = recentMACD[prevMACDIdx];
-      const currMACD = recentMACD[currMACDIdx];
+    if (prev.index >= 0 && curr.index >= 0 && prev.index < recentMACD.length && curr.index < recentMACD.length &&
+        !isNaN(recentMACD[prev.index]) && !isNaN(recentMACD[curr.index])) {
+      const prevMACD = recentMACD[prev.index];
+      const currMACD = recentMACD[curr.index];
 
       if (curr.value > prev.value && currMACD < prevMACD) {
         const strength = Math.min(1, Math.abs(prevMACD - currMACD) / Math.abs(prevMACD || 0.01));
@@ -921,8 +943,10 @@ function calculateDynamicUncertainty(
   if (regime.regime === "ranging") uncertainty *= 0.8;
   if (regime.regime.includes("strong")) uncertainty *= 0.9; // Trending = more predictable
 
-  // Cap between 3% and 18%
-  return Math.max(3, Math.min(18, uncertainty));
+  // Cap: 30% for crypto, 18% for stocks
+  const isCrypto = typeof (globalThis as any).__currentTicker === 'string' && (globalThis as any).__currentTicker.includes('-USD');
+  const maxCap = isCrypto ? 30 : 18;
+  return Math.max(3, Math.min(maxCap, uncertainty));
 }
 
 // ============================================================================
