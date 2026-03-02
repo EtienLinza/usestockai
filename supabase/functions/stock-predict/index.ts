@@ -945,7 +945,7 @@ function calculateDynamicUncertainty(
   if (regime.regime.includes("strong")) uncertainty *= 0.9; // Trending = more predictable
 
   // Cap: 30% for crypto, 18% for stocks
-  const isCrypto = typeof (globalThis as any).__currentTicker === 'string' && (globalThis as any).__currentTicker.includes('-USD');
+  const isCrypto = ticker.includes('-USD');
   const maxCap = isCrypto ? 30 : 18;
   return Math.max(3, Math.min(maxCap, uncertainty));
 }
