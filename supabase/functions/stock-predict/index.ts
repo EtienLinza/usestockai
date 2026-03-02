@@ -924,7 +924,8 @@ function calculateDynamicUncertainty(
   currentPrice: number,
   regime: { regime: string },
   daysToTarget: number,
-  volatility: number[]
+  volatility: number[],
+  ticker: string = ""
 ): number {
   const latestATR = atr[atr.length - 1] || 0;
   const latestVol = volatility[volatility.length - 1] || 0.02;
@@ -1037,11 +1038,17 @@ async function fetchWeeklyData(ticker: string): Promise<any> {
   console.log(`Fetching weekly data for ${ticker}...`);
   
   try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+    
     const response = await fetch(url, {
       headers: {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-      }
+      },
+      signal: controller.signal,
     });
+    
+    clearTimeout(timeout);
     
     if (!response.ok) {
       console.warn(`Failed to fetch weekly data: ${response.status}`);
@@ -1199,11 +1206,24 @@ async function fetchNewsSentiment(ticker: string): Promise<{ score: number; arti
       const recencyWeight = Math.max(0.3, 1 - (hoursAgo / 168));
       
       let score = 0;
+      const negationWords = ['not', 'no', "don't", "doesn't", "isn't", "aren't", "wasn't", "weren't", "never", "neither", "barely", "hardly"];
+      
+      const hasNegationBefore = (text: string, wordIndex: number): boolean => {
+        const before = text.substring(Math.max(0, wordIndex - 25), wordIndex);
+        return negationWords.some(neg => before.includes(neg));
+      };
+      
       for (const word of positiveWords) {
-        if (text.includes(word)) score += 0.08;
+        const idx = text.indexOf(word);
+        if (idx !== -1) {
+          score += hasNegationBefore(text, idx) ? -0.08 : 0.08;
+        }
       }
       for (const word of negativeWords) {
-        if (text.includes(word)) score -= 0.08;
+        const idx = text.indexOf(word);
+        if (idx !== -1) {
+          score += hasNegationBefore(text, idx) ? 0.08 : -0.08;
+        }
       }
       
       totalScore += Math.max(-1, Math.min(1, score)) * recencyWeight;
@@ -1334,7 +1354,7 @@ OBV Trend: ${indicators.obvTrend}
 ${recentData.dates.slice(-10).map((d: string, i: number) => `${d}: $${safeToFixed(recentData.prices.slice(-10)[i])}`).join('\n')}
 
 ===== INSTRUCTIONS =====
-1. Use the Mathematical Confidence (${mathConfidence}%) as your baseline. You may adjust by +/- 8% based on factors not captured in the formula.
+1. Use the Mathematical Confidence (${mathConfidence}%) as your baseline. You may adjust by +/- 4% based on factors not captured in the formula. You MUST explain any deviation from the baseline.
 2. Use the Dynamic Uncertainty (${dynamicUncertainty.toFixed(1)}%) as your baseline for uncertainty bands. You may adjust by +/- 3%.
 3. If weekly trend conflicts with daily signals, REDUCE confidence by 10%.
 4. Pay special attention to divergences - they often precede reversals.
@@ -1613,12 +1633,28 @@ You MUST respond with ONLY valid JSON:
   }
 }
 
+// Align OHLCV arrays - remove indices where ANY value is null
+function alignArrays(close: any[], high: any[], low: any[], volume: any[]): { close: number[]; high: number[]; low: number[]; volume: number[] } {
+  const aligned = { close: [] as number[], high: [] as number[], low: [] as number[], volume: [] as number[] };
+  for (let i = 0; i < close.length; i++) {
+    if (close[i] != null && high[i] != null && low[i] != null && volume[i] != null) {
+      aligned.close.push(close[i]);
+      aligned.high.push(high[i]);
+      aligned.low.push(low[i]);
+      aligned.volume.push(volume[i]);
+    }
+  }
+  return aligned;
+}
+
 // Calculate all enhanced indicators
 function calculateAllIndicators(stockData: any) {
-  const closePrices = stockData.close.filter((p: number) => p != null);
-  const highPrices = stockData.high?.filter((p: number) => p != null) || closePrices;
-  const lowPrices = stockData.low?.filter((p: number) => p != null) || closePrices;
-  const volumes = stockData.volume?.filter((v: number) => v != null) || new Array(closePrices.length).fill(1000000);
+  const rawClose = stockData.close || [];
+  const rawHigh = stockData.high || rawClose;
+  const rawLow = stockData.low || rawClose;
+  const rawVolume = stockData.volume || new Array(rawClose.length).fill(1000000);
+  
+  const { close: closePrices, high: highPrices, low: lowPrices, volume: volumes } = alignArrays(rawClose, rawHigh, rawLow, rawVolume);
 
   const ema12 = calculateEMA(closePrices, 12);
   const ema26 = calculateEMA(closePrices, 26);
@@ -1782,10 +1818,11 @@ async function analyzeStockForGuide(ticker: string, tradingStyle: string = "swin
       return null;
     }
     
-    const closePrices = stockData.close.filter((p: number) => p != null);
-    const highPrices = stockData.high?.filter((p: number) => p != null) || closePrices;
-    const lowPrices = stockData.low?.filter((p: number) => p != null) || closePrices;
-    const volumes = stockData.volume?.filter((v: number) => v != null) || [];
+    const rawClose = stockData.close || [];
+    const rawHigh = stockData.high || rawClose;
+    const rawLow = stockData.low || rawClose;
+    const rawVolume = stockData.volume || [];
+    const { close: closePrices, high: highPrices, low: lowPrices, volume: volumes } = alignArrays(rawClose, rawHigh, rawLow, rawVolume);
     const latestVolume = volumes[volumes.length - 1] || volumeData || 0;
     
     // Calculate all indicators including new ones
@@ -1924,7 +1961,17 @@ async function analyzeStockForGuide(ticker: string, tradingStyle: string = "swin
       return null;
     }
     
-    const confidence = Math.min(92, 45 + score * 6);
+    // Use calibrated confidence when possible
+    const macdDivergence = detectMACDDivergence(closePrices, macd.histogram, 30);
+    const confidence = calculateMathematicalConfidence(
+      consensus,
+      rsiDivergence,
+      macdDivergence,
+      regimeInfo,
+      { score: 0, confidence: 0 }, // No news sentiment for guide (too slow)
+      14, // Assume ~2 weeks holding for guide
+      true // Default to aligned since we skip weekly fetch for speed
+    );
     
     let riskLevel: "low" | "medium" | "high" = "medium";
     if (latestVolatility > 0.03) {
