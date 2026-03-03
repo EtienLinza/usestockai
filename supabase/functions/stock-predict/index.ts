@@ -1013,6 +1013,7 @@ function calculateDynamicUncertainty(
   uncertainty = (uncertainty + latestVol * 100 * Math.sqrt(daysToTarget / 5)) / 2;
 
   // Regime adjustments
+  if (regime.regime === "event_volatility") uncertainty *= 2.0; // Shock = double uncertainty
   if (regime.regime === "volatile") uncertainty *= 1.3;
   if (regime.regime === "ranging") uncertainty *= 0.8;
   if (regime.regime.includes("strong")) uncertainty *= 0.9; // Trending = more predictable
