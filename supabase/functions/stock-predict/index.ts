@@ -108,6 +108,65 @@ function safeGetAt<T>(arr: T[] | undefined | null, index: number, defaultValue: 
 }
 
 // ============================================================================
+// SHOCK / EVENT DETECTION
+// ============================================================================
+
+interface ShockState {
+  isShock: boolean;
+  shockMagnitude: number; // percentage move that triggered it
+  shockType: 'gap_up' | 'gap_down' | 'multi_day_surge' | 'multi_day_crash' | 'none';
+  description: string;
+}
+
+function detectPriceShock(closePrices: number[], volumes?: number[]): ShockState {
+  if (closePrices.length < 6) {
+    return { isShock: false, shockMagnitude: 0, shockType: 'none', description: 'Insufficient data' };
+  }
+
+  const latest = closePrices[closePrices.length - 1];
+  const prev = closePrices[closePrices.length - 2];
+  const fiveDaysAgo = closePrices[closePrices.length - 6];
+
+  // Single-day shock: >=25% move
+  const dailyChange = (latest - prev) / prev;
+  if (Math.abs(dailyChange) >= 0.25) {
+    return {
+      isShock: true,
+      shockMagnitude: Math.abs(dailyChange) * 100,
+      shockType: dailyChange > 0 ? 'gap_up' : 'gap_down',
+      description: `${dailyChange > 0 ? 'Massive gap up' : 'Massive gap down'}: ${(dailyChange * 100).toFixed(1)}% in one day`,
+    };
+  }
+
+  // Multi-day shock: >=40% in 5 days
+  const fiveDayChange = (latest - fiveDaysAgo) / fiveDaysAgo;
+  if (Math.abs(fiveDayChange) >= 0.40) {
+    return {
+      isShock: true,
+      shockMagnitude: Math.abs(fiveDayChange) * 100,
+      shockType: fiveDayChange > 0 ? 'multi_day_surge' : 'multi_day_crash',
+      description: `${fiveDayChange > 0 ? 'Extreme surge' : 'Extreme crash'}: ${(fiveDayChange * 100).toFixed(1)}% over 5 days`,
+    };
+  }
+
+  // Volume spike check (if available): 5x average volume + 15% move = shock
+  if (volumes && volumes.length >= 21) {
+    const avgVolume = volumes.slice(-21, -1).reduce((a, b) => a + (b || 0), 0) / 20;
+    const latestVolume = volumes[volumes.length - 1] || 0;
+    if (latestVolume > avgVolume * 5 && Math.abs(dailyChange) >= 0.15) {
+      return {
+        isShock: true,
+        shockMagnitude: Math.abs(dailyChange) * 100,
+        shockType: dailyChange > 0 ? 'gap_up' : 'gap_down',
+        description: `Volume spike (${(latestVolume / avgVolume).toFixed(0)}x avg) with ${(dailyChange * 100).toFixed(1)}% move`,
+      };
+    }
+  }
+
+  return { isShock: false, shockMagnitude: 0, shockType: 'none', description: 'Normal conditions' };
+}
+
+// ============================================================================
 // ENHANCED TECHNICAL INDICATORS
 // ============================================================================
 
