@@ -2331,22 +2331,30 @@ serve(async (req) => {
     // Calculate all enhanced indicators
     const indicators = calculateAllIndicators(stockData);
     const closePrices = stockData.close.filter((p: number) => p != null);
+    const volumes = stockData.volume?.filter((v: number) => v != null) || [];
     const currentPrice = closePrices[closePrices.length - 1];
     
-    // Get enhanced regime detection
+    // SHOCK DETECTION: Must run before regime detection
+    const shockState = detectPriceShock(closePrices, volumes);
+    if (shockState.isShock) {
+      console.log(`⚠️ SHOCK DETECTED for ${ticker.toUpperCase()}: ${shockState.description}`);
+    }
+    
+    // Get enhanced regime detection (shock-aware)
     const regimeInfo = detectRegimeEnhanced(
       closePrices,
       indicators.rsi,
       indicators.volatility,
       indicators.adx,
-      indicators.bollingerBands
+      indicators.bollingerBands,
+      shockState
     );
     
     // Fetch enhanced news sentiment
     const sentiment = await fetchNewsSentiment(ticker);
     
-    // NEW: Calculate signal consensus
-    const consensus = calculateSignalConsensus(indicators, currentPrice);
+    // Calculate signal consensus (shock-aware: suppresses mean-reversion signals)
+    const consensus = calculateSignalConsensus(indicators, currentPrice, shockState);
     console.log(`Signal Consensus: ${consensus.consensusScore.toFixed(1)} (${consensus.alignment})`);
     
     // NEW: Detect divergences
