@@ -108,6 +108,65 @@ function safeGetAt<T>(arr: T[] | undefined | null, index: number, defaultValue: 
 }
 
 // ============================================================================
+// SHOCK / EVENT DETECTION
+// ============================================================================
+
+interface ShockState {
+  isShock: boolean;
+  shockMagnitude: number; // percentage move that triggered it
+  shockType: 'gap_up' | 'gap_down' | 'multi_day_surge' | 'multi_day_crash' | 'none';
+  description: string;
+}
+
+function detectPriceShock(closePrices: number[], volumes?: number[]): ShockState {
+  if (closePrices.length < 6) {
+    return { isShock: false, shockMagnitude: 0, shockType: 'none', description: 'Insufficient data' };
+  }
+
+  const latest = closePrices[closePrices.length - 1];
+  const prev = closePrices[closePrices.length - 2];
+  const fiveDaysAgo = closePrices[closePrices.length - 6];
+
+  // Single-day shock: >=25% move
+  const dailyChange = (latest - prev) / prev;
+  if (Math.abs(dailyChange) >= 0.25) {
+    return {
+      isShock: true,
+      shockMagnitude: Math.abs(dailyChange) * 100,
+      shockType: dailyChange > 0 ? 'gap_up' : 'gap_down',
+      description: `${dailyChange > 0 ? 'Massive gap up' : 'Massive gap down'}: ${(dailyChange * 100).toFixed(1)}% in one day`,
+    };
+  }
+
+  // Multi-day shock: >=40% in 5 days
+  const fiveDayChange = (latest - fiveDaysAgo) / fiveDaysAgo;
+  if (Math.abs(fiveDayChange) >= 0.40) {
+    return {
+      isShock: true,
+      shockMagnitude: Math.abs(fiveDayChange) * 100,
+      shockType: fiveDayChange > 0 ? 'multi_day_surge' : 'multi_day_crash',
+      description: `${fiveDayChange > 0 ? 'Extreme surge' : 'Extreme crash'}: ${(fiveDayChange * 100).toFixed(1)}% over 5 days`,
+    };
+  }
+
+  // Volume spike check (if available): 5x average volume + 15% move = shock
+  if (volumes && volumes.length >= 21) {
+    const avgVolume = volumes.slice(-21, -1).reduce((a, b) => a + (b || 0), 0) / 20;
+    const latestVolume = volumes[volumes.length - 1] || 0;
+    if (latestVolume > avgVolume * 5 && Math.abs(dailyChange) >= 0.15) {
+      return {
+        isShock: true,
+        shockMagnitude: Math.abs(dailyChange) * 100,
+        shockType: dailyChange > 0 ? 'gap_up' : 'gap_down',
+        description: `Volume spike (${(latestVolume / avgVolume).toFixed(0)}x avg) with ${(dailyChange * 100).toFixed(1)}% move`,
+      };
+    }
+  }
+
+  return { isShock: false, shockMagnitude: 0, shockType: 'none', description: 'Normal conditions' };
+}
+
+// ============================================================================
 // ENHANCED TECHNICAL INDICATORS
 // ============================================================================
 
@@ -494,7 +553,8 @@ function calculatePivotPoints(prevHigh: number, prevLow: number, prevClose: numb
 // ============================================================================
 function calculateSignalConsensus(
   indicators: any,
-  currentPrice: number
+  currentPrice: number,
+  shockState?: ShockState
 ): {
   bullishSignals: number;
   bearishSignals: number;
@@ -502,14 +562,23 @@ function calculateSignalConsensus(
   alignment: string;
   signalDetails: string[];
 } {
+  const isShock = shockState?.isShock || false;
   let bullish = 0;
   let bearish = 0;
   const signalDetails: string[] = [];
 
+  // During event_volatility, add a shock notice
+  if (isShock) {
+    signalDetails.push(`⚠️ SHOCK DETECTED: ${shockState!.description}`);
+  }
+
   try {
-    // RSI Signal (weight: 1.5)
+    // RSI Signal (weight: 1.5) — SUPPRESSED during shocks (mean-reversion is invalid)
     const rsi = safeGetLast(indicators.rsi, 50);
-    if (rsi < 30) {
+    if (isShock) {
+      // During shocks, RSI extremes are noise, not signals
+      signalDetails.push(`RSI at ${rsi.toFixed(1)} (suppressed: shock event)`);
+    } else if (rsi < 30) {
       bullish += 1.5;
       signalDetails.push(`RSI oversold (${rsi.toFixed(1)})`);
     } else if (rsi > 70) {
@@ -595,9 +664,11 @@ function calculateSignalConsensus(
   }
 
   try {
-    // Stochastic (weight: 1.5)
+    // Stochastic (weight: 1.5) — SUPPRESSED during shocks
     const stochK = safeGetLast(indicators.stochastic?.k, 50);
-    if (stochK < 20) {
+    if (isShock) {
+      signalDetails.push(`Stochastic at ${stochK.toFixed(1)} (suppressed: shock event)`);
+    } else if (stochK < 20) {
       bullish += 1.5;
       signalDetails.push(`Stochastic oversold (${stochK.toFixed(1)})`);
     } else if (stochK > 80) {
@@ -609,11 +680,13 @@ function calculateSignalConsensus(
   }
 
   try {
-    // Bollinger Bands Position (weight: 1.5)
+    // Bollinger Bands Position (weight: 1.5) — SUPPRESSED during shocks
     const bbUpper = safeGetLast(indicators.bollingerBands?.upper, currentPrice * 1.1);
     const bbLower = safeGetLast(indicators.bollingerBands?.lower, currentPrice * 0.9);
     const bbMid = safeGetLast(indicators.bollingerBands?.middle, currentPrice);
-    if (currentPrice < bbLower) {
+    if (isShock) {
+      signalDetails.push(`BB position suppressed (shock event)`);
+    } else if (currentPrice < bbLower) {
       bullish += 1.5;
       signalDetails.push("Below lower Bollinger Band");
     } else if (currentPrice > bbUpper) {
@@ -940,6 +1013,7 @@ function calculateDynamicUncertainty(
   uncertainty = (uncertainty + latestVol * 100 * Math.sqrt(daysToTarget / 5)) / 2;
 
   // Regime adjustments
+  if (regime.regime === "event_volatility") uncertainty *= 2.0; // Shock = double uncertainty
   if (regime.regime === "volatile") uncertainty *= 1.3;
   if (regime.regime === "ranging") uncertainty *= 0.8;
   if (regime.regime.includes("strong")) uncertainty *= 0.9; // Trending = more predictable
@@ -958,8 +1032,18 @@ function detectRegimeEnhanced(
   rsi: number[],
   volatility: number[],
   adx: { adx: number[]; plusDI: number[]; minusDI: number[] },
-  bollingerBands: { upper: number[]; middle: number[]; lower: number[]; bandwidth: number[] }
+  bollingerBands: { upper: number[]; middle: number[]; lower: number[]; bandwidth: number[] },
+  shockState?: ShockState
 ): { regime: string; strength: number; description: string } {
+  // SHOCK OVERRIDE: event_volatility takes precedence over all other regimes
+  if (shockState?.isShock) {
+    return {
+      regime: "event_volatility",
+      strength: shockState.shockMagnitude,
+      description: `EVENT REGIME: ${shockState.description}. Standard indicators unreliable.`,
+    };
+  }
+
   const latestADX = adx.adx[adx.adx.length - 1] || 0;
   const latestPlusDI = adx.plusDI[adx.plusDI.length - 1] || 0;
   const latestMinusDI = adx.minusDI[adx.minusDI.length - 1] || 0;
@@ -974,28 +1058,34 @@ function detectRegimeEnhanced(
   // Strong trend detection using ADX
   if (latestADX > 25) {
     if (latestPlusDI > latestMinusDI) {
-      return { regime: "strong_bullish", strength: latestADX, description: "Strong uptrend confirmed by ADX > 25 with +DI dominance" };
+      if (latestADX > 40 && latestRSI > 60) {
+        return { regime: "strong_bullish", strength: latestADX, description: `Very strong uptrend (ADX: ${latestADX.toFixed(1)}, +DI dominant)` };
+      }
+      return { regime: "bullish", strength: latestADX, description: `Uptrend confirmed by ADX (${latestADX.toFixed(1)})` };
     } else {
-      return { regime: "strong_bearish", strength: latestADX, description: "Strong downtrend confirmed by ADX > 25 with -DI dominance" };
+      if (latestADX > 40 && latestRSI < 40) {
+        return { regime: "strong_bearish", strength: latestADX, description: `Very strong downtrend (ADX: ${latestADX.toFixed(1)}, -DI dominant)` };
+      }
+      return { regime: "bearish", strength: latestADX, description: `Downtrend confirmed by ADX (${latestADX.toFixed(1)})` };
     }
   }
 
-  // Volatility breakout
-  if (latestVol > avgVol * 1.5 || bbBandwidth > 0.1) {
-    return { regime: "volatile", strength: latestVol / avgVol, description: "High volatility regime - Bollinger Bands expanding" };
+  // Overbought/Oversold
+  if (latestRSI > 70 && currentPrice > bbUpper) {
+    return { regime: "overbought", strength: latestRSI, description: `Overbought: RSI at ${latestRSI.toFixed(1)}, price above upper BB` };
+  }
+  if (latestRSI < 30 && currentPrice < bbLower) {
+    return { regime: "oversold", strength: 100 - latestRSI, description: `Oversold: RSI at ${latestRSI.toFixed(1)}, price below lower BB` };
   }
 
-  // Bollinger Band extremes
-  if (currentPrice > bbUpper && latestRSI > 70) {
-    return { regime: "overbought", strength: latestRSI, description: "Price above upper Bollinger Band with RSI > 70" };
-  }
-  if (currentPrice < bbLower && latestRSI < 30) {
-    return { regime: "oversold", strength: 100 - latestRSI, description: "Price below lower Bollinger Band with RSI < 30" };
+  // High volatility
+  if (latestVol > avgVol * 1.5) {
+    return { regime: "volatile", strength: (latestVol / avgVol) * 100, description: `High volatility (${(latestVol * 100).toFixed(1)}% vs avg ${(avgVol * 100).toFixed(1)}%)` };
   }
 
-  // Weak trend / ranging
-  if (latestADX < 20) {
-    return { regime: "ranging", strength: 20 - latestADX, description: "No clear trend, ADX < 20 indicates ranging/consolidation" };
+  // Ranging
+  if (bbBandwidth < 0.03 && latestADX < 20) {
+    return { regime: "ranging", strength: 100 - latestADX, description: "Tight range: Low ADX and narrow Bollinger Bands" };
   }
 
   // Moderate trends
@@ -1301,7 +1391,13 @@ async function generateAIPrediction(
 ASSET: ${ticker}
 TARGET DATE: ${targetDate}
 CURRENT PRICE: $${safeToFixed(currentPrice)}
-
+${regimeInfo.regime === 'event_volatility' ? `
+===== ⚠️ EVENT VOLATILITY WARNING =====
+This asset has experienced a price shock (${regimeInfo.description}).
+Standard technical indicators are UNRELIABLE. Mean-reversion signals have been suppressed.
+You MUST: (1) Reduce confidence significantly, (2) Widen uncertainty bands, (3) Do NOT assume mean reversion.
+The prediction should reflect HIGH UNCERTAINTY about post-event price direction.
+` : ''}
 ===== SIGNAL CONSENSUS SYSTEM =====
 Bullish Signals: ${consensus.consensusScore > 0 ? Math.abs(consensus.consensusScore).toFixed(1) : '0'}
 Bearish Signals: ${consensus.consensusScore < 0 ? Math.abs(consensus.consensusScore).toFixed(1) : '0'}
@@ -1839,9 +1935,18 @@ async function analyzeStockForGuide(ticker: string, tradingStyle: string = "swin
     const obvTrend = getOBVTrend(obv, 20);
     const vwap = calculateVWAP(highPrices, lowPrices, closePrices, volumes);
     
-    // Use enhanced regime detection
-    const regimeInfo = detectRegimeEnhanced(closePrices, rsi, volatility, adx, bollingerBands);
+    // Detect price shock
+    const guideShock = detectPriceShock(closePrices, volumes);
+    
+    // Use enhanced regime detection (shock-aware)
+    const regimeInfo = detectRegimeEnhanced(closePrices, rsi, volatility, adx, bollingerBands, guideShock);
     const regime = regimeInfo.regime;
+    
+    // If event_volatility, reject for guide (unstable predictions)
+    if (regime === "event_volatility") {
+      console.log(`${ticker} rejected for guide: event_volatility regime (${guideShock.description})`);
+      return null;
+    }
     
     const currentPrice = closePrices[closePrices.length - 1];
     const latestRSI = rsi[rsi.length - 1];
@@ -2241,22 +2346,30 @@ serve(async (req) => {
     // Calculate all enhanced indicators
     const indicators = calculateAllIndicators(stockData);
     const closePrices = stockData.close.filter((p: number) => p != null);
+    const volumes = stockData.volume?.filter((v: number) => v != null) || [];
     const currentPrice = closePrices[closePrices.length - 1];
     
-    // Get enhanced regime detection
+    // SHOCK DETECTION: Must run before regime detection
+    const shockState = detectPriceShock(closePrices, volumes);
+    if (shockState.isShock) {
+      console.log(`⚠️ SHOCK DETECTED for ${ticker.toUpperCase()}: ${shockState.description}`);
+    }
+    
+    // Get enhanced regime detection (shock-aware)
     const regimeInfo = detectRegimeEnhanced(
       closePrices,
       indicators.rsi,
       indicators.volatility,
       indicators.adx,
-      indicators.bollingerBands
+      indicators.bollingerBands,
+      shockState
     );
     
     // Fetch enhanced news sentiment
     const sentiment = await fetchNewsSentiment(ticker);
     
-    // NEW: Calculate signal consensus
-    const consensus = calculateSignalConsensus(indicators, currentPrice);
+    // Calculate signal consensus (shock-aware: suppresses mean-reversion signals)
+    const consensus = calculateSignalConsensus(indicators, currentPrice, shockState);
     console.log(`Signal Consensus: ${consensus.consensusScore.toFixed(1)} (${consensus.alignment})`);
     
     // NEW: Detect divergences
@@ -2376,7 +2489,13 @@ serve(async (req) => {
       daysToTarget,
       weeklyAlignment.aligned
     );
-    console.log(`Mathematical Confidence: ${mathConfidence}%`);
+    // Apply shock confidence penalty BEFORE sending to AI
+    let mathConfidenceAdjusted = mathConfidence;
+    if (shockState.isShock) {
+      mathConfidenceAdjusted = Math.round(mathConfidence * 0.6);
+      console.log(`⚠️ Shock penalty applied: ${mathConfidence}% → ${mathConfidenceAdjusted}%`);
+    }
+    console.log(`Mathematical Confidence: ${mathConfidenceAdjusted}%`);
 
     // NEW: Calculate dynamic uncertainty
     const dynamicUncertainty = calculateDynamicUncertainty(
@@ -2402,13 +2521,24 @@ serve(async (req) => {
       consensus,
       rsiDivergence,
       macdDivergence,
-      mathConfidence,
+      mathConfidenceAdjusted,
       dynamicUncertainty,
       weeklyAlignment,
       pivotPoints
     );
     
-    const predictedPrice = aiPrediction.predictedPrice;
+    // SHOCK CLAMPING: During event_volatility, limit prediction to ±15% of current price
+    let predictedPrice = aiPrediction.predictedPrice;
+    if (shockState.isShock) {
+      const maxMove = currentPrice * 0.15;
+      const clampedLow = currentPrice - maxMove;
+      const clampedHigh = currentPrice + maxMove;
+      const originalPredicted = predictedPrice;
+      predictedPrice = Math.max(clampedLow, Math.min(clampedHigh, predictedPrice));
+      if (predictedPrice !== originalPredicted) {
+        console.log(`⚠️ Prediction clamped: $${originalPredicted.toFixed(2)} → $${predictedPrice.toFixed(2)} (±15% shock limit)`);
+      }
+    }
     const uncertaintyPercent = aiPrediction.uncertaintyPercent / 100;
     
     const historicalData = stockData.timestamps.slice(-60).map((date: string, i: number) => ({
