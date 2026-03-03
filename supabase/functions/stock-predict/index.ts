@@ -1024,8 +1024,18 @@ function detectRegimeEnhanced(
   rsi: number[],
   volatility: number[],
   adx: { adx: number[]; plusDI: number[]; minusDI: number[] },
-  bollingerBands: { upper: number[]; middle: number[]; lower: number[]; bandwidth: number[] }
+  bollingerBands: { upper: number[]; middle: number[]; lower: number[]; bandwidth: number[] },
+  shockState?: ShockState
 ): { regime: string; strength: number; description: string } {
+  // SHOCK OVERRIDE: event_volatility takes precedence over all other regimes
+  if (shockState?.isShock) {
+    return {
+      regime: "event_volatility",
+      strength: shockState.shockMagnitude,
+      description: `EVENT REGIME: ${shockState.description}. Standard indicators unreliable.`,
+    };
+  }
+
   const latestADX = adx.adx[adx.adx.length - 1] || 0;
   const latestPlusDI = adx.plusDI[adx.plusDI.length - 1] || 0;
   const latestMinusDI = adx.minusDI[adx.minusDI.length - 1] || 0;
@@ -1040,28 +1050,34 @@ function detectRegimeEnhanced(
   // Strong trend detection using ADX
   if (latestADX > 25) {
     if (latestPlusDI > latestMinusDI) {
-      return { regime: "strong_bullish", strength: latestADX, description: "Strong uptrend confirmed by ADX > 25 with +DI dominance" };
+      if (latestADX > 40 && latestRSI > 60) {
+        return { regime: "strong_bullish", strength: latestADX, description: `Very strong uptrend (ADX: ${latestADX.toFixed(1)}, +DI dominant)` };
+      }
+      return { regime: "bullish", strength: latestADX, description: `Uptrend confirmed by ADX (${latestADX.toFixed(1)})` };
     } else {
-      return { regime: "strong_bearish", strength: latestADX, description: "Strong downtrend confirmed by ADX > 25 with -DI dominance" };
+      if (latestADX > 40 && latestRSI < 40) {
+        return { regime: "strong_bearish", strength: latestADX, description: `Very strong downtrend (ADX: ${latestADX.toFixed(1)}, -DI dominant)` };
+      }
+      return { regime: "bearish", strength: latestADX, description: `Downtrend confirmed by ADX (${latestADX.toFixed(1)})` };
     }
   }
 
-  // Volatility breakout
-  if (latestVol > avgVol * 1.5 || bbBandwidth > 0.1) {
-    return { regime: "volatile", strength: latestVol / avgVol, description: "High volatility regime - Bollinger Bands expanding" };
+  // Overbought/Oversold
+  if (latestRSI > 70 && currentPrice > bbUpper) {
+    return { regime: "overbought", strength: latestRSI, description: `Overbought: RSI at ${latestRSI.toFixed(1)}, price above upper BB` };
+  }
+  if (latestRSI < 30 && currentPrice < bbLower) {
+    return { regime: "oversold", strength: 100 - latestRSI, description: `Oversold: RSI at ${latestRSI.toFixed(1)}, price below lower BB` };
   }
 
-  // Bollinger Band extremes
-  if (currentPrice > bbUpper && latestRSI > 70) {
-    return { regime: "overbought", strength: latestRSI, description: "Price above upper Bollinger Band with RSI > 70" };
-  }
-  if (currentPrice < bbLower && latestRSI < 30) {
-    return { regime: "oversold", strength: 100 - latestRSI, description: "Price below lower Bollinger Band with RSI < 30" };
+  // High volatility
+  if (latestVol > avgVol * 1.5) {
+    return { regime: "volatile", strength: (latestVol / avgVol) * 100, description: `High volatility (${(latestVol * 100).toFixed(1)}% vs avg ${(avgVol * 100).toFixed(1)}%)` };
   }
 
-  // Weak trend / ranging
-  if (latestADX < 20) {
-    return { regime: "ranging", strength: 20 - latestADX, description: "No clear trend, ADX < 20 indicates ranging/consolidation" };
+  // Ranging
+  if (bbBandwidth < 0.03 && latestADX < 20) {
+    return { regime: "ranging", strength: 100 - latestADX, description: "Tight range: Low ADX and narrow Bollinger Bands" };
   }
 
   // Moderate trends
