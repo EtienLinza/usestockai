@@ -1929,9 +1929,18 @@ async function analyzeStockForGuide(ticker: string, tradingStyle: string = "swin
     const obvTrend = getOBVTrend(obv, 20);
     const vwap = calculateVWAP(highPrices, lowPrices, closePrices, volumes);
     
-    // Use enhanced regime detection
-    const regimeInfo = detectRegimeEnhanced(closePrices, rsi, volatility, adx, bollingerBands);
+    // Detect price shock
+    const guideShock = detectPriceShock(closePrices, volumes);
+    
+    // Use enhanced regime detection (shock-aware)
+    const regimeInfo = detectRegimeEnhanced(closePrices, rsi, volatility, adx, bollingerBands, guideShock);
     const regime = regimeInfo.regime;
+    
+    // If event_volatility, reject for guide (unstable predictions)
+    if (regime === "event_volatility") {
+      console.log(`${ticker} rejected for guide: event_volatility regime (${guideShock.description})`);
+      return null;
+    }
     
     const currentPrice = closePrices[closePrices.length - 1];
     const latestRSI = rsi[rsi.length - 1];
