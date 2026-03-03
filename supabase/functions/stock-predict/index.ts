@@ -1391,7 +1391,13 @@ async function generateAIPrediction(
 ASSET: ${ticker}
 TARGET DATE: ${targetDate}
 CURRENT PRICE: $${safeToFixed(currentPrice)}
-
+${regimeInfo.regime === 'event_volatility' ? `
+===== ⚠️ EVENT VOLATILITY WARNING =====
+This asset has experienced a price shock (${regimeInfo.description}).
+Standard technical indicators are UNRELIABLE. Mean-reversion signals have been suppressed.
+You MUST: (1) Reduce confidence significantly, (2) Widen uncertainty bands, (3) Do NOT assume mean reversion.
+The prediction should reflect HIGH UNCERTAINTY about post-event price direction.
+` : ''}
 ===== SIGNAL CONSENSUS SYSTEM =====
 Bullish Signals: ${consensus.consensusScore > 0 ? Math.abs(consensus.consensusScore).toFixed(1) : '0'}
 Bearish Signals: ${consensus.consensusScore < 0 ? Math.abs(consensus.consensusScore).toFixed(1) : '0'}
