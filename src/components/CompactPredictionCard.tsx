@@ -42,6 +42,7 @@ export const CompactPredictionCard = ({ data, onRemove, index }: CompactPredicti
       bearish: { color: "text-destructive bg-destructive/10 border-destructive/20", label: "Bear", icon: TrendingDown },
       neutral: { color: "text-warning bg-warning/10 border-warning/20", label: "Neutral", icon: Minus },
       volatile: { color: "text-chart-4 bg-chart-4/10 border-chart-4/20", label: "Volatile", icon: Activity },
+      event_volatility: { color: "text-destructive bg-destructive/10 border-destructive/20", label: "⚡ Event", icon: Activity },
       ranging: { color: "text-warning bg-warning/10 border-warning/20", label: "Range", icon: Minus },
       overbought: { color: "text-warning bg-warning/10 border-warning/20", label: "OB", icon: ArrowUp },
       oversold: { color: "text-chart-4 bg-chart-4/10 border-chart-4/20", label: "OS", icon: ArrowDown },
