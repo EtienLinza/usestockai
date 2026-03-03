@@ -553,7 +553,8 @@ function calculatePivotPoints(prevHigh: number, prevLow: number, prevClose: numb
 // ============================================================================
 function calculateSignalConsensus(
   indicators: any,
-  currentPrice: number
+  currentPrice: number,
+  shockState?: ShockState
 ): {
   bullishSignals: number;
   bearishSignals: number;
@@ -561,9 +562,15 @@ function calculateSignalConsensus(
   alignment: string;
   signalDetails: string[];
 } {
+  const isShock = shockState?.isShock || false;
   let bullish = 0;
   let bearish = 0;
   const signalDetails: string[] = [];
+
+  // During event_volatility, add a shock notice
+  if (isShock) {
+    signalDetails.push(`⚠️ SHOCK DETECTED: ${shockState!.description}`);
+  }
 
   try {
     // RSI Signal (weight: 1.5)
