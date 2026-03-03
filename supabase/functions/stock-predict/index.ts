@@ -2474,7 +2474,13 @@ serve(async (req) => {
       daysToTarget,
       weeklyAlignment.aligned
     );
-    console.log(`Mathematical Confidence: ${mathConfidence}%`);
+    // Apply shock confidence penalty BEFORE sending to AI
+    let mathConfidenceAdjusted = mathConfidence;
+    if (shockState.isShock) {
+      mathConfidenceAdjusted = Math.round(mathConfidence * 0.6);
+      console.log(`⚠️ Shock penalty applied: ${mathConfidence}% → ${mathConfidenceAdjusted}%`);
+    }
+    console.log(`Mathematical Confidence: ${mathConfidenceAdjusted}%`);
 
     // NEW: Calculate dynamic uncertainty
     const dynamicUncertainty = calculateDynamicUncertainty(
@@ -2500,13 +2506,24 @@ serve(async (req) => {
       consensus,
       rsiDivergence,
       macdDivergence,
-      mathConfidence,
+      mathConfidenceAdjusted,
       dynamicUncertainty,
       weeklyAlignment,
       pivotPoints
     );
     
-    const predictedPrice = aiPrediction.predictedPrice;
+    // SHOCK CLAMPING: During event_volatility, limit prediction to ±15% of current price
+    let predictedPrice = aiPrediction.predictedPrice;
+    if (shockState.isShock) {
+      const maxMove = currentPrice * 0.15;
+      const clampedLow = currentPrice - maxMove;
+      const clampedHigh = currentPrice + maxMove;
+      const originalPredicted = predictedPrice;
+      predictedPrice = Math.max(clampedLow, Math.min(clampedHigh, predictedPrice));
+      if (predictedPrice !== originalPredicted) {
+        console.log(`⚠️ Prediction clamped: $${originalPredicted.toFixed(2)} → $${predictedPrice.toFixed(2)} (±15% shock limit)`);
+      }
+    }
     const uncertaintyPercent = aiPrediction.uncertaintyPercent / 100;
     
     const historicalData = stockData.timestamps.slice(-60).map((date: string, i: number) => ({
