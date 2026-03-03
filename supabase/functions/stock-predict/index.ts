@@ -573,9 +573,12 @@ function calculateSignalConsensus(
   }
 
   try {
-    // RSI Signal (weight: 1.5)
+    // RSI Signal (weight: 1.5) — SUPPRESSED during shocks (mean-reversion is invalid)
     const rsi = safeGetLast(indicators.rsi, 50);
-    if (rsi < 30) {
+    if (isShock) {
+      // During shocks, RSI extremes are noise, not signals
+      signalDetails.push(`RSI at ${rsi.toFixed(1)} (suppressed: shock event)`);
+    } else if (rsi < 30) {
       bullish += 1.5;
       signalDetails.push(`RSI oversold (${rsi.toFixed(1)})`);
     } else if (rsi > 70) {
@@ -661,9 +664,11 @@ function calculateSignalConsensus(
   }
 
   try {
-    // Stochastic (weight: 1.5)
+    // Stochastic (weight: 1.5) — SUPPRESSED during shocks
     const stochK = safeGetLast(indicators.stochastic?.k, 50);
-    if (stochK < 20) {
+    if (isShock) {
+      signalDetails.push(`Stochastic at ${stochK.toFixed(1)} (suppressed: shock event)`);
+    } else if (stochK < 20) {
       bullish += 1.5;
       signalDetails.push(`Stochastic oversold (${stochK.toFixed(1)})`);
     } else if (stochK > 80) {
@@ -675,11 +680,13 @@ function calculateSignalConsensus(
   }
 
   try {
-    // Bollinger Bands Position (weight: 1.5)
+    // Bollinger Bands Position (weight: 1.5) — SUPPRESSED during shocks
     const bbUpper = safeGetLast(indicators.bollingerBands?.upper, currentPrice * 1.1);
     const bbLower = safeGetLast(indicators.bollingerBands?.lower, currentPrice * 0.9);
     const bbMid = safeGetLast(indicators.bollingerBands?.middle, currentPrice);
-    if (currentPrice < bbLower) {
+    if (isShock) {
+      signalDetails.push(`BB position suppressed (shock event)`);
+    } else if (currentPrice < bbLower) {
       bullish += 1.5;
       signalDetails.push("Below lower Bollinger Band");
     } else if (currentPrice > bbUpper) {
