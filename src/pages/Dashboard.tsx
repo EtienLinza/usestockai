@@ -38,6 +38,16 @@ export interface PredictionData {
   resistanceLevels?: number[];
   fibonacciTrend?: string;
   obvTrend?: string;
+  // Cross-asset context
+  relativeStrength?: number | null;
+  beta?: number | null;
+  sectorMomentum?: number | null;
+  sectorETFTicker?: string | null;
+  vixLevel?: number | null;
+  vixPercentile?: number | null;
+  dollarRegime?: string | null;
+  yieldRegime?: string | null;
+  marketState?: string | null;
 }
 
 const Dashboard = () => {

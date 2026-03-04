@@ -922,7 +922,8 @@ function calculateMathematicalConfidence(
   regime: { regime: string; strength: number },
   sentiment: { score: number; confidence: number },
   daysToTarget: number,
-  weeklyAlignment: boolean
+  weeklyAlignment: boolean,
+  crossAsset?: CrossAssetMetrics | null
 ): number {
   // REBALANCED: Raised base from 50 to 55
   let confidence = 55;
@@ -983,6 +984,27 @@ function calculateMathematicalConfidence(
   // Mixed signals penalty - REBALANCED: reduced from -15 to -8
   if (Math.abs(consensus.consensusScore) < 20) {
     confidence -= 8;
+  }
+
+  // Cross-asset adjustments
+  if (crossAsset) {
+    // Relative strength alignment: outperforming + bullish consensus = +3
+    const bullish = consensus.consensusScore > 0;
+    if (crossAsset.relativeStrength > 2 && bullish) confidence += 3;
+    else if (crossAsset.relativeStrength < -2 && bullish) confidence -= 3;
+    else if (crossAsset.relativeStrength < -2 && !bullish) confidence += 2;
+    else if (crossAsset.relativeStrength > 2 && !bullish) confidence -= 2;
+
+    // VIX regime penalty: high fear = less predictable
+    if (crossAsset.vixPercentile > 75) confidence -= 4;
+    else if (crossAsset.vixPercentile < 20) confidence += 2; // complacent = more predictable short-term
+
+    // Sector tailwind bonus
+    if ((crossAsset.sectorMomentum > 2 && bullish) || (crossAsset.sectorMomentum < -2 && !bullish)) {
+      confidence += 2;
+    } else if ((crossAsset.sectorMomentum < -2 && bullish) || (crossAsset.sectorMomentum > 2 && !bullish)) {
+      confidence -= 2;
+    }
   }
 
   // Clamp between 35 and 92
@@ -1208,6 +1230,174 @@ function getWeeklyTrendAlignment(
 }
 
 // ============================================================================
+// CROSS-ASSET CONTEXT LAYER
+// ============================================================================
+
+const SECTOR_ETF_MAP: Record<string, string> = {
+  AAPL: 'XLK', MSFT: 'XLK', GOOGL: 'XLK', GOOG: 'XLK', META: 'XLK', NVDA: 'XLK',
+  AMD: 'XLK', INTC: 'XLK', CRM: 'XLK', ADBE: 'XLK', ORCL: 'XLK', AVGO: 'XLK',
+  CSCO: 'XLK', IBM: 'XLK', QCOM: 'XLK', TXN: 'XLK', MU: 'XLK', AMAT: 'XLK',
+  LRCX: 'XLK', KLAC: 'XLK', MRVL: 'XLK', SNPS: 'XLK', CDNS: 'XLK', NXPI: 'XLK',
+  NFLX: 'XLC', DIS: 'XLC', CMCSA: 'XLC', TMUS: 'XLC', VZ: 'XLC', T: 'XLC',
+  JNJ: 'XLV', UNH: 'XLV', PFE: 'XLV', ABBV: 'XLV', MRK: 'XLV', LLY: 'XLV',
+  TMO: 'XLV', ABT: 'XLV', DHR: 'XLV', BMY: 'XLV', AMGN: 'XLV', GILD: 'XLV',
+  JPM: 'XLF', BAC: 'XLF', WFC: 'XLF', GS: 'XLF', MS: 'XLF', C: 'XLF',
+  BLK: 'XLF', SCHW: 'XLF', AXP: 'XLF', V: 'XLF', MA: 'XLF', PYPL: 'XLF',
+  AMZN: 'XLY', TSLA: 'XLY', HD: 'XLY', MCD: 'XLY', NKE: 'XLY', SBUX: 'XLY',
+  LOW: 'XLY', TJX: 'XLY', BKNG: 'XLY', CMG: 'XLY',
+  PG: 'XLP', KO: 'XLP', PEP: 'XLP', WMT: 'XLP', COST: 'XLP', PM: 'XLP',
+  CL: 'XLP', MDLZ: 'XLP', MO: 'XLP',
+  XOM: 'XLE', CVX: 'XLE', COP: 'XLE', SLB: 'XLE', EOG: 'XLE', MPC: 'XLE',
+  CAT: 'XLI', BA: 'XLI', HON: 'XLI', UPS: 'XLI', RTX: 'XLI', GE: 'XLI',
+  DE: 'XLI', LMT: 'XLI', MMM: 'XLI', UNP: 'XLI',
+  NEE: 'XLU', DUK: 'XLU', SO: 'XLU', D: 'XLU', AEP: 'XLU',
+  AMT: 'XLRE', PLD: 'XLRE', CCI: 'XLRE', EQIX: 'XLRE', SPG: 'XLRE',
+  LIN: 'XLB', APD: 'XLB', SHW: 'XLB', FCX: 'XLB', NEM: 'XLB',
+};
+
+function getSectorETF(ticker: string): string {
+  return SECTOR_ETF_MAP[ticker.toUpperCase()] || 'SPY';
+}
+
+interface CrossAssetData {
+  spy: number[];
+  vix: number[];
+  dxy: number[];
+  tnx: number[];
+  sectorETF: number[];
+  sectorETFTicker: string;
+}
+
+interface CrossAssetMetrics {
+  relativeStrength: number;
+  beta: number;
+  sectorMomentum: number;
+  sectorETFTicker: string;
+  vixLevel: number;
+  vixPercentile: number;
+  dollarRegime: string;
+  yieldRegime: string;
+  marketState: string;
+}
+
+async function fetchAssetCloses(ticker: string, days: number = 90): Promise<number[]> {
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+    const endDate = Math.floor(Date.now() / 1000);
+    const startDate = endDate - (days * 24 * 60 * 60);
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?period1=${startDate}&period2=${endDate}&interval=1d`;
+    const response = await fetch(url, {
+      headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+    if (!response.ok) return [];
+    const data = await response.json();
+    if (data.chart?.error) return [];
+    const closes = data.chart.result[0]?.indicators?.quote?.[0]?.close || [];
+    return closes.filter((c: number | null) => c != null);
+  } catch (e) {
+    console.warn(`Failed to fetch cross-asset ${ticker}:`, e);
+    return [];
+  }
+}
+
+async function fetchCrossAssetData(ticker: string): Promise<CrossAssetData | null> {
+  const sectorETFTicker = getSectorETF(ticker);
+  console.log(`Fetching cross-asset context: SPY, ^VIX, DX-Y.NYB, ^TNX, ${sectorETFTicker}...`);
+  const [spy, vix, dxy, tnx, sectorETF] = await Promise.all([
+    fetchAssetCloses('SPY', 270),
+    fetchAssetCloses('%5EVIX', 270),
+    fetchAssetCloses('DX-Y.NYB', 90),
+    fetchAssetCloses('%5ETNX', 90),
+    sectorETFTicker !== 'SPY' ? fetchAssetCloses(sectorETFTicker, 90) : Promise.resolve([]),
+  ]);
+  if (spy.length < 20) {
+    console.warn('Insufficient SPY data for cross-asset analysis');
+    return null;
+  }
+  return { spy, vix, dxy, tnx, sectorETF, sectorETFTicker };
+}
+
+function computeCrossAssetMetrics(stockCloses: number[], crossAsset: CrossAssetData): CrossAssetMetrics {
+  const m: CrossAssetMetrics = {
+    relativeStrength: 0, beta: 1, sectorMomentum: 0,
+    sectorETFTicker: crossAsset.sectorETFTicker,
+    vixLevel: 20, vixPercentile: 50,
+    dollarRegime: 'neutral', yieldRegime: 'neutral',
+    marketState: 'Normal conditions',
+  };
+  const spy = crossAsset.spy;
+  const stock = stockCloses;
+
+  // Relative Strength (20d)
+  if (stock.length >= 21 && spy.length >= 21) {
+    const stockRet = (stock[stock.length - 1] - stock[stock.length - 21]) / stock[stock.length - 21];
+    const spyRet = (spy[spy.length - 1] - spy[spy.length - 21]) / spy[spy.length - 21];
+    m.relativeStrength = parseFloat(((stockRet - spyRet) * 100).toFixed(2));
+  }
+
+  // Rolling Beta (20d)
+  if (stock.length >= 22 && spy.length >= 22) {
+    const n = 20;
+    const sR: number[] = [], spR: number[] = [];
+    for (let i = stock.length - n; i < stock.length; i++) sR.push((stock[i] - stock[i - 1]) / stock[i - 1]);
+    for (let i = spy.length - n; i < spy.length; i++) spR.push((spy[i] - spy[i - 1]) / spy[i - 1]);
+    const mS = sR.reduce((a, b) => a + b, 0) / n;
+    const mSp = spR.reduce((a, b) => a + b, 0) / n;
+    let cov = 0, vSpy = 0;
+    for (let i = 0; i < n; i++) { cov += (sR[i] - mS) * (spR[i] - mSp); vSpy += (spR[i] - mSp) ** 2; }
+    m.beta = vSpy > 0 ? parseFloat((cov / vSpy).toFixed(2)) : 1;
+  }
+
+  // Sector Momentum (20d)
+  const sector = crossAsset.sectorETF.length > 0 ? crossAsset.sectorETF : spy;
+  if (sector.length >= 21) {
+    m.sectorMomentum = parseFloat((((sector[sector.length - 1] - sector[sector.length - 21]) / sector[sector.length - 21]) * 100).toFixed(2));
+  }
+
+  // VIX Percentile
+  const vix = crossAsset.vix;
+  if (vix.length >= 20) {
+    m.vixLevel = parseFloat(vix[vix.length - 1].toFixed(2));
+    const sorted = [...vix].sort((a, b) => a - b);
+    const rank = sorted.findIndex(v => v >= m.vixLevel);
+    m.vixPercentile = Math.round(((rank >= 0 ? rank : sorted.length) / sorted.length) * 100);
+  }
+
+  // Dollar Regime (20d)
+  const dxy = crossAsset.dxy;
+  if (dxy.length >= 21) {
+    const c = (dxy[dxy.length - 1] - dxy[dxy.length - 21]) / dxy[dxy.length - 21];
+    m.dollarRegime = c > 0.005 ? 'strengthening' : c < -0.005 ? 'weakening' : 'neutral';
+  }
+
+  // Yield Regime (20d)
+  const tnx = crossAsset.tnx;
+  if (tnx.length >= 21) {
+    const c = (tnx[tnx.length - 1] - tnx[tnx.length - 21]) / tnx[tnx.length - 21];
+    m.yieldRegime = c > 0.02 ? 'rising' : c < -0.02 ? 'falling' : 'neutral';
+  }
+
+  // Market State Summary
+  const states: string[] = [];
+  if (m.vixPercentile > 80) states.push('High fear');
+  else if (m.vixPercentile < 20) states.push('Low fear/complacent');
+  if (m.dollarRegime === 'strengthening') states.push('Strong dollar headwind');
+  else if (m.dollarRegime === 'weakening') states.push('Weak dollar tailwind');
+  if (m.yieldRegime === 'rising') states.push('Rising yields');
+  else if (m.yieldRegime === 'falling') states.push('Falling yields');
+  if (m.relativeStrength > 3) states.push('Outperforming market');
+  else if (m.relativeStrength < -3) states.push('Underperforming market');
+  if (m.sectorMomentum > 2) states.push(`${crossAsset.sectorETFTicker} sector tailwind`);
+  else if (m.sectorMomentum < -2) states.push(`${crossAsset.sectorETFTicker} sector headwind`);
+  m.marketState = states.length > 0 ? states.join('; ') : 'Normal conditions';
+
+  return m;
+}
+
+// ============================================================================
 // DATA FETCHING
 // ============================================================================
 async function fetchStockData(ticker: string): Promise<any> {
@@ -1355,7 +1545,8 @@ async function generateAIPrediction(
   mathConfidence: number,
   dynamicUncertainty: number,
   weeklyAlignment: { aligned: boolean; weeklyTrend: string; description: string },
-  pivotPoints: { pivot: number; r1: number; r2: number; r3: number; s1: number; s2: number; s3: number }
+  pivotPoints: { pivot: number; r1: number; r2: number; r3: number; s1: number; s2: number; s3: number },
+  crossAssetMetrics?: CrossAssetMetrics | null
 ): Promise<any> {
   const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
   if (!LOVABLE_API_KEY) {
@@ -1445,7 +1636,16 @@ Price vs VWAP: ${currentPrice > indicators.vwap[indicators.vwap.length - 1] ? 'A
 
 ===== VOLUME ANALYSIS =====
 OBV Trend: ${indicators.obvTrend}
-
+${crossAssetMetrics ? `
+===== CROSS-ASSET CONTEXT =====
+Relative Strength vs SPY (20d): ${crossAssetMetrics.relativeStrength > 0 ? '+' : ''}${crossAssetMetrics.relativeStrength}%
+Beta vs SPY: ${crossAssetMetrics.beta}
+Sector ETF (${crossAssetMetrics.sectorETFTicker}) Momentum (20d): ${crossAssetMetrics.sectorMomentum > 0 ? '+' : ''}${crossAssetMetrics.sectorMomentum}%
+VIX Level: ${crossAssetMetrics.vixLevel} (Percentile: ${crossAssetMetrics.vixPercentile}%)
+Dollar Regime: ${crossAssetMetrics.dollarRegime.toUpperCase()}
+Yield Regime (10Y): ${crossAssetMetrics.yieldRegime.toUpperCase()}
+Market State: ${crossAssetMetrics.marketState}
+` : ''}
 ===== RECENT PRICE DATA (last 30 days) =====
 ${recentData.dates.slice(-10).map((d: string, i: number) => `${d}: $${safeToFixed(recentData.prices.slice(-10)[i])}`).join('\n')}
 
@@ -1472,7 +1672,8 @@ You MUST respond with ONLY valid JSON in this exact format:
     {"name": "Pivot Points", "importance": <0-1>},
     {"name": "VWAP Position", "importance": <0-1>},
     {"name": "Market Regime", "importance": <0-1>},
-    {"name": "News Sentiment", "importance": <0-1>}
+    {"name": "News Sentiment", "importance": <0-1>},
+    {"name": "Cross-Asset Context", "importance": <0-1>}
   ]
 }`;
 
@@ -2335,9 +2536,12 @@ serve(async (req) => {
       );
     }
     
-    // Fetch stock data
+    // Fetch stock data and cross-asset data in parallel
     console.log(`Fetching data for ${ticker.toUpperCase()}...`);
-    const stockData = await fetchStockData(ticker.toUpperCase());
+    const [stockData, crossAssetData] = await Promise.all([
+      fetchStockData(ticker.toUpperCase()),
+      fetchCrossAssetData(ticker.toUpperCase()),
+    ]);
     
     if (!stockData.close || stockData.close.length < 60) {
       throw new Error("Insufficient historical data for analysis");
@@ -2367,6 +2571,13 @@ serve(async (req) => {
     
     // Fetch enhanced news sentiment
     const sentiment = await fetchNewsSentiment(ticker);
+
+    // Compute cross-asset metrics
+    let crossAssetMetrics: CrossAssetMetrics | null = null;
+    if (crossAssetData) {
+      crossAssetMetrics = computeCrossAssetMetrics(closePrices, crossAssetData);
+      console.log(`Cross-Asset: RS=${crossAssetMetrics.relativeStrength}%, Beta=${crossAssetMetrics.beta}, VIX=${crossAssetMetrics.vixLevel} (P${crossAssetMetrics.vixPercentile}), Sector=${crossAssetMetrics.sectorMomentum}%`);
+    }
     
     // Calculate signal consensus (shock-aware: suppresses mean-reversion signals)
     const consensus = calculateSignalConsensus(indicators, currentPrice, shockState);
@@ -2487,7 +2698,8 @@ serve(async (req) => {
       regimeInfo,
       sentiment,
       daysToTarget,
-      weeklyAlignment.aligned
+      weeklyAlignment.aligned,
+      crossAssetMetrics
     );
     // Apply shock confidence penalty BEFORE sending to AI
     let mathConfidenceAdjusted = mathConfidence;
@@ -2524,7 +2736,8 @@ serve(async (req) => {
       mathConfidenceAdjusted,
       dynamicUncertainty,
       weeklyAlignment,
-      pivotPoints
+      pivotPoints,
+      crossAssetMetrics
     );
     
     // SHOCK CLAMPING: During event_volatility, limit prediction to ±15% of current price
@@ -2590,6 +2803,16 @@ serve(async (req) => {
       weeklyDescription: weeklyAlignment.description,
       pivotPoints,
       vwap: indicators.vwap[indicators.vwap.length - 1],
+      // Cross-asset context
+      relativeStrength: crossAssetMetrics?.relativeStrength ?? null,
+      beta: crossAssetMetrics?.beta ?? null,
+      sectorMomentum: crossAssetMetrics?.sectorMomentum ?? null,
+      sectorETFTicker: crossAssetMetrics?.sectorETFTicker ?? null,
+      vixLevel: crossAssetMetrics?.vixLevel ?? null,
+      vixPercentile: crossAssetMetrics?.vixPercentile ?? null,
+      dollarRegime: crossAssetMetrics?.dollarRegime ?? null,
+      yieldRegime: crossAssetMetrics?.yieldRegime ?? null,
+      marketState: crossAssetMetrics?.marketState ?? null,
     };
 
     console.log("Ultra-enhanced prediction complete:", result.ticker, result.predictedPrice, `Confidence: ${result.confidence}%`);
