@@ -12,8 +12,6 @@ import {
   Minus,
   ArrowUp,
   ArrowDown,
-  Volume2,
-  Layers
 } from "lucide-react";
 import { PredictionData } from "@/pages/Dashboard";
 
