@@ -136,8 +136,8 @@ export const CompactPredictionCard = ({ data, onRemove, index }: CompactPredicti
           </div>
         </div>
 
-        {/* Metrics Row 2: Technical Quick View */}
-        <div className="grid grid-cols-3 gap-2 mb-2">
+        {/* Metrics Row 2: Technical + Cross-Asset Quick View */}
+        <div className="grid grid-cols-4 gap-2 mb-2">
           {/* Sentiment */}
           <div className="text-center">
             <div className="text-[9px] text-muted-foreground uppercase tracking-wide mb-0.5">Sent.</div>
@@ -149,31 +149,35 @@ export const CompactPredictionCard = ({ data, onRemove, index }: CompactPredicti
             </div>
           </div>
           
-          {/* OBV */}
+          {/* Relative Strength */}
           <div className="text-center">
-            <div className="text-[9px] text-muted-foreground uppercase tracking-wide mb-0.5 flex items-center justify-center gap-0.5">
-              <Volume2 className="w-2 h-2" />
-              OBV
-            </div>
-            <div className={`text-xs font-medium capitalize ${
-              data.obvTrend === "rising" ? "text-success" :
-              data.obvTrend === "falling" ? "text-destructive" : "text-muted-foreground"
+            <div className="text-[9px] text-muted-foreground uppercase tracking-wide mb-0.5">vs SPY</div>
+            <div className={`text-xs font-mono ${
+              (data.relativeStrength ?? 0) > 0 ? "text-success" :
+              (data.relativeStrength ?? 0) < 0 ? "text-destructive" : "text-muted-foreground"
             }`}>
-              {data.obvTrend?.charAt(0).toUpperCase() || "—"}
+              {data.relativeStrength != null ? `${data.relativeStrength > 0 ? '+' : ''}${data.relativeStrength}%` : '—'}
             </div>
           </div>
 
-          {/* Fibonacci */}
+          {/* Beta */}
           <div className="text-center">
-            <div className="text-[9px] text-muted-foreground uppercase tracking-wide mb-0.5 flex items-center justify-center gap-0.5">
-              <Layers className="w-2 h-2" />
-              Fib
-            </div>
-            <div className={`text-xs font-medium ${
-              data.fibonacciTrend === "uptrend" ? "text-success" :
-              data.fibonacciTrend === "downtrend" ? "text-destructive" : "text-muted-foreground"
+            <div className="text-[9px] text-muted-foreground uppercase tracking-wide mb-0.5">Beta</div>
+            <div className={`text-xs font-mono ${
+              (data.beta ?? 1) > 1.3 ? "text-warning" : "text-foreground"
             }`}>
-              {data.fibonacciTrend === "uptrend" ? "↑" : data.fibonacciTrend === "downtrend" ? "↓" : "—"}
+              {data.beta != null ? data.beta.toFixed(1) : '—'}
+            </div>
+          </div>
+
+          {/* VIX */}
+          <div className="text-center">
+            <div className="text-[9px] text-muted-foreground uppercase tracking-wide mb-0.5">VIX</div>
+            <div className={`text-xs font-mono ${
+              (data.vixPercentile ?? 50) > 80 ? "text-destructive" :
+              (data.vixPercentile ?? 50) < 20 ? "text-success" : "text-muted-foreground"
+            }`}>
+              {data.vixLevel != null ? `${data.vixLevel}` : '—'}
             </div>
           </div>
         </div>
