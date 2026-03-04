@@ -922,7 +922,8 @@ function calculateMathematicalConfidence(
   regime: { regime: string; strength: number },
   sentiment: { score: number; confidence: number },
   daysToTarget: number,
-  weeklyAlignment: boolean
+  weeklyAlignment: boolean,
+  crossAsset?: CrossAssetMetrics | null
 ): number {
   // REBALANCED: Raised base from 50 to 55
   let confidence = 55;
@@ -983,6 +984,27 @@ function calculateMathematicalConfidence(
   // Mixed signals penalty - REBALANCED: reduced from -15 to -8
   if (Math.abs(consensus.consensusScore) < 20) {
     confidence -= 8;
+  }
+
+  // Cross-asset adjustments
+  if (crossAsset) {
+    // Relative strength alignment: outperforming + bullish consensus = +3
+    const bullish = consensus.consensusScore > 0;
+    if (crossAsset.relativeStrength > 2 && bullish) confidence += 3;
+    else if (crossAsset.relativeStrength < -2 && bullish) confidence -= 3;
+    else if (crossAsset.relativeStrength < -2 && !bullish) confidence += 2;
+    else if (crossAsset.relativeStrength > 2 && !bullish) confidence -= 2;
+
+    // VIX regime penalty: high fear = less predictable
+    if (crossAsset.vixPercentile > 75) confidence -= 4;
+    else if (crossAsset.vixPercentile < 20) confidence += 2; // complacent = more predictable short-term
+
+    // Sector tailwind bonus
+    if ((crossAsset.sectorMomentum > 2 && bullish) || (crossAsset.sectorMomentum < -2 && !bullish)) {
+      confidence += 2;
+    } else if ((crossAsset.sectorMomentum < -2 && bullish) || (crossAsset.sectorMomentum > 2 && !bullish)) {
+      confidence -= 2;
+    }
   }
 
   // Clamp between 35 and 92
