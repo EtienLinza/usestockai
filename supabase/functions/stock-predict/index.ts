@@ -1545,7 +1545,8 @@ async function generateAIPrediction(
   mathConfidence: number,
   dynamicUncertainty: number,
   weeklyAlignment: { aligned: boolean; weeklyTrend: string; description: string },
-  pivotPoints: { pivot: number; r1: number; r2: number; r3: number; s1: number; s2: number; s3: number }
+  pivotPoints: { pivot: number; r1: number; r2: number; r3: number; s1: number; s2: number; s3: number },
+  crossAssetMetrics?: CrossAssetMetrics | null
 ): Promise<any> {
   const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
   if (!LOVABLE_API_KEY) {
@@ -1635,7 +1636,16 @@ Price vs VWAP: ${currentPrice > indicators.vwap[indicators.vwap.length - 1] ? 'A
 
 ===== VOLUME ANALYSIS =====
 OBV Trend: ${indicators.obvTrend}
-
+${crossAssetMetrics ? `
+===== CROSS-ASSET CONTEXT =====
+Relative Strength vs SPY (20d): ${crossAssetMetrics.relativeStrength > 0 ? '+' : ''}${crossAssetMetrics.relativeStrength}%
+Beta vs SPY: ${crossAssetMetrics.beta}
+Sector ETF (${crossAssetMetrics.sectorETFTicker}) Momentum (20d): ${crossAssetMetrics.sectorMomentum > 0 ? '+' : ''}${crossAssetMetrics.sectorMomentum}%
+VIX Level: ${crossAssetMetrics.vixLevel} (Percentile: ${crossAssetMetrics.vixPercentile}%)
+Dollar Regime: ${crossAssetMetrics.dollarRegime.toUpperCase()}
+Yield Regime (10Y): ${crossAssetMetrics.yieldRegime.toUpperCase()}
+Market State: ${crossAssetMetrics.marketState}
+` : ''}
 ===== RECENT PRICE DATA (last 30 days) =====
 ${recentData.dates.slice(-10).map((d: string, i: number) => `${d}: $${safeToFixed(recentData.prices.slice(-10)[i])}`).join('\n')}
 
@@ -1662,7 +1672,8 @@ You MUST respond with ONLY valid JSON in this exact format:
     {"name": "Pivot Points", "importance": <0-1>},
     {"name": "VWAP Position", "importance": <0-1>},
     {"name": "Market Regime", "importance": <0-1>},
-    {"name": "News Sentiment", "importance": <0-1>}
+    {"name": "News Sentiment", "importance": <0-1>},
+    {"name": "Cross-Asset Context", "importance": <0-1>}
   ]
 }`;
 
@@ -2525,9 +2536,12 @@ serve(async (req) => {
       );
     }
     
-    // Fetch stock data
+    // Fetch stock data and cross-asset data in parallel
     console.log(`Fetching data for ${ticker.toUpperCase()}...`);
-    const stockData = await fetchStockData(ticker.toUpperCase());
+    const [stockData, crossAssetData] = await Promise.all([
+      fetchStockData(ticker.toUpperCase()),
+      fetchCrossAssetData(ticker.toUpperCase()),
+    ]);
     
     if (!stockData.close || stockData.close.length < 60) {
       throw new Error("Insufficient historical data for analysis");
@@ -2557,6 +2571,13 @@ serve(async (req) => {
     
     // Fetch enhanced news sentiment
     const sentiment = await fetchNewsSentiment(ticker);
+
+    // Compute cross-asset metrics
+    let crossAssetMetrics: CrossAssetMetrics | null = null;
+    if (crossAssetData) {
+      crossAssetMetrics = computeCrossAssetMetrics(closePrices, crossAssetData);
+      console.log(`Cross-Asset: RS=${crossAssetMetrics.relativeStrength}%, Beta=${crossAssetMetrics.beta}, VIX=${crossAssetMetrics.vixLevel} (P${crossAssetMetrics.vixPercentile}), Sector=${crossAssetMetrics.sectorMomentum}%`);
+    }
     
     // Calculate signal consensus (shock-aware: suppresses mean-reversion signals)
     const consensus = calculateSignalConsensus(indicators, currentPrice, shockState);
@@ -2677,7 +2698,8 @@ serve(async (req) => {
       regimeInfo,
       sentiment,
       daysToTarget,
-      weeklyAlignment.aligned
+      weeklyAlignment.aligned,
+      crossAssetMetrics
     );
     // Apply shock confidence penalty BEFORE sending to AI
     let mathConfidenceAdjusted = mathConfidence;
@@ -2714,7 +2736,8 @@ serve(async (req) => {
       mathConfidenceAdjusted,
       dynamicUncertainty,
       weeklyAlignment,
-      pivotPoints
+      pivotPoints,
+      crossAssetMetrics
     );
     
     // SHOCK CLAMPING: During event_volatility, limit prediction to ±15% of current price
@@ -2780,6 +2803,16 @@ serve(async (req) => {
       weeklyDescription: weeklyAlignment.description,
       pivotPoints,
       vwap: indicators.vwap[indicators.vwap.length - 1],
+      // Cross-asset context
+      relativeStrength: crossAssetMetrics?.relativeStrength ?? null,
+      beta: crossAssetMetrics?.beta ?? null,
+      sectorMomentum: crossAssetMetrics?.sectorMomentum ?? null,
+      sectorETFTicker: crossAssetMetrics?.sectorETFTicker ?? null,
+      vixLevel: crossAssetMetrics?.vixLevel ?? null,
+      vixPercentile: crossAssetMetrics?.vixPercentile ?? null,
+      dollarRegime: crossAssetMetrics?.dollarRegime ?? null,
+      yieldRegime: crossAssetMetrics?.yieldRegime ?? null,
+      marketState: crossAssetMetrics?.marketState ?? null,
     };
 
     console.log("Ultra-enhanced prediction complete:", result.ticker, result.predictedPrice, `Confidence: ${result.confidence}%`);
