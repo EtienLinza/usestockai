@@ -12,7 +12,10 @@ import {
   Minus,
   BarChart3,
   ArrowUp,
-  ArrowDown
+  ArrowDown,
+  Globe,
+  DollarSign,
+  Percent
 } from "lucide-react";
 import { PriceChart } from "./PriceChart";
 import { ShareReport } from "./ShareReport";
@@ -175,6 +178,97 @@ export const StockPredictionCard = ({ data }: StockPredictionCardProps) => {
           </div>
         </Card>
       </div>
+
+      {/* Cross-Asset Context Panel */}
+      {(data.relativeStrength != null || data.vixLevel != null || data.sectorMomentum != null) && (
+        <Card className="glass-card p-6">
+          <div className="flex items-center gap-2 mb-4">
+            <Globe className="w-4 h-4 text-primary" />
+            <span className="text-sm font-medium">Market Context</span>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            {/* Relative Strength */}
+            {data.relativeStrength != null && (
+              <div>
+                <div className="text-[10px] text-muted-foreground uppercase tracking-wide mb-1">vs SPY (20d)</div>
+                <div className={`text-sm font-mono font-medium flex items-center gap-1 ${
+                  data.relativeStrength > 0 ? "text-success" : data.relativeStrength < 0 ? "text-destructive" : "text-muted-foreground"
+                }`}>
+                  {data.relativeStrength > 0 ? <TrendingUp className="w-3 h-3" /> : data.relativeStrength < 0 ? <TrendingDown className="w-3 h-3" /> : null}
+                  {data.relativeStrength > 0 ? "+" : ""}{data.relativeStrength}%
+                </div>
+              </div>
+            )}
+
+            {/* Beta */}
+            {data.beta != null && (
+              <div>
+                <div className="text-[10px] text-muted-foreground uppercase tracking-wide mb-1 flex items-center gap-1">
+                  <Percent className="w-2.5 h-2.5" />
+                  Beta
+                </div>
+                <div className={`text-sm font-mono font-medium ${
+                  data.beta > 1.3 ? "text-warning" : data.beta < 0.7 ? "text-chart-4" : "text-foreground"
+                }`}>
+                  {data.beta}
+                </div>
+              </div>
+            )}
+
+            {/* VIX */}
+            {data.vixLevel != null && data.vixPercentile != null && (
+              <div>
+                <div className="text-[10px] text-muted-foreground uppercase tracking-wide mb-1">VIX</div>
+                <div className={`text-sm font-mono font-medium ${
+                  data.vixPercentile > 80 ? "text-destructive" : data.vixPercentile < 20 ? "text-success" : "text-foreground"
+                }`}>
+                  {data.vixLevel}
+                </div>
+                <div className="text-[10px] text-muted-foreground">P{data.vixPercentile}</div>
+              </div>
+            )}
+
+            {/* Sector Momentum */}
+            {data.sectorMomentum != null && data.sectorETFTicker && (
+              <div>
+                <div className="text-[10px] text-muted-foreground uppercase tracking-wide mb-1">{data.sectorETFTicker} (20d)</div>
+                <div className={`text-sm font-mono font-medium ${
+                  data.sectorMomentum > 0 ? "text-success" : data.sectorMomentum < 0 ? "text-destructive" : "text-muted-foreground"
+                }`}>
+                  {data.sectorMomentum > 0 ? "+" : ""}{data.sectorMomentum}%
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Macro Row */}
+          {(data.dollarRegime || data.yieldRegime) && (
+            <div className="flex items-center gap-4 mt-3 pt-3 border-t border-border/30">
+              {data.dollarRegime && data.dollarRegime !== 'neutral' && (
+                <div className="flex items-center gap-1 text-xs">
+                  <DollarSign className="w-3 h-3 text-muted-foreground" />
+                  <span className={data.dollarRegime === 'strengthening' ? 'text-warning' : 'text-success'}>
+                    USD {data.dollarRegime}
+                  </span>
+                </div>
+              )}
+              {data.yieldRegime && data.yieldRegime !== 'neutral' && (
+                <div className="flex items-center gap-1 text-xs">
+                  <BarChart3 className="w-3 h-3 text-muted-foreground" />
+                  <span className={data.yieldRegime === 'rising' ? 'text-warning' : 'text-success'}>
+                    10Y {data.yieldRegime}
+                  </span>
+                </div>
+              )}
+              {data.marketState && data.marketState !== 'Normal conditions' && (
+                <div className="text-[10px] text-muted-foreground ml-auto">
+                  {data.marketState}
+                </div>
+              )}
+            </div>
+          )}
+        </Card>
+      )}
 
       {/* Technical Indicators Panel */}
       <TechnicalIndicatorsPanel
