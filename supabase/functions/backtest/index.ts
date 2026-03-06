@@ -1095,7 +1095,7 @@ serve(async (req) => {
     const years = endYear - startYear;
 
     // Compute metrics
-    const metrics = computeMetrics(allTrades, initialCapital, combinedEquity, years, totalBarsAll, barsInTradeAll, benchmarkReturns);
+    const metrics = computeMetrics(allTrades, initialCapital, combinedEquity, years, totalBarsAll, barsInTradeAll, benchmarkReturns, positionSizePct);
     const periods = computePeriods(allTrades);
     const drawdownCurve = computeDrawdownCurve(combinedEquity);
 
