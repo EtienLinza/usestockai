@@ -12,13 +12,14 @@ import { useAuth } from "@/hooks/useAuth";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import {
-  AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
+  AreaChart, Area, BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, ReferenceLine, Cell,
 } from "recharts";
 import {
   Activity, BarChart3, Brain, TrendingUp, TrendingDown, AlertTriangle,
   Play, Loader2, Target, Gauge, DollarSign, Percent, Shuffle, Calendar,
-  Trophy, Shield,
+  Trophy, Shield, Download, Clock, Crosshair, ShieldAlert, Zap, FlaskConical,
+  BarChart2, PieChart,
 } from "lucide-react";
 
 interface BacktestReport {
@@ -35,14 +36,49 @@ interface BacktestReport {
   directionalAccuracy: number;
   mae: number;
   rmse: number;
+  mape: number;
+  avgWin: number;
+  avgLoss: number;
+  winLossRatio: number;
+  avgTradeDuration: number;
+  medianTradeDuration: number;
+  maxTradeDuration: number;
+  avgMAE: number;
+  avgMFE: number;
+  valueAtRisk: number;
+  conditionalVaR: number;
+  ulcerIndex: number;
+  marketExposure: number;
+  longExposure: number;
+  shortExposure: number;
+  cagr: number;
+  timeToDouble: number;
+  alpha: number;
+  beta: number;
+  portfolioTurnover: number;
+  stabilityScore: number;
+  signalPrecision: number;
+  signalRecall: number;
+  signalF1: number;
   regimePerformance: { regime: string; accuracy: number; avgReturn: number; trades: number }[];
   confidenceCalibration: { bucket: string; predictedConf: number; actualAccuracy: number; count: number }[];
   equityCurve: { date: string; value: number }[];
   drawdownCurve: { date: string; drawdown: number }[];
-  tradeLog: { date: string; ticker: string; action: string; entryPrice: number; exitPrice: number; returnPct: number; pnl: number; regime: string; confidence: number }[];
+  tradeLog: { date: string; exitDate: string; ticker: string; action: string; entryPrice: number; exitPrice: number; returnPct: number; pnl: number; regime: string; confidence: number; duration: number; mae: number; mfe: number }[];
   monteCarlo: { percentile5: number; percentile25: number; median: number; percentile75: number; percentile95: number } | null;
   benchmarkReturn: number;
   annualizedReturn: number;
+  rollingSharpe: { index: number; value: number }[];
+  rollingVolatility: { index: number; value: number }[];
+  tradeDistribution: { bucket: string; count: number }[];
+  monthlyReturns: { year: number; month: number; returnPct: number }[];
+  robustness: {
+    noiseInjection: { baseReturn: number; noisyReturn: number; impact: number; passed: boolean } | null;
+    delayedExecution: { baseReturn: number; delayedReturn: number; impact: number; passed: boolean } | null;
+    parameterSensitivity: { param: string; value: number; returnPct: number; sharpe: number }[];
+  };
+  stressTests: { period: string; startDate: string; endDate: string; strategyReturn: number; benchmarkReturn: number; maxDrawdown: number }[];
+  liquidityWarnings: number;
 }
 
 const MetricCard = ({ label, value, suffix = "", icon: Icon, color = "text-foreground" }: {
@@ -59,6 +95,33 @@ const MetricCard = ({ label, value, suffix = "", icon: Icon, color = "text-foreg
   </Card>
 );
 
+const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+
+function exportCSV(report: BacktestReport) {
+  // Summary
+  let csv = "=== BACKTEST SUMMARY ===\n";
+  csv += `Total Trades,${report.totalTrades}\nWin Rate,${report.winRate}%\nTotal Return,${report.totalReturn}%\n`;
+  csv += `Sharpe Ratio,${report.sharpeRatio}\nSortino Ratio,${report.sortinoRatio}\nCalmar Ratio,${report.calmarRatio}\n`;
+  csv += `Max Drawdown,${report.maxDrawdown}%\nProfit Factor,${report.profitFactor}\nCAGR,${report.cagr}%\n`;
+  csv += `Alpha,${report.alpha}%\nBeta,${report.beta}\nVaR (5%),${report.valueAtRisk}%\nCVaR,${report.conditionalVaR}%\n`;
+  csv += `Avg Win,${report.avgWin}%\nAvg Loss,${report.avgLoss}%\nWin/Loss Ratio,${report.winLossRatio}\n`;
+  csv += `Avg Duration,${report.avgTradeDuration} bars\nMarket Exposure,${report.marketExposure}%\n\n`;
+
+  // Trade log
+  csv += "=== TRADE LOG ===\nDate,Exit Date,Ticker,Action,Entry,Exit,Return%,PnL,Duration,MAE%,MFE%,Regime,Confidence\n";
+  for (const t of report.tradeLog) {
+    csv += `${t.date},${t.exitDate},${t.ticker},${t.action},${t.entryPrice.toFixed(2)},${t.exitPrice.toFixed(2)},${t.returnPct.toFixed(2)},${t.pnl.toFixed(2)},${t.duration},${t.mae},${t.mfe},${t.regime},${t.confidence}\n`;
+  }
+
+  const blob = new Blob([csv], { type: "text/csv" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `backtest-report-${new Date().toISOString().split("T")[0]}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 const Backtest = () => {
   const { session } = useAuth();
   const navigate = useNavigate();
@@ -66,7 +129,6 @@ const Backtest = () => {
   const [report, setReport] = useState<BacktestReport | null>(null);
   const [showTradeLog, setShowTradeLog] = useState(false);
 
-  // Config state
   const [tickerInput, setTickerInput] = useState("AAPL");
   const [startYear, setStartYear] = useState(2020);
   const [endYear, setEndYear] = useState(2025);
@@ -142,7 +204,7 @@ const Backtest = () => {
               Backtest Engine
             </h1>
             <p className="text-xs sm:text-sm text-muted-foreground">
-              Walk-forward backtesting with institutional-grade metrics
+              Institutional-grade walk-forward backtesting with anti-bias protection
             </p>
           </motion.div>
 
@@ -156,13 +218,11 @@ const Backtest = () => {
                     Configuration
                   </div>
 
-                  {/* Tickers */}
                   <div className="space-y-2">
                     <Label className="text-xs text-muted-foreground">Tickers (comma-separated, max 5)</Label>
                     <Input value={tickerInput} onChange={e => setTickerInput(e.target.value.toUpperCase())} placeholder="AAPL, MSFT, GOOGL" variant="glass" />
                   </div>
 
-                  {/* Date Range */}
                   <div className="grid grid-cols-2 gap-3">
                     <div className="space-y-2">
                       <Label className="text-xs text-muted-foreground">Start Year</Label>
@@ -174,19 +234,16 @@ const Backtest = () => {
                     </div>
                   </div>
 
-                  {/* Capital */}
                   <div className="space-y-2">
                     <Label className="text-xs text-muted-foreground">Initial Capital: ${initialCapital.toLocaleString()}</Label>
                     <Slider value={[initialCapital]} onValueChange={v => setInitialCapital(v[0])} min={1000} max={100000} step={1000} />
                   </div>
 
-                  {/* Position Size */}
                   <div className="space-y-2">
                     <Label className="text-xs text-muted-foreground">Position Size: {positionSize}%</Label>
                     <Slider value={[positionSize]} onValueChange={v => setPositionSize(v[0])} min={5} max={50} step={5} />
                   </div>
 
-                  {/* Stop Loss / Take Profit */}
                   <div className="grid grid-cols-2 gap-3">
                     <div className="space-y-2">
                       <Label className="text-xs text-muted-foreground">Stop Loss: {stopLoss}%</Label>
@@ -198,7 +255,6 @@ const Backtest = () => {
                     </div>
                   </div>
 
-                  {/* Monte Carlo Toggle */}
                   <div className="flex items-center justify-between">
                     <Label className="text-xs text-muted-foreground flex items-center gap-1.5">
                       <Shuffle className="w-3 h-3" />
@@ -213,13 +269,14 @@ const Backtest = () => {
                   </Button>
                 </Card>
 
-                {/* Trading Costs Info */}
                 <Card className="glass-card p-4">
-                  <div className="text-[10px] text-muted-foreground uppercase tracking-wide mb-2">Realistic Trading Costs</div>
+                  <div className="text-[10px] text-muted-foreground uppercase tracking-wide mb-2">Anti-Bias Protection</div>
                   <div className="space-y-1 text-xs text-muted-foreground">
+                    <div className="flex justify-between"><span>Execution</span><span className="font-mono text-success">Next-bar open</span></div>
                     <div className="flex justify-between"><span>Commission</span><span className="font-mono">0.1%</span></div>
                     <div className="flex justify-between"><span>Spread</span><span className="font-mono">0.05%</span></div>
                     <div className="flex justify-between"><span>Slippage</span><span className="font-mono">±0.1%</span></div>
+                    <div className="flex justify-between"><span>Robustness</span><span className="font-mono text-success">Noise + Delay</span></div>
                   </div>
                 </Card>
               </div>
@@ -233,14 +290,14 @@ const Backtest = () => {
                     <BarChart3 className="w-12 h-12 text-muted-foreground/30 mx-auto mb-4" />
                     <h3 className="text-lg font-medium mb-2">Institutional-Grade Backtesting</h3>
                     <p className="text-sm text-muted-foreground max-w-md mx-auto mb-6">
-                      Test the quantitative prediction engine against historical data with walk-forward validation, realistic trading costs, and Monte Carlo simulation.
+                      Walk-forward validation, realistic costs, robustness testing, and 30+ institutional metrics.
                     </p>
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 max-w-lg mx-auto">
                       {[
                         { icon: Activity, label: "Walk-Forward" },
-                        { icon: DollarSign, label: "Trading Costs" },
-                        { icon: Shuffle, label: "Monte Carlo" },
-                        { icon: Trophy, label: "Pro Metrics" },
+                        { icon: ShieldAlert, label: "Anti-Bias" },
+                        { icon: FlaskConical, label: "Robustness" },
+                        { icon: Trophy, label: "30+ Metrics" },
                       ].map(({ icon: Icon, label }) => (
                         <div key={label} className="flex flex-col items-center gap-1.5 p-3 rounded-lg bg-secondary/30">
                           <Icon className="w-4 h-4 text-primary" />
@@ -252,22 +309,30 @@ const Backtest = () => {
                 ) : isLoading ? (
                   <motion.div key="loading" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="glass-card p-12 text-center">
                     <Loader2 className="w-8 h-8 text-primary animate-spin mx-auto mb-4" />
-                    <p className="text-sm text-muted-foreground">Running walk-forward backtest...</p>
-                    <p className="text-xs text-muted-foreground/60 mt-1">Fetching historical data & simulating trades</p>
+                    <p className="text-sm text-muted-foreground">Running institutional backtest...</p>
+                    <p className="text-xs text-muted-foreground/60 mt-1">Walk-forward + robustness tests + stress analysis</p>
                   </motion.div>
                 ) : report ? (
                   <motion.div key="report" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-6">
-                    {/* Summary Metrics */}
+                    {/* CSV Export */}
+                    <div className="flex justify-end">
+                      <Button variant="outline" size="sm" className="gap-1.5 text-xs" onClick={() => exportCSV(report)}>
+                        <Download className="w-3 h-3" /> Export CSV
+                      </Button>
+                    </div>
+
+                    {/* Primary Metrics */}
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                       <MetricCard label="Total Return" value={`${report.totalReturn > 0 ? "+" : ""}${report.totalReturn}`} suffix="%" icon={TrendingUp}
                         color={report.totalReturn > 0 ? "text-success" : "text-destructive"} />
                       <MetricCard label="Win Rate" value={report.winRate} suffix="%" icon={Target}
                         color={report.winRate > 50 ? "text-success" : "text-destructive"} />
                       <MetricCard label="Max Drawdown" value={`-${report.maxDrawdown}`} suffix="%" icon={TrendingDown} color="text-destructive" />
-                      <MetricCard label="Total Trades" value={report.totalTrades} icon={Activity} />
+                      <MetricCard label="CAGR" value={report.cagr} suffix="%" icon={TrendingUp}
+                        color={report.cagr > 0 ? "text-success" : "text-destructive"} />
                     </div>
 
-                    {/* Pro Metrics */}
+                    {/* Risk Metrics */}
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                       <MetricCard label="Sharpe Ratio" value={report.sharpeRatio} icon={Gauge}
                         color={report.sharpeRatio > 1 ? "text-success" : report.sharpeRatio > 0 ? "text-warning" : "text-destructive"} />
@@ -277,6 +342,43 @@ const Backtest = () => {
                         color={report.profitFactor > 1 ? "text-success" : "text-destructive"} />
                       <MetricCard label="Calmar Ratio" value={report.calmarRatio} icon={Percent}
                         color={report.calmarRatio > 0.5 ? "text-success" : "text-warning"} />
+                    </div>
+
+                    {/* Advanced Risk */}
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                      <MetricCard label="VaR (5%)" value={report.valueAtRisk} suffix="%" icon={ShieldAlert} color="text-destructive" />
+                      <MetricCard label="CVaR" value={report.conditionalVaR} suffix="%" icon={ShieldAlert} color="text-destructive" />
+                      <MetricCard label="Ulcer Index" value={report.ulcerIndex} icon={Activity} />
+                      <MetricCard label="Stability" value={report.stabilityScore} icon={Zap}
+                        color={report.stabilityScore < 3 ? "text-success" : "text-warning"} />
+                    </div>
+
+                    {/* Trade Stats */}
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                      <MetricCard label="Avg Win" value={`+${report.avgWin}`} suffix="%" icon={TrendingUp} color="text-success" />
+                      <MetricCard label="Avg Loss" value={report.avgLoss} suffix="%" icon={TrendingDown} color="text-destructive" />
+                      <MetricCard label="Win/Loss Ratio" value={report.winLossRatio} icon={Target}
+                        color={report.winLossRatio > 1 ? "text-success" : "text-destructive"} />
+                      <MetricCard label="Total Trades" value={report.totalTrades} icon={Activity} />
+                    </div>
+
+                    {/* Exposure & Duration */}
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                      <MetricCard label="Market Exposure" value={report.marketExposure} suffix="%" icon={PieChart} />
+                      <MetricCard label="Avg Duration" value={report.avgTradeDuration} suffix=" bars" icon={Clock} />
+                      <MetricCard label="Avg MAE" value={report.avgMAE} suffix="%" icon={Crosshair} color="text-destructive" />
+                      <MetricCard label="Avg MFE" value={report.avgMFE} suffix="%" icon={Crosshair} color="text-success" />
+                    </div>
+
+                    {/* Alpha/Beta & Signal Quality */}
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                      <MetricCard label="Alpha" value={report.alpha} suffix="%" icon={Trophy}
+                        color={report.alpha > 0 ? "text-success" : "text-destructive"} />
+                      <MetricCard label="Beta" value={report.beta} icon={BarChart2} />
+                      <MetricCard label="Signal Precision" value={report.signalPrecision} suffix="%" icon={Target}
+                        color={report.signalPrecision > 50 ? "text-success" : "text-destructive"} />
+                      <MetricCard label="Signal F1" value={report.signalF1} suffix="%" icon={Target}
+                        color={report.signalF1 > 50 ? "text-success" : "text-destructive"} />
                     </div>
 
                     {/* Benchmark Comparison */}
@@ -293,18 +395,26 @@ const Backtest = () => {
                             </span>
                           </div>
                         </div>
-                        <Badge variant={report.totalReturn > report.benchmarkReturn ? "default" : "destructive"}>
-                          {report.totalReturn > report.benchmarkReturn ? "Outperforms" : "Underperforms"}
-                        </Badge>
+                        <div className="flex gap-2">
+                          <Badge variant={report.totalReturn > report.benchmarkReturn ? "default" : "destructive"}>
+                            {report.totalReturn > report.benchmarkReturn ? "Outperforms" : "Underperforms"}
+                          </Badge>
+                          {report.liquidityWarnings > 0 && (
+                            <Badge variant="outline" className="text-warning border-warning/30">
+                              {report.liquidityWarnings} liquidity flags
+                            </Badge>
+                          )}
+                        </div>
                       </div>
                     </Card>
 
                     {/* Prediction Accuracy */}
-                    <div className="grid grid-cols-3 gap-3">
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                       <MetricCard label="Dir. Accuracy" value={report.directionalAccuracy} suffix="%" icon={Target}
                         color={report.directionalAccuracy > 50 ? "text-success" : "text-destructive"} />
                       <MetricCard label="MAE" value={report.mae} suffix="%" icon={Activity} />
                       <MetricCard label="RMSE" value={report.rmse} suffix="%" icon={BarChart3} />
+                      <MetricCard label="MAPE" value={report.mape} suffix="%" icon={Percent} />
                     </div>
 
                     {/* Equity Curve */}
@@ -319,20 +429,19 @@ const Backtest = () => {
                             <AreaChart data={report.equityCurve}>
                               <defs>
                                 <linearGradient id="equityGrad" x1="0" y1="0" x2="0" y2="1">
-                                  <stop offset="5%" stopColor="hsl(143 35% 45%)" stopOpacity={0.3} />
-                                  <stop offset="95%" stopColor="hsl(143 35% 45%)" stopOpacity={0} />
+                                  <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.3} />
+                                  <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0} />
                                 </linearGradient>
                               </defs>
-                              <CartesianGrid strokeDasharray="3 3" stroke="hsl(0 0% 20%)" />
-                              <XAxis dataKey="date" tick={{ fontSize: 10, fill: "hsl(0 0% 50%)" }}
+                              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                              <XAxis dataKey="date" tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
                                 tickFormatter={v => v.substring(0, 7)} interval="preserveStartEnd" />
-                              <YAxis tick={{ fontSize: 10, fill: "hsl(0 0% 50%)" }}
+                              <YAxis tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
                                 tickFormatter={v => `$${(v / 1000).toFixed(0)}k`} />
-                              <Tooltip contentStyle={{ background: "hsl(0 0% 5%)", border: "1px solid hsl(0 0% 12%)", borderRadius: 8, fontSize: 12 }}
-                                formatter={(v: number) => [`$${v.toFixed(0)}`, "Portfolio"]}
-                                labelFormatter={l => l} />
-                              <ReferenceLine y={initialCapital} stroke="hsl(0 0% 30%)" strokeDasharray="3 3" label={{ value: "Initial", fill: "hsl(0 0% 40%)", fontSize: 10 }} />
-                              <Area type="monotone" dataKey="value" stroke="hsl(143 35% 45%)" fill="url(#equityGrad)" strokeWidth={2} dot={false} />
+                              <Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 8, fontSize: 12 }}
+                                formatter={(v: number) => [`$${v.toFixed(0)}`, "Portfolio"]} />
+                              <ReferenceLine y={initialCapital} stroke="hsl(var(--muted-foreground))" strokeDasharray="3 3" />
+                              <Area type="monotone" dataKey="value" stroke="hsl(var(--primary))" fill="url(#equityGrad)" strokeWidth={2} dot={false} />
                             </AreaChart>
                           </ResponsiveContainer>
                         </div>
@@ -351,20 +460,226 @@ const Backtest = () => {
                             <AreaChart data={report.drawdownCurve}>
                               <defs>
                                 <linearGradient id="ddGrad" x1="0" y1="0" x2="0" y2="1">
-                                  <stop offset="5%" stopColor="hsl(0 72% 51%)" stopOpacity={0.3} />
-                                  <stop offset="95%" stopColor="hsl(0 72% 51%)" stopOpacity={0} />
+                                  <stop offset="5%" stopColor="hsl(var(--destructive))" stopOpacity={0.3} />
+                                  <stop offset="95%" stopColor="hsl(var(--destructive))" stopOpacity={0} />
                                 </linearGradient>
                               </defs>
-                              <CartesianGrid strokeDasharray="3 3" stroke="hsl(0 0% 20%)" />
-                              <XAxis dataKey="date" tick={{ fontSize: 10, fill: "hsl(0 0% 50%)" }}
+                              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                              <XAxis dataKey="date" tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
                                 tickFormatter={v => v.substring(0, 7)} interval="preserveStartEnd" />
-                              <YAxis tick={{ fontSize: 10, fill: "hsl(0 0% 50%)" }}
+                              <YAxis tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
                                 tickFormatter={v => `${v}%`} />
-                              <Tooltip contentStyle={{ background: "hsl(0 0% 5%)", border: "1px solid hsl(0 0% 12%)", borderRadius: 8, fontSize: 12 }}
+                              <Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 8, fontSize: 12 }}
                                 formatter={(v: number) => [`${v}%`, "Drawdown"]} />
-                              <Area type="monotone" dataKey="drawdown" stroke="hsl(0 72% 51%)" fill="url(#ddGrad)" strokeWidth={1.5} dot={false} />
+                              <Area type="monotone" dataKey="drawdown" stroke="hsl(var(--destructive))" fill="url(#ddGrad)" strokeWidth={1.5} dot={false} />
                             </AreaChart>
                           </ResponsiveContainer>
+                        </div>
+                      </Card>
+                    )}
+
+                    {/* Rolling Sharpe */}
+                    {report.rollingSharpe.length > 0 && (
+                      <Card className="glass-card p-6">
+                        <div className="flex items-center gap-2 mb-4">
+                          <Gauge className="w-4 h-4 text-primary" />
+                          <span className="text-sm font-medium">Rolling Sharpe Ratio (20-trade window)</span>
+                        </div>
+                        <div className="h-48">
+                          <ResponsiveContainer width="100%" height="100%">
+                            <LineChart data={report.rollingSharpe}>
+                              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                              <XAxis dataKey="index" tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} />
+                              <YAxis tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} />
+                              <Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 8, fontSize: 12 }}
+                                formatter={(v: number) => [v.toFixed(2), "Sharpe"]} />
+                              <ReferenceLine y={0} stroke="hsl(var(--muted-foreground))" strokeDasharray="3 3" />
+                              <ReferenceLine y={1} stroke="hsl(var(--primary))" strokeDasharray="3 3" />
+                              <Line type="monotone" dataKey="value" stroke="hsl(var(--primary))" strokeWidth={1.5} dot={false} />
+                            </LineChart>
+                          </ResponsiveContainer>
+                        </div>
+                      </Card>
+                    )}
+
+                    {/* Trade Distribution Histogram */}
+                    {report.tradeDistribution.length > 0 && (
+                      <Card className="glass-card p-6">
+                        <div className="flex items-center gap-2 mb-4">
+                          <BarChart2 className="w-4 h-4 text-primary" />
+                          <span className="text-sm font-medium">Trade Return Distribution</span>
+                        </div>
+                        <div className="h-48">
+                          <ResponsiveContainer width="100%" height="100%">
+                            <BarChart data={report.tradeDistribution}>
+                              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                              <XAxis dataKey="bucket" tick={{ fontSize: 9, fill: "hsl(var(--muted-foreground))" }} />
+                              <YAxis tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} />
+                              <Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 8, fontSize: 12 }} />
+                              <Bar dataKey="count" radius={[2, 2, 0, 0]}>
+                                {report.tradeDistribution.map((d, i) => (
+                                  <Cell key={i} fill={d.bucket.startsWith("-") ? "hsl(var(--destructive))" : "hsl(var(--primary))"} />
+                                ))}
+                              </Bar>
+                            </BarChart>
+                          </ResponsiveContainer>
+                        </div>
+                      </Card>
+                    )}
+
+                    {/* Monthly Returns Heatmap */}
+                    {report.monthlyReturns.length > 0 && (
+                      <Card className="glass-card p-6">
+                        <div className="text-sm font-medium mb-4">Monthly Returns Heatmap</div>
+                        <div className="overflow-x-auto">
+                          {(() => {
+                            const years = [...new Set(report.monthlyReturns.map(m => m.year))].sort();
+                            return (
+                              <table className="w-full text-xs">
+                                <thead>
+                                  <tr className="border-b border-border/30">
+                                    <th className="text-left py-1.5 text-muted-foreground font-normal">Year</th>
+                                    {MONTHS.map(m => (
+                                      <th key={m} className="text-center py-1.5 text-muted-foreground font-normal w-12">{m}</th>
+                                    ))}
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {years.map(yr => (
+                                    <tr key={yr} className="border-b border-border/10">
+                                      <td className="py-1.5 font-mono font-medium">{yr}</td>
+                                      {Array.from({ length: 12 }, (_, mi) => {
+                                        const entry = report.monthlyReturns.find(m => m.year === yr && m.month === mi + 1);
+                                        const val = entry?.returnPct || 0;
+                                        const intensity = Math.min(Math.abs(val) / 5, 1);
+                                        const bg = val > 0
+                                          ? `hsl(var(--primary) / ${0.1 + intensity * 0.5})`
+                                          : val < 0
+                                            ? `hsl(var(--destructive) / ${0.1 + intensity * 0.5})`
+                                            : "transparent";
+                                        return (
+                                          <td key={mi} className="text-center py-1.5 font-mono" style={{ backgroundColor: bg }}>
+                                            {entry ? `${val > 0 ? "+" : ""}${val.toFixed(1)}` : "—"}
+                                          </td>
+                                        );
+                                      })}
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            );
+                          })()}
+                        </div>
+                      </Card>
+                    )}
+
+                    {/* Robustness Tests */}
+                    {report.robustness && (report.robustness.noiseInjection || report.robustness.delayedExecution) && (
+                      <Card className="glass-card p-6">
+                        <div className="flex items-center gap-2 mb-4">
+                          <FlaskConical className="w-4 h-4 text-primary" />
+                          <span className="text-sm font-medium">Robustness Tests</span>
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          {report.robustness.noiseInjection && (
+                            <div className="p-3 rounded-lg bg-secondary/20 border border-border/20">
+                              <div className="flex items-center justify-between mb-2">
+                                <span className="text-xs font-medium">Noise Injection (±0.5%)</span>
+                                <Badge variant={report.robustness.noiseInjection.passed ? "default" : "destructive"} className="text-[10px]">
+                                  {report.robustness.noiseInjection.passed ? "PASS" : "FAIL"}
+                                </Badge>
+                              </div>
+                              <div className="text-xs text-muted-foreground space-y-0.5">
+                                <div>Base: {report.robustness.noiseInjection.baseReturn}%</div>
+                                <div>Noisy: {report.robustness.noiseInjection.noisyReturn}%</div>
+                                <div>Impact: {report.robustness.noiseInjection.impact}%</div>
+                              </div>
+                            </div>
+                          )}
+                          {report.robustness.delayedExecution && (
+                            <div className="p-3 rounded-lg bg-secondary/20 border border-border/20">
+                              <div className="flex items-center justify-between mb-2">
+                                <span className="text-xs font-medium">Delayed Execution (t+2)</span>
+                                <Badge variant={report.robustness.delayedExecution.passed ? "default" : "destructive"} className="text-[10px]">
+                                  {report.robustness.delayedExecution.passed ? "PASS" : "FAIL"}
+                                </Badge>
+                              </div>
+                              <div className="text-xs text-muted-foreground space-y-0.5">
+                                <div>Base: {report.robustness.delayedExecution.baseReturn}%</div>
+                                <div>Delayed: {report.robustness.delayedExecution.delayedReturn}%</div>
+                                <div>Impact: {report.robustness.delayedExecution.impact}%</div>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </Card>
+                    )}
+
+                    {/* Parameter Sensitivity */}
+                    {report.robustness?.parameterSensitivity?.length > 0 && (
+                      <Card className="glass-card p-6">
+                        <div className="text-sm font-medium mb-4">Parameter Sensitivity</div>
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-xs">
+                            <thead>
+                              <tr className="border-b border-border/30">
+                                <th className="text-left py-2 text-muted-foreground font-normal">Parameter</th>
+                                <th className="text-right py-2 text-muted-foreground font-normal">Return</th>
+                                <th className="text-right py-2 text-muted-foreground font-normal">Sharpe</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {report.robustness.parameterSensitivity.map(ps => (
+                                <tr key={ps.param} className="border-b border-border/10">
+                                  <td className="py-2 font-mono">{ps.param}</td>
+                                  <td className={`text-right py-2 font-mono ${ps.returnPct > 0 ? "text-success" : "text-destructive"}`}>
+                                    {ps.returnPct > 0 ? "+" : ""}{ps.returnPct}%
+                                  </td>
+                                  <td className={`text-right py-2 font-mono ${ps.sharpe > 1 ? "text-success" : ps.sharpe > 0 ? "text-warning" : "text-destructive"}`}>
+                                    {ps.sharpe}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </Card>
+                    )}
+
+                    {/* Stress Tests */}
+                    {report.stressTests?.length > 0 && (
+                      <Card className="glass-card p-6">
+                        <div className="flex items-center gap-2 mb-4">
+                          <AlertTriangle className="w-4 h-4 text-warning" />
+                          <span className="text-sm font-medium">Stress Test Results</span>
+                        </div>
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-xs">
+                            <thead>
+                              <tr className="border-b border-border/30">
+                                <th className="text-left py-2 text-muted-foreground font-normal">Period</th>
+                                <th className="text-left py-2 text-muted-foreground font-normal">Dates</th>
+                                <th className="text-right py-2 text-muted-foreground font-normal">Strategy</th>
+                                <th className="text-right py-2 text-muted-foreground font-normal">Benchmark</th>
+                                <th className="text-right py-2 text-muted-foreground font-normal">Max DD</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {report.stressTests.map(st => (
+                                <tr key={st.period} className="border-b border-border/10">
+                                  <td className="py-2 font-medium">{st.period}</td>
+                                  <td className="py-2 font-mono text-muted-foreground">{st.startDate.substring(0, 7)}</td>
+                                  <td className={`text-right py-2 font-mono ${st.strategyReturn > 0 ? "text-success" : "text-destructive"}`}>
+                                    {st.strategyReturn > 0 ? "+" : ""}{st.strategyReturn}%
+                                  </td>
+                                  <td className={`text-right py-2 font-mono ${st.benchmarkReturn > 0 ? "text-success" : "text-destructive"}`}>
+                                    {st.benchmarkReturn > 0 ? "+" : ""}{st.benchmarkReturn}%
+                                  </td>
+                                  <td className="text-right py-2 font-mono text-destructive">-{st.maxDrawdown}%</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
                         </div>
                       </Card>
                     )}
@@ -439,16 +754,16 @@ const Backtest = () => {
                         <div className="h-48">
                           <ResponsiveContainer width="100%" height="100%">
                             <BarChart data={report.periods}>
-                              <CartesianGrid strokeDasharray="3 3" stroke="hsl(0 0% 20%)" />
-                              <XAxis dataKey="start" tick={{ fontSize: 10, fill: "hsl(0 0% 50%)" }}
+                              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                              <XAxis dataKey="start" tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
                                 tickFormatter={v => v.substring(0, 4)} />
-                              <YAxis tick={{ fontSize: 10, fill: "hsl(0 0% 50%)" }}
+                              <YAxis tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
                                 tickFormatter={v => `${v}%`} />
-                              <Tooltip contentStyle={{ background: "hsl(0 0% 5%)", border: "1px solid hsl(0 0% 12%)", borderRadius: 8, fontSize: 12 }}
+                              <Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 8, fontSize: 12 }}
                                 formatter={(v: number, name: string) => [`${v}%`, name === "accuracy" ? "Accuracy" : "Return"]} />
                               <Bar dataKey="accuracy" name="accuracy" radius={[4, 4, 0, 0]}>
                                 {report.periods.map((p, i) => (
-                                  <Cell key={i} fill={p.accuracy > 50 ? "hsl(143 35% 45%)" : "hsl(0 72% 51%)"} />
+                                  <Cell key={i} fill={p.accuracy > 50 ? "hsl(var(--primary))" : "hsl(var(--destructive))"} />
                                 ))}
                               </Bar>
                             </BarChart>
@@ -485,7 +800,7 @@ const Backtest = () => {
                       </Card>
                     )}
 
-                    {/* Trade Log Toggle */}
+                    {/* Trade Log */}
                     <Card className="glass-card p-4">
                       <Button variant="ghost" size="sm" className="w-full text-xs" onClick={() => setShowTradeLog(!showTradeLog)}>
                         {showTradeLog ? "Hide" : "Show"} Trade Log ({report.tradeLog.length} trades)
@@ -502,6 +817,9 @@ const Backtest = () => {
                                 <th className="text-right py-1.5 text-muted-foreground font-normal">Exit</th>
                                 <th className="text-right py-1.5 text-muted-foreground font-normal">Return</th>
                                 <th className="text-right py-1.5 text-muted-foreground font-normal">PnL</th>
+                                <th className="text-right py-1.5 text-muted-foreground font-normal">Dur.</th>
+                                <th className="text-right py-1.5 text-muted-foreground font-normal">MAE</th>
+                                <th className="text-right py-1.5 text-muted-foreground font-normal">MFE</th>
                               </tr>
                             </thead>
                             <tbody>
@@ -518,6 +836,9 @@ const Backtest = () => {
                                   <td className={`py-1 text-right font-mono ${t.pnl > 0 ? "text-success" : "text-destructive"}`}>
                                     ${t.pnl.toFixed(0)}
                                   </td>
+                                  <td className="py-1 text-right font-mono text-muted-foreground">{t.duration}d</td>
+                                  <td className="py-1 text-right font-mono text-destructive">{t.mae}%</td>
+                                  <td className="py-1 text-right font-mono text-success">{t.mfe}%</td>
                                 </tr>
                               ))}
                             </tbody>
@@ -530,7 +851,7 @@ const Backtest = () => {
                     <div className="flex items-start gap-3 p-4 border border-border/30 rounded-lg">
                       <AlertTriangle className="w-4 h-4 text-warning mt-0.5 shrink-0" />
                       <p className="text-xs text-muted-foreground leading-relaxed">
-                        Past performance does not guarantee future results. Backtests use historical data and may not reflect real trading conditions.
+                        Past performance does not guarantee future results. Backtests use historical data and may not reflect real trading conditions. This is not financial advice.
                       </p>
                     </div>
                   </motion.div>
