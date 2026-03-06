@@ -2,7 +2,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
 // ============================================================================
@@ -65,10 +65,30 @@ function calculateMACD(prices: number[]): { macd: number[]; signal: number[]; hi
   const ema12 = calculateEMA(prices, 12);
   const ema26 = calculateEMA(prices, 26);
   const macd = ema12.map((v, i) => v - ema26[i]);
-  const signal = calculateEMA(macd.filter(v => !isNaN(v)), 9);
-  const padLen = macd.length - signal.length;
-  const paddedSignal = new Array(Math.max(0, padLen)).fill(NaN).concat(signal);
-  const histogram = macd.map((v, i) => v - (paddedSignal[i] || 0));
+
+  // Track which indices have valid (non-NaN) MACD values
+  const validIndices: number[] = [];
+  const validMacd: number[] = [];
+  for (let i = 0; i < macd.length; i++) {
+    if (!isNaN(macd[i])) {
+      validIndices.push(i);
+      validMacd.push(macd[i]);
+    }
+  }
+
+  // Compute signal EMA only on valid MACD values
+  const signalRaw = calculateEMA(validMacd, 9);
+
+  // Map signal back to original indices
+  const paddedSignal: number[] = new Array(macd.length).fill(NaN);
+  for (let i = 0; i < signalRaw.length; i++) {
+    paddedSignal[validIndices[i]] = signalRaw[i];
+  }
+
+  const histogram = macd.map((v, i) => {
+    if (isNaN(v) || isNaN(paddedSignal[i])) return NaN;
+    return v - paddedSignal[i];
+  });
   return { macd, signal: paddedSignal, histogram };
 }
 
@@ -621,8 +641,9 @@ function computeMetrics(
   const timeToDouble = cagr > 0 ? 72 / cagr : 0; // Rule of 72
 
   // Portfolio Turnover
-  const totalTraded = trades.reduce((a, t) => a + Math.abs(t.pnl) + (t.entryPrice * (initialCapital * (0.1))), 0);
-  const portfolioTurnover = totalTraded / initialCapital;
+  const positionSize = initialCapital * (trades.length > 0 ? 0.1 : 0.1); // approximate per-trade allocation
+  const totalTraded = trades.length * (initialCapital * (positionSizePctVal / 100));
+  const portfolioTurnover = years > 0 ? totalTraded / initialCapital / years : 0;
 
   // Directional Accuracy
   const correctDir = trades.filter(t => {
@@ -773,16 +794,17 @@ function computeMetrics(
 // ============================================================================
 // MONTE CARLO SIMULATION
 // ============================================================================
-function runMonteCarlo(trades: Trade[], initialCapital: number, simulations: number = 1000): BacktestReport['monteCarlo'] {
+function runMonteCarlo(trades: Trade[], initialCapital: number, simulations: number = 1000, positionSizePct: number = 10): BacktestReport['monteCarlo'] {
   if (trades.length < 5) return null;
   const tradeReturns = trades.map(t => t.returnPct / 100);
+  const positionSizeFrac = positionSizePct / 100;
   const finalValues: number[] = [];
 
   for (let s = 0; s < simulations; s++) {
     let capital = initialCapital;
     const shuffled = [...tradeReturns].sort(() => Math.random() - 0.5);
     for (const ret of shuffled) {
-      capital *= (1 + ret * 0.1);
+      capital *= (1 + ret * positionSizeFrac);
     }
     finalValues.push(((capital - initialCapital) / initialCapital) * 100);
   }
@@ -855,7 +877,10 @@ function detectStressPeriods(
   for (let i = 60; i < close.length; i += 30) {
     const windowClose = close.slice(i - 60, i);
     const windowPeak = Math.max(...windowClose);
-    const windowTrough = Math.min(...windowClose.slice(windowClose.indexOf(Math.max(...windowClose))));
+    const peakIdx = windowClose.indexOf(windowPeak);
+    const afterPeak = windowClose.slice(peakIdx + 1);
+    if (afterPeak.length === 0) continue;
+    const windowTrough = Math.min(...afterPeak);
     const dd = ((windowPeak - windowTrough) / windowPeak) * 100;
 
     if (dd > 15) {
@@ -1042,15 +1067,24 @@ serve(async (req) => {
       totalBarsAll += totalBars;
       barsInTradeAll += barsInTrade;
 
-      if (combinedEquity.length === 0) {
-        combinedEquity = equityCurve;
+    // When combining multiple tickers, each ticker's equity is relative to its share of capital
+    const numTickers = config.tickers.filter((_, ti) => tickerData[ti] && tickerData[ti]!.close.length >= 100).length;
+    const capitalPerTicker = config.initialCapital / Math.max(numTickers, 1);
+
+    if (combinedEquity.length === 0) {
+        // Scale first ticker's equity to its proportional share
+        combinedEquity = equityCurve.map(p => ({
+          date: p.date,
+          value: capitalPerTicker + (p.value - config.initialCapital) * (capitalPerTicker / config.initialCapital),
+        }));
       } else {
         for (const point of equityCurve) {
+          const pnl = (point.value - config.initialCapital) * (capitalPerTicker / config.initialCapital);
           const existing = combinedEquity.find(c => c.date === point.date);
           if (existing) {
-            existing.value += (point.value - config.initialCapital);
+            existing.value += pnl;
           } else {
-            combinedEquity.push(point);
+            combinedEquity.push({ date: point.date, value: capitalPerTicker + pnl });
           }
         }
       }
@@ -1075,7 +1109,7 @@ serve(async (req) => {
     // Monte Carlo
     let monteCarlo = null;
     if (includeMonteCarlo && allTrades.length >= 10) {
-      monteCarlo = runMonteCarlo(allTrades, initialCapital, 1000);
+      monteCarlo = runMonteCarlo(allTrades, initialCapital, 1000, positionSizePct);
     }
 
     // Benchmark return
