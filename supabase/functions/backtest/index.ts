@@ -542,7 +542,8 @@ function computeMetrics(
   years: number,
   totalBars: number,
   barsInTrade: number,
-  benchmarkReturns: number[] // daily SPY returns for alpha/beta
+  benchmarkReturns: number[], // daily SPY returns for alpha/beta
+  positionSizePctVal: number = 10,
 ): Partial<BacktestReport> {
   if (trades.length === 0) {
     return {
