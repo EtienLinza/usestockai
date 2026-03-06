@@ -66,7 +66,6 @@ function calculateMACD(prices: number[]): { macd: number[]; signal: number[]; hi
   const ema26 = calculateEMA(prices, 26);
   const macd = ema12.map((v, i) => v - ema26[i]);
 
-  // Track which indices have valid (non-NaN) MACD values
   const validIndices: number[] = [];
   const validMacd: number[] = [];
   for (let i = 0; i < macd.length; i++) {
@@ -76,10 +75,7 @@ function calculateMACD(prices: number[]): { macd: number[]; signal: number[]; hi
     }
   }
 
-  // Compute signal EMA only on valid MACD values
   const signalRaw = calculateEMA(validMacd, 9);
-
-  // Map signal back to original indices
   const paddedSignal: number[] = new Array(macd.length).fill(NaN);
   for (let i = 0; i < signalRaw.length; i++) {
     paddedSignal[validIndices[i]] = signalRaw[i];
@@ -316,9 +312,9 @@ interface Trade {
   confidence: number;
   predictedReturn: number;
   actualReturn: number;
-  duration: number; // bars held
-  mae: number; // max adverse excursion %
-  mfe: number; // max favorable excursion %
+  duration: number;
+  mae: number;
+  mfe: number;
   volumeAtEntry: number;
 }
 
@@ -398,16 +394,28 @@ interface BacktestReport {
   rollingVolatility: { index: number; value: number }[];
   tradeDistribution: { bucket: string; count: number }[];
   monthlyReturns: { year: number; month: number; returnPct: number }[];
-  // Robustness
   robustness: {
     noiseInjection: { baseReturn: number; noisyReturn: number; impact: number; passed: boolean } | null;
     delayedExecution: { baseReturn: number; delayedReturn: number; impact: number; passed: boolean } | null;
     parameterSensitivity: { param: string; value: number; returnPct: number; sharpe: number }[];
+    tradeDependency: { baseReturn: number; reducedReturn: number; impact: number; passed: boolean } | null;
   };
-  // Stress testing
   stressTests: { period: string; startDate: string; endDate: string; strategyReturn: number; benchmarkReturn: number; maxDrawdown: number }[];
-  // Liquidity flags
   liquidityWarnings: number;
+  maxDrawdownDuration: number;
+  avgDrawdownDuration: number;
+  recoveryTime: number;
+  timeInDrawdownPct: number;
+  skewness: number;
+  kurtosis: number;
+  kelly: number;
+  expectancy: number;
+  maxConsecutiveWins: number;
+  maxConsecutiveLosses: number;
+  strategyCapacity: number;
+  signalDecay: { day: number; accuracy: number }[];
+  benchmarkEquity: { date: string; value: number }[];
+  marketRegimePerformance: { regime: string; accuracy: number; avgReturn: number; trades: number }[];
 }
 
 type DataSet = { timestamps: string[]; close: number[]; high: number[]; low: number[]; open: number[]; volume: number[] };
@@ -417,7 +425,7 @@ function runWalkForwardBacktest(
   ticker: string,
   config: BacktestConfig,
   tradeConfig: TradeConfig,
-  executionDelay: number = 1, // bars delay for execution (1 = next bar, fixes lookahead bias)
+  executionDelay: number = 1,
 ): { trades: Trade[]; equityCurve: { date: string; value: number }[]; totalBars: number; barsInTrade: number } {
   const { close, high, low, open, volume, timestamps } = allData;
   const trades: Trade[] = [];
@@ -446,14 +454,12 @@ function runWalkForwardBacktest(
 
     if (action === "HOLD") continue;
 
-    // LOOKAHEAD BIAS FIX: execute at next bar's open, not same bar's close
     const entryIdx = i + executionDelay;
     if (entryIdx >= close.length) continue;
-    const rawEntryPrice = open[entryIdx]; // use open of next bar
+    const rawEntryPrice = open[entryIdx];
     const entryPrice = applyTradingCosts(rawEntryPrice, action === "BUY", tradeConfig);
     const testEnd = Math.min(entryIdx + STEP, close.length - 1);
 
-    // Track MAE/MFE during trade
     let maxAdverse = 0;
     let maxFavorable = 0;
     let exitPrice = close[testEnd];
@@ -465,7 +471,6 @@ function runWalkForwardBacktest(
         ? (close[j] - entryPrice) / entryPrice
         : (entryPrice - close[j]) / entryPrice;
 
-      // Track MAE/MFE
       if (priceChange < 0) maxAdverse = Math.min(maxAdverse, priceChange);
       if (priceChange > 0) maxFavorable = Math.max(maxFavorable, priceChange);
 
@@ -542,7 +547,7 @@ function computeMetrics(
   years: number,
   totalBars: number,
   barsInTrade: number,
-  benchmarkReturns: number[], // daily SPY returns for alpha/beta
+  benchmarkReturns: number[],
   positionSizePctVal: number = 10,
 ): Partial<BacktestReport> {
   if (trades.length === 0) {
@@ -559,6 +564,10 @@ function computeMetrics(
       signalPrecision: 0, signalRecall: 0, signalF1: 0,
       regimePerformance: [], confidenceCalibration: [], annualizedReturn: 0,
       rollingSharpe: [], rollingVolatility: [], tradeDistribution: [], monthlyReturns: [],
+      maxDrawdownDuration: 0, avgDrawdownDuration: 0, recoveryTime: 0,
+      timeInDrawdownPct: 0, skewness: 0, kurtosis: 0, kelly: 0, expectancy: 0,
+      maxConsecutiveWins: 0, maxConsecutiveLosses: 0, strategyCapacity: 0,
+      signalDecay: [], marketRegimePerformance: [],
     };
   }
 
@@ -586,18 +595,58 @@ function computeMetrics(
   const avgMAE = trades.reduce((a, t) => a + t.mae, 0) / trades.length;
   const avgMFE = trades.reduce((a, t) => a + t.mfe, 0) / trades.length;
 
-  // Max Drawdown + drawdown series for Ulcer Index
+  // Max Drawdown + drawdown series for Ulcer Index + DRAWDOWN DURATION
   let peak = initialCapital;
   let maxDrawdown = 0;
   const drawdowns: number[] = [];
-  for (const point of equityCurve) {
-    if (point.value > peak) peak = point.value;
+  let ddStart = -1;
+  let maxDDDuration = 0;
+  let totalDDDuration = 0;
+  let ddCount = 0;
+  let maxRecoveryTime = 0;
+  let inDrawdown = false;
+  let pointsInDD = 0;
+
+  for (let idx = 0; idx < equityCurve.length; idx++) {
+    const point = equityCurve[idx];
+    if (point.value > peak) {
+      // Recovered
+      if (inDrawdown) {
+        const duration = idx - ddStart;
+        totalDDDuration += duration;
+        ddCount++;
+        if (duration > maxDDDuration) maxDDDuration = duration;
+        maxRecoveryTime = Math.max(maxRecoveryTime, duration);
+        inDrawdown = false;
+      }
+      peak = point.value;
+    }
     const dd = ((peak - point.value) / peak) * 100;
     drawdowns.push(dd);
     if (dd > maxDrawdown) maxDrawdown = dd;
+    if (dd > 0) {
+      pointsInDD++;
+      if (!inDrawdown) {
+        inDrawdown = true;
+        ddStart = idx;
+      }
+    }
+  }
+  // Handle still-in-drawdown at end
+  if (inDrawdown) {
+    const duration = equityCurve.length - ddStart;
+    totalDDDuration += duration;
+    ddCount++;
+    if (duration > maxDDDuration) maxDDDuration = duration;
+    maxRecoveryTime = Math.max(maxRecoveryTime, duration);
   }
 
-  // Ulcer Index = RMS of drawdowns
+  const maxDrawdownDuration = maxDDDuration;
+  const avgDrawdownDuration = ddCount > 0 ? Math.round(totalDDDuration / ddCount) : 0;
+  const recoveryTime = maxRecoveryTime;
+  const timeInDrawdownPct = equityCurve.length > 0 ? parseFloat(((pointsInDD / equityCurve.length) * 100).toFixed(1)) : 0;
+
+  // Ulcer Index
   const ulcerIndex = Math.sqrt(drawdowns.reduce((a, b) => a + b * b, 0) / drawdowns.length);
 
   // Sharpe Ratio
@@ -639,10 +688,9 @@ function computeMetrics(
 
   // CAGR & Time to Double
   const cagr = annualizedReturn;
-  const timeToDouble = cagr > 0 ? 72 / cagr : 0; // Rule of 72
+  const timeToDouble = cagr > 0 ? 72 / cagr : 0;
 
   // Portfolio Turnover
-  const positionSize = initialCapital * (trades.length > 0 ? 0.1 : 0.1); // approximate per-trade allocation
   const totalTraded = trades.length * (initialCapital * (positionSizePctVal / 100));
   const portfolioTurnover = years > 0 ? totalTraded / initialCapital / years : 0;
 
@@ -655,7 +703,6 @@ function computeMetrics(
   const directionalAccuracy = (correctDir.length / trades.length) * 100;
 
   // Signal Quality: Precision, Recall, F1
-  // Treating BUY as "positive" prediction, positive actual = price went up
   const truePositives = trades.filter(t => t.action === "BUY" && t.actualReturn > 0).length;
   const falsePositives = trades.filter(t => t.action === "BUY" && t.actualReturn <= 0).length;
   const falseNegatives = trades.filter(t => t.action === "SHORT" && t.actualReturn > 0).length;
@@ -669,10 +716,9 @@ function computeMetrics(
   const rmse = Math.sqrt(errors.reduce((a, b) => a + b * b, 0) / errors.length);
   const mape = trades.reduce((a, t) => a + (t.actualReturn !== 0 ? Math.abs((t.predictedReturn - t.actualReturn) / t.actualReturn) : 0), 0) / trades.length * 100;
 
-  // Alpha / Beta (vs benchmark)
+  // Alpha / Beta
   let alpha = 0, beta = 0;
   if (benchmarkReturns.length > 1 && returns.length > 1) {
-    // Simple linear regression: strategy returns vs benchmark
     const n = Math.min(returns.length, benchmarkReturns.length);
     const stratRets = returns.slice(0, n).map(r => r / 100);
     const benchRets = benchmarkReturns.slice(0, n);
@@ -684,11 +730,8 @@ function computeMetrics(
       varB += (benchRets[i] - meanB) ** 2;
     }
     beta = varB > 0 ? covSB / varB : 0;
-    alpha = (meanS - beta * meanB) * 252; // annualized
+    alpha = (meanS - beta * meanB) * 252;
   }
-
-  // Stability Score (std dev of period returns)
-  // Computed later from periods
 
   // Rolling Sharpe (20-trade window)
   const rollingSharpe: { index: number; value: number }[] = [];
@@ -710,7 +753,7 @@ function computeMetrics(
     rollingVolatility.push({ index: i, value: parseFloat((wStd * Math.sqrt(252 / 5) * 100).toFixed(2)) });
   }
 
-  // Trade Distribution (histogram -10% to +10% in 1% buckets)
+  // Trade Distribution
   const tradeDistribution: { bucket: string; count: number }[] = [];
   for (let b = -10; b < 10; b++) {
     const count = returns.filter(r => r >= b && r < b + 1).length;
@@ -721,7 +764,7 @@ function computeMetrics(
   // Monthly Returns
   const monthlyMap = new Map<string, number[]>();
   for (const t of trades) {
-    const key = t.date.substring(0, 7); // YYYY-MM
+    const key = t.date.substring(0, 7);
     if (!monthlyMap.has(key)) monthlyMap.set(key, []);
     monthlyMap.get(key)!.push(t.returnPct);
   }
@@ -768,6 +811,47 @@ function computeMetrics(
     };
   }).filter(b => b.count > 0);
 
+  // ============================================================================
+  // NEW INSTITUTIONAL METRICS
+  // ============================================================================
+
+  // Skewness & Kurtosis
+  const n = returns.length;
+  const retMean = returns.reduce((a, b) => a + b, 0) / n;
+  const retStd = Math.sqrt(returns.reduce((a, b) => a + (b - retMean) ** 2, 0) / n);
+  const skewness = retStd > 0
+    ? (returns.reduce((a, b) => a + ((b - retMean) / retStd) ** 3, 0) / n)
+    : 0;
+  const kurtosis = retStd > 0
+    ? (returns.reduce((a, b) => a + ((b - retMean) / retStd) ** 4, 0) / n) - 3
+    : 0;
+
+  // Kelly Criterion
+  const winRateFrac = wins.length / trades.length;
+  const kelly = winLossRatio > 0
+    ? winRateFrac - ((1 - winRateFrac) / winLossRatio)
+    : 0;
+
+  // Expectancy
+  const lossRate = losses.length / trades.length;
+  const expectancy = (winRateFrac * avgWin) - (lossRate * Math.abs(avgLoss));
+
+  // Trade Clustering: Max Consecutive Wins/Losses
+  let maxConsWins = 0, maxConsLosses = 0, curWins = 0, curLosses = 0;
+  for (const t of trades) {
+    if (t.pnl > 0) { curWins++; curLosses = 0; maxConsWins = Math.max(maxConsWins, curWins); }
+    else { curLosses++; curWins = 0; maxConsLosses = Math.max(maxConsLosses, curLosses); }
+  }
+
+  // Capacity Estimation
+  const capacities = trades
+    .filter(t => t.volumeAtEntry > 0)
+    .map(t => t.volumeAtEntry * t.entryPrice * 0.02);
+  capacities.sort((a, b) => a - b);
+  const strategyCapacity = capacities.length > 0
+    ? capacities[Math.floor(capacities.length / 2)]
+    : 0;
+
   const p = (v: number) => parseFloat(v.toFixed(2));
 
   return {
@@ -785,10 +869,158 @@ function computeMetrics(
     cagr: p(cagr), timeToDouble: p(timeToDouble),
     alpha: p(alpha * 100), beta: p(beta),
     portfolioTurnover: p(portfolioTurnover),
-    stabilityScore: 0, // computed from periods later
+    stabilityScore: 0,
     signalPrecision: p(signalPrecision), signalRecall: p(signalRecall), signalF1: p(signalF1),
     regimePerformance, confidenceCalibration, annualizedReturn: p(annualizedReturn),
     rollingSharpe, rollingVolatility, tradeDistribution, monthlyReturns,
+    // New metrics
+    maxDrawdownDuration, avgDrawdownDuration, recoveryTime, timeInDrawdownPct,
+    skewness: p(skewness), kurtosis: p(kurtosis),
+    kelly: p(kelly), expectancy: p(expectancy),
+    maxConsecutiveWins: maxConsWins, maxConsecutiveLosses: maxConsLosses,
+    strategyCapacity: Math.round(strategyCapacity),
+  };
+}
+
+// ============================================================================
+// SIGNAL DECAY
+// ============================================================================
+function computeSignalDecay(
+  data: DataSet,
+  trades: Trade[],
+): { day: number; accuracy: number }[] {
+  const dayOffsets = [1, 3, 5, 7];
+  const result: { day: number; accuracy: number }[] = [];
+
+  for (const offset of dayOffsets) {
+    let correct = 0, total = 0;
+    for (const t of trades) {
+      const entryIdx = data.timestamps.indexOf(t.date);
+      if (entryIdx < 0) continue;
+      const checkIdx = entryIdx + offset;
+      if (checkIdx >= data.close.length) continue;
+      const actualMove = data.close[checkIdx] - data.close[entryIdx];
+      const predicted = t.action === "BUY" ? 1 : -1;
+      const actual = actualMove > 0 ? 1 : actualMove < 0 ? -1 : 0;
+      if (predicted === actual) correct++;
+      total++;
+    }
+    result.push({
+      day: offset,
+      accuracy: total > 0 ? parseFloat(((correct / total) * 100).toFixed(1)) : 0,
+    });
+  }
+  return result;
+}
+
+// ============================================================================
+// MARKET REGIME (SPY 200MA)
+// ============================================================================
+function computeMarketRegimePerformance(
+  spyData: DataSet | null,
+  trades: Trade[],
+): { regime: string; accuracy: number; avgReturn: number; trades: number }[] {
+  if (!spyData || spyData.close.length < 200 || trades.length === 0) return [];
+
+  const sma200 = calculateSMA(spyData.close, 200);
+
+  const regimeMap = new Map<string, { correct: number; total: number; returns: number[] }>();
+
+  for (const t of trades) {
+    const idx = spyData.timestamps.indexOf(t.date);
+    if (idx < 0 || idx >= sma200.length || isNaN(sma200[idx])) continue;
+
+    const spyPrice = spyData.close[idx];
+    const ma = sma200[idx];
+    const pctDiff = ((spyPrice - ma) / ma) * 100;
+
+    let regime: string;
+    if (pctDiff > 2) regime = "Bull";
+    else if (pctDiff < -2) regime = "Bear";
+    else regime = "Sideways";
+
+    if (!regimeMap.has(regime)) regimeMap.set(regime, { correct: 0, total: 0, returns: [] });
+    const rm = regimeMap.get(regime)!;
+    rm.total++;
+    rm.returns.push(t.returnPct);
+    if ((t.action === "BUY" && t.actualReturn > 0) || (t.action === "SHORT" && t.actualReturn < 0)) rm.correct++;
+  }
+
+  return Array.from(regimeMap.entries()).map(([regime, data]) => ({
+    regime,
+    accuracy: parseFloat(((data.correct / data.total) * 100).toFixed(1)),
+    avgReturn: parseFloat((data.returns.reduce((a, b) => a + b, 0) / data.returns.length).toFixed(2)),
+    trades: data.total,
+  }));
+}
+
+// ============================================================================
+// BENCHMARK EQUITY CURVE
+// ============================================================================
+function computeBenchmarkEquity(
+  spyData: DataSet | null,
+  initialCapital: number,
+): { date: string; value: number }[] {
+  if (!spyData || spyData.close.length < 2) return [];
+  const startPrice = spyData.close[0];
+  // Sample every ~20 bars to keep payload small
+  const step = Math.max(1, Math.floor(spyData.close.length / 100));
+  const curve: { date: string; value: number }[] = [];
+  for (let i = 0; i < spyData.close.length; i += step) {
+    curve.push({
+      date: spyData.timestamps[i],
+      value: parseFloat((initialCapital * (spyData.close[i] / startPrice)).toFixed(0)),
+    });
+  }
+  // Always include last point
+  const lastIdx = spyData.close.length - 1;
+  if (curve[curve.length - 1]?.date !== spyData.timestamps[lastIdx]) {
+    curve.push({
+      date: spyData.timestamps[lastIdx],
+      value: parseFloat((initialCapital * (spyData.close[lastIdx] / startPrice)).toFixed(0)),
+    });
+  }
+  return curve;
+}
+
+// ============================================================================
+// TRADE DEPENDENCY TEST
+// ============================================================================
+function runTradeDependencyTest(
+  trades: Trade[],
+  initialCapital: number,
+  baseReturn: number,
+): { baseReturn: number; reducedReturn: number; impact: number; passed: boolean } | null {
+  if (trades.length < 20) return null;
+
+  const iterations = 5;
+  let totalReducedReturn = 0;
+
+  for (let iter = 0; iter < iterations; iter++) {
+    // Remove 10% random trades
+    const removeCount = Math.max(1, Math.floor(trades.length * 0.1));
+    const indices = new Set<number>();
+    while (indices.size < removeCount) {
+      indices.add(Math.floor(Math.random() * trades.length));
+    }
+
+    let capital = initialCapital;
+    for (let i = 0; i < trades.length; i++) {
+      if (indices.has(i)) continue;
+      capital += trades[i].pnl;
+    }
+    totalReducedReturn += ((capital - initialCapital) / initialCapital) * 100;
+  }
+
+  const reducedReturn = totalReducedReturn / iterations;
+  const impact = Math.abs(baseReturn - reducedReturn);
+  const relativeImpact = baseReturn !== 0 ? impact / Math.abs(baseReturn) : impact;
+
+  return {
+    baseReturn: parseFloat(baseReturn.toFixed(2)),
+    reducedReturn: parseFloat(reducedReturn.toFixed(2)),
+    impact: parseFloat(impact.toFixed(2)),
+    passed: relativeImpact < 0.5, // passes if removing 10% trades changes return by <50%
   };
 }
 
@@ -863,7 +1095,7 @@ function computeDrawdownCurve(equityCurve: { date: string; value: number }[]): {
 }
 
 // ============================================================================
-// STRESS TESTING - detect crisis periods
+// STRESS TESTING
 // ============================================================================
 function detectStressPeriods(
   spyData: DataSet | null,
@@ -874,7 +1106,6 @@ function detectStressPeriods(
   const stressTests: BacktestReport['stressTests'] = [];
   const { close, timestamps } = spyData;
 
-  // Scan for drawdown > 15% over 60-bar windows
   for (let i = 60; i < close.length; i += 30) {
     const windowClose = close.slice(i - 60, i);
     const windowPeak = Math.max(...windowClose);
@@ -889,22 +1120,17 @@ function detectStressPeriods(
       const endDate = timestamps[i];
       const benchReturn = ((close[i] - close[i - 60]) / close[i - 60]) * 100;
 
-      // Find strategy trades during this window
       const windowTrades = allTrades.filter(t => t.date >= startDate && t.date <= endDate);
       if (windowTrades.length === 0) continue;
 
       const stratReturn = windowTrades.reduce((a, t) => a + t.returnPct, 0);
-      const stratPeak = Math.max(...windowTrades.map(t => t.returnPct));
-      const stratTrough = Math.min(...windowTrades.map(t => t.returnPct));
 
-      // Determine period label
       let label = "Market Stress";
       if (startDate >= "2020-02" && startDate <= "2020-04") label = "COVID Crash";
       else if (startDate >= "2022-01" && startDate <= "2022-10") label = "2022 Bear Market";
       else if (startDate >= "2008-09" && startDate <= "2009-03") label = "2008 Financial Crisis";
       else if (startDate >= "2018-10" && startDate <= "2019-01") label = "Q4 2018 Selloff";
 
-      // Avoid duplicate labels
       if (!stressTests.find(s => s.period === label)) {
         stressTests.push({
           period: label,
@@ -918,7 +1144,7 @@ function detectStressPeriods(
     }
   }
 
-  return stressTests.slice(0, 5); // Max 5 stress periods
+  return stressTests.slice(0, 5);
 }
 
 // ============================================================================
@@ -930,8 +1156,9 @@ function runRobustnessTests(
   config: BacktestConfig,
   tradeConfig: TradeConfig,
   baseReturn: number,
+  allTrades: Trade[],
 ): BacktestReport['robustness'] {
-  // 1. Noise Injection: add ±0.5% random noise to prices
+  // 1. Noise Injection
   const noisyData: DataSet = {
     ...data,
     close: data.close.map(p => p * (1 + (Math.random() - 0.5) * 0.01)),
@@ -944,13 +1171,13 @@ function runRobustnessTests(
   const noisyReturn = ((noisyFinal - config.initialCapital) / config.initialCapital) * 100;
   const noiseImpact = Math.abs(baseReturn - noisyReturn);
 
-  // 2. Delayed Execution: t+2 instead of t+1
+  // 2. Delayed Execution
   const delayedResult = runWalkForwardBacktest(data, ticker, config, tradeConfig, 2);
   const delayedFinal = delayedResult.equityCurve[delayedResult.equityCurve.length - 1]?.value || config.initialCapital;
   const delayedReturn = ((delayedFinal - config.initialCapital) / config.initialCapital) * 100;
   const delayImpact = Math.abs(baseReturn - delayedReturn);
 
-  // 3. Parameter Sensitivity: vary buy/short thresholds
+  // 3. Parameter Sensitivity
   const paramResults: BacktestReport['robustness']['parameterSensitivity'] = [];
   const thresholdVariations = [20, 25, 30, 35, 40];
   for (const thresh of thresholdVariations) {
@@ -970,12 +1197,15 @@ function runRobustnessTests(
     });
   }
 
+  // 4. Trade Dependency Test
+  const tradeDependency = runTradeDependencyTest(allTrades, config.initialCapital, baseReturn);
+
   return {
     noiseInjection: {
       baseReturn: parseFloat(baseReturn.toFixed(2)),
       noisyReturn: parseFloat(noisyReturn.toFixed(2)),
       impact: parseFloat(noiseImpact.toFixed(2)),
-      passed: noiseImpact < Math.abs(baseReturn) * 0.5, // passes if impact < 50% of base return
+      passed: noiseImpact < Math.abs(baseReturn) * 0.5,
     },
     delayedExecution: {
       baseReturn: parseFloat(baseReturn.toFixed(2)),
@@ -984,6 +1214,7 @@ function runRobustnessTests(
       passed: delayImpact < Math.abs(baseReturn) * 0.5,
     },
     parameterSensitivity: paramResults,
+    tradeDependency,
   };
 }
 
@@ -1068,12 +1299,10 @@ serve(async (req) => {
       totalBarsAll += totalBars;
       barsInTradeAll += barsInTrade;
 
-    // When combining multiple tickers, each ticker's equity is relative to its share of capital
-    const numTickers = config.tickers.filter((_, ti) => tickerData[ti] && tickerData[ti]!.close.length >= 100).length;
-    const capitalPerTicker = config.initialCapital / Math.max(numTickers, 1);
+      const numTickers = config.tickers.filter((_, ti) => tickerData[ti] && tickerData[ti]!.close.length >= 100).length;
+      const capitalPerTicker = config.initialCapital / Math.max(numTickers, 1);
 
-    if (combinedEquity.length === 0) {
-        // Scale first ticker's equity to its proportional share
+      if (combinedEquity.length === 0) {
         combinedEquity = equityCurve.map(p => ({
           date: p.date,
           value: capitalPerTicker + (p.value - config.initialCapital) * (capitalPerTicker / config.initialCapital),
@@ -1127,19 +1356,31 @@ serve(async (req) => {
       noiseInjection: null,
       delayedExecution: null,
       parameterSensitivity: [],
+      tradeDependency: null,
     };
     if (firstTickerData && firstTickerData.close.length >= 100) {
       const baseReturn = metrics.totalReturn || 0;
-      robustness = runRobustnessTests(firstTickerData, config.tickers[0], config, tradeConfig, baseReturn);
+      robustness = runRobustnessTests(firstTickerData, config.tickers[0], config, tradeConfig, baseReturn, allTrades);
     }
 
-    // Liquidity warnings: flag trades where position > 2% daily volume
+    // Liquidity warnings
     const liquidityWarnings = allTrades.filter(t => {
       if (t.volumeAtEntry <= 0) return false;
       const positionValue = initialCapital * (positionSizePct / 100);
       const sharesTraded = positionValue / t.entryPrice;
       return sharesTraded > t.volumeAtEntry * 0.02;
     }).length;
+
+    // NEW: Signal Decay
+    const signalDecay = firstTickerData
+      ? computeSignalDecay(firstTickerData, allTrades.filter(t => t.ticker === config.tickers[0]))
+      : [];
+
+    // NEW: Benchmark Equity Curve
+    const benchmarkEquity = computeBenchmarkEquity(spyData, initialCapital);
+
+    // NEW: Market Regime Performance (SPY 200MA)
+    const marketRegimePerformance = computeMarketRegimePerformance(spyData, allTrades);
 
     const report: BacktestReport = {
       ...metrics as any,
@@ -1152,6 +1393,9 @@ serve(async (req) => {
       robustness,
       stressTests,
       liquidityWarnings,
+      signalDecay,
+      benchmarkEquity,
+      marketRegimePerformance,
     };
 
     console.log(`Backtest complete: ${allTrades.length} trades, Win Rate: ${metrics.winRate}%, Sharpe: ${metrics.sharpeRatio}`);
