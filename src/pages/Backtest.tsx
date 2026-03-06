@@ -13,13 +13,13 @@ import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import {
   AreaChart, Area, BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer, ReferenceLine, Cell,
+  ResponsiveContainer, ReferenceLine, Cell, ComposedChart,
 } from "recharts";
 import {
   Activity, BarChart3, Brain, TrendingUp, TrendingDown, AlertTriangle,
   Play, Loader2, Target, Gauge, DollarSign, Percent, Shuffle, Calendar,
   Trophy, Shield, Download, Clock, Crosshair, ShieldAlert, Zap, FlaskConical,
-  BarChart2, PieChart,
+  BarChart2, PieChart, Repeat, Layers, Scale, Signal,
 } from "lucide-react";
 
 interface BacktestReport {
@@ -76,9 +76,25 @@ interface BacktestReport {
     noiseInjection: { baseReturn: number; noisyReturn: number; impact: number; passed: boolean } | null;
     delayedExecution: { baseReturn: number; delayedReturn: number; impact: number; passed: boolean } | null;
     parameterSensitivity: { param: string; value: number; returnPct: number; sharpe: number }[];
+    tradeDependency: { baseReturn: number; reducedReturn: number; impact: number; passed: boolean } | null;
   };
   stressTests: { period: string; startDate: string; endDate: string; strategyReturn: number; benchmarkReturn: number; maxDrawdown: number }[];
   liquidityWarnings: number;
+  // New institutional metrics
+  maxDrawdownDuration: number;
+  avgDrawdownDuration: number;
+  recoveryTime: number;
+  timeInDrawdownPct: number;
+  skewness: number;
+  kurtosis: number;
+  kelly: number;
+  expectancy: number;
+  maxConsecutiveWins: number;
+  maxConsecutiveLosses: number;
+  strategyCapacity: number;
+  signalDecay: { day: number; accuracy: number }[];
+  benchmarkEquity: { date: string; value: number }[];
+  marketRegimePerformance: { regime: string; accuracy: number; avgReturn: number; trades: number }[];
 }
 
 const MetricCard = ({ label, value, suffix = "", icon: Icon, color = "text-foreground" }: {
@@ -98,16 +114,18 @@ const MetricCard = ({ label, value, suffix = "", icon: Icon, color = "text-foreg
 const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 
 function exportCSV(report: BacktestReport) {
-  // Summary
   let csv = "=== BACKTEST SUMMARY ===\n";
   csv += `Total Trades,${report.totalTrades}\nWin Rate,${report.winRate}%\nTotal Return,${report.totalReturn}%\n`;
   csv += `Sharpe Ratio,${report.sharpeRatio}\nSortino Ratio,${report.sortinoRatio}\nCalmar Ratio,${report.calmarRatio}\n`;
   csv += `Max Drawdown,${report.maxDrawdown}%\nProfit Factor,${report.profitFactor}\nCAGR,${report.cagr}%\n`;
   csv += `Alpha,${report.alpha}%\nBeta,${report.beta}\nVaR (5%),${report.valueAtRisk}%\nCVaR,${report.conditionalVaR}%\n`;
   csv += `Avg Win,${report.avgWin}%\nAvg Loss,${report.avgLoss}%\nWin/Loss Ratio,${report.winLossRatio}\n`;
-  csv += `Avg Duration,${report.avgTradeDuration} bars\nMarket Exposure,${report.marketExposure}%\n\n`;
+  csv += `Avg Duration,${report.avgTradeDuration} bars\nMarket Exposure,${report.marketExposure}%\n`;
+  csv += `Expectancy,${report.expectancy}%\nKelly,${report.kelly}\nSkewness,${report.skewness}\nKurtosis,${report.kurtosis}\n`;
+  csv += `Max Consec Wins,${report.maxConsecutiveWins}\nMax Consec Losses,${report.maxConsecutiveLosses}\n`;
+  csv += `Time in Drawdown,${report.timeInDrawdownPct}%\nMax DD Duration,${report.maxDrawdownDuration} bars\nRecovery Time,${report.recoveryTime} bars\n`;
+  csv += `Strategy Capacity,$${report.strategyCapacity?.toLocaleString() || 'N/A'}\n\n`;
 
-  // Trade log
   csv += "=== TRADE LOG ===\nDate,Exit Date,Ticker,Action,Entry,Exit,Return%,PnL,Duration,MAE%,MFE%,Regime,Confidence\n";
   for (const t of report.tradeLog) {
     csv += `${t.date},${t.exitDate},${t.ticker},${t.action},${t.entryPrice.toFixed(2)},${t.exitPrice.toFixed(2)},${t.returnPct.toFixed(2)},${t.pnl.toFixed(2)},${t.duration},${t.mae},${t.mfe},${t.regime},${t.confidence}\n`;
@@ -188,6 +206,17 @@ const Backtest = () => {
       setIsLoading(false);
     }
   };
+
+  // Merge equity + benchmark for overlay chart
+  const equityVsBenchmark = report?.equityCurve && report?.benchmarkEquity?.length > 0
+    ? report.equityCurve.map(ec => {
+        const bench = report.benchmarkEquity.reduce((closest, b) => {
+          return Math.abs(new Date(b.date).getTime() - new Date(ec.date).getTime()) <
+                 Math.abs(new Date(closest.date).getTime() - new Date(ec.date).getTime()) ? b : closest;
+        }, report.benchmarkEquity[0]);
+        return { date: ec.date, strategy: ec.value, benchmark: bench.value };
+      })
+    : null;
 
   return (
     <div className="min-h-screen bg-background">
@@ -290,14 +319,14 @@ const Backtest = () => {
                     <BarChart3 className="w-12 h-12 text-muted-foreground/30 mx-auto mb-4" />
                     <h3 className="text-lg font-medium mb-2">Institutional-Grade Backtesting</h3>
                     <p className="text-sm text-muted-foreground max-w-md mx-auto mb-6">
-                      Walk-forward validation, realistic costs, robustness testing, and 30+ institutional metrics.
+                      Walk-forward validation, realistic costs, robustness testing, and 40+ institutional metrics.
                     </p>
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 max-w-lg mx-auto">
                       {[
                         { icon: Activity, label: "Walk-Forward" },
                         { icon: ShieldAlert, label: "Anti-Bias" },
                         { icon: FlaskConical, label: "Robustness" },
-                        { icon: Trophy, label: "30+ Metrics" },
+                        { icon: Trophy, label: "40+ Metrics" },
                       ].map(({ icon: Icon, label }) => (
                         <div key={label} className="flex flex-col items-center gap-1.5 p-3 rounded-lg bg-secondary/30">
                           <Icon className="w-4 h-4 text-primary" />
@@ -310,7 +339,7 @@ const Backtest = () => {
                   <motion.div key="loading" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="glass-card p-12 text-center">
                     <Loader2 className="w-8 h-8 text-primary animate-spin mx-auto mb-4" />
                     <p className="text-sm text-muted-foreground">Running institutional backtest...</p>
-                    <p className="text-xs text-muted-foreground/60 mt-1">Walk-forward + robustness tests + stress analysis</p>
+                    <p className="text-xs text-muted-foreground/60 mt-1">Walk-forward + robustness + stress + trade dependency</p>
                   </motion.div>
                 ) : report ? (
                   <motion.div key="report" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-6">
@@ -344,6 +373,18 @@ const Backtest = () => {
                         color={report.calmarRatio > 0.5 ? "text-success" : "text-warning"} />
                     </div>
 
+                    {/* NEW: Expectancy, Kelly, Skewness, Kurtosis */}
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                      <MetricCard label="Expectancy" value={report.expectancy} suffix="%" icon={Scale}
+                        color={report.expectancy > 0 ? "text-success" : "text-destructive"} />
+                      <MetricCard label="Kelly Criterion" value={report.kelly} icon={Layers}
+                        color={report.kelly > 0 ? "text-success" : "text-destructive"} />
+                      <MetricCard label="Skewness" value={report.skewness} icon={BarChart2}
+                        color={report.skewness > 0 ? "text-success" : "text-warning"} />
+                      <MetricCard label="Kurtosis" value={report.kurtosis} icon={BarChart2}
+                        color={Math.abs(report.kurtosis) < 1 ? "text-success" : "text-warning"} />
+                    </div>
+
                     {/* Advanced Risk */}
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                       <MetricCard label="VaR (5%)" value={report.valueAtRisk} suffix="%" icon={ShieldAlert} color="text-destructive" />
@@ -362,12 +403,21 @@ const Backtest = () => {
                       <MetricCard label="Total Trades" value={report.totalTrades} icon={Activity} />
                     </div>
 
-                    {/* Exposure & Duration */}
+                    {/* NEW: Clustering & Drawdown Duration */}
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                      <MetricCard label="Max Consec Wins" value={report.maxConsecutiveWins} icon={TrendingUp} color="text-success" />
+                      <MetricCard label="Max Consec Losses" value={report.maxConsecutiveLosses} icon={TrendingDown} color="text-destructive" />
+                      <MetricCard label="Time in Drawdown" value={report.timeInDrawdownPct} suffix="%" icon={Clock}
+                        color={report.timeInDrawdownPct < 40 ? "text-success" : "text-warning"} />
+                      <MetricCard label="Recovery Time" value={report.recoveryTime} suffix=" bars" icon={Repeat} />
+                    </div>
+
+                    {/* Exposure & Duration + Capacity */}
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                       <MetricCard label="Market Exposure" value={report.marketExposure} suffix="%" icon={PieChart} />
                       <MetricCard label="Avg Duration" value={report.avgTradeDuration} suffix=" bars" icon={Clock} />
                       <MetricCard label="Avg MAE" value={report.avgMAE} suffix="%" icon={Crosshair} color="text-destructive" />
-                      <MetricCard label="Avg MFE" value={report.avgMFE} suffix="%" icon={Crosshair} color="text-success" />
+                      <MetricCard label="Strategy Capacity" value={report.strategyCapacity ? `$${(report.strategyCapacity / 1e6).toFixed(1)}M` : "N/A"} icon={DollarSign} />
                     </div>
 
                     {/* Alpha/Beta & Signal Quality */}
@@ -417,18 +467,24 @@ const Backtest = () => {
                       <MetricCard label="MAPE" value={report.mape} suffix="%" icon={Percent} />
                     </div>
 
-                    {/* Equity Curve */}
-                    {report.equityCurve.length > 0 && (
+                    {/* Equity vs Benchmark Overlay */}
+                    {equityVsBenchmark && equityVsBenchmark.length > 0 && (
                       <Card className="glass-card p-6">
-                        <div className="flex items-center gap-2 mb-4">
-                          <div className="w-2 h-2 rounded-full bg-primary" />
-                          <span className="text-sm font-medium">Equity Curve</span>
+                        <div className="flex items-center gap-4 mb-4">
+                          <div className="flex items-center gap-2">
+                            <div className="w-3 h-0.5 bg-primary rounded" />
+                            <span className="text-xs text-muted-foreground">Strategy</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <div className="w-3 h-0.5 rounded" style={{ backgroundColor: "hsl(var(--muted-foreground))" }} />
+                            <span className="text-xs text-muted-foreground">SPY Benchmark</span>
+                          </div>
                         </div>
                         <div className="h-64">
                           <ResponsiveContainer width="100%" height="100%">
-                            <AreaChart data={report.equityCurve}>
+                            <ComposedChart data={equityVsBenchmark}>
                               <defs>
-                                <linearGradient id="equityGrad" x1="0" y1="0" x2="0" y2="1">
+                                <linearGradient id="equityGradOverlay" x1="0" y1="0" x2="0" y2="1">
                                   <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.3} />
                                   <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0} />
                                 </linearGradient>
@@ -439,10 +495,11 @@ const Backtest = () => {
                               <YAxis tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
                                 tickFormatter={v => `$${(v / 1000).toFixed(0)}k`} />
                               <Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 8, fontSize: 12 }}
-                                formatter={(v: number) => [`$${v.toFixed(0)}`, "Portfolio"]} />
+                                formatter={(v: number, name: string) => [`$${v.toFixed(0)}`, name === "strategy" ? "Strategy" : "SPY"]} />
                               <ReferenceLine y={initialCapital} stroke="hsl(var(--muted-foreground))" strokeDasharray="3 3" />
-                              <Area type="monotone" dataKey="value" stroke="hsl(var(--primary))" fill="url(#equityGrad)" strokeWidth={2} dot={false} />
-                            </AreaChart>
+                              <Area type="monotone" dataKey="strategy" stroke="hsl(var(--primary))" fill="url(#equityGradOverlay)" strokeWidth={2} dot={false} />
+                              <Line type="monotone" dataKey="benchmark" stroke="hsl(var(--muted-foreground))" strokeWidth={1.5} strokeDasharray="4 4" dot={false} />
+                            </ComposedChart>
                           </ResponsiveContainer>
                         </div>
                       </Card>
@@ -451,9 +508,12 @@ const Backtest = () => {
                     {/* Drawdown Curve */}
                     {report.drawdownCurve.length > 0 && (
                       <Card className="glass-card p-6">
-                        <div className="flex items-center gap-2 mb-4">
+                        <div className="flex items-center gap-2 mb-1">
                           <div className="w-2 h-2 rounded-full bg-destructive" />
                           <span className="text-sm font-medium">Drawdown</span>
+                        </div>
+                        <div className="text-[10px] text-muted-foreground mb-4">
+                          Max duration: {report.maxDrawdownDuration} bars · Avg duration: {report.avgDrawdownDuration} bars
                         </div>
                         <div className="h-48">
                           <ResponsiveContainer width="100%" height="100%">
@@ -475,6 +535,32 @@ const Backtest = () => {
                             </AreaChart>
                           </ResponsiveContainer>
                         </div>
+                      </Card>
+                    )}
+
+                    {/* Signal Decay */}
+                    {report.signalDecay?.length > 0 && (
+                      <Card className="glass-card p-6">
+                        <div className="flex items-center gap-2 mb-4">
+                          <Signal className="w-4 h-4 text-primary" />
+                          <span className="text-sm font-medium">Signal Decay Curve</span>
+                        </div>
+                        <div className="h-40">
+                          <ResponsiveContainer width="100%" height="100%">
+                            <LineChart data={report.signalDecay}>
+                              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                              <XAxis dataKey="day" tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
+                                tickFormatter={v => `Day ${v}`} />
+                              <YAxis tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
+                                tickFormatter={v => `${v}%`} domain={[0, 100]} />
+                              <Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 8, fontSize: 12 }}
+                                formatter={(v: number) => [`${v}%`, "Accuracy"]} />
+                              <ReferenceLine y={50} stroke="hsl(var(--muted-foreground))" strokeDasharray="3 3" />
+                              <Line type="monotone" dataKey="accuracy" stroke="hsl(var(--primary))" strokeWidth={2} dot={{ fill: "hsl(var(--primary))", r: 4 }} />
+                            </LineChart>
+                          </ResponsiveContainer>
+                        </div>
+                        <p className="text-[10px] text-muted-foreground mt-2">How quickly signal predictive power fades over time</p>
                       </Card>
                     )}
 
@@ -574,13 +660,13 @@ const Backtest = () => {
                     )}
 
                     {/* Robustness Tests */}
-                    {report.robustness && (report.robustness.noiseInjection || report.robustness.delayedExecution) && (
+                    {report.robustness && (report.robustness.noiseInjection || report.robustness.delayedExecution || report.robustness.tradeDependency) && (
                       <Card className="glass-card p-6">
                         <div className="flex items-center gap-2 mb-4">
                           <FlaskConical className="w-4 h-4 text-primary" />
                           <span className="text-sm font-medium">Robustness Tests</span>
                         </div>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                           {report.robustness.noiseInjection && (
                             <div className="p-3 rounded-lg bg-secondary/20 border border-border/20">
                               <div className="flex items-center justify-between mb-2">
@@ -608,6 +694,21 @@ const Backtest = () => {
                                 <div>Base: {report.robustness.delayedExecution.baseReturn}%</div>
                                 <div>Delayed: {report.robustness.delayedExecution.delayedReturn}%</div>
                                 <div>Impact: {report.robustness.delayedExecution.impact}%</div>
+                              </div>
+                            </div>
+                          )}
+                          {report.robustness.tradeDependency && (
+                            <div className="p-3 rounded-lg bg-secondary/20 border border-border/20">
+                              <div className="flex items-center justify-between mb-2">
+                                <span className="text-xs font-medium">Trade Dependency</span>
+                                <Badge variant={report.robustness.tradeDependency.passed ? "default" : "destructive"} className="text-[10px]">
+                                  {report.robustness.tradeDependency.passed ? "PASS" : "FAIL"}
+                                </Badge>
+                              </div>
+                              <div className="text-xs text-muted-foreground space-y-0.5">
+                                <div>Base: {report.robustness.tradeDependency.baseReturn}%</div>
+                                <div>-10% trades: {report.robustness.tradeDependency.reducedReturn}%</div>
+                                <div>Impact: {report.robustness.tradeDependency.impact}%</div>
                               </div>
                             </div>
                           )}
@@ -684,10 +785,47 @@ const Backtest = () => {
                       </Card>
                     )}
 
-                    {/* Regime Performance */}
+                    {/* Market Regime Performance (SPY 200MA) */}
+                    {report.marketRegimePerformance?.length > 0 && (
+                      <Card className="glass-card p-6">
+                        <div className="flex items-center gap-2 mb-4">
+                          <Layers className="w-4 h-4 text-primary" />
+                          <span className="text-sm font-medium">Market Regime Performance (SPY 200MA)</span>
+                        </div>
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-xs">
+                            <thead>
+                              <tr className="border-b border-border/30">
+                                <th className="text-left py-2 text-muted-foreground font-normal">Regime</th>
+                                <th className="text-right py-2 text-muted-foreground font-normal">Accuracy</th>
+                                <th className="text-right py-2 text-muted-foreground font-normal">Avg Return</th>
+                                <th className="text-right py-2 text-muted-foreground font-normal">Trades</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {report.marketRegimePerformance.map(rp => (
+                                <tr key={rp.regime} className="border-b border-border/10">
+                                  <td className="py-2 font-medium flex items-center gap-2">
+                                    <div className={`w-2 h-2 rounded-full ${
+                                      rp.regime === "Bull" ? "bg-success" : rp.regime === "Bear" ? "bg-destructive" : "bg-warning"
+                                    }`} />
+                                    {rp.regime}
+                                  </td>
+                                  <td className={`text-right py-2 font-mono ${rp.accuracy > 50 ? "text-success" : "text-destructive"}`}>{rp.accuracy}%</td>
+                                  <td className={`text-right py-2 font-mono ${rp.avgReturn > 0 ? "text-success" : "text-destructive"}`}>{rp.avgReturn > 0 ? "+" : ""}{rp.avgReturn}%</td>
+                                  <td className="text-right py-2 font-mono text-muted-foreground">{rp.trades}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </Card>
+                    )}
+
+                    {/* Indicator-Based Regime Performance */}
                     {report.regimePerformance.length > 0 && (
                       <Card className="glass-card p-6">
-                        <div className="text-sm font-medium mb-4">Regime Performance</div>
+                        <div className="text-sm font-medium mb-4">Indicator Regime Performance</div>
                         <div className="overflow-x-auto">
                           <table className="w-full text-xs">
                             <thead>
