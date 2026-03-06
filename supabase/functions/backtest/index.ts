@@ -6,7 +6,7 @@ const corsHeaders = {
 };
 
 // ============================================================================
-// TECHNICAL INDICATOR FUNCTIONS (duplicated from stock-predict for edge fn isolation)
+// TECHNICAL INDICATOR FUNCTIONS
 // ============================================================================
 
 function calculateEMA(prices: number[], period: number): number[] {
@@ -66,7 +66,6 @@ function calculateMACD(prices: number[]): { macd: number[]; signal: number[]; hi
   const ema26 = calculateEMA(prices, 26);
   const macd = ema12.map((v, i) => v - ema26[i]);
   const signal = calculateEMA(macd.filter(v => !isNaN(v)), 9);
-  // Pad signal to match macd length
   const padLen = macd.length - signal.length;
   const paddedSignal = new Array(Math.max(0, padLen)).fill(NaN).concat(signal);
   const histogram = macd.map((v, i) => v - (paddedSignal[i] || 0));
@@ -146,7 +145,7 @@ function safeGet(arr: number[], defaultVal: number): number {
 }
 
 // ============================================================================
-// SIGNAL CONSENSUS (simplified for backtesting)
+// SIGNAL CONSENSUS
 // ============================================================================
 function computeSignal(close: number[], high: number[], low: number[], volume: number[]): {
   consensusScore: number;
@@ -161,20 +160,17 @@ function computeSignal(close: number[], high: number[], low: number[], volume: n
   const rsi = calculateRSI(close, 14);
   const macd = calculateMACD(close);
   const bb = calculateBollingerBands(close, 20, 2);
-  const vol = calculateVolatility(close, 20);
   const adx = calculateADX(high, low, close, 14);
   const stochK = calculateStochastic(close, high, low, 14);
 
   let bullish = 0, bearish = 0;
 
-  // RSI
   const rsiVal = safeGet(rsi, 50);
   if (rsiVal < 30) bullish += 1.5;
   else if (rsiVal > 70) bearish += 1.5;
   else if (rsiVal > 50) bullish += 0.5;
   else bearish += 0.5;
 
-  // MACD
   const macdH = safeGet(macd.histogram, 0);
   const prevMacdH = macd.histogram.length >= 2 ? macd.histogram[macd.histogram.length - 2] : 0;
   if (macdH > 0 && macdH > prevMacdH) bullish += 1.5;
@@ -182,25 +178,20 @@ function computeSignal(close: number[], high: number[], low: number[], volume: n
   else if (macdH > 0) bullish += 0.5;
   else bearish += 0.5;
 
-  // EMA crossover
   const e12 = safeGet(ema12, currentPrice), e26 = safeGet(ema26, currentPrice);
   if (e12 > e26) bullish += 1; else bearish += 1;
 
-  // SMA50
   const s50 = safeGet(sma50, currentPrice);
   if (currentPrice > s50) bullish += 1; else bearish += 1;
 
-  // ADX
   const adxVal = safeGet(adx.adx, 0);
   const pdi = safeGet(adx.plusDI, 0), mdi = safeGet(adx.minusDI, 0);
   if (adxVal > 25) { if (pdi > mdi) bullish += 2; else bearish += 2; }
 
-  // Stochastic
   const sk = safeGet(stochK, 50);
   if (sk < 20) bullish += 1.5;
   else if (sk > 80) bearish += 1.5;
 
-  // Bollinger
   const bbU = safeGet(bb.upper, currentPrice * 1.1);
   const bbL = safeGet(bb.lower, currentPrice * 0.9);
   const bbM = safeGet(bb.middle, currentPrice);
@@ -214,7 +205,6 @@ function computeSignal(close: number[], high: number[], low: number[], volume: n
   const conviction = Math.min(1, total / (13.5 * 0.6));
   const consensusScore = dirScore * conviction;
 
-  // Regime
   let regime = "neutral";
   if (adxVal > 40 && pdi > mdi && rsiVal > 60) regime = "strong_bullish";
   else if (adxVal > 40 && mdi > pdi && rsiVal < 40) regime = "strong_bearish";
@@ -223,10 +213,8 @@ function computeSignal(close: number[], high: number[], low: number[], volume: n
   else if (rsiVal > 70) regime = "overbought";
   else if (rsiVal < 30) regime = "oversold";
 
-  // Predicted return based on consensus (-5% to +5% range)
   const predictedReturn = (consensusScore / 100) * 5;
 
-  // Confidence
   let confidence = 55 + Math.abs(consensusScore) * 0.25;
   if (regime.includes("strong")) confidence += 8;
   if (Math.abs(consensusScore) < 20) confidence -= 8;
@@ -243,6 +231,7 @@ async function fetchYahooData(ticker: string, startDate: number, endDate: number
   close: number[];
   high: number[];
   low: number[];
+  open: number[];
   volume: number[];
 } | null> {
   const url = `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?period1=${startDate}&period2=${endDate}&interval=1d`;
@@ -263,18 +252,18 @@ async function fetchYahooData(ticker: string, startDate: number, endDate: number
       const d = new Date(t * 1000);
       return d.toISOString().split('T')[0];
     });
-    // Filter out null values while keeping arrays aligned
-    const close: number[] = [], high: number[] = [], low: number[] = [], volume: number[] = [], dates: string[] = [];
+    const close: number[] = [], high: number[] = [], low: number[] = [], volume: number[] = [], dates: string[] = [], open: number[] = [];
     for (let i = 0; i < timestamps.length; i++) {
-      if (quotes.close[i] != null && quotes.high[i] != null && quotes.low[i] != null) {
+      if (quotes.close[i] != null && quotes.high[i] != null && quotes.low[i] != null && quotes.open[i] != null) {
         close.push(quotes.close[i]);
         high.push(quotes.high[i]);
         low.push(quotes.low[i]);
+        open.push(quotes.open[i]);
         volume.push(quotes.volume[i] || 0);
         dates.push(timestamps[i]);
       }
     }
-    return { timestamps: dates, close, high, low, volume };
+    return { timestamps: dates, close, high, low, open, volume };
   } catch (e) {
     console.error(`Failed to fetch ${ticker}:`, e);
     return null;
@@ -296,6 +285,7 @@ interface TradeConfig {
 
 interface Trade {
   date: string;
+  exitDate: string;
   ticker: string;
   action: "BUY" | "SHORT" | "HOLD";
   entryPrice: number;
@@ -306,13 +296,15 @@ interface Trade {
   confidence: number;
   predictedReturn: number;
   actualReturn: number;
+  duration: number; // bars held
+  mae: number; // max adverse excursion %
+  mfe: number; // max favorable excursion %
+  volumeAtEntry: number;
 }
 
 function applyTradingCosts(price: number, isBuy: boolean, config: TradeConfig): number {
   let adjusted = price;
-  // Spread
   adjusted *= isBuy ? (1 + config.spreadPct / 100) : (1 - config.spreadPct / 100);
-  // Slippage (random)
   const slippage = 1 + (Math.random() - 0.5) * 2 * (config.slippagePct / 100);
   adjusted *= slippage;
   return adjusted;
@@ -332,8 +324,8 @@ interface BacktestConfig {
   maxPositions: number;
   rebalanceFrequency: "weekly" | "monthly";
   includeMonteCarlo: boolean;
-  buyThreshold: number;   // consensus score to trigger BUY (default 30)
-  shortThreshold: number; // consensus score to trigger SHORT (default -30)
+  buyThreshold: number;
+  shortThreshold: number;
 }
 
 interface BacktestReport {
@@ -350,6 +342,30 @@ interface BacktestReport {
   directionalAccuracy: number;
   mae: number;
   rmse: number;
+  mape: number;
+  avgWin: number;
+  avgLoss: number;
+  winLossRatio: number;
+  avgTradeDuration: number;
+  medianTradeDuration: number;
+  maxTradeDuration: number;
+  avgMAE: number;
+  avgMFE: number;
+  valueAtRisk: number;
+  conditionalVaR: number;
+  ulcerIndex: number;
+  marketExposure: number;
+  longExposure: number;
+  shortExposure: number;
+  cagr: number;
+  timeToDouble: number;
+  alpha: number;
+  beta: number;
+  portfolioTurnover: number;
+  stabilityScore: number;
+  signalPrecision: number;
+  signalRecall: number;
+  signalF1: number;
   regimePerformance: { regime: string; accuracy: number; avgReturn: number; trades: number }[];
   confidenceCalibration: { bucket: string; predictedConf: number; actualAccuracy: number; count: number }[];
   equityCurve: { date: string; value: number }[];
@@ -358,79 +374,104 @@ interface BacktestReport {
   monteCarlo: { percentile5: number; percentile25: number; median: number; percentile75: number; percentile95: number } | null;
   benchmarkReturn: number;
   annualizedReturn: number;
+  rollingSharpe: { index: number; value: number }[];
+  rollingVolatility: { index: number; value: number }[];
+  tradeDistribution: { bucket: string; count: number }[];
+  monthlyReturns: { year: number; month: number; returnPct: number }[];
+  // Robustness
+  robustness: {
+    noiseInjection: { baseReturn: number; noisyReturn: number; impact: number; passed: boolean } | null;
+    delayedExecution: { baseReturn: number; delayedReturn: number; impact: number; passed: boolean } | null;
+    parameterSensitivity: { param: string; value: number; returnPct: number; sharpe: number }[];
+  };
+  // Stress testing
+  stressTests: { period: string; startDate: string; endDate: string; strategyReturn: number; benchmarkReturn: number; maxDrawdown: number }[];
+  // Liquidity flags
+  liquidityWarnings: number;
 }
 
+type DataSet = { timestamps: string[]; close: number[]; high: number[]; low: number[]; open: number[]; volume: number[] };
+
 function runWalkForwardBacktest(
-  allData: { timestamps: string[]; close: number[]; high: number[]; low: number[]; volume: number[] },
+  allData: DataSet,
   ticker: string,
   config: BacktestConfig,
-  tradeConfig: TradeConfig
-): { trades: Trade[]; equityCurve: { date: string; value: number }[] } {
-  const { close, high, low, volume, timestamps } = allData;
+  tradeConfig: TradeConfig,
+  executionDelay: number = 1, // bars delay for execution (1 = next bar, fixes lookahead bias)
+): { trades: Trade[]; equityCurve: { date: string; value: number }[]; totalBars: number; barsInTrade: number } {
+  const { close, high, low, open, volume, timestamps } = allData;
   const trades: Trade[] = [];
   let capital = config.initialCapital;
   const equityCurve: { date: string; value: number }[] = [{ date: timestamps[0], value: capital }];
 
-  // Walk-forward: use 60-bar training window, step 5 bars at a time
   const TRAIN_WINDOW = 60;
-  const STEP = 5; // test on 5 bars ahead
+  const STEP = 5;
+  let totalBars = 0;
+  let barsInTrade = 0;
 
-  for (let i = TRAIN_WINDOW; i < close.length - STEP; i += STEP) {
-    // Training window
+  for (let i = TRAIN_WINDOW; i < close.length - STEP - executionDelay; i += STEP) {
     const trainClose = close.slice(Math.max(0, i - TRAIN_WINDOW), i);
     const trainHigh = high.slice(Math.max(0, i - TRAIN_WINDOW), i);
     const trainLow = low.slice(Math.max(0, i - TRAIN_WINDOW), i);
     const trainVol = volume.slice(Math.max(0, i - TRAIN_WINDOW), i);
 
     if (trainClose.length < 30) continue;
+    totalBars += STEP;
 
-    // Generate signal from training data
     const signal = computeSignal(trainClose, trainHigh, trainLow, trainVol);
 
-    // Determine action
     let action: "BUY" | "SHORT" | "HOLD" = "HOLD";
     if (signal.consensusScore > config.buyThreshold) action = "BUY";
     else if (signal.consensusScore < config.shortThreshold) action = "SHORT";
 
     if (action === "HOLD") continue;
 
-    // Test period: next STEP bars
-    const entryPrice = applyTradingCosts(close[i], action === "BUY", tradeConfig);
-    const testEnd = Math.min(i + STEP, close.length - 1);
+    // LOOKAHEAD BIAS FIX: execute at next bar's open, not same bar's close
+    const entryIdx = i + executionDelay;
+    if (entryIdx >= close.length) continue;
+    const rawEntryPrice = open[entryIdx]; // use open of next bar
+    const entryPrice = applyTradingCosts(rawEntryPrice, action === "BUY", tradeConfig);
+    const testEnd = Math.min(entryIdx + STEP, close.length - 1);
 
-    // Simulate with stop loss and take profit
+    // Track MAE/MFE during trade
+    let maxAdverse = 0;
+    let maxFavorable = 0;
     let exitPrice = close[testEnd];
     let exitDate = timestamps[testEnd];
+    let exitIdx = testEnd;
 
-    for (let j = i + 1; j <= testEnd; j++) {
+    for (let j = entryIdx + 1; j <= testEnd; j++) {
       const priceChange = action === "BUY"
         ? (close[j] - entryPrice) / entryPrice
         : (entryPrice - close[j]) / entryPrice;
 
-      // Stop loss
+      // Track MAE/MFE
+      if (priceChange < 0) maxAdverse = Math.min(maxAdverse, priceChange);
+      if (priceChange > 0) maxFavorable = Math.max(maxFavorable, priceChange);
+
       if (priceChange <= -config.stopLossPct / 100) {
         exitPrice = action === "BUY"
           ? entryPrice * (1 - config.stopLossPct / 100)
           : entryPrice * (1 + config.stopLossPct / 100);
         exitDate = timestamps[j];
+        exitIdx = j;
         break;
       }
-      // Take profit
       if (priceChange >= config.takeProfitPct / 100) {
         exitPrice = action === "BUY"
           ? entryPrice * (1 + config.takeProfitPct / 100)
           : entryPrice * (1 - config.takeProfitPct / 100);
         exitDate = timestamps[j];
+        exitIdx = j;
         break;
       }
     }
 
     exitPrice = applyTradingCosts(exitPrice, action !== "BUY", tradeConfig);
 
-    // Calculate PnL
     const positionSize = capital * (config.positionSizePct / 100);
     const shares = positionSize / entryPrice;
-    const commission = positionSize * (tradeConfig.commissionPct / 100) * 2; // entry + exit
+    const commission = positionSize * (tradeConfig.commissionPct / 100) * 2;
 
     let pnl: number;
     if (action === "BUY") {
@@ -440,12 +481,15 @@ function runWalkForwardBacktest(
     }
 
     const returnPct = (pnl / positionSize) * 100;
-    const actualReturn = (close[testEnd] - close[i]) / close[i] * 100;
+    const actualReturn = (close[testEnd] - close[entryIdx]) / close[entryIdx] * 100;
+    const duration = exitIdx - entryIdx;
 
     capital += pnl;
+    barsInTrade += duration;
 
     trades.push({
-      date: timestamps[i],
+      date: timestamps[entryIdx],
+      exitDate,
       ticker,
       action,
       entryPrice,
@@ -456,24 +500,44 @@ function runWalkForwardBacktest(
       confidence: signal.confidence,
       predictedReturn: signal.predictedReturn,
       actualReturn,
+      duration,
+      mae: parseFloat((maxAdverse * 100).toFixed(2)),
+      mfe: parseFloat((maxFavorable * 100).toFixed(2)),
+      volumeAtEntry: volume[entryIdx] || 0,
     });
 
     equityCurve.push({ date: exitDate, value: capital });
   }
 
-  return { trades, equityCurve };
+  return { trades, equityCurve, totalBars, barsInTrade };
 }
 
 // ============================================================================
 // METRICS COMPUTATION
 // ============================================================================
-function computeMetrics(trades: Trade[], initialCapital: number, equityCurve: { date: string; value: number }[], years: number): Omit<BacktestReport, 'periods' | 'tradeLog' | 'equityCurve' | 'drawdownCurve' | 'monteCarlo' | 'benchmarkReturn'> {
+function computeMetrics(
+  trades: Trade[],
+  initialCapital: number,
+  equityCurve: { date: string; value: number }[],
+  years: number,
+  totalBars: number,
+  barsInTrade: number,
+  benchmarkReturns: number[] // daily SPY returns for alpha/beta
+): Partial<BacktestReport> {
   if (trades.length === 0) {
     return {
       totalTrades: 0, winRate: 0, avgReturn: 0, totalReturn: 0, maxDrawdown: 0,
       sharpeRatio: 0, sortinoRatio: 0, calmarRatio: 0, profitFactor: 0,
-      directionalAccuracy: 0, mae: 0, rmse: 0,
+      directionalAccuracy: 0, mae: 0, rmse: 0, mape: 0,
+      avgWin: 0, avgLoss: 0, winLossRatio: 0,
+      avgTradeDuration: 0, medianTradeDuration: 0, maxTradeDuration: 0,
+      avgMAE: 0, avgMFE: 0, valueAtRisk: 0, conditionalVaR: 0,
+      ulcerIndex: 0, marketExposure: 0, longExposure: 0, shortExposure: 0,
+      cagr: 0, timeToDouble: 0, alpha: 0, beta: 0,
+      portfolioTurnover: 0, stabilityScore: 0,
+      signalPrecision: 0, signalRecall: 0, signalF1: 0,
       regimePerformance: [], confidenceCalibration: [], annualizedReturn: 0,
+      rollingSharpe: [], rollingVolatility: [], tradeDistribution: [], monthlyReturns: [],
     };
   }
 
@@ -486,22 +550,42 @@ function computeMetrics(trades: Trade[], initialCapital: number, equityCurve: { 
   const totalReturn = ((finalCapital - initialCapital) / initialCapital) * 100;
   const annualizedReturn = years > 0 ? (Math.pow(finalCapital / initialCapital, 1 / years) - 1) * 100 : totalReturn;
 
-  // Max Drawdown
+  // Avg Win / Avg Loss / Ratio
+  const avgWin = wins.length > 0 ? wins.reduce((a, t) => a + t.returnPct, 0) / wins.length : 0;
+  const avgLoss = losses.length > 0 ? losses.reduce((a, t) => a + t.returnPct, 0) / losses.length : 0;
+  const winLossRatio = avgLoss !== 0 ? Math.abs(avgWin / avgLoss) : avgWin > 0 ? 999 : 0;
+
+  // Trade Duration
+  const durations = trades.map(t => t.duration).sort((a, b) => a - b);
+  const avgTradeDuration = durations.reduce((a, b) => a + b, 0) / durations.length;
+  const medianTradeDuration = durations[Math.floor(durations.length / 2)] || 0;
+  const maxTradeDuration = durations[durations.length - 1] || 0;
+
+  // MAE / MFE
+  const avgMAE = trades.reduce((a, t) => a + t.mae, 0) / trades.length;
+  const avgMFE = trades.reduce((a, t) => a + t.mfe, 0) / trades.length;
+
+  // Max Drawdown + drawdown series for Ulcer Index
   let peak = initialCapital;
   let maxDrawdown = 0;
+  const drawdowns: number[] = [];
   for (const point of equityCurve) {
     if (point.value > peak) peak = point.value;
     const dd = ((peak - point.value) / peak) * 100;
+    drawdowns.push(dd);
     if (dd > maxDrawdown) maxDrawdown = dd;
   }
 
-  // Sharpe Ratio (annualized, assume 252 trading days, risk-free ~4%)
+  // Ulcer Index = RMS of drawdowns
+  const ulcerIndex = Math.sqrt(drawdowns.reduce((a, b) => a + b * b, 0) / drawdowns.length);
+
+  // Sharpe Ratio
   const riskFreeDaily = 0.04 / 252;
   const meanReturn = returns.reduce((a, b) => a + b / 100, 0) / returns.length;
   const stdReturn = Math.sqrt(returns.reduce((a, b) => a + Math.pow(b / 100 - meanReturn, 2), 0) / returns.length);
-  const sharpeRatio = stdReturn > 0 ? ((meanReturn - riskFreeDaily) / stdReturn) * Math.sqrt(252 / 5) : 0; // 5-day periods
+  const sharpeRatio = stdReturn > 0 ? ((meanReturn - riskFreeDaily) / stdReturn) * Math.sqrt(252 / 5) : 0;
 
-  // Sortino Ratio (downside only)
+  // Sortino Ratio
   const downsideReturns = returns.filter(r => r < 0).map(r => r / 100);
   const downsideStd = downsideReturns.length > 0
     ? Math.sqrt(downsideReturns.reduce((a, b) => a + b * b, 0) / downsideReturns.length)
@@ -516,6 +600,30 @@ function computeMetrics(trades: Trade[], initialCapital: number, equityCurve: { 
   const totalLoss = Math.abs(losses.reduce((a, t) => a + t.pnl, 0));
   const profitFactor = totalLoss > 0 ? totalProfit / totalLoss : totalProfit > 0 ? 999 : 0;
 
+  // VaR and CVaR (5th percentile)
+  const sortedReturns = [...returns].sort((a, b) => a - b);
+  const varIdx = Math.floor(0.05 * sortedReturns.length);
+  const valueAtRisk = sortedReturns[varIdx] || 0;
+  const tailReturns = sortedReturns.slice(0, varIdx + 1);
+  const conditionalVaR = tailReturns.length > 0 ? tailReturns.reduce((a, b) => a + b, 0) / tailReturns.length : 0;
+
+  // Exposure
+  const marketExposure = totalBars > 0 ? (barsInTrade / totalBars) * 100 : 0;
+  const longTrades = trades.filter(t => t.action === "BUY");
+  const shortTrades = trades.filter(t => t.action === "SHORT");
+  const longBars = longTrades.reduce((a, t) => a + t.duration, 0);
+  const shortBars = shortTrades.reduce((a, t) => a + t.duration, 0);
+  const longExposure = totalBars > 0 ? (longBars / totalBars) * 100 : 0;
+  const shortExposure = totalBars > 0 ? (shortBars / totalBars) * 100 : 0;
+
+  // CAGR & Time to Double
+  const cagr = annualizedReturn;
+  const timeToDouble = cagr > 0 ? 72 / cagr : 0; // Rule of 72
+
+  // Portfolio Turnover
+  const totalTraded = trades.reduce((a, t) => a + Math.abs(t.pnl) + (t.entryPrice * (initialCapital * (0.1))), 0);
+  const portfolioTurnover = totalTraded / initialCapital;
+
   // Directional Accuracy
   const correctDir = trades.filter(t => {
     if (t.action === "BUY" && t.actualReturn > 0) return true;
@@ -524,10 +632,82 @@ function computeMetrics(trades: Trade[], initialCapital: number, equityCurve: { 
   });
   const directionalAccuracy = (correctDir.length / trades.length) * 100;
 
-  // MAE and RMSE (predicted return vs actual return)
+  // Signal Quality: Precision, Recall, F1
+  // Treating BUY as "positive" prediction, positive actual = price went up
+  const truePositives = trades.filter(t => t.action === "BUY" && t.actualReturn > 0).length;
+  const falsePositives = trades.filter(t => t.action === "BUY" && t.actualReturn <= 0).length;
+  const falseNegatives = trades.filter(t => t.action === "SHORT" && t.actualReturn > 0).length;
+  const signalPrecision = (truePositives + falsePositives) > 0 ? (truePositives / (truePositives + falsePositives)) * 100 : 0;
+  const signalRecall = (truePositives + falseNegatives) > 0 ? (truePositives / (truePositives + falseNegatives)) * 100 : 0;
+  const signalF1 = (signalPrecision + signalRecall) > 0 ? 2 * (signalPrecision * signalRecall) / (signalPrecision + signalRecall) : 0;
+
+  // MAE, RMSE, MAPE
   const errors = trades.map(t => t.predictedReturn - t.actualReturn);
-  const mae = errors.reduce((a, b) => a + Math.abs(b), 0) / errors.length;
+  const maeVal = errors.reduce((a, b) => a + Math.abs(b), 0) / errors.length;
   const rmse = Math.sqrt(errors.reduce((a, b) => a + b * b, 0) / errors.length);
+  const mape = trades.reduce((a, t) => a + (t.actualReturn !== 0 ? Math.abs((t.predictedReturn - t.actualReturn) / t.actualReturn) : 0), 0) / trades.length * 100;
+
+  // Alpha / Beta (vs benchmark)
+  let alpha = 0, beta = 0;
+  if (benchmarkReturns.length > 1 && returns.length > 1) {
+    // Simple linear regression: strategy returns vs benchmark
+    const n = Math.min(returns.length, benchmarkReturns.length);
+    const stratRets = returns.slice(0, n).map(r => r / 100);
+    const benchRets = benchmarkReturns.slice(0, n);
+    const meanS = stratRets.reduce((a, b) => a + b, 0) / n;
+    const meanB = benchRets.reduce((a, b) => a + b, 0) / n;
+    let covSB = 0, varB = 0;
+    for (let i = 0; i < n; i++) {
+      covSB += (stratRets[i] - meanS) * (benchRets[i] - meanB);
+      varB += (benchRets[i] - meanB) ** 2;
+    }
+    beta = varB > 0 ? covSB / varB : 0;
+    alpha = (meanS - beta * meanB) * 252; // annualized
+  }
+
+  // Stability Score (std dev of period returns)
+  // Computed later from periods
+
+  // Rolling Sharpe (20-trade window)
+  const rollingSharpe: { index: number; value: number }[] = [];
+  const ROLLING_WINDOW = 20;
+  for (let i = ROLLING_WINDOW; i <= returns.length; i++) {
+    const window = returns.slice(i - ROLLING_WINDOW, i).map(r => r / 100);
+    const wMean = window.reduce((a, b) => a + b, 0) / window.length;
+    const wStd = Math.sqrt(window.reduce((a, b) => a + (b - wMean) ** 2, 0) / window.length);
+    const rSharpe = wStd > 0 ? (wMean / wStd) * Math.sqrt(252 / 5) : 0;
+    rollingSharpe.push({ index: i, value: parseFloat(rSharpe.toFixed(2)) });
+  }
+
+  // Rolling Volatility (20-trade window)
+  const rollingVolatility: { index: number; value: number }[] = [];
+  for (let i = ROLLING_WINDOW; i <= returns.length; i++) {
+    const window = returns.slice(i - ROLLING_WINDOW, i).map(r => r / 100);
+    const wMean = window.reduce((a, b) => a + b, 0) / window.length;
+    const wStd = Math.sqrt(window.reduce((a, b) => a + (b - wMean) ** 2, 0) / window.length);
+    rollingVolatility.push({ index: i, value: parseFloat((wStd * Math.sqrt(252 / 5) * 100).toFixed(2)) });
+  }
+
+  // Trade Distribution (histogram -10% to +10% in 1% buckets)
+  const tradeDistribution: { bucket: string; count: number }[] = [];
+  for (let b = -10; b < 10; b++) {
+    const count = returns.filter(r => r >= b && r < b + 1).length;
+    tradeDistribution.push({ bucket: `${b}%`, count });
+  }
+  tradeDistribution.push({ bucket: "10%+", count: returns.filter(r => r >= 10).length });
+
+  // Monthly Returns
+  const monthlyMap = new Map<string, number[]>();
+  for (const t of trades) {
+    const key = t.date.substring(0, 7); // YYYY-MM
+    if (!monthlyMap.has(key)) monthlyMap.set(key, []);
+    monthlyMap.get(key)!.push(t.returnPct);
+  }
+  const monthlyReturns = Array.from(monthlyMap.entries()).map(([key, rets]) => ({
+    year: parseInt(key.substring(0, 4)),
+    month: parseInt(key.substring(5, 7)),
+    returnPct: parseFloat(rets.reduce((a, b) => a + b, 0).toFixed(2)),
+  }));
 
   // Regime Performance
   const regimeMap = new Map<string, { correct: number; total: number; returns: number[] }>();
@@ -566,22 +746,27 @@ function computeMetrics(trades: Trade[], initialCapital: number, equityCurve: { 
     };
   }).filter(b => b.count > 0);
 
+  const p = (v: number) => parseFloat(v.toFixed(2));
+
   return {
     totalTrades: trades.length,
-    winRate: parseFloat(winRate.toFixed(1)),
-    avgReturn: parseFloat(avgReturn.toFixed(2)),
-    totalReturn: parseFloat(totalReturn.toFixed(2)),
-    maxDrawdown: parseFloat(maxDrawdown.toFixed(2)),
-    sharpeRatio: parseFloat(sharpeRatio.toFixed(2)),
-    sortinoRatio: parseFloat(sortinoRatio.toFixed(2)),
-    calmarRatio: parseFloat(calmarRatio.toFixed(2)),
-    profitFactor: parseFloat(profitFactor.toFixed(2)),
-    directionalAccuracy: parseFloat(directionalAccuracy.toFixed(1)),
-    mae: parseFloat(mae.toFixed(2)),
-    rmse: parseFloat(rmse.toFixed(2)),
-    regimePerformance,
-    confidenceCalibration,
-    annualizedReturn: parseFloat(annualizedReturn.toFixed(2)),
+    winRate: p(winRate), avgReturn: p(avgReturn), totalReturn: p(totalReturn),
+    maxDrawdown: p(maxDrawdown), sharpeRatio: p(sharpeRatio), sortinoRatio: p(sortinoRatio),
+    calmarRatio: p(calmarRatio), profitFactor: p(profitFactor),
+    directionalAccuracy: p(directionalAccuracy), mae: p(maeVal), rmse: p(rmse), mape: p(mape),
+    avgWin: p(avgWin), avgLoss: p(avgLoss), winLossRatio: p(winLossRatio),
+    avgTradeDuration: p(avgTradeDuration), medianTradeDuration, maxTradeDuration,
+    avgMAE: p(avgMAE), avgMFE: p(avgMFE),
+    valueAtRisk: p(valueAtRisk), conditionalVaR: p(conditionalVaR),
+    ulcerIndex: p(ulcerIndex),
+    marketExposure: p(marketExposure), longExposure: p(longExposure), shortExposure: p(shortExposure),
+    cagr: p(cagr), timeToDouble: p(timeToDouble),
+    alpha: p(alpha * 100), beta: p(beta),
+    portfolioTurnover: p(portfolioTurnover),
+    stabilityScore: 0, // computed from periods later
+    signalPrecision: p(signalPrecision), signalRecall: p(signalRecall), signalF1: p(signalF1),
+    regimePerformance, confidenceCalibration, annualizedReturn: p(annualizedReturn),
+    rollingSharpe, rollingVolatility, tradeDistribution, monthlyReturns,
   };
 }
 
@@ -595,10 +780,9 @@ function runMonteCarlo(trades: Trade[], initialCapital: number, simulations: num
 
   for (let s = 0; s < simulations; s++) {
     let capital = initialCapital;
-    // Shuffle trade order
     const shuffled = [...tradeReturns].sort(() => Math.random() - 0.5);
     for (const ret of shuffled) {
-      capital *= (1 + ret * 0.1); // position size = 10%
+      capital *= (1 + ret * 0.1);
     }
     finalValues.push(((capital - initialCapital) / initialCapital) * 100);
   }
@@ -618,11 +802,9 @@ function runMonteCarlo(trades: Trade[], initialCapital: number, simulations: num
 // ============================================================================
 // WALK-FORWARD PERIOD BREAKDOWN
 // ============================================================================
-function computePeriods(trades: Trade[], periodMonths: number = 12): BacktestReport['periods'] {
+function computePeriods(trades: Trade[]): BacktestReport['periods'] {
   if (trades.length === 0) return [];
   const periods: BacktestReport['periods'] = [];
-  
-  // Group trades by year
   const yearMap = new Map<string, Trade[]>();
   for (const t of trades) {
     const year = t.date.substring(0, 4);
@@ -631,7 +813,7 @@ function computePeriods(trades: Trade[], periodMonths: number = 12): BacktestRep
   }
 
   for (const [year, yearTrades] of yearMap) {
-    const correct = yearTrades.filter(t => 
+    const correct = yearTrades.filter(t =>
       (t.action === "BUY" && t.actualReturn > 0) || (t.action === "SHORT" && t.actualReturn < 0)
     );
     const totalRet = yearTrades.reduce((a, t) => a + t.returnPct, 0);
@@ -643,7 +825,6 @@ function computePeriods(trades: Trade[], periodMonths: number = 12): BacktestRep
       trades: yearTrades.length,
     });
   }
-
   return periods;
 }
 
@@ -656,6 +837,128 @@ function computeDrawdownCurve(equityCurve: { date: string; value: number }[]): {
     if (p.value > peak) peak = p.value;
     return { date: p.date, drawdown: parseFloat((((peak - p.value) / peak) * -100).toFixed(2)) };
   });
+}
+
+// ============================================================================
+// STRESS TESTING - detect crisis periods
+// ============================================================================
+function detectStressPeriods(
+  spyData: DataSet | null,
+  allTrades: Trade[],
+): BacktestReport['stressTests'] {
+  if (!spyData || spyData.close.length < 60) return [];
+
+  const stressTests: BacktestReport['stressTests'] = [];
+  const { close, timestamps } = spyData;
+
+  // Scan for drawdown > 15% over 60-bar windows
+  for (let i = 60; i < close.length; i += 30) {
+    const windowClose = close.slice(i - 60, i);
+    const windowPeak = Math.max(...windowClose);
+    const windowTrough = Math.min(...windowClose.slice(windowClose.indexOf(Math.max(...windowClose))));
+    const dd = ((windowPeak - windowTrough) / windowPeak) * 100;
+
+    if (dd > 15) {
+      const startDate = timestamps[i - 60];
+      const endDate = timestamps[i];
+      const benchReturn = ((close[i] - close[i - 60]) / close[i - 60]) * 100;
+
+      // Find strategy trades during this window
+      const windowTrades = allTrades.filter(t => t.date >= startDate && t.date <= endDate);
+      if (windowTrades.length === 0) continue;
+
+      const stratReturn = windowTrades.reduce((a, t) => a + t.returnPct, 0);
+      const stratPeak = Math.max(...windowTrades.map(t => t.returnPct));
+      const stratTrough = Math.min(...windowTrades.map(t => t.returnPct));
+
+      // Determine period label
+      let label = "Market Stress";
+      if (startDate >= "2020-02" && startDate <= "2020-04") label = "COVID Crash";
+      else if (startDate >= "2022-01" && startDate <= "2022-10") label = "2022 Bear Market";
+      else if (startDate >= "2008-09" && startDate <= "2009-03") label = "2008 Financial Crisis";
+      else if (startDate >= "2018-10" && startDate <= "2019-01") label = "Q4 2018 Selloff";
+
+      // Avoid duplicate labels
+      if (!stressTests.find(s => s.period === label)) {
+        stressTests.push({
+          period: label,
+          startDate,
+          endDate,
+          strategyReturn: parseFloat(stratReturn.toFixed(2)),
+          benchmarkReturn: parseFloat(benchReturn.toFixed(2)),
+          maxDrawdown: parseFloat(dd.toFixed(2)),
+        });
+      }
+    }
+  }
+
+  return stressTests.slice(0, 5); // Max 5 stress periods
+}
+
+// ============================================================================
+// ROBUSTNESS TESTS
+// ============================================================================
+function runRobustnessTests(
+  data: DataSet,
+  ticker: string,
+  config: BacktestConfig,
+  tradeConfig: TradeConfig,
+  baseReturn: number,
+): BacktestReport['robustness'] {
+  // 1. Noise Injection: add ±0.5% random noise to prices
+  const noisyData: DataSet = {
+    ...data,
+    close: data.close.map(p => p * (1 + (Math.random() - 0.5) * 0.01)),
+    high: data.high.map(p => p * (1 + (Math.random() - 0.5) * 0.01)),
+    low: data.low.map(p => p * (1 + (Math.random() - 0.5) * 0.01)),
+    open: data.open.map(p => p * (1 + (Math.random() - 0.5) * 0.01)),
+  };
+  const noisyResult = runWalkForwardBacktest(noisyData, ticker, config, tradeConfig);
+  const noisyFinal = noisyResult.equityCurve[noisyResult.equityCurve.length - 1]?.value || config.initialCapital;
+  const noisyReturn = ((noisyFinal - config.initialCapital) / config.initialCapital) * 100;
+  const noiseImpact = Math.abs(baseReturn - noisyReturn);
+
+  // 2. Delayed Execution: t+2 instead of t+1
+  const delayedResult = runWalkForwardBacktest(data, ticker, config, tradeConfig, 2);
+  const delayedFinal = delayedResult.equityCurve[delayedResult.equityCurve.length - 1]?.value || config.initialCapital;
+  const delayedReturn = ((delayedFinal - config.initialCapital) / config.initialCapital) * 100;
+  const delayImpact = Math.abs(baseReturn - delayedReturn);
+
+  // 3. Parameter Sensitivity: vary buy/short thresholds
+  const paramResults: BacktestReport['robustness']['parameterSensitivity'] = [];
+  const thresholdVariations = [20, 25, 30, 35, 40];
+  for (const thresh of thresholdVariations) {
+    const modConfig = { ...config, buyThreshold: thresh, shortThreshold: -thresh };
+    const result = runWalkForwardBacktest(data, ticker, modConfig, tradeConfig);
+    const final = result.equityCurve[result.equityCurve.length - 1]?.value || config.initialCapital;
+    const ret = ((final - config.initialCapital) / config.initialCapital) * 100;
+    const rets = result.trades.map(t => t.returnPct / 100);
+    const mean = rets.length > 0 ? rets.reduce((a, b) => a + b, 0) / rets.length : 0;
+    const std = rets.length > 1 ? Math.sqrt(rets.reduce((a, b) => a + (b - mean) ** 2, 0) / rets.length) : 0.001;
+    const sharpe = std > 0 ? (mean / std) * Math.sqrt(252 / 5) : 0;
+    paramResults.push({
+      param: `Threshold ±${thresh}`,
+      value: thresh,
+      returnPct: parseFloat(ret.toFixed(2)),
+      sharpe: parseFloat(sharpe.toFixed(2)),
+    });
+  }
+
+  return {
+    noiseInjection: {
+      baseReturn: parseFloat(baseReturn.toFixed(2)),
+      noisyReturn: parseFloat(noisyReturn.toFixed(2)),
+      impact: parseFloat(noiseImpact.toFixed(2)),
+      passed: noiseImpact < Math.abs(baseReturn) * 0.5, // passes if impact < 50% of base return
+    },
+    delayedExecution: {
+      baseReturn: parseFloat(baseReturn.toFixed(2)),
+      delayedReturn: parseFloat(delayedReturn.toFixed(2)),
+      impact: parseFloat(delayImpact.toFixed(2)),
+      passed: delayImpact < Math.abs(baseReturn) * 0.5,
+    },
+    parameterSensitivity: paramResults,
+  };
 }
 
 // ============================================================================
@@ -703,7 +1006,6 @@ serve(async (req) => {
       slippagePct: 0.1,
     };
 
-    // Fetch data for all tickers + SPY benchmark
     const startDate = Math.floor(new Date(`${startYear}-01-01`).getTime() / 1000);
     const endDate = Math.floor(new Date(`${endYear}-12-31`).getTime() / 1000);
 
@@ -713,9 +1015,18 @@ serve(async (req) => {
     const spyData = allDataResults[allDataResults.length - 1];
     const tickerData = allDataResults.slice(0, -1);
 
-    // Run backtest for each ticker
+    // SPY daily returns for alpha/beta
+    const benchmarkReturns: number[] = [];
+    if (spyData) {
+      for (let i = 1; i < spyData.close.length; i++) {
+        benchmarkReturns.push((spyData.close[i] - spyData.close[i - 1]) / spyData.close[i - 1]);
+      }
+    }
+
     let allTrades: Trade[] = [];
     let combinedEquity: { date: string; value: number }[] = [];
+    let totalBarsAll = 0, barsInTradeAll = 0;
+    let firstTickerData: DataSet | null = null;
 
     for (let idx = 0; idx < config.tickers.length; idx++) {
       const data = tickerData[idx];
@@ -724,13 +1035,16 @@ serve(async (req) => {
         continue;
       }
 
-      const { trades, equityCurve } = runWalkForwardBacktest(data, config.tickers[idx], config, tradeConfig);
+      if (!firstTickerData) firstTickerData = data;
+
+      const { trades, equityCurve, totalBars, barsInTrade } = runWalkForwardBacktest(data, config.tickers[idx], config, tradeConfig);
       allTrades = allTrades.concat(trades);
+      totalBarsAll += totalBars;
+      barsInTradeAll += barsInTrade;
 
       if (combinedEquity.length === 0) {
         combinedEquity = equityCurve;
       } else {
-        // Merge equity curves (add PnL differences)
         for (const point of equityCurve) {
           const existing = combinedEquity.find(c => c.date === point.date);
           if (existing) {
@@ -742,16 +1056,21 @@ serve(async (req) => {
       }
     }
 
-    // Sort equity curve by date
     combinedEquity.sort((a, b) => a.date.localeCompare(b.date));
-
-    // Compute years for annualization
     const years = endYear - startYear;
 
-    // Compute all metrics
-    const metrics = computeMetrics(allTrades, initialCapital, combinedEquity, years);
+    // Compute metrics
+    const metrics = computeMetrics(allTrades, initialCapital, combinedEquity, years, totalBarsAll, barsInTradeAll, benchmarkReturns);
     const periods = computePeriods(allTrades);
     const drawdownCurve = computeDrawdownCurve(combinedEquity);
+
+    // Stability score from periods
+    if (periods.length > 1) {
+      const periodReturns = periods.map(p => p.returnPct);
+      const mean = periodReturns.reduce((a, b) => a + b, 0) / periodReturns.length;
+      const std = Math.sqrt(periodReturns.reduce((a, b) => a + (b - mean) ** 2, 0) / periodReturns.length);
+      metrics.stabilityScore = parseFloat(std.toFixed(2));
+    }
 
     // Monte Carlo
     let monteCarlo = null;
@@ -759,20 +1078,45 @@ serve(async (req) => {
       monteCarlo = runMonteCarlo(allTrades, initialCapital, 1000);
     }
 
-    // Benchmark return (SPY buy & hold)
+    // Benchmark return
     let benchmarkReturn = 0;
     if (spyData && spyData.close.length > 1) {
       benchmarkReturn = parseFloat((((spyData.close[spyData.close.length - 1] - spyData.close[0]) / spyData.close[0]) * 100).toFixed(2));
     }
 
+    // Stress testing
+    const stressTests = detectStressPeriods(spyData, allTrades);
+
+    // Robustness tests (only on first ticker to save time)
+    let robustness: BacktestReport['robustness'] = {
+      noiseInjection: null,
+      delayedExecution: null,
+      parameterSensitivity: [],
+    };
+    if (firstTickerData && firstTickerData.close.length >= 100) {
+      const baseReturn = metrics.totalReturn || 0;
+      robustness = runRobustnessTests(firstTickerData, config.tickers[0], config, tradeConfig, baseReturn);
+    }
+
+    // Liquidity warnings: flag trades where position > 2% daily volume
+    const liquidityWarnings = allTrades.filter(t => {
+      if (t.volumeAtEntry <= 0) return false;
+      const positionValue = initialCapital * (positionSizePct / 100);
+      const sharesTraded = positionValue / t.entryPrice;
+      return sharesTraded > t.volumeAtEntry * 0.02;
+    }).length;
+
     const report: BacktestReport = {
-      ...metrics,
+      ...metrics as any,
       periods,
-      tradeLog: allTrades.slice(-200), // Last 200 trades to keep response size manageable
+      tradeLog: allTrades.slice(-200),
       equityCurve: combinedEquity,
       drawdownCurve,
       monteCarlo,
       benchmarkReturn,
+      robustness,
+      stressTests,
+      liquidityWarnings,
     };
 
     console.log(`Backtest complete: ${allTrades.length} trades, Win Rate: ${metrics.winRate}%, Sharpe: ${metrics.sharpeRatio}`);
