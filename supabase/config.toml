@@ -20,3 +20,6 @@ verify_jwt = false
 
 [functions.weekly-digest]
 verify_jwt = false
+
+[functions.backtest]
+verify_jwt = false
