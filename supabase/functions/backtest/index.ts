@@ -1078,12 +1078,23 @@ function runWalkForwardBacktest(
       }
     }
 
+    // Use profile-adjusted params, with user overrides taking priority
+    const effectiveADX = userExplicitADX ? config.adxThreshold : activeProfile.adxThreshold;
+    const effectiveRSIOS = userExplicitRSIOS ? config.rsiOversold : activeProfile.rsiOversold;
+    const effectiveRSIOB = userExplicitRSIOB ? config.rsiOverbought : activeProfile.rsiOverbought;
+    const effectiveBuyThresh = userExplicitBuyThresh ? config.buyThreshold : activeProfile.buyThreshold;
+    const effectiveShortThresh = userExplicitShortThresh ? Math.abs(config.shortThreshold) : activeProfile.shortThreshold;
+
     const signal = computeStrategySignal(trainClose, trainHigh, trainLow, trainVol, signalState, STEP, {
-      adxThreshold: config.adxThreshold,
-      rsiOversold: config.rsiOversold,
-      rsiOverbought: config.rsiOverbought,
-      buyThreshold: config.buyThreshold,
-      shortThreshold: Math.abs(config.shortThreshold),
+      adxThreshold: effectiveADX,
+      rsiOversold: effectiveRSIOS,
+      rsiOverbought: effectiveRSIOB,
+      buyThreshold: effectiveBuyThresh,
+      shortThreshold: effectiveShortThresh,
+    }, {
+      trendConvictionBonus: activeProfile.trendConvictionBonus,
+      mrConvictionBonus: activeProfile.mrConvictionBonus,
+      breakoutConvictionBonus: activeProfile.breakoutConvictionBonus,
     }, {
       spyBearish,
       spySMADeclining,
