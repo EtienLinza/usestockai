@@ -199,7 +199,8 @@ function createSignalTracker(): SignalState {
 function computeStrategySignal(
   close: number[], high: number[], low: number[], volume: number[],
   signalState: SignalState, step: number,
-  signalParams?: { adxThreshold?: number; rsiOversold?: number; rsiOverbought?: number; buyThreshold?: number; shortThreshold?: number }
+  signalParams?: { adxThreshold?: number; rsiOversold?: number; rsiOverbought?: number; buyThreshold?: number; shortThreshold?: number },
+  adaptiveContext?: { spyBearish?: boolean; spySMADeclining?: boolean; isLeader?: boolean }
 ): {
   consensusScore: number;
   regime: string;
