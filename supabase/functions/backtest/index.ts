@@ -206,10 +206,11 @@ function computeStrategySignal(
   confidence: number;
   strategy: "trend" | "mean_reversion" | "breakout" | "none";
   positionSizeMultiplier: number;
+  atr: number;
 } {
   const HOLD_RESULT = (regime: string) => ({
     consensusScore: 0, regime, predictedReturn: 0, confidence: 0,
-    strategy: "none" as const, positionSizeMultiplier: 1,
+    strategy: "none" as const, positionSizeMultiplier: 1, atr: 0,
   });
 
   // --- Cooldown check ---
