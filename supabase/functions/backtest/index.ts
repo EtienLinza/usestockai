@@ -662,8 +662,16 @@ function runWalkForwardBacktest(
       : STEP;
     const testEnd = Math.min(entryIdx + maxHoldBars, close.length - 1);
     const useTrailingStop = signal.strategy === "trend" || signal.strategy === "breakout";
-    const TRAILING_STOP_PCT = 0.03; // 3% trail from peak
-    const BREAKEVEN_THRESHOLD = 0.02; // move stop to breakeven after +2%
+
+    // ATR-based trailing stop: 2*ATR distance, breakeven after 1*ATR gain
+    const atrPct = entryPrice > 0 ? signal.atr / entryPrice : 0.02;
+    const TRAILING_STOP_DIST = 2 * atrPct; // 2 × ATR as fraction of price
+    const BREAKEVEN_THRESHOLD = atrPct; // activate breakeven after 1 × ATR gain
+
+    // For trend strategy: widen hard stop to 3 × ATR (let trends breathe)
+    const effectiveStopPct = signal.strategy === "trend"
+      ? Math.max(config.stopLossPct / 100, 3 * atrPct)
+      : config.stopLossPct / 100;
 
     let maxAdverse = 0;
     let maxFavorable = 0;
