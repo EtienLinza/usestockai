@@ -909,16 +909,45 @@ function runWalkForwardBacktest(
   let activeProfile: ProfileParams = PROFILE_PARAMS["index"]; // default
   let lastClassifyBar = -CLASSIFY_WINDOW; // force initial classification
 
-  // Check if user explicitly set params (must match UI defaults to detect "no change")
-  // UI defaults: buyThreshold=65, shortThreshold=-65, adx=25, rsiOS=30, rsiOB=70, maxHold=20, TP=10, TSMult=2.0
-  const userExplicitADX = config.adxThreshold !== 25;
-  const userExplicitRSIOS = config.rsiOversold !== 30;
-  const userExplicitRSIOB = config.rsiOverbought !== 70;
-  const userExplicitBuyThresh = config.buyThreshold !== 65;
-  const userExplicitShortThresh = Math.abs(config.shortThreshold) !== 65;
-  const userExplicitMaxHold = config.maxHoldBars !== 20;
-  const userExplicitTP = config.takeProfitPct !== 10;
-  const userExplicitTSMult = config.trailingStopATRMult !== 2.0;
+  // Strategy Mode: only override profile params when mode is "custom" with explicit user changes
+  const isCustomMode = (config as any).strategyMode === "custom" && (config as any).explicitOverride === true;
+  const userExplicitADX = isCustomMode;
+  const userExplicitRSIOS = isCustomMode;
+  const userExplicitRSIOB = isCustomMode;
+  const userExplicitBuyThresh = isCustomMode;
+  const userExplicitShortThresh = isCustomMode;
+  const userExplicitMaxHold = isCustomMode;
+  const userExplicitTP = isCustomMode;
+  const userExplicitTSMult = isCustomMode;
+
+  // Apply strategy mode modifiers to profile params
+  const modeModifier = (config as any).strategyMode || "adaptive";
+  const applyModeToProfile = (profile: ProfileParams): ProfileParams => {
+    if (modeModifier === "conservative") {
+      return {
+        ...profile,
+        buyThreshold: Math.min(profile.buyThreshold + 10, 85),
+        shortThreshold: Math.min(profile.shortThreshold + 10, 85),
+        maxHoldTrend: Math.round(profile.maxHoldTrend * 0.8),
+        maxHoldMR: Math.round(profile.maxHoldMR * 0.8),
+        maxHoldBreakout: Math.round(profile.maxHoldBreakout * 0.8),
+        trailingStopATRMult: Math.max(profile.trailingStopATRMult - 0.3, 1.2),
+        takeProfitPct: Math.round(profile.takeProfitPct * 0.8),
+      };
+    } else if (modeModifier === "aggressive") {
+      return {
+        ...profile,
+        buyThreshold: Math.max(profile.buyThreshold - 5, 50),
+        shortThreshold: Math.max(profile.shortThreshold - 5, 50),
+        maxHoldTrend: Math.round(profile.maxHoldTrend * 1.25),
+        maxHoldMR: Math.round(profile.maxHoldMR * 1.25),
+        maxHoldBreakout: Math.round(profile.maxHoldBreakout * 1.25),
+        trailingStopATRMult: profile.trailingStopATRMult + 0.3,
+        takeProfitPct: Math.round(profile.takeProfitPct * 1.2),
+      };
+    }
+    return profile; // adaptive or custom
+  };
 
   // Detect if this ticker IS the benchmark (circular logic guard)
   const isIndexTicker = ["SPY", "QQQ", "DIA", "IWM", "VOO", "VTI"].includes(ticker.toUpperCase());
@@ -934,7 +963,7 @@ function runWalkForwardBacktest(
       const cLow = low.slice(i - classWindow, i);
       if (cClose.length >= 50) {
         currentClassification = classifyStock(cClose, cHigh, cLow);
-        activeProfile = PROFILE_PARAMS[currentClassification.classification];
+        activeProfile = applyModeToProfile(PROFILE_PARAMS[currentClassification.classification]);
         lastClassifyBar = i;
       }
     }
@@ -1968,11 +1997,13 @@ serve(async (req) => {
       trailingStopATRMult = 2.0,
       maxHoldBars = 20,
       riskPerTrade = 0.01,
+      strategyMode = "adaptive",
+      explicitOverride = false,
     } = body;
 
-    console.log(`Backtest request: ${tickers.join(",")} from ${startYear} to ${endYear}, buyThresh=${buyThreshold}, adx=${adxThreshold}, rsiOS=${rsiOversold}, rsiOB=${rsiOverbought}`);
+    console.log(`Backtest request: ${tickers.join(",")} from ${startYear} to ${endYear}, mode=${strategyMode}, buyThresh=${buyThreshold}, adx=${adxThreshold}`);
 
-    const config: BacktestConfig = {
+    const config: BacktestConfig & { strategyMode: string; explicitOverride: boolean } = {
       tickers: tickers.slice(0, 5),
       startYear, endYear, initialCapital, positionSizePct,
       stopLossPct, takeProfitPct, maxPositions,
@@ -1981,6 +2012,8 @@ serve(async (req) => {
       adxThreshold, rsiOversold, rsiOverbought,
       trailingStopATRMult, maxHoldBars,
       riskPerTrade,
+      strategyMode,
+      explicitOverride,
     };
 
     const tradeConfig: TradeConfig = {
