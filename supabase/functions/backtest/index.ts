@@ -590,6 +590,7 @@ function runWalkForwardBacktest(
   config: BacktestConfig,
   tradeConfig: TradeConfig,
   executionDelay: number = 1,
+  stepOverride?: number,
 ): { trades: Trade[]; equityCurve: { date: string; value: number }[]; totalBars: number; barsInTrade: number } {
   const { close, high, low, open, volume, timestamps } = allData;
   const trades: Trade[] = [];
@@ -598,7 +599,7 @@ function runWalkForwardBacktest(
 
   // TRAIN_WINDOW = 250: SMA200 needs 200 bars + 50 buffer for indicator stabilization
   const TRAIN_WINDOW = 250;
-  const STEP = 5;
+  const STEP = stepOverride || 5;
   let totalBars = 0;
   let barsInTrade = 0;
   const COOLDOWN_BARS = 5; // 1 evaluation step (reduced from 15 to allow re-entry)
@@ -1101,11 +1102,17 @@ function computeSignalDecay(
   const dayOffsets = [1, 3, 5, 7];
   const result: { day: number; accuracy: number }[] = [];
 
+  // O(1) lookup instead of O(n) indexOf
+  const timestampMap = new Map<string, number>();
+  for (let i = 0; i < data.timestamps.length; i++) {
+    timestampMap.set(data.timestamps[i], i);
+  }
+
   for (const offset of dayOffsets) {
     let correct = 0, total = 0;
     for (const t of trades) {
-      const entryIdx = data.timestamps.indexOf(t.date);
-      if (entryIdx < 0) continue;
+      const entryIdx = timestampMap.get(t.date);
+      if (entryIdx === undefined) continue;
       const checkIdx = entryIdx + offset;
       if (checkIdx >= data.close.length) continue;
       const actualMove = data.close[checkIdx] - data.close[entryIdx];
@@ -1133,11 +1140,17 @@ function computeMarketRegimePerformance(
 
   const sma200 = calculateSMA(spyData.close, 200);
 
+  // O(1) lookup
+  const spyTimestampMap = new Map<string, number>();
+  for (let i = 0; i < spyData.timestamps.length; i++) {
+    spyTimestampMap.set(spyData.timestamps[i], i);
+  }
+
   const regimeMap = new Map<string, { correct: number; total: number; returns: number[] }>();
 
   for (const t of trades) {
-    const idx = spyData.timestamps.indexOf(t.date);
-    if (idx < 0 || idx >= sma200.length || isNaN(sma200[idx])) continue;
+    const idx = spyTimestampMap.get(t.date);
+    if (idx === undefined || idx >= sma200.length || isNaN(sma200[idx])) continue;
 
     const spyPrice = spyData.close[idx];
     const ma = sma200[idx];
@@ -1236,7 +1249,7 @@ function runTradeDependencyTest(
 // ============================================================================
 // MONTE CARLO SIMULATION
 // ============================================================================
-function runMonteCarlo(trades: Trade[], initialCapital: number, simulations: number = 1000, positionSizePct: number = 10): BacktestReport['monteCarlo'] {
+function runMonteCarlo(trades: Trade[], initialCapital: number, simulations: number = 200, positionSizePct: number = 10): BacktestReport['monteCarlo'] {
   if (trades.length < 5) return null;
   const tradeReturns = trades.map(t => t.returnPct / 100);
   const positionSizeFrac = positionSizePct / 100;
@@ -1366,32 +1379,55 @@ function runRobustnessTests(
   tradeConfig: TradeConfig,
   baseReturn: number,
   allTrades: Trade[],
+  tickerCount: number = 1,
 ): BacktestReport['robustness'] {
-  // 1. Noise Injection
-  const noisyData: DataSet = {
-    ...data,
-    close: data.close.map(p => p * (1 + (Math.random() - 0.5) * 0.01)),
-    high: data.high.map(p => p * (1 + (Math.random() - 0.5) * 0.01)),
-    low: data.low.map(p => p * (1 + (Math.random() - 0.5) * 0.01)),
-    open: data.open.map(p => p * (1 + (Math.random() - 0.5) * 0.01)),
-  };
-  const noisyResult = runWalkForwardBacktest(noisyData, ticker, config, tradeConfig);
-  const noisyFinal = noisyResult.equityCurve[noisyResult.equityCurve.length - 1]?.value || config.initialCapital;
-  const noisyReturn = ((noisyFinal - config.initialCapital) / config.initialCapital) * 100;
-  const noiseImpact = Math.abs(baseReturn - noisyReturn);
+  const ROBUSTNESS_STEP = 10; // Faster step for robustness sub-runs
+  const isHeavy = tickerCount >= 3;
 
-  // 2. Delayed Execution
-  const delayedResult = runWalkForwardBacktest(data, ticker, config, tradeConfig, 2);
-  const delayedFinal = delayedResult.equityCurve[delayedResult.equityCurve.length - 1]?.value || config.initialCapital;
-  const delayedReturn = ((delayedFinal - config.initialCapital) / config.initialCapital) * 100;
-  const delayImpact = Math.abs(baseReturn - delayedReturn);
+  let noiseInjection: BacktestReport['robustness']['noiseInjection'] = null;
+  let delayedExecution: BacktestReport['robustness']['delayedExecution'] = null;
 
-  // 3. Parameter Sensitivity
+  // 1. Noise Injection (skip for 3+ tickers)
+  if (!isHeavy) {
+    const noisyData: DataSet = {
+      ...data,
+      close: data.close.map(p => p * (1 + (Math.random() - 0.5) * 0.01)),
+      high: data.high.map(p => p * (1 + (Math.random() - 0.5) * 0.01)),
+      low: data.low.map(p => p * (1 + (Math.random() - 0.5) * 0.01)),
+      open: data.open.map(p => p * (1 + (Math.random() - 0.5) * 0.01)),
+    };
+    const noisyResult = runWalkForwardBacktest(noisyData, ticker, config, tradeConfig, 1, ROBUSTNESS_STEP);
+    const noisyFinal = noisyResult.equityCurve[noisyResult.equityCurve.length - 1]?.value || config.initialCapital;
+    const noisyReturn = ((noisyFinal - config.initialCapital) / config.initialCapital) * 100;
+    const noiseImpact = Math.abs(baseReturn - noisyReturn);
+    noiseInjection = {
+      baseReturn: parseFloat(baseReturn.toFixed(2)),
+      noisyReturn: parseFloat(noisyReturn.toFixed(2)),
+      impact: parseFloat(noiseImpact.toFixed(2)),
+      passed: noiseImpact < Math.abs(baseReturn) * 0.5,
+    };
+  }
+
+  // 2. Delayed Execution (skip for 3+ tickers)
+  if (!isHeavy) {
+    const delayedResult = runWalkForwardBacktest(data, ticker, config, tradeConfig, 2, ROBUSTNESS_STEP);
+    const delayedFinal = delayedResult.equityCurve[delayedResult.equityCurve.length - 1]?.value || config.initialCapital;
+    const delayedReturn = ((delayedFinal - config.initialCapital) / config.initialCapital) * 100;
+    const delayImpact = Math.abs(baseReturn - delayedReturn);
+    delayedExecution = {
+      baseReturn: parseFloat(baseReturn.toFixed(2)),
+      delayedReturn: parseFloat(delayedReturn.toFixed(2)),
+      impact: parseFloat(delayImpact.toFixed(2)),
+      passed: delayImpact < Math.abs(baseReturn) * 0.5,
+    };
+  }
+
+  // 3. Parameter Sensitivity (3 variations for heavy, 5 for light)
   const paramResults: BacktestReport['robustness']['parameterSensitivity'] = [];
-  const thresholdVariations = [20, 25, 30, 35, 40];
+  const thresholdVariations = isHeavy ? [20, 30, 40] : [20, 25, 30, 35, 40];
   for (const thresh of thresholdVariations) {
     const modConfig = { ...config, buyThreshold: thresh, shortThreshold: -thresh };
-    const result = runWalkForwardBacktest(data, ticker, modConfig, tradeConfig);
+    const result = runWalkForwardBacktest(data, ticker, modConfig, tradeConfig, 1, ROBUSTNESS_STEP);
     const final = result.equityCurve[result.equityCurve.length - 1]?.value || config.initialCapital;
     const ret = ((final - config.initialCapital) / config.initialCapital) * 100;
     const rets = result.trades.map(t => t.returnPct / 100);
@@ -1410,18 +1446,8 @@ function runRobustnessTests(
   const tradeDependency = runTradeDependencyTest(allTrades, config.initialCapital, baseReturn);
 
   return {
-    noiseInjection: {
-      baseReturn: parseFloat(baseReturn.toFixed(2)),
-      noisyReturn: parseFloat(noisyReturn.toFixed(2)),
-      impact: parseFloat(noiseImpact.toFixed(2)),
-      passed: noiseImpact < Math.abs(baseReturn) * 0.5,
-    },
-    delayedExecution: {
-      baseReturn: parseFloat(baseReturn.toFixed(2)),
-      delayedReturn: parseFloat(delayedReturn.toFixed(2)),
-      impact: parseFloat(delayImpact.toFixed(2)),
-      passed: delayImpact < Math.abs(baseReturn) * 0.5,
-    },
+    noiseInjection,
+    delayedExecution,
     parameterSensitivity: paramResults,
     tradeDependency,
   };
@@ -1436,6 +1462,7 @@ serve(async (req) => {
   }
 
   try {
+    const startTime = Date.now();
     const body = await req.json();
     const {
       tickers = ["AAPL"],
@@ -1493,6 +1520,7 @@ serve(async (req) => {
     let combinedEquity: { date: string; value: number }[] = [];
     let totalBarsAll = 0, barsInTradeAll = 0;
     let firstTickerData: DataSet | null = null;
+    const tickerCount = config.tickers.length;
 
     for (let idx = 0; idx < config.tickers.length; idx++) {
       const data = tickerData[idx];
@@ -1530,6 +1558,21 @@ serve(async (req) => {
     }
 
     combinedEquity.sort((a, b) => a.date.localeCompare(b.date));
+
+    // Cap equity curve points to 500 to reduce serialization
+    if (combinedEquity.length > 500) {
+      const step = Math.ceil(combinedEquity.length / 500);
+      const sampled: typeof combinedEquity = [];
+      for (let i = 0; i < combinedEquity.length; i += step) {
+        sampled.push(combinedEquity[i]);
+      }
+      // Always include last point
+      if (sampled[sampled.length - 1] !== combinedEquity[combinedEquity.length - 1]) {
+        sampled.push(combinedEquity[combinedEquity.length - 1]);
+      }
+      combinedEquity = sampled;
+    }
+
     const years = endYear - startYear;
 
     // Compute metrics
@@ -1545,10 +1588,10 @@ serve(async (req) => {
       metrics.stabilityScore = parseFloat(std.toFixed(2));
     }
 
-    // Monte Carlo
+    // Monte Carlo (reduced to 200 sims)
     let monteCarlo = null;
     if (includeMonteCarlo && allTrades.length >= 10) {
-      monteCarlo = runMonteCarlo(allTrades, initialCapital, 1000, positionSizePct);
+      monteCarlo = runMonteCarlo(allTrades, initialCapital, 200, positionSizePct);
     }
 
     // Benchmark return
@@ -1560,16 +1603,22 @@ serve(async (req) => {
     // Stress testing
     const stressTests = detectStressPeriods(spyData, allTrades);
 
-    // Robustness tests (only on first ticker to save time)
+    // CPU budget guard: check elapsed time before robustness tests
+    const elapsedMs = Date.now() - startTime;
+    let robustnessSkipped = false;
     let robustness: BacktestReport['robustness'] = {
       noiseInjection: null,
       delayedExecution: null,
       parameterSensitivity: [],
       tradeDependency: null,
     };
-    if (firstTickerData && firstTickerData.close.length >= 100) {
+
+    if (elapsedMs > 1500) {
+      console.log(`CPU budget exceeded (${elapsedMs}ms), skipping robustness tests`);
+      robustnessSkipped = true;
+    } else if (firstTickerData && firstTickerData.close.length >= 100) {
       const baseReturn = metrics.totalReturn || 0;
-      robustness = runRobustnessTests(firstTickerData, config.tickers[0], config, tradeConfig, baseReturn, allTrades);
+      robustness = runRobustnessTests(firstTickerData, config.tickers[0], config, tradeConfig, baseReturn, allTrades, tickerCount);
     }
 
     // Liquidity warnings
@@ -1580,15 +1629,15 @@ serve(async (req) => {
       return sharesTraded > t.volumeAtEntry * 0.02;
     }).length;
 
-    // NEW: Signal Decay
+    // Signal Decay (with Map optimization)
     const signalDecay = firstTickerData
       ? computeSignalDecay(firstTickerData, allTrades.filter(t => t.ticker === config.tickers[0]))
       : [];
 
-    // NEW: Benchmark Equity Curve
+    // Benchmark Equity Curve
     const benchmarkEquity = computeBenchmarkEquity(spyData, initialCapital);
 
-    // NEW: Market Regime Performance (SPY 200MA)
+    // Market Regime Performance (with Map optimization)
     const marketRegimePerformance = computeMarketRegimePerformance(spyData, allTrades);
 
     // Strategy Performance Attribution
@@ -1616,6 +1665,7 @@ serve(async (req) => {
       monteCarlo,
       benchmarkReturn,
       robustness,
+      robustnessSkipped,
       stressTests,
       liquidityWarnings,
       signalDecay,
@@ -1624,7 +1674,7 @@ serve(async (req) => {
       strategyPerformance,
     };
 
-    console.log(`Backtest complete: ${allTrades.length} trades, Win Rate: ${metrics.winRate}%, Sharpe: ${metrics.sharpeRatio}`);
+    console.log(`Backtest complete: ${allTrades.length} trades, Win Rate: ${metrics.winRate}%, Sharpe: ${metrics.sharpeRatio}, elapsed: ${Date.now() - startTime}ms`);
 
     return new Response(JSON.stringify(report), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },

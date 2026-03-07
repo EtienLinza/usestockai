@@ -67,6 +67,7 @@ interface BacktestReport {
   drawdownCurve: { date: string; drawdown: number }[];
   tradeLog: { date: string; exitDate: string; ticker: string; action: string; entryPrice: number; exitPrice: number; returnPct: number; pnl: number; regime: string; confidence: number; duration: number; mae: number; mfe: number; strategy?: string; exitReason?: string }[];
   monteCarlo: { percentile5: number; percentile25: number; median: number; percentile75: number; percentile95: number } | null;
+  robustnessSkipped?: boolean;
   benchmarkReturn: number;
   annualizedReturn: number;
   rollingSharpe: { index: number; value: number }[];
@@ -202,9 +203,14 @@ const Backtest = () => {
       const data: BacktestReport = await resp.json();
       setReport(data);
       toast.success(`Backtest complete: ${data.totalTrades} trades analyzed`);
-    } catch (e) {
+    } catch (e: any) {
       console.error("Backtest error:", e);
-      showErrorToast(e, "Backtest failed. Please try again.");
+      const isTimeout = e?.isTimeout || e?.isNetworkError || (e?.message && e.message.includes("timed out"));
+      if (isTimeout) {
+        showErrorToast(e, "Backtest timed out. Try fewer tickers or a shorter date range.");
+      } else {
+        showErrorToast(e, "Backtest failed. Please try again.");
+      }
     } finally {
       setIsLoading(false);
     }
@@ -290,7 +296,7 @@ const Backtest = () => {
                   <div className="flex items-center justify-between">
                     <Label className="text-xs text-muted-foreground flex items-center gap-1.5">
                       <Shuffle className="w-3 h-3" />
-                      Monte Carlo (1,000 sims)
+                      Monte Carlo (200 sims)
                     </Label>
                     <Switch checked={includeMonteCarlo} onCheckedChange={setIncludeMonteCarlo} />
                   </div>
@@ -663,7 +669,18 @@ const Backtest = () => {
                     )}
 
                     {/* Robustness Tests */}
-                    {report.robustness && (report.robustness.noiseInjection || report.robustness.delayedExecution || report.robustness.tradeDependency) && (
+                    {report.robustnessSkipped ? (
+                      <Card className="glass-card p-6">
+                        <div className="flex items-center gap-2 mb-2">
+                          <FlaskConical className="w-4 h-4 text-muted-foreground" />
+                          <span className="text-sm font-medium">Robustness Tests</span>
+                          <Badge variant="secondary" className="text-[10px]">SKIPPED</Badge>
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          Skipped due to computation budget. Try fewer tickers or a shorter date range for full robustness analysis.
+                        </p>
+                      </Card>
+                    ) : report.robustness && (report.robustness.noiseInjection || report.robustness.delayedExecution || report.robustness.tradeDependency) ? (
                       <Card className="glass-card p-6">
                         <div className="flex items-center gap-2 mb-4">
                           <FlaskConical className="w-4 h-4 text-primary" />
@@ -717,7 +734,7 @@ const Backtest = () => {
                           )}
                         </div>
                       </Card>
-                    )}
+                    ) : null}
 
                     {/* Parameter Sensitivity */}
                     {report.robustness?.parameterSensitivity?.length > 0 && (
@@ -979,7 +996,7 @@ const Backtest = () => {
                       <Card className="glass-card p-6">
                         <div className="flex items-center gap-2 mb-4">
                           <Shuffle className="w-4 h-4 text-primary" />
-                          <span className="text-sm font-medium">Monte Carlo Simulation (1,000 runs)</span>
+                          <span className="text-sm font-medium">Monte Carlo Simulation (200 runs)</span>
                         </div>
                         <div className="grid grid-cols-5 gap-3">
                           {[
