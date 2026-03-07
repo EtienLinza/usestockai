@@ -596,11 +596,12 @@ function runWalkForwardBacktest(
   let capital = config.initialCapital;
   const equityCurve: { date: string; value: number }[] = [{ date: timestamps[0], value: capital }];
 
-  const TRAIN_WINDOW = 250; // Need 200+ bars for SMA200
+  // TRAIN_WINDOW = 250: SMA200 needs 200 bars + 50 buffer for indicator stabilization
+  const TRAIN_WINDOW = 250;
   const STEP = 5;
   let totalBars = 0;
   let barsInTrade = 0;
-  const COOLDOWN_BARS = 15; // 3 evaluation steps
+  const COOLDOWN_BARS = 5; // 1 evaluation step (reduced from 15 to allow re-entry)
 
   const signalState = createSignalTracker();
 
