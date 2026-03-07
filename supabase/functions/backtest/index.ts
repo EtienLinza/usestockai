@@ -198,7 +198,8 @@ function createSignalTracker(): SignalState {
 
 function computeStrategySignal(
   close: number[], high: number[], low: number[], volume: number[],
-  signalState: SignalState, step: number
+  signalState: SignalState, step: number,
+  signalParams?: { adxThreshold?: number; rsiOversold?: number; rsiOverbought?: number; buyThreshold?: number; shortThreshold?: number }
 ): {
   consensusScore: number;
   regime: string;
@@ -279,10 +280,17 @@ function computeStrategySignal(
   const above200 = currentPrice > s200;
   const below200 = currentPrice < s200;
 
-  // --- Strategy A: Trend Following (ADX > 25) ---
+  const SP = signalParams || {};
+  const ADX_THRESH = SP.adxThreshold ?? 25;
+  const RSI_OS = SP.rsiOversold ?? 30;
+  const RSI_OB = SP.rsiOverbought ?? 70;
+  const CONV_BUY_THRESH = SP.buyThreshold ?? 60;
+  const CONV_SHORT_THRESH = SP.shortThreshold ?? 60;
+
+  // --- Strategy A: Trend Following (ADX > threshold) ---
   let trendSignal: "BUY" | "SHORT" | "HOLD" = "HOLD";
   let trendConviction = 0;
-  if (adxVal > 25) {
+  if (adxVal > ADX_THRESH) {
     // BUY: EMA12 > EMA26 AND price > SMA50 AND MACD histogram positive & increasing AND RSI 35-75
     const trendBuyConditions = [
       e12 > e26,
@@ -310,14 +318,14 @@ function computeStrategySignal(
     }
   }
 
-  // --- Strategy B: Mean Reversion (ADX < 25 — no dead zone with trend) ---
+  // --- Strategy B: Mean Reversion (ADX < threshold — no dead zone with trend) ---
   let mrSignal: "BUY" | "SHORT" | "HOLD" = "HOLD";
   let mrConviction = 0;
-  if (adxVal < 25) {
-    // BUY: RSI < 30, price < lower BB, deviation > 1.5*ATR (volatility-adjusted), stoch < 20, volume > 1.2x — need 3/5
+  if (adxVal < ADX_THRESH) {
+    // BUY: RSI < oversold, price < lower BB, deviation > 1.5*ATR (volatility-adjusted), stoch < 20, volume > 1.2x — need 3/5
     const atrDevThreshold = currentPrice > 0 ? (1.5 * currentATR) / currentPrice : 0.02;
     const mrBuyConditions = [
-      rsiVal < 30,
+      rsiVal < RSI_OS,
       currentPrice < bbL,
       smaDeviation < -atrDevThreshold,
       sk < 20,
@@ -325,9 +333,9 @@ function computeStrategySignal(
     ];
     const mrBuyScore = mrBuyConditions.filter(Boolean).length;
 
-    // SHORT: RSI > 70, price > upper BB, deviation > 1.5*ATR, stoch > 80, volume > 1.2x — need 3/5
+    // SHORT: RSI > overbought, price > upper BB, deviation > 1.5*ATR, stoch > 80, volume > 1.2x — need 3/5
     const mrShortConditions = [
-      rsiVal > 70,
+      rsiVal > RSI_OB,
       currentPrice > bbU,
       smaDeviation > atrDevThreshold,
       sk > 80,
@@ -394,13 +402,18 @@ function computeStrategySignal(
     return HOLD_RESULT(regime);
   }
 
-  // --- No confirmation required — individual strategy filters are already strict enough ---
-  // Confirmation at STEP intervals added too much latency (10+ bars delay)
+  // --- Conviction threshold filter (Bug Fix #1) ---
+  // This is the key gate: if conviction doesn't meet the user-configured threshold, skip it
+  const cappedConviction = Math.min(100, bestConviction);
+  const convThresh = bestSignal === "BUY" ? CONV_BUY_THRESH : CONV_SHORT_THRESH;
+  if (cappedConviction < convThresh) {
+    signalState.lastDirection = "HOLD";
+    signalState.consecutiveCount = 0;
+    return HOLD_RESULT(regime);
+  }
+
   signalState.lastDirection = bestSignal;
   signalState.consecutiveCount = 1;
-
-  // --- Passed all filters — generate signal ---
-  const cappedConviction = Math.min(100, bestConviction);
 
   // Volatility-adjusted position sizing
   const TARGET_VOL = 0.015; // 1.5% daily target
@@ -524,6 +537,12 @@ interface BacktestConfig {
   includeMonteCarlo: boolean;
   buyThreshold: number;
   shortThreshold: number;
+  // New configurable signal parameters
+  adxThreshold: number;
+  rsiOversold: number;
+  rsiOverbought: number;
+  trailingStopATRMult: number;
+  maxHoldBars: number;
 }
 
 interface BacktestReport {
