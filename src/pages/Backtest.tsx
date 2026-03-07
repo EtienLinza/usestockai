@@ -322,41 +322,115 @@ const Backtest = () => {
                   <div className="border-t border-border/50 pt-4 mt-2 space-y-4">
                     <div className="text-[10px] text-muted-foreground uppercase tracking-wide flex items-center gap-1.5">
                       <Signal className="w-3 h-3" />
-                      Signal Parameters
+                      Strategy Mode
                     </div>
 
-                    <div className="space-y-2">
-                      <Label className="text-xs text-muted-foreground">Conviction Threshold: {buyThreshold}</Label>
-                      <Slider value={[buyThreshold]} onValueChange={v => setBuyThreshold(v[0])} min={40} max={90} step={5} />
-                      <p className="text-[10px] text-muted-foreground/60">Higher = fewer but stronger signals</p>
+                    <div className="grid grid-cols-2 gap-2">
+                      {([
+                        { value: "adaptive" as const, label: "Adaptive", icon: Sparkles, desc: "Auto-optimized" },
+                        { value: "conservative" as const, label: "Conservative", icon: Shield, desc: "Fewer trades" },
+                        { value: "aggressive" as const, label: "Aggressive", icon: Zap, desc: "More trades" },
+                        { value: "custom" as const, label: "Custom", icon: SlidersHorizontal, desc: "Manual tuning" },
+                      ]).map(mode => (
+                        <button
+                          key={mode.value}
+                          onClick={() => setStrategyMode(mode.value)}
+                          className={`flex flex-col items-center gap-1 p-2.5 rounded-lg border text-xs transition-all ${
+                            strategyMode === mode.value
+                              ? "border-primary bg-primary/10 text-primary"
+                              : "border-border/50 bg-card/30 text-muted-foreground hover:border-border hover:bg-card/50"
+                          }`}
+                        >
+                          <mode.icon className="w-3.5 h-3.5" />
+                          <span className="font-medium">{mode.label}</span>
+                          <span className="text-[9px] opacity-70">{mode.desc}</span>
+                        </button>
+                      ))}
                     </div>
 
-                    <div className="space-y-2">
-                      <Label className="text-xs text-muted-foreground">ADX Threshold: {adxThreshold}</Label>
-                      <Slider value={[adxThreshold]} onValueChange={v => setAdxThreshold(v[0])} min={15} max={40} step={1} />
-                      <p className="text-[10px] text-muted-foreground/60">Trend vs Mean Reversion cutoff</p>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-3">
-                      <div className="space-y-2">
-                        <Label className="text-xs text-muted-foreground">RSI Oversold: {rsiOversold}</Label>
-                        <Slider value={[rsiOversold]} onValueChange={v => setRsiOversold(v[0])} min={15} max={40} step={1} />
+                    {strategyMode === "adaptive" && (
+                      <div className="flex items-start gap-2 p-3 rounded-lg bg-primary/5 border border-primary/10">
+                        <Sparkles className="w-3.5 h-3.5 text-primary mt-0.5 shrink-0" />
+                        <p className="text-[10px] text-muted-foreground leading-relaxed">
+                          Algorithm auto-detects each stock's behavior profile (momentum, value, index, volatile) and applies optimized parameters. <span className="text-primary font-medium">Recommended for most users.</span>
+                        </p>
                       </div>
-                      <div className="space-y-2">
-                        <Label className="text-xs text-muted-foreground">RSI Overbought: {rsiOverbought}</Label>
-                        <Slider value={[rsiOverbought]} onValueChange={v => setRsiOverbought(v[0])} min={60} max={85} step={1} />
+                    )}
+
+                    {strategyMode === "conservative" && (
+                      <div className="flex items-start gap-2 p-3 rounded-lg bg-muted/50 border border-border/50">
+                        <Shield className="w-3.5 h-3.5 text-muted-foreground mt-0.5 shrink-0" />
+                        <div className="text-[10px] text-muted-foreground leading-relaxed space-y-1">
+                          <p>Higher conviction thresholds (+10), shorter holds (−20%), tighter trailing stops.</p>
+                          <p className="opacity-60">Fewer trades, higher win rate, lower drawdowns.</p>
+                        </div>
                       </div>
-                    </div>
+                    )}
 
-                    <div className="space-y-2">
-                      <Label className="text-xs text-muted-foreground">Trailing Stop: {trailingStopATRMult}× ATR</Label>
-                      <Slider value={[trailingStopATRMult * 10]} onValueChange={v => setTrailingStopATRMult(v[0] / 10)} min={10} max={40} step={1} />
-                    </div>
+                    {strategyMode === "aggressive" && (
+                      <div className="flex items-start gap-2 p-3 rounded-lg bg-muted/50 border border-border/50">
+                        <Zap className="w-3.5 h-3.5 text-muted-foreground mt-0.5 shrink-0" />
+                        <div className="text-[10px] text-muted-foreground leading-relaxed space-y-1">
+                          <p>Lower conviction (−5), longer holds (+25%), wider trailing stops.</p>
+                          <p className="opacity-60">More trades, higher exposure, potentially larger gains and drawdowns.</p>
+                        </div>
+                      </div>
+                    )}
 
-                    <div className="space-y-2">
-                      <Label className="text-xs text-muted-foreground">Max Hold: {maxHoldBars} bars</Label>
-                      <Slider value={[maxHoldBars]} onValueChange={v => setMaxHoldBars(v[0])} min={5} max={60} step={5} />
-                    </div>
+                    {strategyMode === "custom" && (
+                      <div className="space-y-4">
+                        <div className="flex items-start gap-2 p-2.5 rounded-lg bg-destructive/5 border border-destructive/10">
+                          <AlertTriangle className="w-3 h-3 text-destructive mt-0.5 shrink-0" />
+                          <p className="text-[10px] text-destructive/80 leading-relaxed">
+                            Custom overrides profile optimization. Bad combinations can hurt performance.
+                          </p>
+                        </div>
+
+                        <div className="space-y-2">
+                          <Label className="text-xs text-muted-foreground">Conviction Threshold: {buyThreshold}</Label>
+                          <Slider value={[buyThreshold]} onValueChange={v => setBuyThreshold(v[0])} min={50} max={85} step={5} />
+                          <p className={`text-[10px] ${buyThreshold < 55 ? "text-destructive" : buyThreshold < 60 ? "text-yellow-500" : "text-muted-foreground/60"}`}>
+                            {buyThreshold < 55 ? "⚠ Very low — may generate many weak signals" : buyThreshold < 60 ? "⚡ Low — more trades but weaker signals" : "Higher = fewer but stronger signals"}
+                          </p>
+                        </div>
+
+                        <div className="space-y-2">
+                          <Label className="text-xs text-muted-foreground">ADX Threshold: {adxThreshold}</Label>
+                          <Slider value={[adxThreshold]} onValueChange={v => setAdxThreshold(v[0])} min={18} max={35} step={1} />
+                          <p className="text-[10px] text-muted-foreground/60">Trend vs Mean Reversion cutoff</p>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="space-y-2">
+                            <Label className="text-xs text-muted-foreground">RSI Oversold: {rsiOversold}</Label>
+                            <Slider value={[rsiOversold]} onValueChange={v => setRsiOversold(v[0])} min={20} max={35} step={1} />
+                          </div>
+                          <div className="space-y-2">
+                            <Label className="text-xs text-muted-foreground">RSI Overbought: {rsiOverbought}</Label>
+                            <Slider value={[rsiOverbought]} onValueChange={v => setRsiOverbought(v[0])} min={65} max={80} step={1} />
+                          </div>
+                        </div>
+
+                        <div className="space-y-2">
+                          <Label className="text-xs text-muted-foreground">Trailing Stop: {trailingStopATRMult}× ATR</Label>
+                          <Slider value={[trailingStopATRMult * 10]} onValueChange={v => setTrailingStopATRMult(v[0] / 10)} min={15} max={30} step={1} />
+                        </div>
+
+                        <div className="space-y-2">
+                          <Label className="text-xs text-muted-foreground">Max Hold: {maxHoldBars} bars</Label>
+                          <Slider value={[maxHoldBars]} onValueChange={v => setMaxHoldBars(v[0])} min={8} max={40} step={2} />
+                        </div>
+
+                        {rsiOversold > 33 && buyThreshold < 60 && (
+                          <div className="flex items-start gap-2 p-2.5 rounded-lg bg-yellow-500/5 border border-yellow-500/10">
+                            <AlertTriangle className="w-3 h-3 text-yellow-500 mt-0.5 shrink-0" />
+                            <p className="text-[10px] text-yellow-600 dark:text-yellow-400 leading-relaxed">
+                              High RSI oversold + low conviction may generate many low-quality mean-reversion signals.
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
 
                   <div className="flex items-center justify-between">
