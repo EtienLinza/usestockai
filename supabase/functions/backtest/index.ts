@@ -1491,83 +1491,69 @@ function computeMetrics(
   const rmse = Math.sqrt(errors.reduce((a, b) => a + b * b, 0) / errors.length);
   const mape = trades.reduce((a, t) => a + (t.actualReturn !== 0 ? Math.abs((t.predictedReturn - t.actualReturn) / t.actualReturn) : 0), 0) / trades.length * 100;
 
-  // Alpha / Beta — computed from equity curve daily returns aligned with SPY daily returns by date
+  // Alpha / Beta — computed from equity curve returns aligned with SPY returns by date
   let alpha = 0, beta = 0;
-  if (equityCurve.length > 2 && benchmarkReturns.length > 1) {
-    // Build equity curve daily returns map (date → return)
-    const eqDailyReturns = new Map<string, number>();
+  if (spyData && spyData.close.length > 1 && equityCurve.length > 2) {
+    // Build SPY daily returns indexed by date
+    const spyReturnsByDate = new Map<string, number>();
+    for (let i = 1; i < spyData.close.length; i++) {
+      spyReturnsByDate.set(spyData.timestamps[i], (spyData.close[i] - spyData.close[i - 1]) / spyData.close[i - 1]);
+    }
+
+    // Build equity curve returns indexed by date
+    const eqReturnsByDate = new Map<string, number>();
     for (let i = 1; i < equityCurve.length; i++) {
       if (equityCurve[i - 1].value > 0) {
-        const ret = (equityCurve[i].value - equityCurve[i - 1].value) / equityCurve[i - 1].value;
-        eqDailyReturns.set(equityCurve[i].date, ret);
+        eqReturnsByDate.set(equityCurve[i].date, (equityCurve[i].value - equityCurve[i - 1].value) / equityCurve[i - 1].value);
       }
     }
 
-    // benchmarkReturns is a flat array of daily SPY returns; we need dates
-    // The caller passes spyData timestamps starting from index 1 (return[i] corresponds to spy timestamp[i+1])
-    // Since we don't have spy timestamps here, we use equity curve dates to look up benchmark
-    // Instead, accept benchmarkReturnsByDate map
-    // For now: build from the passed array using equityCurve dates as alignment keys
-    // Actually benchmarkReturns is passed without dates — we need to fix the caller too.
-    // WORKAROUND: Use the equity curve to compute strategy annualized return and benchmark total return
-    // and derive alpha from: alpha = strategyAnnReturn - beta * benchAnnReturn
+    // If equity curve is sampled (not daily), compute SPY return over the same intervals
+    const stratRets: number[] = [];
+    const benchRets: number[] = [];
+    const eqDates = Array.from(eqReturnsByDate.keys()).sort();
 
-    // Since benchmarkReturns lacks date keys, pair by matching equity curve dates
-    // The equity curve dates are a subset of trading dates — find overlapping indices
-    // We'll compute beta from trade-level data aligned by date instead
-
-    // Better approach: convert trades to a date→return map, then align with benchmarkReturns
-    // But benchmarkReturns has no dates either. So we pass them through.
-    
-    // FINAL FIX: The equity curve points have dates. We'll compute returns between consecutive
-    // equity points and pair them with the benchmark return over the same date span.
-    // This works even when equity curve is sampled (not daily).
-
-    const stratReturnsAligned: number[] = [];
-    const benchReturnsAligned: number[] = [];
-
-    // We need spy close data — it's not passed to computeMetrics currently
-    // So we'll use a simple regression on the returns we have
-    // For proper alignment, we compute period returns for both over matching intervals
-    
-    // Use equity curve intervals as the alignment basis
-    for (const [date, ret] of eqDailyReturns) {
-      // Find the closest benchmark return by index position
-      // Since both cover the same date range, use the equity curve date order
-      stratReturnsAligned.push(ret);
-    }
-    
-    // Fallback: if we can't date-align, use sequential pairing with matching lengths
-    const n = Math.min(stratReturnsAligned.length, benchmarkReturns.length);
-    if (n > 5) {
-      // Sample benchmark returns evenly to match equity curve frequency
-      const benchSampled: number[] = [];
-      const ratio = benchmarkReturns.length / stratReturnsAligned.length;
-      for (let i = 0; i < stratReturnsAligned.length; i++) {
-        // Aggregate benchmark returns over the corresponding period
-        const startIdx = Math.floor(i * ratio);
-        const endIdx = Math.min(Math.floor((i + 1) * ratio), benchmarkReturns.length);
-        let periodReturn = 0;
-        for (let j = startIdx; j < endIdx; j++) {
-          periodReturn += benchmarkReturns[j];
-        }
-        benchSampled.push(periodReturn);
-      }
+    if (eqDates.length > 5) {
+      // For each equity curve interval, compute the matching SPY return over the same date span
+      const sortedEqCurve = [...equityCurve].sort((a, b) => a.date.localeCompare(b.date));
       
-      const nn = Math.min(stratReturnsAligned.length, benchSampled.length);
-      const sRets = stratReturnsAligned.slice(0, nn);
-      const bRets = benchSampled.slice(0, nn);
-      const meanS = sRets.reduce((a, b) => a + b, 0) / nn;
-      const meanB = bRets.reduce((a, b) => a + b, 0) / nn;
+      // Build SPY close lookup by date
+      const spyCloseByDate = new Map<string, number>();
+      for (let i = 0; i < spyData.close.length; i++) {
+        spyCloseByDate.set(spyData.timestamps[i], spyData.close[i]);
+      }
+
+      for (let i = 1; i < sortedEqCurve.length; i++) {
+        const prevDate = sortedEqCurve[i - 1].date;
+        const currDate = sortedEqCurve[i].date;
+        const spyPrev = spyCloseByDate.get(prevDate);
+        const spyCurr = spyCloseByDate.get(currDate);
+        const eqPrev = sortedEqCurve[i - 1].value;
+        const eqCurr = sortedEqCurve[i].value;
+        
+        if (spyPrev && spyCurr && spyPrev > 0 && eqPrev > 0) {
+          stratRets.push((eqCurr - eqPrev) / eqPrev);
+          benchRets.push((spyCurr - spyPrev) / spyPrev);
+        }
+      }
+    }
+
+    if (stratRets.length > 5) {
+      const n = stratRets.length;
+      const meanS = stratRets.reduce((a, b) => a + b, 0) / n;
+      const meanB = benchRets.reduce((a, b) => a + b, 0) / n;
       let covSB = 0, varB = 0;
-      for (let i = 0; i < nn; i++) {
-        covSB += (sRets[i] - meanS) * (bRets[i] - meanB);
-        varB += (bRets[i] - meanB) ** 2;
+      for (let i = 0; i < n; i++) {
+        covSB += (stratRets[i] - meanS) * (benchRets[i] - meanB);
+        varB += (benchRets[i] - meanB) ** 2;
       }
       beta = varB > 0 ? parseFloat((covSB / varB).toFixed(3)) : 0;
-      // Annualize: alpha = (annualized strategy return) - beta * (annualized benchmark return)
-      const benchAnnReturn = benchmarkReturns.reduce((a, b) => a + b, 0) / years;
-      alpha = parseFloat(((annualizedReturn / 100) - beta * benchAnnReturn * 252).toFixed(4));
+      // Alpha = annualized excess return over beta × benchmark
+      const spyTotalReturn = (spyData.close[spyData.close.length - 1] - spyData.close[0]) / spyData.close[0];
+      const spyAnnReturn = years > 0 ? (Math.pow(1 + spyTotalReturn, 1 / years) - 1) : spyTotalReturn;
+      alpha = parseFloat(((annualizedReturn / 100) - beta * spyAnnReturn).toFixed(4));
+    }
+  }
     }
   }
 
