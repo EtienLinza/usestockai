@@ -293,7 +293,13 @@ const Backtest = () => {
                   </div>
 
                   <div className="space-y-2">
-                    <Label className="text-xs text-muted-foreground">Position Size: {positionSize}%</Label>
+                    <Label className="text-xs text-muted-foreground">Risk Per Trade: {riskPerTrade}%</Label>
+                    <Slider value={[riskPerTrade]} onValueChange={v => setRiskPerTrade(v[0])} min={0.5} max={5} step={0.5} />
+                    <p className="text-[10px] text-muted-foreground/60">% of capital risked per trade (sizes position by stop distance)</p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label className="text-xs text-muted-foreground">Position Size Cap: {positionSize}%</Label>
                     <Slider value={[positionSize]} onValueChange={v => setPositionSize(v[0])} min={5} max={50} step={5} />
                   </div>
 
