@@ -2003,7 +2003,7 @@ serve(async (req) => {
 
     console.log(`Backtest request: ${tickers.join(",")} from ${startYear} to ${endYear}, mode=${strategyMode}, buyThresh=${buyThreshold}, adx=${adxThreshold}`);
 
-    const config: BacktestConfig = {
+    const config: BacktestConfig & { strategyMode: string; explicitOverride: boolean } = {
       tickers: tickers.slice(0, 5),
       startYear, endYear, initialCapital, positionSizePct,
       stopLossPct, takeProfitPct, maxPositions,
@@ -2012,6 +2012,8 @@ serve(async (req) => {
       adxThreshold, rsiOversold, rsiOverbought,
       trailingStopATRMult, maxHoldBars,
       riskPerTrade,
+      strategyMode,
+      explicitOverride,
     };
 
     const tradeConfig: TradeConfig = {
