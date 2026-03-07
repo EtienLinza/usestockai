@@ -868,7 +868,7 @@ function runWalkForwardBacktest(
   executionDelay: number = 1,
   stepOverride?: number,
   spyData?: DataSet | null,
-): { trades: Trade[]; equityCurve: { date: string; value: number }[]; totalBars: number; barsInTrade: number } {
+): { trades: Trade[]; equityCurve: { date: string; value: number }[]; totalBars: number; barsInTrade: number; stockClassification: StockClassification | null } {
   const { close, high, low, open, volume, timestamps } = allData;
   const trades: Trade[] = [];
   let capital = config.initialCapital;
