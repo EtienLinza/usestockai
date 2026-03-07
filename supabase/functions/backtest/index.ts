@@ -221,17 +221,17 @@ const PROFILE_PARAMS: Record<StockProfile, ProfileParams> = {
   },
   value: {
     adxThreshold: 30, rsiOversold: 25, rsiOverbought: 75,
-    maxHoldTrend: 15, maxHoldMR: 12, maxHoldBreakout: 11,
+    maxHoldTrend: 15, maxHoldMR: 14, maxHoldBreakout: 11,
     takeProfitPct: 8, trailingStopATRMult: 1.5,
-    buyThreshold: 65, shortThreshold: 60,
-    trendConvictionBonus: 0, mrConvictionBonus: 10, breakoutConvictionBonus: 0,
+    buyThreshold: 60, shortThreshold: 55,
+    trendConvictionBonus: 0, mrConvictionBonus: 15, breakoutConvictionBonus: 0,
   },
   index: {
-    adxThreshold: 25, rsiOversold: 30, rsiOverbought: 70,
-    maxHoldTrend: 20, maxHoldMR: 10, maxHoldBreakout: 15,
+    adxThreshold: 22, rsiOversold: 28, rsiOverbought: 72,
+    maxHoldTrend: 22, maxHoldMR: 12, maxHoldBreakout: 15,
     takeProfitPct: 10, trailingStopATRMult: 2.0,
-    buyThreshold: 65, shortThreshold: 65,
-    trendConvictionBonus: 0, mrConvictionBonus: 0, breakoutConvictionBonus: 0,
+    buyThreshold: 60, shortThreshold: 60,
+    trendConvictionBonus: 5, mrConvictionBonus: 5, breakoutConvictionBonus: 0,
   },
   volatile: {
     adxThreshold: 20, rsiOversold: 20, rsiOverbought: 80,
@@ -909,15 +909,19 @@ function runWalkForwardBacktest(
   let activeProfile: ProfileParams = PROFILE_PARAMS["index"]; // default
   let lastClassifyBar = -CLASSIFY_WINDOW; // force initial classification
 
-  // Check if user explicitly set params (non-default = explicit)
+  // Check if user explicitly set params (must match UI defaults to detect "no change")
+  // UI defaults: buyThreshold=65, shortThreshold=-65, adx=25, rsiOS=30, rsiOB=70, maxHold=20, TP=10, TSMult=2.0
   const userExplicitADX = config.adxThreshold !== 25;
   const userExplicitRSIOS = config.rsiOversold !== 30;
   const userExplicitRSIOB = config.rsiOverbought !== 70;
-  const userExplicitBuyThresh = config.buyThreshold !== 60;
-  const userExplicitShortThresh = Math.abs(config.shortThreshold) !== 60;
+  const userExplicitBuyThresh = config.buyThreshold !== 65;
+  const userExplicitShortThresh = Math.abs(config.shortThreshold) !== 65;
   const userExplicitMaxHold = config.maxHoldBars !== 20;
   const userExplicitTP = config.takeProfitPct !== 10;
   const userExplicitTSMult = config.trailingStopATRMult !== 2.0;
+
+  // Detect if this ticker IS the benchmark (circular logic guard)
+  const isIndexTicker = ["SPY", "QQQ", "DIA", "IWM", "VOO", "VTI"].includes(ticker.toUpperCase());
 
   for (let i = TRAIN_WINDOW; i < close.length - 1; i += STEP) {
     totalBars += STEP;
@@ -1059,23 +1063,29 @@ function runWalkForwardBacktest(
     let spyBearish = false;
     let spySMADeclining = false;
 
-    if (spy200SMAMap.size > 0) {
-      spyBearish = spy200SMAMap.get(currentDate) === false; // SPY below its 200 SMA
+    if (spy200SMAMap.size > 0 && !isIndexTicker) {
+      // For non-index tickers, use SPY as regime filter
+      spyBearish = spy200SMAMap.get(currentDate) === false;
       spySMADeclining = spySMADecliningMap.get(currentDate) === true;
 
       // Calculate 50-bar relative strength: stock return vs SPY return
       if (i >= 50) {
         const stockReturn50 = (close[i] - close[i - 50]) / close[i - 50];
         const spyCloseNow = spyDateMap.get(currentDate);
-        // Find SPY close ~50 bars ago
         const pastDate = timestamps[i - 50];
         const spyClosePast = spyDateMap.get(pastDate);
         if (spyCloseNow !== undefined && spyClosePast !== undefined && spyClosePast > 0) {
           const spyReturn50 = (spyCloseNow - spyClosePast) / spyClosePast;
           const relativeStrength = stockReturn50 - spyReturn50;
-          isLeader = relativeStrength > 0.10; // Outperforming SPY by 10%+
+          isLeader = relativeStrength > 0.10;
         }
       }
+    } else if (isIndexTicker) {
+      // Index tickers: use own price action only, no circular SPY filter
+      // Still compute own 200 SMA state for internal trend guards
+      spyBearish = false; // Never block based on SPY when we ARE the index
+      spySMADeclining = false;
+      isLeader = true; // Index always treated as "leader" (no short blocking)
     }
 
     // Use profile-adjusted params, with user overrides taking priority
@@ -1110,10 +1120,18 @@ function runWalkForwardBacktest(
     else if (signal.consensusScore < 0) action = "SHORT";
     if (action === "HOLD") continue;
 
-    // Adaptive short filter: Disable shorts when SPY > 200 SMA, UNLESS stock is a leader
-    if (action === "SHORT" && spy200SMAMap.size > 0 && !isLeader) {
+    // Adaptive short filter: Disable shorts when SPY > 200 SMA, UNLESS stock is a leader or an index
+    if (action === "SHORT" && spy200SMAMap.size > 0 && !isLeader && !isIndexTicker) {
       const spyAbove200 = spy200SMAMap.get(currentDate);
-      if (spyAbove200 === true) continue; // Skip short in bull market (unless leader)
+      if (spyAbove200 === true) continue;
+    }
+
+    // Minimum profitability filter: expected move must exceed trading costs
+    const roundTripCost = (tradeConfig.commissionPct + tradeConfig.spreadPct + tradeConfig.slippagePct) / 100 * 2;
+    const minExpectedMove = roundTripCost * 3; // Need 3× costs to justify the trade
+    const atrPctForFilter = signal.atr / close[i];
+    if (atrPctForFilter < minExpectedMove && signal.strategy === "mean_reversion") {
+      continue; // Skip MR trades where expected move is too small relative to costs
     }
 
     // Block duplicate-direction trades on same ticker
@@ -1942,8 +1960,8 @@ serve(async (req) => {
       maxPositions = 3,
       rebalanceFrequency = "weekly",
       includeMonteCarlo = true,
-      buyThreshold = 60,
-      shortThreshold = -60,
+      buyThreshold = 65,
+      shortThreshold = -65,
       adxThreshold = 25,
       rsiOversold = 30,
       rsiOverbought = 70,
