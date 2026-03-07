@@ -2151,6 +2151,7 @@ serve(async (req) => {
       benchmarkEquity,
       marketRegimePerformance,
       strategyPerformance,
+      stockProfiles,
     };
 
     console.log(`Backtest complete: ${allTrades.length} trades, Win Rate: ${metrics.winRate}%, Sharpe: ${metrics.sharpeRatio}, elapsed: ${Date.now() - startTime}ms`);
