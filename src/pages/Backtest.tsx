@@ -158,7 +158,7 @@ const Backtest = () => {
   const [stopLoss, setStopLoss] = useState(5);
   const [takeProfit, setTakeProfit] = useState(10);
   const [includeMonteCarlo, setIncludeMonteCarlo] = useState(true);
-  const [buyThreshold, setBuyThreshold] = useState(60);
+  const [buyThreshold, setBuyThreshold] = useState(65);
   const [adxThreshold, setAdxThreshold] = useState(25);
   const [rsiOversold, setRsiOversold] = useState(30);
   const [rsiOverbought, setRsiOverbought] = useState(70);
