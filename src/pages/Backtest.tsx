@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Navbar } from "@/components/Navbar";
 import { Card } from "@/components/ui/card";
@@ -20,7 +20,7 @@ import {
   Activity, BarChart3, Brain, TrendingUp, TrendingDown, AlertTriangle,
   Play, Loader2, Target, Gauge, DollarSign, Percent, Shuffle, Calendar,
   Trophy, Shield, Download, Clock, Crosshair, ShieldAlert, Zap, FlaskConical,
-  BarChart2, PieChart, Repeat, Layers, Scale, Signal,
+  BarChart2, PieChart, Repeat, Layers, Scale, Signal, Sparkles, Lock, SlidersHorizontal,
 } from "lucide-react";
 
 interface BacktestReport {
