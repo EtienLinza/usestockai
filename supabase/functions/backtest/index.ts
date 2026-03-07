@@ -1172,7 +1172,7 @@ function runWalkForwardBacktest(
     openPositions.push({
       entryIdx, entryPrice, action, strategy: signal.strategy,
       maxHoldBars, useTrailingStop, trailingStopDist, breakevenThreshold,
-      effectiveStopPct, takeProfitPct: config.takeProfitPct / 100,
+      effectiveStopPct, takeProfitPct: effectiveTP / 100,
       positionSize, shares, commission,
       regime: signal.regime, confidence: signal.confidence,
       predictedReturn: signal.predictedReturn, signal_atr: signal.atr,
