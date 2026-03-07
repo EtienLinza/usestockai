@@ -204,8 +204,9 @@ const Backtest = () => {
             rsiOverbought,
             trailingStopATRMult,
             maxHoldBars,
+            riskPerTrade: riskPerTrade / 100,
           }),
-          timeoutMs: 120000, // Backtests can take longer
+          timeoutMs: 120000,
           retries: 1,
         }
       );
