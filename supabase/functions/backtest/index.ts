@@ -735,12 +735,18 @@ function runWalkForwardBacktest(
   // Build SPY date→close map + compute SPY 200 SMA for short filtering
   const spyDateMap = new Map<string, number>();
   const spy200SMAMap = new Map<string, boolean>(); // date → whether SPY > SMA200
+  const spySMADecliningMap = new Map<string, boolean>(); // date → whether SPY 200 SMA slope is declining
   if (spyData && spyData.close.length >= 200) {
     const spySMA200 = calculateSMA(spyData.close, 200);
     for (let si = 0; si < spyData.timestamps.length; si++) {
       spyDateMap.set(spyData.timestamps[si], spyData.close[si]);
       if (!isNaN(spySMA200[si])) {
         spy200SMAMap.set(spyData.timestamps[si], spyData.close[si] > spySMA200[si]);
+        // Compute SPY 200 SMA slope (20-bar ROC)
+        if (si >= 20 && !isNaN(spySMA200[si - 20]) && spySMA200[si - 20] > 0) {
+          const spySlope = (spySMA200[si] - spySMA200[si - 20]) / spySMA200[si - 20];
+          spySMADecliningMap.set(spyData.timestamps[si], spySlope < -0.01);
+        }
       }
     }
   }
@@ -866,12 +872,41 @@ function runWalkForwardBacktest(
     const trainVol = volume.slice(Math.max(0, i - TRAIN_WINDOW), i);
     if (trainClose.length < 50) continue;
 
+    // --- Adaptive Layer 2: Relative Strength Filter ---
+    const currentDate = timestamps[i];
+    let isLeader = false;
+    let spyBearish = false;
+    let spySMADeclining = false;
+
+    if (spy200SMAMap.size > 0) {
+      spyBearish = spy200SMAMap.get(currentDate) === false; // SPY below its 200 SMA
+      spySMADeclining = spySMADecliningMap.get(currentDate) === true;
+
+      // Calculate 50-bar relative strength: stock return vs SPY return
+      if (i >= 50) {
+        const stockReturn50 = (close[i] - close[i - 50]) / close[i - 50];
+        const spyCloseNow = spyDateMap.get(currentDate);
+        // Find SPY close ~50 bars ago
+        const pastDate = timestamps[i - 50];
+        const spyClosePast = spyDateMap.get(pastDate);
+        if (spyCloseNow !== undefined && spyClosePast !== undefined && spyClosePast > 0) {
+          const spyReturn50 = (spyCloseNow - spyClosePast) / spyClosePast;
+          const relativeStrength = stockReturn50 - spyReturn50;
+          isLeader = relativeStrength > 0.10; // Outperforming SPY by 10%+
+        }
+      }
+    }
+
     const signal = computeStrategySignal(trainClose, trainHigh, trainLow, trainVol, signalState, STEP, {
       adxThreshold: config.adxThreshold,
       rsiOversold: config.rsiOversold,
       rsiOverbought: config.rsiOverbought,
       buyThreshold: config.buyThreshold,
-      shortThreshold: Math.abs(config.shortThreshold), // normalize to positive for conviction comparison
+      shortThreshold: Math.abs(config.shortThreshold),
+    }, {
+      spyBearish,
+      spySMADeclining,
+      isLeader,
     });
 
     // Signal already filtered by conviction threshold inside computeStrategySignal
@@ -883,12 +918,10 @@ function runWalkForwardBacktest(
     else if (signal.consensusScore < 0) action = "SHORT";
     if (action === "HOLD") continue;
 
-    // Fix 2: Disable shorts when SPY > 200 SMA (bull market filter)
-    if (action === "SHORT" && spy200SMAMap.size > 0) {
-      const currentDate = timestamps[i];
-      // Find closest SPY date
+    // Adaptive short filter: Disable shorts when SPY > 200 SMA, UNLESS stock is a leader
+    if (action === "SHORT" && spy200SMAMap.size > 0 && !isLeader) {
       const spyAbove200 = spy200SMAMap.get(currentDate);
-      if (spyAbove200 === true) continue; // Skip short in bull market
+      if (spyAbove200 === true) continue; // Skip short in bull market (unless leader)
     }
 
     // Block duplicate-direction trades on same ticker
