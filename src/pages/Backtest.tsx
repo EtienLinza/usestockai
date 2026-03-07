@@ -155,7 +155,7 @@ const Backtest = () => {
   const [endYear, setEndYear] = useState(2025);
   const [initialCapital, setInitialCapital] = useState(10000);
   const [positionSize, setPositionSize] = useState(10);
-  const [stopLoss, setStopLoss] = useState(5);
+  const [stopLoss, setStopLoss] = useState(8);
   const [takeProfit, setTakeProfit] = useState(10);
   const [includeMonteCarlo, setIncludeMonteCarlo] = useState(true);
   const [buyThreshold, setBuyThreshold] = useState(65);
@@ -164,6 +164,7 @@ const Backtest = () => {
   const [rsiOverbought, setRsiOverbought] = useState(70);
   const [trailingStopATRMult, setTrailingStopATRMult] = useState(2.0);
   const [maxHoldBars, setMaxHoldBars] = useState(20);
+  const [riskPerTrade, setRiskPerTrade] = useState(1);
 
   const handleRunBacktest = async () => {
     if (!session?.access_token) {
