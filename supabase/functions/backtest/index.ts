@@ -686,9 +686,10 @@ function computeStrategySignal(
   const consensusScore = bestSignal === "BUY" ? cappedConviction : -cappedConviction;
   const predictedReturn = (consensusScore / 100) * 5;
 
-  let confidence = 50 + cappedConviction * 0.35;
-  if (regime.includes("strong")) confidence += 5;
-  confidence = Math.max(40, Math.min(95, Math.round(confidence)));
+  // Confidence = raw conviction score (already 0-100, gated at ~62 for entry)
+  let confidence = cappedConviction;
+  if (regime.includes("strong")) confidence += 3;
+  confidence = Math.max(0, Math.min(100, Math.round(confidence)));
 
   return { consensusScore, regime, predictedReturn, confidence, strategy: bestStrategy, positionSizeMultiplier, atr: currentATR };
 }
@@ -1322,6 +1323,7 @@ function computeMetrics(
   barsInTrade: number,
   benchmarkReturns: number[],
   positionSizePctVal: number = 10,
+  spyData?: DataSet | null,
 ): Partial<BacktestReport> {
   if (trades.length === 0) {
     return {
@@ -1489,21 +1491,68 @@ function computeMetrics(
   const rmse = Math.sqrt(errors.reduce((a, b) => a + b * b, 0) / errors.length);
   const mape = trades.reduce((a, t) => a + (t.actualReturn !== 0 ? Math.abs((t.predictedReturn - t.actualReturn) / t.actualReturn) : 0), 0) / trades.length * 100;
 
-  // Alpha / Beta
+  // Alpha / Beta — computed from equity curve returns aligned with SPY returns by date
   let alpha = 0, beta = 0;
-  if (benchmarkReturns.length > 1 && returns.length > 1) {
-    const n = Math.min(returns.length, benchmarkReturns.length);
-    const stratRets = returns.slice(0, n).map(r => r / 100);
-    const benchRets = benchmarkReturns.slice(0, n);
-    const meanS = stratRets.reduce((a, b) => a + b, 0) / n;
-    const meanB = benchRets.reduce((a, b) => a + b, 0) / n;
-    let covSB = 0, varB = 0;
-    for (let i = 0; i < n; i++) {
-      covSB += (stratRets[i] - meanS) * (benchRets[i] - meanB);
-      varB += (benchRets[i] - meanB) ** 2;
+  if (spyData && spyData.close.length > 1 && equityCurve.length > 2) {
+    // Build SPY daily returns indexed by date
+    const spyReturnsByDate = new Map<string, number>();
+    for (let i = 1; i < spyData.close.length; i++) {
+      spyReturnsByDate.set(spyData.timestamps[i], (spyData.close[i] - spyData.close[i - 1]) / spyData.close[i - 1]);
     }
-    beta = varB > 0 ? covSB / varB : 0;
-    alpha = (meanS - beta * meanB) * 252;
+
+    // Build equity curve returns indexed by date
+    const eqReturnsByDate = new Map<string, number>();
+    for (let i = 1; i < equityCurve.length; i++) {
+      if (equityCurve[i - 1].value > 0) {
+        eqReturnsByDate.set(equityCurve[i].date, (equityCurve[i].value - equityCurve[i - 1].value) / equityCurve[i - 1].value);
+      }
+    }
+
+    // If equity curve is sampled (not daily), compute SPY return over the same intervals
+    const stratRets: number[] = [];
+    const benchRets: number[] = [];
+    const eqDates = Array.from(eqReturnsByDate.keys()).sort();
+
+    if (eqDates.length > 5) {
+      // For each equity curve interval, compute the matching SPY return over the same date span
+      const sortedEqCurve = [...equityCurve].sort((a, b) => a.date.localeCompare(b.date));
+      
+      // Build SPY close lookup by date
+      const spyCloseByDate = new Map<string, number>();
+      for (let i = 0; i < spyData.close.length; i++) {
+        spyCloseByDate.set(spyData.timestamps[i], spyData.close[i]);
+      }
+
+      for (let i = 1; i < sortedEqCurve.length; i++) {
+        const prevDate = sortedEqCurve[i - 1].date;
+        const currDate = sortedEqCurve[i].date;
+        const spyPrev = spyCloseByDate.get(prevDate);
+        const spyCurr = spyCloseByDate.get(currDate);
+        const eqPrev = sortedEqCurve[i - 1].value;
+        const eqCurr = sortedEqCurve[i].value;
+        
+        if (spyPrev && spyCurr && spyPrev > 0 && eqPrev > 0) {
+          stratRets.push((eqCurr - eqPrev) / eqPrev);
+          benchRets.push((spyCurr - spyPrev) / spyPrev);
+        }
+      }
+    }
+
+    if (stratRets.length > 5) {
+      const n = stratRets.length;
+      const meanS = stratRets.reduce((a, b) => a + b, 0) / n;
+      const meanB = benchRets.reduce((a, b) => a + b, 0) / n;
+      let covSB = 0, varB = 0;
+      for (let i = 0; i < n; i++) {
+        covSB += (stratRets[i] - meanS) * (benchRets[i] - meanB);
+        varB += (benchRets[i] - meanB) ** 2;
+      }
+      beta = varB > 0 ? parseFloat((covSB / varB).toFixed(3)) : 0;
+      // Alpha = annualized excess return over beta × benchmark
+      const spyTotalReturn = (spyData.close[spyData.close.length - 1] - spyData.close[0]) / spyData.close[0];
+      const spyAnnReturn = years > 0 ? (Math.pow(1 + spyTotalReturn, 1 / years) - 1) : spyTotalReturn;
+      alpha = parseFloat(((annualizedReturn / 100) - beta * spyAnnReturn).toFixed(4));
+    }
   }
 
   // Rolling Sharpe (20-trade window)
@@ -1563,14 +1612,14 @@ function computeMetrics(
     trades: data.total,
   }));
 
-  // Confidence Calibration
+  // Confidence Calibration — buckets aligned to raw conviction distribution
   const confBuckets = [
-    { bucket: "35-45%", min: 35, max: 45 },
-    { bucket: "45-55%", min: 45, max: 55 },
-    { bucket: "55-65%", min: 55, max: 65 },
-    { bucket: "65-75%", min: 65, max: 75 },
-    { bucket: "75-85%", min: 75, max: 85 },
-    { bucket: "85-92%", min: 85, max: 92 },
+    { bucket: "60-65%", min: 60, max: 65 },
+    { bucket: "65-70%", min: 65, max: 70 },
+    { bucket: "70-75%", min: 70, max: 75 },
+    { bucket: "75-80%", min: 75, max: 80 },
+    { bucket: "80-90%", min: 80, max: 90 },
+    { bucket: "90-100%", min: 90, max: 100 },
   ];
   const confidenceCalibration = confBuckets.map(b => {
     const bucketTrades = trades.filter(t => t.confidence >= b.min && t.confidence < b.max);
@@ -2174,7 +2223,7 @@ serve(async (req) => {
     const years = endYear - startYear;
 
     // Compute metrics
-    const metrics = computeMetrics(allTrades, initialCapital, combinedEquity, years, totalBarsAll, barsInTradeAll, benchmarkReturns, positionSizePct);
+    const metrics = computeMetrics(allTrades, initialCapital, combinedEquity, years, totalBarsAll, barsInTradeAll, benchmarkReturns, positionSizePct, spyData);
     const periods = computePeriods(allTrades);
     const drawdownCurve = computeDrawdownCurve(combinedEquity);
 
