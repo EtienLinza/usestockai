@@ -1323,6 +1323,7 @@ function computeMetrics(
   barsInTrade: number,
   benchmarkReturns: number[],
   positionSizePctVal: number = 10,
+  spyData?: DataSet | null,
 ): Partial<BacktestReport> {
   if (trades.length === 0) {
     return {
