@@ -1551,6 +1551,22 @@ serve(async (req) => {
     // NEW: Market Regime Performance (SPY 200MA)
     const marketRegimePerformance = computeMarketRegimePerformance(spyData, allTrades);
 
+    // Strategy Performance Attribution
+    const strategyPerformance = (() => {
+      const strategies = ["trend", "mean_reversion", "breakout"] as const;
+      return strategies.map(s => {
+        const sTrades = allTrades.filter(t => t.strategy === s);
+        const wins = sTrades.filter(t => t.returnPct > 0).length;
+        const avgRet = sTrades.length > 0 ? sTrades.reduce((a, t) => a + t.returnPct, 0) / sTrades.length : 0;
+        return {
+          strategy: s,
+          trades: sTrades.length,
+          winRate: sTrades.length > 0 ? parseFloat(((wins / sTrades.length) * 100).toFixed(1)) : 0,
+          avgReturn: parseFloat(avgRet.toFixed(2)),
+        };
+      }).filter(s => s.trades > 0);
+    })();
+
     const report: BacktestReport = {
       ...metrics as any,
       periods,
@@ -1565,6 +1581,7 @@ serve(async (req) => {
       signalDecay,
       benchmarkEquity,
       marketRegimePerformance,
+      strategyPerformance,
     };
 
     console.log(`Backtest complete: ${allTrades.length} trades, Win Rate: ${metrics.winRate}%, Sharpe: ${metrics.sharpeRatio}`);
