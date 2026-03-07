@@ -301,12 +301,12 @@ function computeStrategySignal(
     ];
     const trendShortScore = trendShortConditions.filter(Boolean).length;
 
-    if (trendBuyScore === 4 && above200) {
+    if (trendBuyScore >= 3 && above200) {
       trendSignal = "BUY";
-      trendConviction = 60 + (adxVal - 25) * 0.8 + Math.abs(macdH) * 10;
-    } else if (trendShortScore === 4 && below200) {
+      trendConviction = 55 + (adxVal - 25) * 0.8 + Math.abs(macdH) * 10 + trendBuyScore * 5;
+    } else if (trendShortScore >= 3 && below200) {
       trendSignal = "SHORT";
-      trendConviction = 60 + (adxVal - 25) * 0.8 + Math.abs(macdH) * 10;
+      trendConviction = 55 + (adxVal - 25) * 0.8 + Math.abs(macdH) * 10 + trendShortScore * 5;
     }
   }
 
@@ -335,11 +335,11 @@ function computeStrategySignal(
     ];
     const mrShortScore = mrShortConditions.filter(Boolean).length;
 
-    // Require 3 of 5 conditions (relaxed from 4/5)
-    if (mrBuyScore >= 3 && above200) {
+    // Require 3 of 5 conditions — no 200 SMA guard (MR buys dips regardless of long-term trend)
+    if (mrBuyScore >= 3) {
       mrSignal = "BUY";
       mrConviction = 50 + (30 - rsiVal) * 1.5 + Math.abs(smaDeviation) * 200 + mrBuyScore * 5;
-    } else if (mrShortScore >= 3 && below200) {
+    } else if (mrShortScore >= 3) {
       mrSignal = "SHORT";
       mrConviction = 50 + (rsiVal - 70) * 1.5 + Math.abs(smaDeviation) * 200 + mrShortScore * 5;
     }
@@ -359,13 +359,15 @@ function computeStrategySignal(
     const currentRange = high[n - 1] - low[n - 1];
     const rangeExpansion = currentRange > 1.5 * currentATR;
 
-    // Bullish breakout: close above upper BB with volume > 1.5x, ADX rising, and range expansion
-    if (currentPrice > bbU && volRatio > 1.5 && adxRising && rangeExpansion) {
+    // Relaxed breakout: squeeze + ADX rising mandatory; need at least one of (volume > 1.5x, range expansion)
+    const hasVolumeConfirm = volRatio > 1.5;
+    const hasBreakoutFilter = hasVolumeConfirm || rangeExpansion;
+
+    if (currentPrice > bbU && adxRising && hasBreakoutFilter) {
       boSignal = "BUY";
       boConviction = 55 + volRatio * 10 + (currentPrice - bbU) / bbU * 500;
     }
-    // Bearish breakout: close below lower BB with volume > 1.5x, ADX rising, and range expansion
-    else if (currentPrice < bbL && volRatio > 1.5 && adxRising && rangeExpansion) {
+    else if (currentPrice < bbL && adxRising && hasBreakoutFilter) {
       boSignal = "SHORT";
       boConviction = 55 + volRatio * 10 + (bbL - currentPrice) / bbL * 500;
     }
@@ -392,21 +394,10 @@ function computeStrategySignal(
     return HOLD_RESULT(regime);
   }
 
-  // --- Signal Confirmation ---
-  // Trend: require 2 consecutive same-direction signals
-  // Mean reversion & breakout: execute immediately (time-sensitive / self-filtering)
-  if (bestSignal === signalState.lastDirection) {
-    signalState.consecutiveCount++;
-  } else {
-    signalState.lastDirection = bestSignal;
-    signalState.consecutiveCount = 1;
-  }
-
-  const needsConfirmation = bestStrategy === "trend";
-  const CONFIRMATION_REQUIRED = 2;
-  if (needsConfirmation && signalState.consecutiveCount < CONFIRMATION_REQUIRED) {
-    return HOLD_RESULT(regime);
-  }
+  // --- No confirmation required — individual strategy filters are already strict enough ---
+  // Confirmation at STEP intervals added too much latency (10+ bars delay)
+  signalState.lastDirection = bestSignal;
+  signalState.consecutiveCount = 1;
 
   // --- Passed all filters — generate signal ---
   const cappedConviction = Math.min(100, bestConviction);
