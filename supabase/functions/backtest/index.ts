@@ -198,7 +198,8 @@ function createSignalTracker(): SignalState {
 
 function computeStrategySignal(
   close: number[], high: number[], low: number[], volume: number[],
-  signalState: SignalState, step: number
+  signalState: SignalState, step: number,
+  signalParams?: { adxThreshold?: number; rsiOversold?: number; rsiOverbought?: number; buyThreshold?: number; shortThreshold?: number }
 ): {
   consensusScore: number;
   regime: string;
@@ -279,10 +280,17 @@ function computeStrategySignal(
   const above200 = currentPrice > s200;
   const below200 = currentPrice < s200;
 
-  // --- Strategy A: Trend Following (ADX > 25) ---
+  const SP = signalParams || {};
+  const ADX_THRESH = SP.adxThreshold ?? 25;
+  const RSI_OS = SP.rsiOversold ?? 30;
+  const RSI_OB = SP.rsiOverbought ?? 70;
+  const CONV_BUY_THRESH = SP.buyThreshold ?? 60;
+  const CONV_SHORT_THRESH = SP.shortThreshold ?? 60;
+
+  // --- Strategy A: Trend Following (ADX > threshold) ---
   let trendSignal: "BUY" | "SHORT" | "HOLD" = "HOLD";
   let trendConviction = 0;
-  if (adxVal > 25) {
+  if (adxVal > ADX_THRESH) {
     // BUY: EMA12 > EMA26 AND price > SMA50 AND MACD histogram positive & increasing AND RSI 35-75
     const trendBuyConditions = [
       e12 > e26,
@@ -310,14 +318,14 @@ function computeStrategySignal(
     }
   }
 
-  // --- Strategy B: Mean Reversion (ADX < 25 — no dead zone with trend) ---
+  // --- Strategy B: Mean Reversion (ADX < threshold — no dead zone with trend) ---
   let mrSignal: "BUY" | "SHORT" | "HOLD" = "HOLD";
   let mrConviction = 0;
-  if (adxVal < 25) {
-    // BUY: RSI < 30, price < lower BB, deviation > 1.5*ATR (volatility-adjusted), stoch < 20, volume > 1.2x — need 3/5
+  if (adxVal < ADX_THRESH) {
+    // BUY: RSI < oversold, price < lower BB, deviation > 1.5*ATR (volatility-adjusted), stoch < 20, volume > 1.2x — need 3/5
     const atrDevThreshold = currentPrice > 0 ? (1.5 * currentATR) / currentPrice : 0.02;
     const mrBuyConditions = [
-      rsiVal < 30,
+      rsiVal < RSI_OS,
       currentPrice < bbL,
       smaDeviation < -atrDevThreshold,
       sk < 20,
@@ -325,9 +333,9 @@ function computeStrategySignal(
     ];
     const mrBuyScore = mrBuyConditions.filter(Boolean).length;
 
-    // SHORT: RSI > 70, price > upper BB, deviation > 1.5*ATR, stoch > 80, volume > 1.2x — need 3/5
+    // SHORT: RSI > overbought, price > upper BB, deviation > 1.5*ATR, stoch > 80, volume > 1.2x — need 3/5
     const mrShortConditions = [
-      rsiVal > 70,
+      rsiVal > RSI_OB,
       currentPrice > bbU,
       smaDeviation > atrDevThreshold,
       sk > 80,
@@ -394,13 +402,18 @@ function computeStrategySignal(
     return HOLD_RESULT(regime);
   }
 
-  // --- No confirmation required — individual strategy filters are already strict enough ---
-  // Confirmation at STEP intervals added too much latency (10+ bars delay)
+  // --- Conviction threshold filter (Bug Fix #1) ---
+  // This is the key gate: if conviction doesn't meet the user-configured threshold, skip it
+  const cappedConviction = Math.min(100, bestConviction);
+  const convThresh = bestSignal === "BUY" ? CONV_BUY_THRESH : CONV_SHORT_THRESH;
+  if (cappedConviction < convThresh) {
+    signalState.lastDirection = "HOLD";
+    signalState.consecutiveCount = 0;
+    return HOLD_RESULT(regime);
+  }
+
   signalState.lastDirection = bestSignal;
   signalState.consecutiveCount = 1;
-
-  // --- Passed all filters — generate signal ---
-  const cappedConviction = Math.min(100, bestConviction);
 
   // Volatility-adjusted position sizing
   const TARGET_VOL = 0.015; // 1.5% daily target
@@ -524,6 +537,12 @@ interface BacktestConfig {
   includeMonteCarlo: boolean;
   buyThreshold: number;
   shortThreshold: number;
+  // New configurable signal parameters
+  adxThreshold: number;
+  rsiOversold: number;
+  rsiOverbought: number;
+  trailingStopATRMult: number;
+  maxHoldBars: number;
 }
 
 interface BacktestReport {
@@ -773,14 +792,21 @@ function runWalkForwardBacktest(
     const trainVol = volume.slice(Math.max(0, i - TRAIN_WINDOW), i);
     if (trainClose.length < 50) continue;
 
-    const signal = computeStrategySignal(trainClose, trainHigh, trainLow, trainVol, signalState, STEP);
+    const signal = computeStrategySignal(trainClose, trainHigh, trainLow, trainVol, signalState, STEP, {
+      adxThreshold: config.adxThreshold,
+      rsiOversold: config.rsiOversold,
+      rsiOverbought: config.rsiOverbought,
+      buyThreshold: config.buyThreshold,
+      shortThreshold: Math.abs(config.shortThreshold), // normalize to positive for conviction comparison
+    });
 
-    // Minimum conviction floor — skip weak signals
-    if (signal.confidence < 55) continue;
+    // Signal already filtered by conviction threshold inside computeStrategySignal
+    // Just check if we got a directional signal
+    if (signal.consensusScore === 0) continue;
 
     let action: "BUY" | "SHORT" | "HOLD" = "HOLD";
-    if (signal.consensusScore > config.buyThreshold) action = "BUY";
-    else if (signal.consensusScore < config.shortThreshold) action = "SHORT";
+    if (signal.consensusScore > 0) action = "BUY";
+    else if (signal.consensusScore < 0) action = "SHORT";
     if (action === "HOLD") continue;
 
     // Block duplicate-direction trades on same ticker
@@ -792,14 +818,16 @@ function runWalkForwardBacktest(
     const rawEntryPrice = open[entryIdx];
     const entryPrice = applyTradingCosts(rawEntryPrice, action === "BUY", tradeConfig);
 
-    const maxHoldBars = signal.strategy === "trend" ? 20
-      : signal.strategy === "mean_reversion" ? 10
-      : signal.strategy === "breakout" ? 15
+    const trendHold = config.maxHoldBars || 20;
+    const maxHoldBars = signal.strategy === "trend" ? trendHold
+      : signal.strategy === "mean_reversion" ? Math.round(trendHold * 0.5)
+      : signal.strategy === "breakout" ? Math.round(trendHold * 0.75)
       : STEP;
     const useTrailingStop = signal.strategy === "trend" || signal.strategy === "breakout";
 
     const atrPct = entryPrice > 0 ? signal.atr / entryPrice : 0.02;
-    const trailingStopDist = 2 * atrPct;
+    const tsATRMult = config.trailingStopATRMult || 2.0;
+    const trailingStopDist = tsATRMult * atrPct;
     const breakevenThreshold = atrPct;
     const effectiveStopPct = signal.strategy === "trend"
       ? Math.max(config.stopLossPct / 100, 3 * atrPct)
@@ -1586,11 +1614,16 @@ serve(async (req) => {
       maxPositions = 5,
       rebalanceFrequency = "weekly",
       includeMonteCarlo = true,
-      buyThreshold = 30,
-      shortThreshold = -30,
+      buyThreshold = 60,
+      shortThreshold = -60,
+      adxThreshold = 25,
+      rsiOversold = 30,
+      rsiOverbought = 70,
+      trailingStopATRMult = 2.0,
+      maxHoldBars = 20,
     } = body;
 
-    console.log(`Backtest request: ${tickers.join(",")} from ${startYear} to ${endYear}`);
+    console.log(`Backtest request: ${tickers.join(",")} from ${startYear} to ${endYear}, buyThresh=${buyThreshold}, adx=${adxThreshold}, rsiOS=${rsiOversold}, rsiOB=${rsiOverbought}`);
 
     const config: BacktestConfig = {
       tickers: tickers.slice(0, 5),
@@ -1598,6 +1631,8 @@ serve(async (req) => {
       stopLossPct, takeProfitPct, maxPositions,
       rebalanceFrequency, includeMonteCarlo,
       buyThreshold, shortThreshold,
+      adxThreshold, rsiOversold, rsiOverbought,
+      trailingStopATRMult, maxHoldBars,
     };
 
     const tradeConfig: TradeConfig = {
@@ -1633,31 +1668,32 @@ serve(async (req) => {
     let firstTickerData: DataSet | null = null;
     const tickerCount = config.tickers.length;
 
-    for (let idx = 0; idx < config.tickers.length; idx++) {
-      const data = tickerData[idx];
-      if (!data || data.close.length < 100) {
-        console.warn(`Insufficient data for ${config.tickers[idx]}, skipping`);
-        continue;
-      }
+    // Bug Fix #2: Count valid tickers FIRST, then split capital properly
+    const validTickerIndices = config.tickers
+      .map((_, ti) => ti)
+      .filter(ti => tickerData[ti] && tickerData[ti]!.close.length >= 100);
+    const numTickers = Math.max(validTickerIndices.length, 1);
+    const capitalPerTicker = config.initialCapital / numTickers;
+
+    for (const idx of validTickerIndices) {
+      const data = tickerData[idx]!;
 
       if (!firstTickerData) firstTickerData = data;
 
-      const { trades, equityCurve, totalBars, barsInTrade } = runWalkForwardBacktest(data, config.tickers[idx], config, tradeConfig);
+      // Pass per-ticker capital so position sizing is correct
+      const tickerConfig = { ...config, initialCapital: capitalPerTicker };
+      const tickerTradeConfig = { ...tradeConfig, initialCapital: capitalPerTicker };
+
+      const { trades, equityCurve, totalBars, barsInTrade } = runWalkForwardBacktest(data, config.tickers[idx], tickerConfig, tickerTradeConfig);
       allTrades = allTrades.concat(trades);
       totalBarsAll += totalBars;
       barsInTradeAll += barsInTrade;
 
-      const numTickers = config.tickers.filter((_, ti) => tickerData[ti] && tickerData[ti]!.close.length >= 100).length;
-      const capitalPerTicker = config.initialCapital / Math.max(numTickers, 1);
-
       if (combinedEquity.length === 0) {
-        combinedEquity = equityCurve.map(p => ({
-          date: p.date,
-          value: capitalPerTicker + (p.value - config.initialCapital) * (capitalPerTicker / config.initialCapital),
-        }));
+        combinedEquity = equityCurve.map(p => ({ date: p.date, value: p.value }));
       } else {
         for (const point of equityCurve) {
-          const pnl = (point.value - config.initialCapital) * (capitalPerTicker / config.initialCapital);
+          const pnl = point.value - capitalPerTicker;
           const existing = combinedEquity.find(c => c.date === point.date);
           if (existing) {
             existing.value += pnl;

@@ -158,6 +158,12 @@ const Backtest = () => {
   const [stopLoss, setStopLoss] = useState(5);
   const [takeProfit, setTakeProfit] = useState(10);
   const [includeMonteCarlo, setIncludeMonteCarlo] = useState(true);
+  const [buyThreshold, setBuyThreshold] = useState(60);
+  const [adxThreshold, setAdxThreshold] = useState(25);
+  const [rsiOversold, setRsiOversold] = useState(30);
+  const [rsiOverbought, setRsiOverbought] = useState(70);
+  const [trailingStopATRMult, setTrailingStopATRMult] = useState(2.0);
+  const [maxHoldBars, setMaxHoldBars] = useState(20);
 
   const handleRunBacktest = async () => {
     if (!session?.access_token) {
@@ -190,6 +196,13 @@ const Backtest = () => {
             stopLossPct: stopLoss,
             takeProfitPct: takeProfit,
             includeMonteCarlo,
+            buyThreshold,
+            shortThreshold: -buyThreshold,
+            adxThreshold,
+            rsiOversold,
+            rsiOverbought,
+            trailingStopATRMult,
+            maxHoldBars,
           }),
           timeoutMs: 120000, // Backtests can take longer
           retries: 1,
@@ -290,6 +303,46 @@ const Backtest = () => {
                     <div className="space-y-2">
                       <Label className="text-xs text-muted-foreground">Take Profit: {takeProfit}%</Label>
                       <Slider value={[takeProfit]} onValueChange={v => setTakeProfit(v[0])} min={2} max={30} step={1} />
+                    </div>
+                  </div>
+
+                  <div className="border-t border-border/50 pt-4 mt-2 space-y-4">
+                    <div className="text-[10px] text-muted-foreground uppercase tracking-wide flex items-center gap-1.5">
+                      <Signal className="w-3 h-3" />
+                      Signal Parameters
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label className="text-xs text-muted-foreground">Conviction Threshold: {buyThreshold}</Label>
+                      <Slider value={[buyThreshold]} onValueChange={v => setBuyThreshold(v[0])} min={40} max={90} step={5} />
+                      <p className="text-[10px] text-muted-foreground/60">Higher = fewer but stronger signals</p>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label className="text-xs text-muted-foreground">ADX Threshold: {adxThreshold}</Label>
+                      <Slider value={[adxThreshold]} onValueChange={v => setAdxThreshold(v[0])} min={15} max={40} step={1} />
+                      <p className="text-[10px] text-muted-foreground/60">Trend vs Mean Reversion cutoff</p>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-2">
+                        <Label className="text-xs text-muted-foreground">RSI Oversold: {rsiOversold}</Label>
+                        <Slider value={[rsiOversold]} onValueChange={v => setRsiOversold(v[0])} min={15} max={40} step={1} />
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-xs text-muted-foreground">RSI Overbought: {rsiOverbought}</Label>
+                        <Slider value={[rsiOverbought]} onValueChange={v => setRsiOverbought(v[0])} min={60} max={85} step={1} />
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label className="text-xs text-muted-foreground">Trailing Stop: {trailingStopATRMult}× ATR</Label>
+                      <Slider value={[trailingStopATRMult * 10]} onValueChange={v => setTrailingStopATRMult(v[0] / 10)} min={10} max={40} step={1} />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label className="text-xs text-muted-foreground">Max Hold: {maxHoldBars} bars</Label>
+                      <Slider value={[maxHoldBars]} onValueChange={v => setMaxHoldBars(v[0])} min={5} max={60} step={5} />
                     </div>
                   </div>
 
