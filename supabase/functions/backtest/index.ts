@@ -474,6 +474,7 @@ interface Trade {
   mae: number;
   mfe: number;
   volumeAtEntry: number;
+  strategy: "trend" | "mean_reversion" | "breakout" | "none";
 }
 
 function applyTradingCosts(price: number, isBuy: boolean, config: TradeConfig): number {
