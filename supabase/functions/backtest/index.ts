@@ -1614,11 +1614,16 @@ serve(async (req) => {
       maxPositions = 5,
       rebalanceFrequency = "weekly",
       includeMonteCarlo = true,
-      buyThreshold = 30,
-      shortThreshold = -30,
+      buyThreshold = 60,
+      shortThreshold = -60,
+      adxThreshold = 25,
+      rsiOversold = 30,
+      rsiOverbought = 70,
+      trailingStopATRMult = 2.0,
+      maxHoldBars = 20,
     } = body;
 
-    console.log(`Backtest request: ${tickers.join(",")} from ${startYear} to ${endYear}`);
+    console.log(`Backtest request: ${tickers.join(",")} from ${startYear} to ${endYear}, buyThresh=${buyThreshold}, adx=${adxThreshold}, rsiOS=${rsiOversold}, rsiOB=${rsiOverbought}`);
 
     const config: BacktestConfig = {
       tickers: tickers.slice(0, 5),
@@ -1626,6 +1631,8 @@ serve(async (req) => {
       stopLossPct, takeProfitPct, maxPositions,
       rebalanceFrequency, includeMonteCarlo,
       buyThreshold, shortThreshold,
+      adxThreshold, rsiOversold, rsiOverbought,
+      trailingStopATRMult, maxHoldBars,
     };
 
     const tradeConfig: TradeConfig = {
