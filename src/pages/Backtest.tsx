@@ -127,9 +127,9 @@ function exportCSV(report: BacktestReport) {
   csv += `Time in Drawdown,${report.timeInDrawdownPct}%\nMax DD Duration,${report.maxDrawdownDuration} bars\nRecovery Time,${report.recoveryTime} bars\n`;
   csv += `Strategy Capacity,$${report.strategyCapacity?.toLocaleString() || 'N/A'}\n\n`;
 
-  csv += "=== TRADE LOG ===\nDate,Exit Date,Ticker,Action,Entry,Exit,Return%,PnL,Duration,MAE%,MFE%,Regime,Confidence\n";
+  csv += "=== TRADE LOG ===\nDate,Exit Date,Ticker,Action,Strategy,Entry,Exit,Return%,PnL,Duration,MAE%,MFE%,Regime,Confidence\n";
   for (const t of report.tradeLog) {
-    csv += `${t.date},${t.exitDate},${t.ticker},${t.action},${t.entryPrice.toFixed(2)},${t.exitPrice.toFixed(2)},${t.returnPct.toFixed(2)},${t.pnl.toFixed(2)},${t.duration},${t.mae},${t.mfe},${t.regime},${t.confidence}\n`;
+    csv += `${t.date},${t.exitDate},${t.ticker},${t.action},${t.strategy || ""},${t.entryPrice.toFixed(2)},${t.exitPrice.toFixed(2)},${t.returnPct.toFixed(2)},${t.pnl.toFixed(2)},${t.duration},${t.mae},${t.mfe},${t.regime},${t.confidence}\n`;
   }
 
   const blob = new Blob([csv], { type: "text/csv" });
