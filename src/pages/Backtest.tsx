@@ -669,7 +669,18 @@ const Backtest = () => {
                     )}
 
                     {/* Robustness Tests */}
-                    {report.robustness && (report.robustness.noiseInjection || report.robustness.delayedExecution || report.robustness.tradeDependency) && (
+                    {report.robustnessSkipped ? (
+                      <Card className="glass-card p-6">
+                        <div className="flex items-center gap-2 mb-2">
+                          <FlaskConical className="w-4 h-4 text-muted-foreground" />
+                          <span className="text-sm font-medium">Robustness Tests</span>
+                          <Badge variant="secondary" className="text-[10px]">SKIPPED</Badge>
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          Skipped due to computation budget. Try fewer tickers or a shorter date range for full robustness analysis.
+                        </p>
+                      </Card>
+                    ) : report.robustness && (report.robustness.noiseInjection || report.robustness.delayedExecution || report.robustness.tradeDependency) ? (
                       <Card className="glass-card p-6">
                         <div className="flex items-center gap-2 mb-4">
                           <FlaskConical className="w-4 h-4 text-primary" />
@@ -723,7 +734,7 @@ const Backtest = () => {
                           )}
                         </div>
                       </Card>
-                    )}
+                    ) : null}
 
                     {/* Parameter Sensitivity */}
                     {report.robustness?.parameterSensitivity?.length > 0 && (
