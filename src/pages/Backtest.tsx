@@ -149,6 +149,7 @@ const Backtest = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [report, setReport] = useState<BacktestReport | null>(null);
   const [showTradeLog, setShowTradeLog] = useState(false);
+  const [strategyMode, setStrategyMode] = useState<"adaptive" | "conservative" | "aggressive" | "custom">("adaptive");
 
   const [tickerInput, setTickerInput] = useState("AAPL");
   const [startYear, setStartYear] = useState(2020);
