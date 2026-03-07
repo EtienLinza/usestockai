@@ -64,7 +64,7 @@ interface BacktestReport {
   confidenceCalibration: { bucket: string; predictedConf: number; actualAccuracy: number; count: number }[];
   equityCurve: { date: string; value: number }[];
   drawdownCurve: { date: string; drawdown: number }[];
-  tradeLog: { date: string; exitDate: string; ticker: string; action: string; entryPrice: number; exitPrice: number; returnPct: number; pnl: number; regime: string; confidence: number; duration: number; mae: number; mfe: number }[];
+  tradeLog: { date: string; exitDate: string; ticker: string; action: string; entryPrice: number; exitPrice: number; returnPct: number; pnl: number; regime: string; confidence: number; duration: number; mae: number; mfe: number; strategy?: string }[];
   monteCarlo: { percentile5: number; percentile25: number; median: number; percentile75: number; percentile95: number } | null;
   benchmarkReturn: number;
   annualizedReturn: number;
@@ -95,6 +95,7 @@ interface BacktestReport {
   signalDecay: { day: number; accuracy: number }[];
   benchmarkEquity: { date: string; value: number }[];
   marketRegimePerformance: { regime: string; accuracy: number; avgReturn: number; trades: number }[];
+  strategyPerformance?: { strategy: string; trades: number; winRate: number; avgReturn: number }[];
 }
 
 const MetricCard = ({ label, value, suffix = "", icon: Icon, color = "text-foreground" }: {
@@ -126,9 +127,9 @@ function exportCSV(report: BacktestReport) {
   csv += `Time in Drawdown,${report.timeInDrawdownPct}%\nMax DD Duration,${report.maxDrawdownDuration} bars\nRecovery Time,${report.recoveryTime} bars\n`;
   csv += `Strategy Capacity,$${report.strategyCapacity?.toLocaleString() || 'N/A'}\n\n`;
 
-  csv += "=== TRADE LOG ===\nDate,Exit Date,Ticker,Action,Entry,Exit,Return%,PnL,Duration,MAE%,MFE%,Regime,Confidence\n";
+  csv += "=== TRADE LOG ===\nDate,Exit Date,Ticker,Action,Strategy,Entry,Exit,Return%,PnL,Duration,MAE%,MFE%,Regime,Confidence\n";
   for (const t of report.tradeLog) {
-    csv += `${t.date},${t.exitDate},${t.ticker},${t.action},${t.entryPrice.toFixed(2)},${t.exitPrice.toFixed(2)},${t.returnPct.toFixed(2)},${t.pnl.toFixed(2)},${t.duration},${t.mae},${t.mfe},${t.regime},${t.confidence}\n`;
+    csv += `${t.date},${t.exitDate},${t.ticker},${t.action},${t.strategy || ""},${t.entryPrice.toFixed(2)},${t.exitPrice.toFixed(2)},${t.returnPct.toFixed(2)},${t.pnl.toFixed(2)},${t.duration},${t.mae},${t.mfe},${t.regime},${t.confidence}\n`;
   }
 
   const blob = new Blob([csv], { type: "text/csv" });
@@ -822,7 +823,28 @@ const Backtest = () => {
                       </Card>
                     )}
 
-                    {/* Indicator-Based Regime Performance */}
+                    {/* Strategy Attribution */}
+                    {report.strategyPerformance && report.strategyPerformance.length > 0 && (
+                      <Card className="glass-card p-6">
+                        <div className="flex items-center gap-2 mb-4">
+                          <Layers className="w-4 h-4 text-primary" />
+                          <span className="text-sm font-medium">Strategy Attribution</span>
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                          {report.strategyPerformance.map(sp => (
+                            <div key={sp.strategy} className="p-3 rounded-lg border border-border/20 bg-muted/10">
+                              <div className="text-xs text-muted-foreground capitalize mb-1">{sp.strategy.replace(/_/g, " ")}</div>
+                              <div className="text-lg font-bold">{sp.trades} <span className="text-xs font-normal text-muted-foreground">trades</span></div>
+                              <div className="flex items-center gap-3 mt-1">
+                                <span className={`text-xs font-mono ${sp.winRate >= 50 ? "text-success" : "text-destructive"}`}>{sp.winRate}% win</span>
+                                <span className={`text-xs font-mono ${sp.avgReturn >= 0 ? "text-success" : "text-destructive"}`}>{sp.avgReturn > 0 ? "+" : ""}{sp.avgReturn}%</span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </Card>
+                    )}
+
                     {report.regimePerformance.length > 0 && (
                       <Card className="glass-card p-6">
                         <div className="text-sm font-medium mb-4">Indicator Regime Performance</div>
@@ -951,6 +973,7 @@ const Backtest = () => {
                                 <th className="text-left py-1.5 text-muted-foreground font-normal">Date</th>
                                 <th className="text-left py-1.5 text-muted-foreground font-normal">Ticker</th>
                                 <th className="text-left py-1.5 text-muted-foreground font-normal">Action</th>
+                                <th className="text-left py-1.5 text-muted-foreground font-normal">Strategy</th>
                                 <th className="text-right py-1.5 text-muted-foreground font-normal">Entry</th>
                                 <th className="text-right py-1.5 text-muted-foreground font-normal">Exit</th>
                                 <th className="text-right py-1.5 text-muted-foreground font-normal">Return</th>
@@ -966,6 +989,7 @@ const Backtest = () => {
                                   <td className="py-1 font-mono text-muted-foreground">{t.date}</td>
                                   <td className="py-1 font-mono">{t.ticker}</td>
                                   <td className={`py-1 font-medium ${t.action === "BUY" ? "text-success" : "text-destructive"}`}>{t.action}</td>
+                                  <td className="py-1 text-muted-foreground capitalize">{(t.strategy || "—").replace(/_/g, " ")}</td>
                                   <td className="py-1 text-right font-mono">${t.entryPrice.toFixed(2)}</td>
                                   <td className="py-1 text-right font-mono">${t.exitPrice.toFixed(2)}</td>
                                   <td className={`py-1 text-right font-mono ${t.returnPct > 0 ? "text-success" : "text-destructive"}`}>
