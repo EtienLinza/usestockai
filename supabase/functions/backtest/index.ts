@@ -199,7 +199,8 @@ function createSignalTracker(): SignalState {
 function computeStrategySignal(
   close: number[], high: number[], low: number[], volume: number[],
   signalState: SignalState, step: number,
-  signalParams?: { adxThreshold?: number; rsiOversold?: number; rsiOverbought?: number; buyThreshold?: number; shortThreshold?: number }
+  signalParams?: { adxThreshold?: number; rsiOversold?: number; rsiOverbought?: number; buyThreshold?: number; shortThreshold?: number },
+  adaptiveContext?: { spyBearish?: boolean; spySMADeclining?: boolean; isLeader?: boolean }
 ): {
   consensusScore: number;
   regime: string;
@@ -289,6 +290,16 @@ function computeStrategySignal(
   const sma200Declining = sma200Slope < -0.01; // 200 SMA declining > 1%
   const sma200Rising = sma200Slope > 0.01;     // 200 SMA rising > 1%
 
+  // --- Adaptive Layer 1: Dual-Regime System ---
+  // Only apply guards when BOTH SPY and the stock confirm bearishness
+  const ctx = adaptiveContext || {};
+  const spyConfirmsBear = ctx.spyBearish === true;
+  const spySMAConfirmsDeclining = ctx.spySMADeclining === true;
+  // Dual-regime: block only when both stock AND SPY agree on the bearish signal
+  const dualRegimeBearBlock = below200 && spyConfirmsBear;
+  const dualRegimeBullBlock = above200 && (ctx.spyBearish === false); // SPY bullish, used for short guard
+  const dualSMADeclining = sma200Declining && spySMAConfirmsDeclining;
+
   const SP = signalParams || {};
   const ADX_THRESH = SP.adxThreshold ?? 25;
   const RSI_OS = SP.rsiOversold ?? 30;
@@ -317,16 +328,16 @@ function computeStrategySignal(
     ];
     const trendShortScore = trendShortConditions.filter(Boolean).length;
 
-    // Fix 2: Block trend BUYs when 200 SMA is declining (catches early 2008 rollovers)
-    if (trendBuyScore >= 3 && above200 && !sma200Declining) {
+    // Dual-Regime Layer 1: Block trend BUYs only when BOTH stock AND SPY 200 SMA are declining
+    if (trendBuyScore >= 3 && above200 && !dualSMADeclining) {
       trendSignal = "BUY";
       let conv = trendBuyScore * 20;
       conv += Math.min((adxVal - ADX_THRESH) * 0.5, 15);
       conv += Math.min(Math.abs(macdH) * 5, 10);
       if (rsiVal >= 40 && rsiVal <= 60) conv += 5;
       trendConviction = Math.min(100, conv);
-    // Fix 2: Block trend SHORTs when 200 SMA is rising
-    } else if (trendShortScore >= 3 && below200 && !sma200Rising) {
+    // Dual-Regime Layer 1: Block trend SHORTs only when BOTH stock AND SPY 200 SMA are rising
+    } else if (trendShortScore >= 3 && below200 && !(sma200Rising && ctx.spyBearish === false)) {
       trendSignal = "SHORT";
       let conv = trendShortScore * 20;
       conv += Math.min((adxVal - ADX_THRESH) * 0.5, 15);
@@ -360,14 +371,14 @@ function computeStrategySignal(
     ];
     const mrShortScore = mrShortConditions.filter(Boolean).length;
 
-    // Fix 1: Apply 200 SMA trend guard to MR — block falling knife buys and counter-trend shorts
-    if (mrBuyScore >= 3 && !below200) {
+    // Dual-Regime Layer 1: Block MR buys only when BOTH stock below 200 AND SPY bearish
+    if (mrBuyScore >= 3 && !dualRegimeBearBlock) {
       mrSignal = "BUY";
       let conv = mrBuyScore * 18;
       conv += Math.min(Math.abs(rsiVal - 50) * 0.3, 10);
       conv += Math.min(Math.abs(smaDeviation) * 100, 10);
       mrConviction = Math.min(100, conv);
-    } else if (mrShortScore >= 3 && !above200) {
+    } else if (mrShortScore >= 3 && !(above200 && ctx.spyBearish === false)) {
       mrSignal = "SHORT";
       let conv = mrShortScore * 18;
       conv += Math.min(Math.abs(rsiVal - 50) * 0.3, 10);
@@ -434,10 +445,22 @@ function computeStrategySignal(
   let adjustedConviction = bestConviction;
   const isBearishRegime = regime === "bearish" || regime === "strong_bearish";
   const isBullishRegime = regime === "bullish" || regime === "strong_bullish";
-  if (bestSignal === "BUY" && isBearishRegime) {
-    adjustedConviction *= 0.7; // Buying in bear market needs much higher raw conviction
-  } else if (bestSignal === "SHORT" && isBullishRegime) {
-    adjustedConviction *= 0.7; // Shorting in bull market needs much higher raw conviction
+  const isLeader = ctx.isLeader === true;
+
+  if (bestSignal === "BUY" && isBearishRegime && !isLeader) {
+    adjustedConviction *= 0.7; // Buying in bear market needs much higher raw conviction (unless leader)
+  } else if (bestSignal === "SHORT" && isBullishRegime && !isLeader) {
+    adjustedConviction *= 0.7; // Shorting in bull market needs much higher raw conviction (unless leader)
+  }
+
+  // --- Adaptive Layer 3: Conviction Bonus for stocks in their own strong trend ---
+  // If stock is in its own strong uptrend, boost BUY conviction
+  if (above200 && sma200Slope > 0.02 && rsiVal > 40 && rsiVal < 70) {
+    if (bestSignal === "BUY") adjustedConviction += 15;
+  }
+  // If stock is in its own strong downtrend, boost SHORT conviction
+  if (below200 && sma200Slope < -0.02 && rsiVal > 30 && rsiVal < 60) {
+    if (bestSignal === "SHORT") adjustedConviction += 15;
   }
 
   // --- Conviction threshold filter ---
@@ -712,12 +735,18 @@ function runWalkForwardBacktest(
   // Build SPY date→close map + compute SPY 200 SMA for short filtering
   const spyDateMap = new Map<string, number>();
   const spy200SMAMap = new Map<string, boolean>(); // date → whether SPY > SMA200
+  const spySMADecliningMap = new Map<string, boolean>(); // date → whether SPY 200 SMA slope is declining
   if (spyData && spyData.close.length >= 200) {
     const spySMA200 = calculateSMA(spyData.close, 200);
     for (let si = 0; si < spyData.timestamps.length; si++) {
       spyDateMap.set(spyData.timestamps[si], spyData.close[si]);
       if (!isNaN(spySMA200[si])) {
         spy200SMAMap.set(spyData.timestamps[si], spyData.close[si] > spySMA200[si]);
+        // Compute SPY 200 SMA slope (20-bar ROC)
+        if (si >= 20 && !isNaN(spySMA200[si - 20]) && spySMA200[si - 20] > 0) {
+          const spySlope = (spySMA200[si] - spySMA200[si - 20]) / spySMA200[si - 20];
+          spySMADecliningMap.set(spyData.timestamps[si], spySlope < -0.01);
+        }
       }
     }
   }
@@ -843,12 +872,41 @@ function runWalkForwardBacktest(
     const trainVol = volume.slice(Math.max(0, i - TRAIN_WINDOW), i);
     if (trainClose.length < 50) continue;
 
+    // --- Adaptive Layer 2: Relative Strength Filter ---
+    const currentDate = timestamps[i];
+    let isLeader = false;
+    let spyBearish = false;
+    let spySMADeclining = false;
+
+    if (spy200SMAMap.size > 0) {
+      spyBearish = spy200SMAMap.get(currentDate) === false; // SPY below its 200 SMA
+      spySMADeclining = spySMADecliningMap.get(currentDate) === true;
+
+      // Calculate 50-bar relative strength: stock return vs SPY return
+      if (i >= 50) {
+        const stockReturn50 = (close[i] - close[i - 50]) / close[i - 50];
+        const spyCloseNow = spyDateMap.get(currentDate);
+        // Find SPY close ~50 bars ago
+        const pastDate = timestamps[i - 50];
+        const spyClosePast = spyDateMap.get(pastDate);
+        if (spyCloseNow !== undefined && spyClosePast !== undefined && spyClosePast > 0) {
+          const spyReturn50 = (spyCloseNow - spyClosePast) / spyClosePast;
+          const relativeStrength = stockReturn50 - spyReturn50;
+          isLeader = relativeStrength > 0.10; // Outperforming SPY by 10%+
+        }
+      }
+    }
+
     const signal = computeStrategySignal(trainClose, trainHigh, trainLow, trainVol, signalState, STEP, {
       adxThreshold: config.adxThreshold,
       rsiOversold: config.rsiOversold,
       rsiOverbought: config.rsiOverbought,
       buyThreshold: config.buyThreshold,
-      shortThreshold: Math.abs(config.shortThreshold), // normalize to positive for conviction comparison
+      shortThreshold: Math.abs(config.shortThreshold),
+    }, {
+      spyBearish,
+      spySMADeclining,
+      isLeader,
     });
 
     // Signal already filtered by conviction threshold inside computeStrategySignal
@@ -860,12 +918,10 @@ function runWalkForwardBacktest(
     else if (signal.consensusScore < 0) action = "SHORT";
     if (action === "HOLD") continue;
 
-    // Fix 2: Disable shorts when SPY > 200 SMA (bull market filter)
-    if (action === "SHORT" && spy200SMAMap.size > 0) {
-      const currentDate = timestamps[i];
-      // Find closest SPY date
+    // Adaptive short filter: Disable shorts when SPY > 200 SMA, UNLESS stock is a leader
+    if (action === "SHORT" && spy200SMAMap.size > 0 && !isLeader) {
       const spyAbove200 = spy200SMAMap.get(currentDate);
-      if (spyAbove200 === true) continue; // Skip short in bull market
+      if (spyAbove200 === true) continue; // Skip short in bull market (unless leader)
     }
 
     // Block duplicate-direction trades on same ticker
