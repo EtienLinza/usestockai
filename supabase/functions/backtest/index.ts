@@ -575,6 +575,7 @@ interface BacktestReport {
   signalDecay: { day: number; accuracy: number }[];
   benchmarkEquity: { date: string; value: number }[];
   marketRegimePerformance: { regime: string; accuracy: number; avgReturn: number; trades: number }[];
+  strategyPerformance: { strategy: string; trades: number; winRate: number; avgReturn: number }[];
 }
 
 type DataSet = { timestamps: string[]; close: number[]; high: number[]; low: number[]; open: number[]; volume: number[] };
