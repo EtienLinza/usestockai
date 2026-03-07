@@ -2003,6 +2003,14 @@ serve(async (req) => {
 
     console.log(`Backtest request: ${tickers.join(",")} from ${startYear} to ${endYear}, mode=${strategyMode}, buyThresh=${buyThreshold}, adx=${adxThreshold}`);
 
+    // Validate years
+    if (startYear < 2000 || startYear > 2026) {
+      return new Response(JSON.stringify({ error: "Invalid start year. Please use a 4-digit year between 2000 and 2026." }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+    if (endYear <= startYear) {
+      return new Response(JSON.stringify({ error: "End year must be after start year." }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
     const config: BacktestConfig & { strategyMode: string; explicitOverride: boolean } = {
       tickers: tickers.slice(0, 5),
       startYear, endYear, initialCapital, positionSizePct,

@@ -177,6 +177,19 @@ const Backtest = () => {
     const tickers = tickerInput.split(",").map(t => t.trim().toUpperCase()).filter(Boolean).slice(0, 5);
     if (tickers.length === 0) { toast.error("Enter at least one ticker"); return; }
 
+    if (startYear < 2000 || startYear > 2026) {
+      toast.error("Start year must be between 2000 and 2026");
+      return;
+    }
+    if (endYear < 2000 || endYear > 2026) {
+      toast.error("End year must be between 2000 and 2026");
+      return;
+    }
+    if (endYear <= startYear) {
+      toast.error("End year must be after start year");
+      return;
+    }
+
     setIsLoading(true);
     setReport(null);
 
@@ -284,7 +297,7 @@ const Backtest = () => {
                   <div className="grid grid-cols-2 gap-3">
                     <div className="space-y-2">
                       <Label className="text-xs text-muted-foreground">Start Year</Label>
-                      <Input type="number" value={startYear} onChange={e => setStartYear(Number(e.target.value))} min={2010} max={2025} variant="glass" />
+                      <Input type="number" value={startYear} onChange={e => { const v = Number(e.target.value); setStartYear(v); }} min={2000} max={2026} variant="glass" onBlur={() => { if (startYear < 2000) setStartYear(2010); if (startYear > 2026) setStartYear(2025); }} />
                     </div>
                     <div className="space-y-2">
                       <Label className="text-xs text-muted-foreground">End Year</Label>
