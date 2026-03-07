@@ -301,12 +301,12 @@ function computeStrategySignal(
     ];
     const trendShortScore = trendShortConditions.filter(Boolean).length;
 
-    if (trendBuyScore === 4 && above200) {
+    if (trendBuyScore >= 3 && above200) {
       trendSignal = "BUY";
-      trendConviction = 60 + (adxVal - 25) * 0.8 + Math.abs(macdH) * 10;
-    } else if (trendShortScore === 4 && below200) {
+      trendConviction = 55 + (adxVal - 25) * 0.8 + Math.abs(macdH) * 10 + trendBuyScore * 5;
+    } else if (trendShortScore >= 3 && below200) {
       trendSignal = "SHORT";
-      trendConviction = 60 + (adxVal - 25) * 0.8 + Math.abs(macdH) * 10;
+      trendConviction = 55 + (adxVal - 25) * 0.8 + Math.abs(macdH) * 10 + trendShortScore * 5;
     }
   }
 
@@ -335,11 +335,11 @@ function computeStrategySignal(
     ];
     const mrShortScore = mrShortConditions.filter(Boolean).length;
 
-    // Require 3 of 5 conditions (relaxed from 4/5)
-    if (mrBuyScore >= 3 && above200) {
+    // Require 3 of 5 conditions — no 200 SMA guard (MR buys dips regardless of long-term trend)
+    if (mrBuyScore >= 3) {
       mrSignal = "BUY";
       mrConviction = 50 + (30 - rsiVal) * 1.5 + Math.abs(smaDeviation) * 200 + mrBuyScore * 5;
-    } else if (mrShortScore >= 3 && below200) {
+    } else if (mrShortScore >= 3) {
       mrSignal = "SHORT";
       mrConviction = 50 + (rsiVal - 70) * 1.5 + Math.abs(smaDeviation) * 200 + mrShortScore * 5;
     }
@@ -359,13 +359,15 @@ function computeStrategySignal(
     const currentRange = high[n - 1] - low[n - 1];
     const rangeExpansion = currentRange > 1.5 * currentATR;
 
-    // Bullish breakout: close above upper BB with volume > 1.5x, ADX rising, and range expansion
-    if (currentPrice > bbU && volRatio > 1.5 && adxRising && rangeExpansion) {
+    // Relaxed breakout: squeeze + ADX rising mandatory; need at least one of (volume > 1.5x, range expansion)
+    const hasVolumeConfirm = volRatio > 1.5;
+    const hasBreakoutFilter = hasVolumeConfirm || rangeExpansion;
+
+    if (currentPrice > bbU && adxRising && hasBreakoutFilter) {
       boSignal = "BUY";
       boConviction = 55 + volRatio * 10 + (currentPrice - bbU) / bbU * 500;
     }
-    // Bearish breakout: close below lower BB with volume > 1.5x, ADX rising, and range expansion
-    else if (currentPrice < bbL && volRatio > 1.5 && adxRising && rangeExpansion) {
+    else if (currentPrice < bbL && adxRising && hasBreakoutFilter) {
       boSignal = "SHORT";
       boConviction = 55 + volRatio * 10 + (bbL - currentPrice) / bbL * 500;
     }
@@ -392,21 +394,10 @@ function computeStrategySignal(
     return HOLD_RESULT(regime);
   }
 
-  // --- Signal Confirmation ---
-  // Trend: require 2 consecutive same-direction signals
-  // Mean reversion & breakout: execute immediately (time-sensitive / self-filtering)
-  if (bestSignal === signalState.lastDirection) {
-    signalState.consecutiveCount++;
-  } else {
-    signalState.lastDirection = bestSignal;
-    signalState.consecutiveCount = 1;
-  }
-
-  const needsConfirmation = bestStrategy === "trend";
-  const CONFIRMATION_REQUIRED = 2;
-  if (needsConfirmation && signalState.consecutiveCount < CONFIRMATION_REQUIRED) {
-    return HOLD_RESULT(regime);
-  }
+  // --- No confirmation required — individual strategy filters are already strict enough ---
+  // Confirmation at STEP intervals added too much latency (10+ bars delay)
+  signalState.lastDirection = bestSignal;
+  signalState.consecutiveCount = 1;
 
   // --- Passed all filters — generate signal ---
   const cappedConviction = Math.min(100, bestConviction);
@@ -612,6 +603,32 @@ interface BacktestReport {
 
 type DataSet = { timestamps: string[]; close: number[]; high: number[]; low: number[]; open: number[]; volume: number[] };
 
+interface OpenPosition {
+  entryIdx: number;
+  entryPrice: number;
+  action: "BUY" | "SHORT";
+  strategy: "trend" | "mean_reversion" | "breakout" | "none";
+  maxHoldBars: number;
+  useTrailingStop: boolean;
+  trailingStopDist: number;
+  breakevenThreshold: number;
+  effectiveStopPct: number;
+  takeProfitPct: number;
+  positionSize: number;
+  shares: number;
+  commission: number;
+  regime: string;
+  confidence: number;
+  predictedReturn: number;
+  signal_atr: number;
+  positionSizeMultiplier: number;
+  // Tracking state
+  peakReturn: number;
+  breakEvenActivated: boolean;
+  maxAdverse: number;
+  maxFavorable: number;
+}
+
 function runWalkForwardBacktest(
   allData: DataSet,
   ticker: string,
@@ -625,160 +642,200 @@ function runWalkForwardBacktest(
   let capital = config.initialCapital;
   const equityCurve: { date: string; value: number }[] = [{ date: timestamps[0], value: capital }];
 
-  // TRAIN_WINDOW = 250: SMA200 needs 200 bars + 50 buffer for indicator stabilization
   const TRAIN_WINDOW = 250;
-  const STEP = stepOverride || 5;
+  const STEP = stepOverride || 2; // Reduced from 5 to 2 for faster signal evaluation
   let totalBars = 0;
   let barsInTrade = 0;
-  const COOLDOWN_BARS = 5; // 1 evaluation step (reduced from 15 to allow re-entry)
+  const COOLDOWN_BARS = 3; // Reduced proportionally with STEP
 
   const signalState = createSignalTracker();
+  const openPositions: OpenPosition[] = [];
+  let capitalInPositions = 0; // Track capital deployed
 
-  for (let i = TRAIN_WINDOW; i < close.length - STEP - executionDelay; i += STEP) {
+  for (let i = TRAIN_WINDOW; i < close.length - 1; i += STEP) {
+    totalBars += STEP;
+
+    // --- Phase 1: Check exits for all open positions ---
+    for (let p = openPositions.length - 1; p >= 0; p--) {
+      const pos = openPositions[p];
+      let exited = false;
+      let exitPrice = 0;
+      let exitDate = "";
+      let exitIdx = i;
+      let exitReason: Trade["exitReason"] = "time_exit";
+
+      // Check each bar since last evaluation
+      const checkStart = Math.max(pos.entryIdx + 1, i - STEP + 1);
+      const checkEnd = Math.min(i, close.length - 1);
+      
+      for (let j = checkStart; j <= checkEnd; j++) {
+        const priceChange = pos.action === "BUY"
+          ? (close[j] - pos.entryPrice) / pos.entryPrice
+          : (pos.entryPrice - close[j]) / pos.entryPrice;
+
+        if (priceChange < 0) pos.maxAdverse = Math.min(pos.maxAdverse, priceChange);
+        if (priceChange > 0) pos.maxFavorable = Math.max(pos.maxFavorable, priceChange);
+        if (priceChange > pos.peakReturn) pos.peakReturn = priceChange;
+        if (priceChange >= pos.breakevenThreshold) pos.breakEvenActivated = true;
+
+        // Hard stop-loss
+        if (priceChange <= -pos.effectiveStopPct) {
+          exitPrice = pos.action === "BUY"
+            ? pos.entryPrice * (1 - pos.effectiveStopPct)
+            : pos.entryPrice * (1 + pos.effectiveStopPct);
+          exitDate = timestamps[j]; exitIdx = j; exitReason = "stop_loss"; exited = true; break;
+        }
+
+        // Hard take-profit
+        if (priceChange >= pos.takeProfitPct) {
+          exitPrice = pos.action === "BUY"
+            ? pos.entryPrice * (1 + pos.takeProfitPct)
+            : pos.entryPrice * (1 - pos.takeProfitPct);
+          exitDate = timestamps[j]; exitIdx = j; exitReason = "take_profit"; exited = true; break;
+        }
+
+        // Trailing stop
+        if (pos.useTrailingStop && pos.peakReturn > pos.breakevenThreshold) {
+          const trailLevel = pos.peakReturn - pos.trailingStopDist;
+          const stopLevel = pos.breakEvenActivated ? Math.max(0, trailLevel) : trailLevel;
+          if (priceChange <= stopLevel) {
+            exitPrice = close[j];
+            exitDate = timestamps[j]; exitIdx = j; exitReason = "trailing_stop"; exited = true; break;
+          }
+        }
+
+        // Time exit
+        if (j - pos.entryIdx >= pos.maxHoldBars) {
+          exitPrice = close[j];
+          exitDate = timestamps[j]; exitIdx = j; exitReason = "time_exit"; exited = true; break;
+        }
+      }
+
+      // Also check time exit at current bar
+      if (!exited && (i - pos.entryIdx >= pos.maxHoldBars)) {
+        exitPrice = close[Math.min(i, close.length - 1)];
+        exitDate = timestamps[Math.min(i, close.length - 1)];
+        exitIdx = Math.min(i, close.length - 1);
+        exitReason = "time_exit";
+        exited = true;
+      }
+
+      if (exited) {
+        exitPrice = applyTradingCosts(exitPrice, pos.action !== "BUY", tradeConfig);
+        let pnl: number;
+        if (pos.action === "BUY") {
+          pnl = (exitPrice - pos.entryPrice) * pos.shares - pos.commission;
+        } else {
+          pnl = (pos.entryPrice - exitPrice) * pos.shares - pos.commission;
+        }
+        const returnPct = (pnl / pos.positionSize) * 100;
+        const actualReturn = (close[Math.min(exitIdx, close.length - 1)] - close[pos.entryIdx]) / close[pos.entryIdx] * 100;
+        const duration = exitIdx - pos.entryIdx;
+
+        capital += pnl;
+        capitalInPositions -= pos.positionSize;
+        barsInTrade += duration;
+
+        trades.push({
+          date: timestamps[pos.entryIdx], exitDate, ticker,
+          action: pos.action, entryPrice: pos.entryPrice, exitPrice, returnPct, pnl,
+          regime: pos.regime, confidence: pos.confidence,
+          predictedReturn: pos.predictedReturn, actualReturn, duration,
+          mae: parseFloat((pos.maxAdverse * 100).toFixed(2)),
+          mfe: parseFloat((pos.maxFavorable * 100).toFixed(2)),
+          volumeAtEntry: volume[pos.entryIdx] || 0,
+          strategy: pos.strategy, exitReason,
+        });
+
+        equityCurve.push({ date: exitDate, value: capital + capitalInPositions });
+        openPositions.splice(p, 1);
+      }
+    }
+
+    // --- Phase 2: Evaluate new signals if we have capacity ---
+    if (openPositions.length >= config.maxPositions) continue;
+    if (i + executionDelay >= close.length) continue;
+
     const trainClose = close.slice(Math.max(0, i - TRAIN_WINDOW), i);
     const trainHigh = high.slice(Math.max(0, i - TRAIN_WINDOW), i);
     const trainLow = low.slice(Math.max(0, i - TRAIN_WINDOW), i);
     const trainVol = volume.slice(Math.max(0, i - TRAIN_WINDOW), i);
-
     if (trainClose.length < 50) continue;
-    totalBars += STEP;
 
     const signal = computeStrategySignal(trainClose, trainHigh, trainLow, trainVol, signalState, STEP);
 
     let action: "BUY" | "SHORT" | "HOLD" = "HOLD";
     if (signal.consensusScore > config.buyThreshold) action = "BUY";
     else if (signal.consensusScore < config.shortThreshold) action = "SHORT";
-
     if (action === "HOLD") continue;
 
     const entryIdx = i + executionDelay;
     if (entryIdx >= close.length) continue;
     const rawEntryPrice = open[entryIdx];
     const entryPrice = applyTradingCosts(rawEntryPrice, action === "BUY", tradeConfig);
-    // Strategy-specific max holding periods
+
     const maxHoldBars = signal.strategy === "trend" ? 20
       : signal.strategy === "mean_reversion" ? 10
       : signal.strategy === "breakout" ? 15
       : STEP;
-    const testEnd = Math.min(entryIdx + maxHoldBars, close.length - 1);
     const useTrailingStop = signal.strategy === "trend" || signal.strategy === "breakout";
 
-    // ATR-based trailing stop: 2*ATR distance, breakeven after 1*ATR gain
     const atrPct = entryPrice > 0 ? signal.atr / entryPrice : 0.02;
-    const TRAILING_STOP_DIST = 2 * atrPct; // 2 × ATR as fraction of price
-    const BREAKEVEN_THRESHOLD = atrPct; // activate breakeven after 1 × ATR gain
-
-    // For trend strategy: widen hard stop to 3 × ATR (let trends breathe)
+    const trailingStopDist = 2 * atrPct;
+    const breakevenThreshold = atrPct;
     const effectiveStopPct = signal.strategy === "trend"
       ? Math.max(config.stopLossPct / 100, 3 * atrPct)
       : config.stopLossPct / 100;
 
-    let maxAdverse = 0;
-    let maxFavorable = 0;
-    let exitPrice = close[testEnd];
-    let exitDate = timestamps[testEnd];
-    let exitIdx = testEnd;
-    let exitReason: Trade["exitReason"] = "time_exit";
-    let peakReturn = 0;
-    let breakEvenActivated = false;
-
-    for (let j = entryIdx + 1; j <= testEnd; j++) {
-      const priceChange = action === "BUY"
-        ? (close[j] - entryPrice) / entryPrice
-        : (entryPrice - close[j]) / entryPrice;
-
-      if (priceChange < 0) maxAdverse = Math.min(maxAdverse, priceChange);
-      if (priceChange > 0) maxFavorable = Math.max(maxFavorable, priceChange);
-
-      // Track peak for trailing stop
-      if (priceChange > peakReturn) peakReturn = priceChange;
-      if (priceChange >= BREAKEVEN_THRESHOLD) breakEvenActivated = true;
-
-      // Hard stop-loss (ATR-widened for trend strategy)
-      if (priceChange <= -effectiveStopPct) {
-        exitPrice = action === "BUY"
-          ? entryPrice * (1 - effectiveStopPct)
-          : entryPrice * (1 + effectiveStopPct);
-        exitDate = timestamps[j];
-        exitIdx = j;
-        exitReason = "stop_loss";
-        break;
-      }
-
-      // Hard take-profit
-      if (priceChange >= config.takeProfitPct / 100) {
-        exitPrice = action === "BUY"
-          ? entryPrice * (1 + config.takeProfitPct / 100)
-          : entryPrice * (1 - config.takeProfitPct / 100);
-        exitDate = timestamps[j];
-        exitIdx = j;
-        exitReason = "take_profit";
-        break;
-      }
-
-      // Trailing stop (trend & breakout only)
-      if (useTrailingStop && peakReturn > BREAKEVEN_THRESHOLD) {
-        const trailLevel = peakReturn - TRAILING_STOP_DIST;
-        const stopLevel = breakEvenActivated ? Math.max(0, trailLevel) : trailLevel;
-        if (priceChange <= stopLevel) {
-          exitPrice = close[j];
-          exitDate = timestamps[j];
-          exitIdx = j;
-          exitReason = "trailing_stop";
-          break;
-        }
-      }
-    }
-
-    exitPrice = applyTradingCosts(exitPrice, action !== "BUY", tradeConfig);
-
-    // Volatility-adjusted position sizing
     const adjustedSizePct = config.positionSizePct * signal.positionSizeMultiplier;
-    const positionSize = capital * (adjustedSizePct / 100);
+    const availableCapital = capital - capitalInPositions;
+    const positionSize = Math.min(availableCapital * (adjustedSizePct / 100), availableCapital * 0.95);
+    if (positionSize <= 0) continue;
     const shares = positionSize / entryPrice;
     const commission = positionSize * (tradeConfig.commissionPct / 100) * 2;
 
-    let pnl: number;
-    if (action === "BUY") {
-      pnl = (exitPrice - entryPrice) * shares - commission;
-    } else {
-      pnl = (entryPrice - exitPrice) * shares - commission;
-    }
+    capitalInPositions += positionSize;
 
-    const returnPct = (pnl / positionSize) * 100;
-    const actualReturn = (close[testEnd] - close[entryIdx]) / close[entryIdx] * 100;
-    const duration = exitIdx - entryIdx;
-
-    capital += pnl;
-    barsInTrade += duration;
-
-    // Apply cooldown after trade
-    signalState.cooldownBarsRemaining = COOLDOWN_BARS;
-    signalState.consecutiveCount = 0;
-
-    trades.push({
-      date: timestamps[entryIdx],
-      exitDate,
-      ticker,
-      action,
-      entryPrice,
-      exitPrice,
-      returnPct,
-      pnl,
-      regime: signal.regime,
-      confidence: signal.confidence,
-      predictedReturn: signal.predictedReturn,
-      actualReturn,
-      duration,
-      mae: parseFloat((maxAdverse * 100).toFixed(2)),
-      mfe: parseFloat((maxFavorable * 100).toFixed(2)),
-      volumeAtEntry: volume[entryIdx] || 0,
-      strategy: signal.strategy,
-      exitReason,
+    openPositions.push({
+      entryIdx, entryPrice, action, strategy: signal.strategy,
+      maxHoldBars, useTrailingStop, trailingStopDist, breakevenThreshold,
+      effectiveStopPct, takeProfitPct: config.takeProfitPct / 100,
+      positionSize, shares, commission,
+      regime: signal.regime, confidence: signal.confidence,
+      predictedReturn: signal.predictedReturn, signal_atr: signal.atr,
+      positionSizeMultiplier: signal.positionSizeMultiplier,
+      peakReturn: 0, breakEvenActivated: false, maxAdverse: 0, maxFavorable: 0,
     });
 
-    equityCurve.push({ date: exitDate, value: capital });
+    signalState.cooldownBarsRemaining = COOLDOWN_BARS;
+    signalState.consecutiveCount = 0;
   }
+
+  // --- Force-close any remaining positions at end of data ---
+  for (const pos of openPositions) {
+    const lastIdx = close.length - 1;
+    const exitPrice = applyTradingCosts(close[lastIdx], pos.action !== "BUY", tradeConfig);
+    let pnl = pos.action === "BUY"
+      ? (exitPrice - pos.entryPrice) * pos.shares - pos.commission
+      : (pos.entryPrice - exitPrice) * pos.shares - pos.commission;
+    const returnPct = (pnl / pos.positionSize) * 100;
+    const duration = lastIdx - pos.entryIdx;
+    capital += pnl;
+    barsInTrade += duration;
+    trades.push({
+      date: timestamps[pos.entryIdx], exitDate: timestamps[lastIdx], ticker,
+      action: pos.action, entryPrice: pos.entryPrice, exitPrice, returnPct, pnl,
+      regime: pos.regime, confidence: pos.confidence,
+      predictedReturn: pos.predictedReturn,
+      actualReturn: (close[lastIdx] - close[pos.entryIdx]) / close[pos.entryIdx] * 100,
+      duration,
+      mae: parseFloat((pos.maxAdverse * 100).toFixed(2)),
+      mfe: parseFloat((pos.maxFavorable * 100).toFixed(2)),
+      volumeAtEntry: volume[pos.entryIdx] || 0,
+      strategy: pos.strategy, exitReason: "time_exit",
+    });
+  }
+  equityCurve.push({ date: timestamps[close.length - 1], value: capital });
 
   return { trades, equityCurve, totalBars, barsInTrade };
 }
