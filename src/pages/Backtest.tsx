@@ -158,6 +158,12 @@ const Backtest = () => {
   const [stopLoss, setStopLoss] = useState(5);
   const [takeProfit, setTakeProfit] = useState(10);
   const [includeMonteCarlo, setIncludeMonteCarlo] = useState(true);
+  const [buyThreshold, setBuyThreshold] = useState(60);
+  const [adxThreshold, setAdxThreshold] = useState(25);
+  const [rsiOversold, setRsiOversold] = useState(30);
+  const [rsiOverbought, setRsiOverbought] = useState(70);
+  const [trailingStopATRMult, setTrailingStopATRMult] = useState(2.0);
+  const [maxHoldBars, setMaxHoldBars] = useState(20);
 
   const handleRunBacktest = async () => {
     if (!session?.access_token) {
@@ -190,6 +196,13 @@ const Backtest = () => {
             stopLossPct: stopLoss,
             takeProfitPct: takeProfit,
             includeMonteCarlo,
+            buyThreshold,
+            shortThreshold: -buyThreshold,
+            adxThreshold,
+            rsiOversold,
+            rsiOverbought,
+            trailingStopATRMult,
+            maxHoldBars,
           }),
           timeoutMs: 120000, // Backtests can take longer
           retries: 1,
