@@ -2003,6 +2003,14 @@ serve(async (req) => {
 
     console.log(`Backtest request: ${tickers.join(",")} from ${startYear} to ${endYear}, mode=${strategyMode}, buyThresh=${buyThreshold}, adx=${adxThreshold}`);
 
+    // Validate years
+    if (startYear < 2000 || startYear > 2026) {
+      return new Response(JSON.stringify({ error: "Invalid start year. Please use a 4-digit year between 2000 and 2026." }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+    if (endYear <= startYear) {
+      return new Response(JSON.stringify({ error: "End year must be after start year." }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
     const config: BacktestConfig & { strategyMode: string; explicitOverride: boolean } = {
       tickers: tickers.slice(0, 5),
       startYear, endYear, initialCapital, positionSizePct,
@@ -2054,7 +2062,18 @@ serve(async (req) => {
     const validTickerIndices = config.tickers
       .map((_, ti) => ti)
       .filter(ti => tickerData[ti] && tickerData[ti]!.close.length >= 100);
-    const numTickers = Math.max(validTickerIndices.length, 1);
+
+    // Log which tickers failed
+    config.tickers.forEach((t, ti) => {
+      if (!tickerData[ti]) console.log(`Ticker ${t}: no data returned`);
+      else if (tickerData[ti]!.close.length < 100) console.log(`Ticker ${t}: only ${tickerData[ti]!.close.length} bars (need 100+)`);
+    });
+
+    if (validTickerIndices.length === 0) {
+      return new Response(JSON.stringify({ error: "No valid market data found for the given tickers and date range. Ensure tickers are correct and the date range has enough trading days." }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
+    const numTickers = validTickerIndices.length;
     const capitalPerTicker = config.initialCapital / numTickers;
 
     for (const idx of validTickerIndices) {
