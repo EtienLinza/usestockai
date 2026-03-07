@@ -305,7 +305,7 @@ const Backtest = () => {
 
                   <div className="grid grid-cols-2 gap-3">
                     <div className="space-y-2">
-                      <Label className="text-xs text-muted-foreground">Stop Loss: {stopLoss}%</Label>
+                      <Label className="text-xs text-muted-foreground">Max Stop: {stopLoss}%</Label>
                       <Slider value={[stopLoss]} onValueChange={v => setStopLoss(v[0])} min={1} max={20} step={1} />
                     </div>
                     <div className="space-y-2">
