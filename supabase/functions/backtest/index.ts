@@ -284,14 +284,14 @@ function computeStrategySignal(
   const ADX_THRESH = SP.adxThreshold ?? 25;
   const RSI_OS = SP.rsiOversold ?? 30;
   const RSI_OB = SP.rsiOverbought ?? 70;
-  const CONV_BUY_THRESH = SP.buyThreshold ?? 60;
-  const CONV_SHORT_THRESH = SP.shortThreshold ?? 60;
+  const CONV_BUY_THRESH = SP.buyThreshold ?? 65;
+  const CONV_SHORT_THRESH = SP.shortThreshold ?? 65;
 
   // --- Strategy A: Trend Following (ADX > threshold) ---
+  // Conviction on TRUE 0-100 scale: no hardcoded floor
   let trendSignal: "BUY" | "SHORT" | "HOLD" = "HOLD";
   let trendConviction = 0;
   if (adxVal > ADX_THRESH) {
-    // BUY: EMA12 > EMA26 AND price > SMA50 AND MACD histogram positive & increasing AND RSI 35-75
     const trendBuyConditions = [
       e12 > e26,
       currentPrice > s50,
@@ -300,7 +300,6 @@ function computeStrategySignal(
     ];
     const trendBuyScore = trendBuyConditions.filter(Boolean).length;
 
-    // SHORT: EMA12 < EMA26 AND price < SMA50 AND MACD histogram negative & decreasing AND RSI 25-60
     const trendShortConditions = [
       e12 < e26,
       currentPrice < s50,
@@ -311,18 +310,27 @@ function computeStrategySignal(
 
     if (trendBuyScore >= 3 && above200) {
       trendSignal = "BUY";
-      trendConviction = 55 + (adxVal - 25) * 0.8 + Math.abs(macdH) * 10 + trendBuyScore * 5;
+      // Base: score*20 (3/4=60, 4/4=80). Bonuses capped.
+      let conv = trendBuyScore * 20;
+      conv += Math.min((adxVal - ADX_THRESH) * 0.5, 15); // ADX strength bonus
+      conv += Math.min(Math.abs(macdH) * 5, 10);          // MACD momentum bonus
+      if (rsiVal >= 40 && rsiVal <= 60) conv += 5;         // RSI sweetspot
+      trendConviction = Math.min(100, conv);
     } else if (trendShortScore >= 3 && below200) {
       trendSignal = "SHORT";
-      trendConviction = 55 + (adxVal - 25) * 0.8 + Math.abs(macdH) * 10 + trendShortScore * 5;
+      let conv = trendShortScore * 20;
+      conv += Math.min((adxVal - ADX_THRESH) * 0.5, 15);
+      conv += Math.min(Math.abs(macdH) * 5, 10);
+      if (rsiVal >= 40 && rsiVal <= 55) conv += 5;
+      trendConviction = Math.min(100, conv);
     }
   }
 
-  // --- Strategy B: Mean Reversion (ADX < threshold — no dead zone with trend) ---
+  // --- Strategy B: Mean Reversion (ADX < threshold) ---
+  // Conviction 0-100: base = score*18 (3/5=54, 4/5=72, 5/5=90)
   let mrSignal: "BUY" | "SHORT" | "HOLD" = "HOLD";
   let mrConviction = 0;
   if (adxVal < ADX_THRESH) {
-    // BUY: RSI < oversold, price < lower BB, deviation > 1.5*ATR (volatility-adjusted), stoch < 20, volume > 1.2x — need 3/5
     const atrDevThreshold = currentPrice > 0 ? (1.5 * currentATR) / currentPrice : 0.02;
     const mrBuyConditions = [
       rsiVal < RSI_OS,
@@ -333,7 +341,6 @@ function computeStrategySignal(
     ];
     const mrBuyScore = mrBuyConditions.filter(Boolean).length;
 
-    // SHORT: RSI > overbought, price > upper BB, deviation > 1.5*ATR, stoch > 80, volume > 1.2x — need 3/5
     const mrShortConditions = [
       rsiVal > RSI_OB,
       currentPrice > bbU,
@@ -343,17 +350,23 @@ function computeStrategySignal(
     ];
     const mrShortScore = mrShortConditions.filter(Boolean).length;
 
-    // Require 3 of 5 conditions — no 200 SMA guard (MR buys dips regardless of long-term trend)
     if (mrBuyScore >= 3) {
       mrSignal = "BUY";
-      mrConviction = 50 + (30 - rsiVal) * 1.5 + Math.abs(smaDeviation) * 200 + mrBuyScore * 5;
+      let conv = mrBuyScore * 18;
+      conv += Math.min(Math.abs(rsiVal - 50) * 0.3, 10);     // RSI extremity
+      conv += Math.min(Math.abs(smaDeviation) * 100, 10);     // Deviation bonus
+      mrConviction = Math.min(100, conv);
     } else if (mrShortScore >= 3) {
       mrSignal = "SHORT";
-      mrConviction = 50 + (rsiVal - 70) * 1.5 + Math.abs(smaDeviation) * 200 + mrShortScore * 5;
+      let conv = mrShortScore * 18;
+      conv += Math.min(Math.abs(rsiVal - 50) * 0.3, 10);
+      conv += Math.min(Math.abs(smaDeviation) * 100, 10);
+      mrConviction = Math.min(100, conv);
     }
   }
 
   // --- Strategy C: Breakout (Bollinger squeeze + range expansion filter) ---
+  // Conviction 0-100: base=50, volume bonus up to 25, range bonus up to 25
   let boSignal: "BUY" | "SHORT" | "HOLD" = "HOLD";
   let boConviction = 0;
   const isSqueeze = bbBW < bwAvg50 * 0.7;
@@ -363,21 +376,24 @@ function computeStrategySignal(
       && !isNaN(adxData.adx[adxData.adx.length - 3])
       && adxData.adx[adxData.adx.length - 1] > adxData.adx[adxData.adx.length - 3];
 
-    // Range expansion filter: current candle range must exceed 1.5 * ATR
     const currentRange = high[n - 1] - low[n - 1];
     const rangeExpansion = currentRange > 1.5 * currentATR;
-
-    // Relaxed breakout: squeeze + ADX rising mandatory; need at least one of (volume > 1.5x, range expansion)
     const hasVolumeConfirm = volRatio > 1.5;
     const hasBreakoutFilter = hasVolumeConfirm || rangeExpansion;
 
     if (currentPrice > bbU && adxRising && hasBreakoutFilter) {
       boSignal = "BUY";
-      boConviction = 55 + volRatio * 10 + (currentPrice - bbU) / bbU * 500;
+      let conv = 50;
+      conv += Math.min((volRatio - 1) * 20, 25);                              // Volume bonus
+      conv += Math.min((currentRange / currentATR - 1) * 20, 25);             // Range expansion bonus
+      boConviction = Math.min(100, conv);
     }
     else if (currentPrice < bbL && adxRising && hasBreakoutFilter) {
       boSignal = "SHORT";
-      boConviction = 55 + volRatio * 10 + (bbL - currentPrice) / bbL * 500;
+      let conv = 50;
+      conv += Math.min((volRatio - 1) * 20, 25);
+      conv += Math.min((currentRange / currentATR - 1) * 20, 25);
+      boConviction = Math.min(100, conv);
     }
   }
 
