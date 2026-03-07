@@ -1996,6 +1996,7 @@ serve(async (req) => {
     let combinedEquity: { date: string; value: number }[] = [];
     let totalBarsAll = 0, barsInTradeAll = 0;
     let firstTickerData: DataSet | null = null;
+    const stockProfiles: Record<string, StockClassification> = {};
     const tickerCount = config.tickers.length;
 
     // Bug Fix #2: Count valid tickers FIRST, then split capital properly
@@ -2014,7 +2015,8 @@ serve(async (req) => {
       const tickerConfig = { ...config, initialCapital: capitalPerTicker };
       const tickerTradeConfig = { ...tradeConfig, initialCapital: capitalPerTicker };
 
-      const { trades, equityCurve, totalBars, barsInTrade } = runWalkForwardBacktest(data, config.tickers[idx], tickerConfig, tickerTradeConfig, 1, undefined, spyData);
+      const { trades, equityCurve, totalBars, barsInTrade, stockClassification } = runWalkForwardBacktest(data, config.tickers[idx], tickerConfig, tickerTradeConfig, 1, undefined, spyData);
+      if (stockClassification) stockProfiles[config.tickers[idx]] = stockClassification;
       allTrades = allTrades.concat(trades);
       totalBarsAll += totalBars;
       barsInTradeAll += barsInTrade;
