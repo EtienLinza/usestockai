@@ -1211,7 +1211,7 @@ function runWalkForwardBacktest(
   }
   equityCurve.push({ date: timestamps[close.length - 1], value: capital });
 
-  return { trades, equityCurve, totalBars, barsInTrade };
+  return { trades, equityCurve, totalBars, barsInTrade, stockClassification: currentClassification };
 }
 
 // ============================================================================
