@@ -1014,7 +1014,7 @@ const Backtest = () => {
                                 <th className="text-left py-1.5 text-muted-foreground font-normal">Ticker</th>
                                 <th className="text-left py-1.5 text-muted-foreground font-normal">Action</th>
                                 <th className="text-left py-1.5 text-muted-foreground font-normal">Strategy</th>
-                                <th className="text-left py-1.5 text-muted-foreground font-normal">Exit</th>
+                                <th className="text-left py-1.5 text-muted-foreground font-normal">Exit Reason</th>
                                 <th className="text-right py-1.5 text-muted-foreground font-normal">Entry $</th>
                                 <th className="text-right py-1.5 text-muted-foreground font-normal">Exit $</th>
                                 <th className="text-right py-1.5 text-muted-foreground font-normal">Return</th>
@@ -1029,6 +1029,7 @@ const Backtest = () => {
                                 <tr key={i} className="border-b border-border/5">
                                   <td className="py-1 font-mono text-muted-foreground">{t.date}</td>
                                   <td className="py-1 font-mono">{t.ticker}</td>
+                                  <td className={`py-1 font-medium ${t.action === "BUY" ? "text-success" : "text-destructive"}`}>{t.action}</td>
                                   <td className="py-1 text-muted-foreground capitalize">{(t.strategy || "—").replace(/_/g, " ")}</td>
                                   <td className="py-1 text-muted-foreground capitalize text-[10px]">{(t.exitReason || "—").replace(/_/g, " ")}</td>
                                   <td className="py-1 text-right font-mono">${t.entryPrice.toFixed(2)}</td>
