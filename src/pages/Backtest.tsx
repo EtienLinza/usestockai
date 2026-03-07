@@ -64,7 +64,7 @@ interface BacktestReport {
   confidenceCalibration: { bucket: string; predictedConf: number; actualAccuracy: number; count: number }[];
   equityCurve: { date: string; value: number }[];
   drawdownCurve: { date: string; drawdown: number }[];
-  tradeLog: { date: string; exitDate: string; ticker: string; action: string; entryPrice: number; exitPrice: number; returnPct: number; pnl: number; regime: string; confidence: number; duration: number; mae: number; mfe: number; strategy?: string }[];
+  tradeLog: { date: string; exitDate: string; ticker: string; action: string; entryPrice: number; exitPrice: number; returnPct: number; pnl: number; regime: string; confidence: number; duration: number; mae: number; mfe: number; strategy?: string; exitReason?: string }[];
   monteCarlo: { percentile5: number; percentile25: number; median: number; percentile75: number; percentile95: number } | null;
   benchmarkReturn: number;
   annualizedReturn: number;
@@ -845,6 +845,46 @@ const Backtest = () => {
                       </Card>
                     )}
 
+                    {/* Exit Reason Distribution */}
+                    {report.tradeLog.length > 0 && (() => {
+                      const exitCounts: Record<string, number> = {};
+                      report.tradeLog.forEach(t => {
+                        const reason = (t.exitReason || "time_exit").replace(/_/g, " ");
+                        exitCounts[reason] = (exitCounts[reason] || 0) + 1;
+                      });
+                      const exitData = Object.entries(exitCounts).map(([name, count]) => ({
+                        name,
+                        count,
+                        pct: parseFloat(((count / report.tradeLog.length) * 100).toFixed(1)),
+                      })).sort((a, b) => b.count - a.count);
+                      return (
+                        <Card className="glass-card p-6">
+                          <div className="flex items-center gap-2 mb-4">
+                            <Signal className="w-4 h-4 text-primary" />
+                            <span className="text-sm font-medium">Exit Reason Distribution</span>
+                          </div>
+                          <div className="h-40">
+                            <ResponsiveContainer width="100%" height="100%">
+                              <BarChart data={exitData} layout="vertical">
+                                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                                <XAxis type="number" tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
+                                  tickFormatter={v => `${v}`} />
+                                <YAxis dataKey="name" type="category" width={90}
+                                  tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} />
+                                <Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 8, fontSize: 12 }}
+                                  formatter={(v: number, _: string, entry: any) => [`${v} (${entry.payload.pct}%)`, "Trades"]} />
+                                <Bar dataKey="count" radius={[0, 4, 4, 0]}>
+                                  {exitData.map((_, i) => (
+                                    <Cell key={i} fill={["hsl(var(--destructive))", "hsl(var(--success))", "hsl(var(--primary))", "hsl(var(--muted-foreground))"][i % 4]} />
+                                  ))}
+                                </Bar>
+                              </BarChart>
+                            </ResponsiveContainer>
+                          </div>
+                        </Card>
+                      );
+                    })()}
+
                     {report.regimePerformance.length > 0 && (
                       <Card className="glass-card p-6">
                         <div className="text-sm font-medium mb-4">Indicator Regime Performance</div>
@@ -974,8 +1014,9 @@ const Backtest = () => {
                                 <th className="text-left py-1.5 text-muted-foreground font-normal">Ticker</th>
                                 <th className="text-left py-1.5 text-muted-foreground font-normal">Action</th>
                                 <th className="text-left py-1.5 text-muted-foreground font-normal">Strategy</th>
-                                <th className="text-right py-1.5 text-muted-foreground font-normal">Entry</th>
-                                <th className="text-right py-1.5 text-muted-foreground font-normal">Exit</th>
+                                <th className="text-left py-1.5 text-muted-foreground font-normal">Exit Reason</th>
+                                <th className="text-right py-1.5 text-muted-foreground font-normal">Entry $</th>
+                                <th className="text-right py-1.5 text-muted-foreground font-normal">Exit $</th>
                                 <th className="text-right py-1.5 text-muted-foreground font-normal">Return</th>
                                 <th className="text-right py-1.5 text-muted-foreground font-normal">PnL</th>
                                 <th className="text-right py-1.5 text-muted-foreground font-normal">Dur.</th>
@@ -990,6 +1031,7 @@ const Backtest = () => {
                                   <td className="py-1 font-mono">{t.ticker}</td>
                                   <td className={`py-1 font-medium ${t.action === "BUY" ? "text-success" : "text-destructive"}`}>{t.action}</td>
                                   <td className="py-1 text-muted-foreground capitalize">{(t.strategy || "—").replace(/_/g, " ")}</td>
+                                  <td className="py-1 text-muted-foreground capitalize text-[10px]">{(t.exitReason || "—").replace(/_/g, " ")}</td>
                                   <td className="py-1 text-right font-mono">${t.entryPrice.toFixed(2)}</td>
                                   <td className="py-1 text-right font-mono">${t.exitPrice.toFixed(2)}</td>
                                   <td className={`py-1 text-right font-mono ${t.returnPct > 0 ? "text-success" : "text-destructive"}`}>
