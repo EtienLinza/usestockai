@@ -155,7 +155,7 @@ const Backtest = () => {
   const [endYear, setEndYear] = useState(2025);
   const [initialCapital, setInitialCapital] = useState(10000);
   const [positionSize, setPositionSize] = useState(10);
-  const [stopLoss, setStopLoss] = useState(5);
+  const [stopLoss, setStopLoss] = useState(8);
   const [takeProfit, setTakeProfit] = useState(10);
   const [includeMonteCarlo, setIncludeMonteCarlo] = useState(true);
   const [buyThreshold, setBuyThreshold] = useState(65);
@@ -164,6 +164,7 @@ const Backtest = () => {
   const [rsiOverbought, setRsiOverbought] = useState(70);
   const [trailingStopATRMult, setTrailingStopATRMult] = useState(2.0);
   const [maxHoldBars, setMaxHoldBars] = useState(20);
+  const [riskPerTrade, setRiskPerTrade] = useState(1);
 
   const handleRunBacktest = async () => {
     if (!session?.access_token) {
@@ -203,8 +204,9 @@ const Backtest = () => {
             rsiOverbought,
             trailingStopATRMult,
             maxHoldBars,
+            riskPerTrade: riskPerTrade / 100,
           }),
-          timeoutMs: 120000, // Backtests can take longer
+          timeoutMs: 120000,
           retries: 1,
         }
       );
@@ -291,13 +293,19 @@ const Backtest = () => {
                   </div>
 
                   <div className="space-y-2">
-                    <Label className="text-xs text-muted-foreground">Position Size: {positionSize}%</Label>
+                    <Label className="text-xs text-muted-foreground">Risk Per Trade: {riskPerTrade}%</Label>
+                    <Slider value={[riskPerTrade]} onValueChange={v => setRiskPerTrade(v[0])} min={0.5} max={5} step={0.5} />
+                    <p className="text-[10px] text-muted-foreground/60">% of capital risked per trade (sizes position by stop distance)</p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label className="text-xs text-muted-foreground">Position Size Cap: {positionSize}%</Label>
                     <Slider value={[positionSize]} onValueChange={v => setPositionSize(v[0])} min={5} max={50} step={5} />
                   </div>
 
                   <div className="grid grid-cols-2 gap-3">
                     <div className="space-y-2">
-                      <Label className="text-xs text-muted-foreground">Stop Loss: {stopLoss}%</Label>
+                      <Label className="text-xs text-muted-foreground">Max Stop: {stopLoss}%</Label>
                       <Slider value={[stopLoss]} onValueChange={v => setStopLoss(v[0])} min={1} max={20} step={1} />
                     </div>
                     <div className="space-y-2">

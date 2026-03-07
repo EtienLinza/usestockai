@@ -574,12 +574,12 @@ interface BacktestConfig {
   includeMonteCarlo: boolean;
   buyThreshold: number;
   shortThreshold: number;
-  // New configurable signal parameters
   adxThreshold: number;
   rsiOversold: number;
   rsiOverbought: number;
   trailingStopATRMult: number;
   maxHoldBars: number;
+  riskPerTrade: number; // Risk-based sizing: fraction of capital risked per trade
 }
 
 interface BacktestReport {
@@ -692,6 +692,7 @@ function runWalkForwardBacktest(
   tradeConfig: TradeConfig,
   executionDelay: number = 1,
   stepOverride?: number,
+  spyData?: DataSet | null,
 ): { trades: Trade[]; equityCurve: { date: string; value: number }[]; totalBars: number; barsInTrade: number } {
   const { close, high, low, open, volume, timestamps } = allData;
   const trades: Trade[] = [];
@@ -699,14 +700,27 @@ function runWalkForwardBacktest(
   const equityCurve: { date: string; value: number }[] = [{ date: timestamps[0], value: capital }];
 
   const TRAIN_WINDOW = 250;
-  const STEP = stepOverride || 3; // Balance between responsiveness and overtrading
+  const STEP = stepOverride || 3;
   let totalBars = 0;
   let barsInTrade = 0;
-  const COOLDOWN_BARS = 5; // Space out entries to reduce noise trades
+  const COOLDOWN_BARS = 5;
 
   const signalState = createSignalTracker();
   const openPositions: OpenPosition[] = [];
-  const cooldownPerTicker = new Map<string, number>(); // Per-ticker cooldown tracking
+  const cooldownPerTicker = new Map<string, number>();
+
+  // Build SPY date→close map + compute SPY 200 SMA for short filtering
+  const spyDateMap = new Map<string, number>();
+  const spy200SMAMap = new Map<string, boolean>(); // date → whether SPY > SMA200
+  if (spyData && spyData.close.length >= 200) {
+    const spySMA200 = calculateSMA(spyData.close, 200);
+    for (let si = 0; si < spyData.timestamps.length; si++) {
+      spyDateMap.set(spyData.timestamps[si], spyData.close[si]);
+      if (!isNaN(spySMA200[si])) {
+        spy200SMAMap.set(spyData.timestamps[si], spyData.close[si] > spySMA200[si]);
+      }
+    }
+  }
 
   for (let i = TRAIN_WINDOW; i < close.length - 1; i += STEP) {
     totalBars += STEP;
@@ -846,6 +860,14 @@ function runWalkForwardBacktest(
     else if (signal.consensusScore < 0) action = "SHORT";
     if (action === "HOLD") continue;
 
+    // Fix 2: Disable shorts when SPY > 200 SMA (bull market filter)
+    if (action === "SHORT" && spy200SMAMap.size > 0) {
+      const currentDate = timestamps[i];
+      // Find closest SPY date
+      const spyAbove200 = spy200SMAMap.get(currentDate);
+      if (spyAbove200 === true) continue; // Skip short in bull market
+    }
+
     // Block duplicate-direction trades on same ticker
     const hasDuplicateDirection = openPositions.some(p => p.action === action);
     if (hasDuplicateDirection) continue;
@@ -866,21 +888,29 @@ function runWalkForwardBacktest(
     const tsATRMult = config.trailingStopATRMult || 2.0;
     const isBearRegime = signal.regime === "bearish" || signal.regime === "strong_bearish";
 
-    // Fix 3: Widen stops and trailing distance for SHORTs in bearish regimes
-    // Bear market rallies are violent — give shorts more room
+    // Widen trailing distance for SHORTs in bearish regimes (bear rallies are violent)
     const effectiveTrailingMult = (action === "SHORT" && isBearRegime) ? tsATRMult * 1.5 : tsATRMult;
     const trailingStopDist = effectiveTrailingMult * atrPct;
     const breakevenThreshold = atrPct;
+
+    // Fix 5: Use 2 ATR for trend stops (was 3)
     let effectiveStopPct = signal.strategy === "trend"
-      ? Math.max(config.stopLossPct / 100, 3 * atrPct)
+      ? Math.max(config.stopLossPct / 100, 2 * atrPct)
       : config.stopLossPct / 100;
     // Widen hard stop by 1.5× for SHORTs in bear regimes
     if (action === "SHORT" && isBearRegime) {
       effectiveStopPct *= 1.5;
     }
+    // Fix 1: Hard 8% loss cap — no trade ever risks more than 8%
+    effectiveStopPct = Math.min(effectiveStopPct, 0.08);
 
-    const adjustedSizePct = config.positionSizePct * signal.positionSizeMultiplier;
-    const positionSize = Math.min(capital * (adjustedSizePct / 100), capital * 0.95);
+    // Fix 3: Risk-based position sizing
+    // Risk riskPerTrade fraction of capital per trade, capped at 25% of capital
+    const riskFraction = config.riskPerTrade || 0.01;
+    const positionSize = Math.min(
+      capital * riskFraction / Math.max(effectiveStopPct, 0.005),
+      capital * 0.25
+    );
     if (positionSize <= 0) continue;
     const shares = positionSize / entryPrice;
     const commission = positionSize * (tradeConfig.commissionPct / 100) * 2;
@@ -1657,7 +1687,7 @@ serve(async (req) => {
       positionSizePct = 10,
       stopLossPct = 5,
       takeProfitPct = 10,
-      maxPositions = 5,
+      maxPositions = 3,
       rebalanceFrequency = "weekly",
       includeMonteCarlo = true,
       buyThreshold = 60,
@@ -1667,6 +1697,7 @@ serve(async (req) => {
       rsiOverbought = 70,
       trailingStopATRMult = 2.0,
       maxHoldBars = 20,
+      riskPerTrade = 0.01,
     } = body;
 
     console.log(`Backtest request: ${tickers.join(",")} from ${startYear} to ${endYear}, buyThresh=${buyThreshold}, adx=${adxThreshold}, rsiOS=${rsiOversold}, rsiOB=${rsiOverbought}`);
@@ -1679,6 +1710,7 @@ serve(async (req) => {
       buyThreshold, shortThreshold,
       adxThreshold, rsiOversold, rsiOverbought,
       trailingStopATRMult, maxHoldBars,
+      riskPerTrade,
     };
 
     const tradeConfig: TradeConfig = {
@@ -1730,7 +1762,7 @@ serve(async (req) => {
       const tickerConfig = { ...config, initialCapital: capitalPerTicker };
       const tickerTradeConfig = { ...tradeConfig, initialCapital: capitalPerTicker };
 
-      const { trades, equityCurve, totalBars, barsInTrade } = runWalkForwardBacktest(data, config.tickers[idx], tickerConfig, tickerTradeConfig);
+      const { trades, equityCurve, totalBars, barsInTrade } = runWalkForwardBacktest(data, config.tickers[idx], tickerConfig, tickerTradeConfig, 1, undefined, spyData);
       allTrades = allTrades.concat(trades);
       totalBarsAll += totalBars;
       barsInTradeAll += barsInTrade;
