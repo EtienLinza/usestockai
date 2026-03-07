@@ -922,6 +922,19 @@ function runWalkForwardBacktest(
   for (let i = TRAIN_WINDOW; i < close.length - 1; i += STEP) {
     totalBars += STEP;
 
+    // --- Rolling stock classification every 250 bars ---
+    if (i - lastClassifyBar >= CLASSIFY_WINDOW && i >= CLASSIFY_WINDOW) {
+      const classWindow = Math.min(i, CLASSIFY_WINDOW);
+      const cClose = close.slice(i - classWindow, i);
+      const cHigh = high.slice(i - classWindow, i);
+      const cLow = low.slice(i - classWindow, i);
+      if (cClose.length >= 50) {
+        currentClassification = classifyStock(cClose, cHigh, cLow);
+        activeProfile = PROFILE_PARAMS[currentClassification.classification];
+        lastClassifyBar = i;
+      }
+    }
+
     // --- Phase 1: Check exits for all open positions ---
     for (let p = openPositions.length - 1; p >= 0; p--) {
       const pos = openPositions[p];
