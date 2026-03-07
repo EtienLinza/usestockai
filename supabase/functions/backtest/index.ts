@@ -1661,31 +1661,32 @@ serve(async (req) => {
     let firstTickerData: DataSet | null = null;
     const tickerCount = config.tickers.length;
 
-    for (let idx = 0; idx < config.tickers.length; idx++) {
-      const data = tickerData[idx];
-      if (!data || data.close.length < 100) {
-        console.warn(`Insufficient data for ${config.tickers[idx]}, skipping`);
-        continue;
-      }
+    // Bug Fix #2: Count valid tickers FIRST, then split capital properly
+    const validTickerIndices = config.tickers
+      .map((_, ti) => ti)
+      .filter(ti => tickerData[ti] && tickerData[ti]!.close.length >= 100);
+    const numTickers = Math.max(validTickerIndices.length, 1);
+    const capitalPerTicker = config.initialCapital / numTickers;
+
+    for (const idx of validTickerIndices) {
+      const data = tickerData[idx]!;
 
       if (!firstTickerData) firstTickerData = data;
 
-      const { trades, equityCurve, totalBars, barsInTrade } = runWalkForwardBacktest(data, config.tickers[idx], config, tradeConfig);
+      // Pass per-ticker capital so position sizing is correct
+      const tickerConfig = { ...config, initialCapital: capitalPerTicker };
+      const tickerTradeConfig = { ...tradeConfig, initialCapital: capitalPerTicker };
+
+      const { trades, equityCurve, totalBars, barsInTrade } = runWalkForwardBacktest(data, config.tickers[idx], tickerConfig, tickerTradeConfig);
       allTrades = allTrades.concat(trades);
       totalBarsAll += totalBars;
       barsInTradeAll += barsInTrade;
 
-      const numTickers = config.tickers.filter((_, ti) => tickerData[ti] && tickerData[ti]!.close.length >= 100).length;
-      const capitalPerTicker = config.initialCapital / Math.max(numTickers, 1);
-
       if (combinedEquity.length === 0) {
-        combinedEquity = equityCurve.map(p => ({
-          date: p.date,
-          value: capitalPerTicker + (p.value - config.initialCapital) * (capitalPerTicker / config.initialCapital),
-        }));
+        combinedEquity = equityCurve.map(p => ({ date: p.date, value: p.value }));
       } else {
         for (const point of equityCurve) {
-          const pnl = (point.value - config.initialCapital) * (capitalPerTicker / config.initialCapital);
+          const pnl = point.value - capitalPerTicker;
           const existing = combinedEquity.find(c => c.date === point.date);
           if (existing) {
             existing.value += pnl;
