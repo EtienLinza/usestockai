@@ -154,6 +154,27 @@ function calculateStochastic(close: number[], high: number[], low: number[], kPe
   return k;
 }
 
+function calculateATR(high: number[], low: number[], close: number[], period: number = 14): number[] {
+  const atr: number[] = [NaN];
+  const tr: number[] = [high[0] - low[0]];
+  for (let i = 1; i < close.length; i++) {
+    tr.push(Math.max(
+      high[i] - low[i],
+      Math.abs(high[i] - close[i - 1]),
+      Math.abs(low[i] - close[i - 1])
+    ));
+  }
+  // Initial ATR = simple average of first `period` TRs
+  for (let i = 1; i < period; i++) atr[i] = NaN;
+  if (tr.length >= period) {
+    atr[period - 1] = tr.slice(0, period).reduce((a, b) => a + b, 0) / period;
+    for (let i = period; i < tr.length; i++) {
+      atr[i] = (atr[i - 1] * (period - 1) + tr[i]) / period;
+    }
+  }
+  return atr;
+}
+
 function safeGet(arr: number[], defaultVal: number): number {
   if (!arr || arr.length === 0) return defaultVal;
   const v = arr[arr.length - 1];
