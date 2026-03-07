@@ -2062,7 +2062,18 @@ serve(async (req) => {
     const validTickerIndices = config.tickers
       .map((_, ti) => ti)
       .filter(ti => tickerData[ti] && tickerData[ti]!.close.length >= 100);
-    const numTickers = Math.max(validTickerIndices.length, 1);
+
+    // Log which tickers failed
+    config.tickers.forEach((t, ti) => {
+      if (!tickerData[ti]) console.log(`Ticker ${t}: no data returned`);
+      else if (tickerData[ti]!.close.length < 100) console.log(`Ticker ${t}: only ${tickerData[ti]!.close.length} bars (need 100+)`);
+    });
+
+    if (validTickerIndices.length === 0) {
+      return new Response(JSON.stringify({ error: "No valid market data found for the given tickers and date range. Ensure tickers are correct and the date range has enough trading days." }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
+    const numTickers = validTickerIndices.length;
     const capitalPerTicker = config.initialCapital / numTickers;
 
     for (const idx of validTickerIndices) {
