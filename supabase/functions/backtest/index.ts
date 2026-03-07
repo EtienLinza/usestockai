@@ -626,13 +626,24 @@ function runWalkForwardBacktest(
     if (entryIdx >= close.length) continue;
     const rawEntryPrice = open[entryIdx];
     const entryPrice = applyTradingCosts(rawEntryPrice, action === "BUY", tradeConfig);
-    const testEnd = Math.min(entryIdx + STEP, close.length - 1);
+    // Strategy-specific max holding periods
+    const maxHoldBars = signal.strategy === "trend" ? 20
+      : signal.strategy === "mean_reversion" ? 10
+      : signal.strategy === "breakout" ? 15
+      : STEP;
+    const testEnd = Math.min(entryIdx + maxHoldBars, close.length - 1);
+    const useTrailingStop = signal.strategy === "trend" || signal.strategy === "breakout";
+    const TRAILING_STOP_PCT = 0.03; // 3% trail from peak
+    const BREAKEVEN_THRESHOLD = 0.02; // move stop to breakeven after +2%
 
     let maxAdverse = 0;
     let maxFavorable = 0;
     let exitPrice = close[testEnd];
     let exitDate = timestamps[testEnd];
     let exitIdx = testEnd;
+    let exitReason: Trade["exitReason"] = "time_exit";
+    let peakReturn = 0;
+    let breakEvenActivated = false;
 
     for (let j = entryIdx + 1; j <= testEnd; j++) {
       const priceChange = action === "BUY"
@@ -642,21 +653,43 @@ function runWalkForwardBacktest(
       if (priceChange < 0) maxAdverse = Math.min(maxAdverse, priceChange);
       if (priceChange > 0) maxFavorable = Math.max(maxFavorable, priceChange);
 
+      // Track peak for trailing stop
+      if (priceChange > peakReturn) peakReturn = priceChange;
+      if (priceChange >= BREAKEVEN_THRESHOLD) breakEvenActivated = true;
+
+      // Hard stop-loss
       if (priceChange <= -config.stopLossPct / 100) {
         exitPrice = action === "BUY"
           ? entryPrice * (1 - config.stopLossPct / 100)
           : entryPrice * (1 + config.stopLossPct / 100);
         exitDate = timestamps[j];
         exitIdx = j;
+        exitReason = "stop_loss";
         break;
       }
+
+      // Hard take-profit
       if (priceChange >= config.takeProfitPct / 100) {
         exitPrice = action === "BUY"
           ? entryPrice * (1 + config.takeProfitPct / 100)
           : entryPrice * (1 - config.takeProfitPct / 100);
         exitDate = timestamps[j];
         exitIdx = j;
+        exitReason = "take_profit";
         break;
+      }
+
+      // Trailing stop (trend & breakout only)
+      if (useTrailingStop && peakReturn > BREAKEVEN_THRESHOLD) {
+        const trailLevel = peakReturn - TRAILING_STOP_PCT;
+        const stopLevel = breakEvenActivated ? Math.max(0, trailLevel) : trailLevel;
+        if (priceChange <= stopLevel) {
+          exitPrice = close[j];
+          exitDate = timestamps[j];
+          exitIdx = j;
+          exitReason = "trailing_stop";
+          break;
+        }
       }
     }
 
@@ -704,6 +737,7 @@ function runWalkForwardBacktest(
       mfe: parseFloat((maxFavorable * 100).toFixed(2)),
       volumeAtEntry: volume[entryIdx] || 0,
       strategy: signal.strategy,
+      exitReason,
     });
 
     equityCurve.push({ date: exitDate, value: capital });
