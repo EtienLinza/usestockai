@@ -1125,15 +1125,19 @@ function runWalkForwardBacktest(
     const rawEntryPrice = open[entryIdx];
     const entryPrice = applyTradingCosts(rawEntryPrice, action === "BUY", tradeConfig);
 
-    const trendHold = config.maxHoldBars || 20;
-    const maxHoldBars = signal.strategy === "trend" ? trendHold
-      : signal.strategy === "mean_reversion" ? Math.round(trendHold * 0.5)
-      : signal.strategy === "breakout" ? Math.round(trendHold * 0.75)
+    // Profile-adjusted hold periods and trade params
+    const effectiveMaxHoldTrend = userExplicitMaxHold ? (config.maxHoldBars || 20) : activeProfile.maxHoldTrend;
+    const effectiveMaxHoldMR = userExplicitMaxHold ? Math.round((config.maxHoldBars || 20) * 0.5) : activeProfile.maxHoldMR;
+    const effectiveMaxHoldBO = userExplicitMaxHold ? Math.round((config.maxHoldBars || 20) * 0.75) : activeProfile.maxHoldBreakout;
+    const maxHoldBars = signal.strategy === "trend" ? effectiveMaxHoldTrend
+      : signal.strategy === "mean_reversion" ? effectiveMaxHoldMR
+      : signal.strategy === "breakout" ? effectiveMaxHoldBO
       : STEP;
     const useTrailingStop = signal.strategy === "trend" || signal.strategy === "breakout";
 
     const atrPct = entryPrice > 0 ? signal.atr / entryPrice : 0.02;
-    const tsATRMult = config.trailingStopATRMult || 2.0;
+    const tsATRMult = userExplicitTSMult ? config.trailingStopATRMult : activeProfile.trailingStopATRMult;
+    const effectiveTP = userExplicitTP ? config.takeProfitPct : activeProfile.takeProfitPct;
     const isBearRegime = signal.regime === "bearish" || signal.regime === "strong_bearish";
 
     // Widen trailing distance for SHORTs in bearish regimes (bear rallies are violent)
