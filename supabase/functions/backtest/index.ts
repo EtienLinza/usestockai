@@ -280,6 +280,15 @@ function computeStrategySignal(
   const above200 = currentPrice > s200;
   const below200 = currentPrice < s200;
 
+  // --- 200 SMA Slope Filter (Fix 2: catches trend reversals earlier) ---
+  // 20-bar rate of change of 200 SMA
+  let sma200Slope = 0;
+  if (sma200.length >= 21 && !isNaN(sma200[sma200.length - 1]) && !isNaN(sma200[sma200.length - 21]) && sma200[sma200.length - 21] > 0) {
+    sma200Slope = (sma200[sma200.length - 1] - sma200[sma200.length - 21]) / sma200[sma200.length - 21];
+  }
+  const sma200Declining = sma200Slope < -0.01; // 200 SMA declining > 1%
+  const sma200Rising = sma200Slope > 0.01;     // 200 SMA rising > 1%
+
   const SP = signalParams || {};
   const ADX_THRESH = SP.adxThreshold ?? 25;
   const RSI_OS = SP.rsiOversold ?? 30;
@@ -308,15 +317,16 @@ function computeStrategySignal(
     ];
     const trendShortScore = trendShortConditions.filter(Boolean).length;
 
-    if (trendBuyScore >= 3 && above200) {
+    // Fix 2: Block trend BUYs when 200 SMA is declining (catches early 2008 rollovers)
+    if (trendBuyScore >= 3 && above200 && !sma200Declining) {
       trendSignal = "BUY";
-      // Base: score*20 (3/4=60, 4/4=80). Bonuses capped.
       let conv = trendBuyScore * 20;
-      conv += Math.min((adxVal - ADX_THRESH) * 0.5, 15); // ADX strength bonus
-      conv += Math.min(Math.abs(macdH) * 5, 10);          // MACD momentum bonus
-      if (rsiVal >= 40 && rsiVal <= 60) conv += 5;         // RSI sweetspot
+      conv += Math.min((adxVal - ADX_THRESH) * 0.5, 15);
+      conv += Math.min(Math.abs(macdH) * 5, 10);
+      if (rsiVal >= 40 && rsiVal <= 60) conv += 5;
       trendConviction = Math.min(100, conv);
-    } else if (trendShortScore >= 3 && below200) {
+    // Fix 2: Block trend SHORTs when 200 SMA is rising
+    } else if (trendShortScore >= 3 && below200 && !sma200Rising) {
       trendSignal = "SHORT";
       let conv = trendShortScore * 20;
       conv += Math.min((adxVal - ADX_THRESH) * 0.5, 15);
@@ -350,13 +360,14 @@ function computeStrategySignal(
     ];
     const mrShortScore = mrShortConditions.filter(Boolean).length;
 
-    if (mrBuyScore >= 3) {
+    // Fix 1: Apply 200 SMA trend guard to MR — block falling knife buys and counter-trend shorts
+    if (mrBuyScore >= 3 && !below200) {
       mrSignal = "BUY";
       let conv = mrBuyScore * 18;
-      conv += Math.min(Math.abs(rsiVal - 50) * 0.3, 10);     // RSI extremity
-      conv += Math.min(Math.abs(smaDeviation) * 100, 10);     // Deviation bonus
+      conv += Math.min(Math.abs(rsiVal - 50) * 0.3, 10);
+      conv += Math.min(Math.abs(smaDeviation) * 100, 10);
       mrConviction = Math.min(100, conv);
-    } else if (mrShortScore >= 3) {
+    } else if (mrShortScore >= 3 && !above200) {
       mrSignal = "SHORT";
       let conv = mrShortScore * 18;
       conv += Math.min(Math.abs(rsiVal - 50) * 0.3, 10);
@@ -418,9 +429,19 @@ function computeStrategySignal(
     return HOLD_RESULT(regime);
   }
 
-  // --- Conviction threshold filter (Bug Fix #1) ---
-  // This is the key gate: if conviction doesn't meet the user-configured threshold, skip it
-  const cappedConviction = Math.min(100, bestConviction);
+  // --- Fix 4: Regime-based conviction penalty for counter-trend trades ---
+  // Counter-trend trades get 0.7× conviction multiplier so only the strongest pass
+  let adjustedConviction = bestConviction;
+  const isBearishRegime = regime === "bearish" || regime === "strong_bearish";
+  const isBullishRegime = regime === "bullish" || regime === "strong_bullish";
+  if (bestSignal === "BUY" && isBearishRegime) {
+    adjustedConviction *= 0.7; // Buying in bear market needs much higher raw conviction
+  } else if (bestSignal === "SHORT" && isBullishRegime) {
+    adjustedConviction *= 0.7; // Shorting in bull market needs much higher raw conviction
+  }
+
+  // --- Conviction threshold filter ---
+  const cappedConviction = Math.min(100, adjustedConviction);
   const convThresh = bestSignal === "BUY" ? CONV_BUY_THRESH : CONV_SHORT_THRESH;
   if (cappedConviction < convThresh) {
     signalState.lastDirection = "HOLD";
@@ -843,11 +864,20 @@ function runWalkForwardBacktest(
 
     const atrPct = entryPrice > 0 ? signal.atr / entryPrice : 0.02;
     const tsATRMult = config.trailingStopATRMult || 2.0;
-    const trailingStopDist = tsATRMult * atrPct;
+    const isBearRegime = signal.regime === "bearish" || signal.regime === "strong_bearish";
+
+    // Fix 3: Widen stops and trailing distance for SHORTs in bearish regimes
+    // Bear market rallies are violent — give shorts more room
+    const effectiveTrailingMult = (action === "SHORT" && isBearRegime) ? tsATRMult * 1.5 : tsATRMult;
+    const trailingStopDist = effectiveTrailingMult * atrPct;
     const breakevenThreshold = atrPct;
-    const effectiveStopPct = signal.strategy === "trend"
+    let effectiveStopPct = signal.strategy === "trend"
       ? Math.max(config.stopLossPct / 100, 3 * atrPct)
       : config.stopLossPct / 100;
+    // Widen hard stop by 1.5× for SHORTs in bear regimes
+    if (action === "SHORT" && isBearRegime) {
+      effectiveStopPct *= 1.5;
+    }
 
     const adjustedSizePct = config.positionSizePct * signal.positionSizeMultiplier;
     const positionSize = Math.min(capital * (adjustedSizePct / 100), capital * 0.95);
