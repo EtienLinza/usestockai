@@ -182,6 +182,145 @@ function safeGet(arr: number[], defaultVal: number): number {
 }
 
 // ============================================================================
+// STOCK-ADAPTIVE STRATEGY PROFILES
+// ============================================================================
+
+type StockProfile = "momentum" | "value" | "index" | "volatile";
+
+interface StockClassification {
+  classification: StockProfile;
+  trendPersistence: number;
+  meanReversionRate: number;
+  avgVolatility: number;
+  atrPctAvg: number;
+}
+
+interface ProfileParams {
+  adxThreshold: number;
+  rsiOversold: number;
+  rsiOverbought: number;
+  maxHoldTrend: number;
+  maxHoldMR: number;
+  maxHoldBreakout: number;
+  takeProfitPct: number;
+  trailingStopATRMult: number;
+  buyThreshold: number;
+  shortThreshold: number;
+  trendConvictionBonus: number;
+  mrConvictionBonus: number;
+  breakoutConvictionBonus: number;
+}
+
+const PROFILE_PARAMS: Record<StockProfile, ProfileParams> = {
+  momentum: {
+    adxThreshold: 20, rsiOversold: 35, rsiOverbought: 65,
+    maxHoldTrend: 30, maxHoldMR: 8, maxHoldBreakout: 22,
+    takeProfitPct: 15, trailingStopATRMult: 2.5,
+    buyThreshold: 60, shortThreshold: 70,
+    trendConvictionBonus: 10, mrConvictionBonus: 0, breakoutConvictionBonus: 0,
+  },
+  value: {
+    adxThreshold: 30, rsiOversold: 25, rsiOverbought: 75,
+    maxHoldTrend: 15, maxHoldMR: 12, maxHoldBreakout: 11,
+    takeProfitPct: 8, trailingStopATRMult: 1.5,
+    buyThreshold: 65, shortThreshold: 60,
+    trendConvictionBonus: 0, mrConvictionBonus: 10, breakoutConvictionBonus: 0,
+  },
+  index: {
+    adxThreshold: 25, rsiOversold: 30, rsiOverbought: 70,
+    maxHoldTrend: 20, maxHoldMR: 10, maxHoldBreakout: 15,
+    takeProfitPct: 10, trailingStopATRMult: 2.0,
+    buyThreshold: 65, shortThreshold: 65,
+    trendConvictionBonus: 0, mrConvictionBonus: 0, breakoutConvictionBonus: 0,
+  },
+  volatile: {
+    adxThreshold: 20, rsiOversold: 20, rsiOverbought: 80,
+    maxHoldTrend: 12, maxHoldMR: 6, maxHoldBreakout: 9,
+    takeProfitPct: 12, trailingStopATRMult: 3.0,
+    buyThreshold: 70, shortThreshold: 60,
+    trendConvictionBonus: 0, mrConvictionBonus: 0, breakoutConvictionBonus: 5,
+  },
+};
+
+function classifyStock(close: number[], high: number[], low: number[]): StockClassification {
+  const n = close.length;
+
+  // 1. Daily returns
+  const returns: number[] = [];
+  for (let i = 1; i < n; i++) returns.push((close[i] - close[i - 1]) / close[i - 1]);
+
+  // 2. Average daily volatility (std of returns)
+  const retMean = returns.reduce((a, b) => a + b, 0) / returns.length;
+  const avgVolatility = Math.sqrt(returns.reduce((a, b) => a + (b - retMean) ** 2, 0) / returns.length);
+
+  // 3. Trend persistence: average autocorrelation of returns (lag 1-5)
+  let totalAutoCorr = 0;
+  const maxLag = Math.min(5, returns.length - 1);
+  for (let lag = 1; lag <= maxLag; lag++) {
+    let sumXY = 0, sumX2 = 0, sumY2 = 0;
+    for (let i = lag; i < returns.length; i++) {
+      const x = returns[i - lag] - retMean;
+      const y = returns[i] - retMean;
+      sumXY += x * y;
+      sumX2 += x * x;
+      sumY2 += y * y;
+    }
+    const denom = Math.sqrt(sumX2 * sumY2);
+    totalAutoCorr += denom > 0 ? sumXY / denom : 0;
+  }
+  const trendPersistence = maxLag > 0 ? totalAutoCorr / maxLag : 0;
+
+  // 4. Mean reversion rate: % of RSI extremes that snap back within 5 bars
+  const rsi = calculateRSI(close, 14);
+  let extremeCount = 0, revertCount = 0;
+  for (let i = 20; i < n - 5; i++) {
+    if (isNaN(rsi[i])) continue;
+    if (rsi[i] < 30 || rsi[i] > 70) {
+      extremeCount++;
+      // Check if RSI reverts toward 50 within 5 bars
+      for (let j = 1; j <= 5 && i + j < n; j++) {
+        if (!isNaN(rsi[i + j]) && Math.abs(rsi[i + j] - 50) < Math.abs(rsi[i] - 50) * 0.6) {
+          revertCount++;
+          break;
+        }
+      }
+    }
+  }
+  const meanReversionRate = extremeCount > 0 ? revertCount / extremeCount : 0.5;
+
+  // 5. Average ATR as % of price
+  const atr = calculateATR(high, low, close, 14);
+  let atrPctSum = 0, atrPctCount = 0;
+  for (let i = 14; i < n; i++) {
+    if (!isNaN(atr[i]) && close[i] > 0) {
+      atrPctSum += atr[i] / close[i];
+      atrPctCount++;
+    }
+  }
+  const atrPctAvg = atrPctCount > 0 ? atrPctSum / atrPctCount : 0.02;
+
+  // 6. Classification logic
+  // Known index tickers get fast-tracked
+  let classification: StockProfile;
+
+  if (atrPctAvg > 0.035 && trendPersistence < 0.05) {
+    // Very high ATR%, low autocorrelation → volatile
+    classification = "volatile";
+  } else if (trendPersistence > 0.06 && avgVolatility > 0.012) {
+    // High trend persistence + moderate-high vol → momentum
+    classification = "momentum";
+  } else if (meanReversionRate > 0.55 && trendPersistence < 0.04) {
+    // High mean reversion, low trend persistence → value
+    classification = "value";
+  } else {
+    // Default: moderate everything → index
+    classification = "index";
+  }
+
+  return { classification, trendPersistence, meanReversionRate, avgVolatility, atrPctAvg };
+}
+
+// ============================================================================
 // MULTI-STRATEGY REGIME-ADAPTIVE SIGNAL ENGINE
 // ============================================================================
 
@@ -200,6 +339,7 @@ function computeStrategySignal(
   close: number[], high: number[], low: number[], volume: number[],
   signalState: SignalState, step: number,
   signalParams?: { adxThreshold?: number; rsiOversold?: number; rsiOverbought?: number; buyThreshold?: number; shortThreshold?: number },
+  profileBonuses?: { trendConvictionBonus?: number; mrConvictionBonus?: number; breakoutConvictionBonus?: number },
   adaptiveContext?: { spyBearish?: boolean; spySMADeclining?: boolean; isLeader?: boolean }
 ): {
   consensusScore: number;
@@ -417,6 +557,18 @@ function computeStrategySignal(
       conv += Math.min((currentRange / currentATR - 1) * 20, 25);
       boConviction = Math.min(100, conv);
     }
+  }
+
+  // --- Apply profile-specific conviction bonuses ---
+  const pb = profileBonuses || {};
+  if (trendSignal !== "HOLD" && pb.trendConvictionBonus) {
+    trendConviction = Math.min(100, trendConviction + pb.trendConvictionBonus);
+  }
+  if (mrSignal !== "HOLD" && pb.mrConvictionBonus) {
+    mrConviction = Math.min(100, mrConviction + pb.mrConvictionBonus);
+  }
+  if (boSignal !== "HOLD" && pb.breakoutConvictionBonus) {
+    boConviction = Math.min(100, boConviction + pb.breakoutConvictionBonus);
   }
 
   // --- Select best strategy by conviction ---
@@ -716,7 +868,7 @@ function runWalkForwardBacktest(
   executionDelay: number = 1,
   stepOverride?: number,
   spyData?: DataSet | null,
-): { trades: Trade[]; equityCurve: { date: string; value: number }[]; totalBars: number; barsInTrade: number } {
+): { trades: Trade[]; equityCurve: { date: string; value: number }[]; totalBars: number; barsInTrade: number; stockClassification: StockClassification | null } {
   const { close, high, low, open, volume, timestamps } = allData;
   const trades: Trade[] = [];
   let capital = config.initialCapital;
@@ -751,8 +903,37 @@ function runWalkForwardBacktest(
     }
   }
 
+  // --- Stock Classification (initial + rolling re-eval every 250 bars) ---
+  const CLASSIFY_WINDOW = 250;
+  let currentClassification: StockClassification | null = null;
+  let activeProfile: ProfileParams = PROFILE_PARAMS["index"]; // default
+  let lastClassifyBar = -CLASSIFY_WINDOW; // force initial classification
+
+  // Check if user explicitly set params (non-default = explicit)
+  const userExplicitADX = config.adxThreshold !== 25;
+  const userExplicitRSIOS = config.rsiOversold !== 30;
+  const userExplicitRSIOB = config.rsiOverbought !== 70;
+  const userExplicitBuyThresh = config.buyThreshold !== 60;
+  const userExplicitShortThresh = Math.abs(config.shortThreshold) !== 60;
+  const userExplicitMaxHold = config.maxHoldBars !== 20;
+  const userExplicitTP = config.takeProfitPct !== 10;
+  const userExplicitTSMult = config.trailingStopATRMult !== 2.0;
+
   for (let i = TRAIN_WINDOW; i < close.length - 1; i += STEP) {
     totalBars += STEP;
+
+    // --- Rolling stock classification every 250 bars ---
+    if (i - lastClassifyBar >= CLASSIFY_WINDOW && i >= CLASSIFY_WINDOW) {
+      const classWindow = Math.min(i, CLASSIFY_WINDOW);
+      const cClose = close.slice(i - classWindow, i);
+      const cHigh = high.slice(i - classWindow, i);
+      const cLow = low.slice(i - classWindow, i);
+      if (cClose.length >= 50) {
+        currentClassification = classifyStock(cClose, cHigh, cLow);
+        activeProfile = PROFILE_PARAMS[currentClassification.classification];
+        lastClassifyBar = i;
+      }
+    }
 
     // --- Phase 1: Check exits for all open positions ---
     for (let p = openPositions.length - 1; p >= 0; p--) {
@@ -897,12 +1078,23 @@ function runWalkForwardBacktest(
       }
     }
 
+    // Use profile-adjusted params, with user overrides taking priority
+    const effectiveADX = userExplicitADX ? config.adxThreshold : activeProfile.adxThreshold;
+    const effectiveRSIOS = userExplicitRSIOS ? config.rsiOversold : activeProfile.rsiOversold;
+    const effectiveRSIOB = userExplicitRSIOB ? config.rsiOverbought : activeProfile.rsiOverbought;
+    const effectiveBuyThresh = userExplicitBuyThresh ? config.buyThreshold : activeProfile.buyThreshold;
+    const effectiveShortThresh = userExplicitShortThresh ? Math.abs(config.shortThreshold) : activeProfile.shortThreshold;
+
     const signal = computeStrategySignal(trainClose, trainHigh, trainLow, trainVol, signalState, STEP, {
-      adxThreshold: config.adxThreshold,
-      rsiOversold: config.rsiOversold,
-      rsiOverbought: config.rsiOverbought,
-      buyThreshold: config.buyThreshold,
-      shortThreshold: Math.abs(config.shortThreshold),
+      adxThreshold: effectiveADX,
+      rsiOversold: effectiveRSIOS,
+      rsiOverbought: effectiveRSIOB,
+      buyThreshold: effectiveBuyThresh,
+      shortThreshold: effectiveShortThresh,
+    }, {
+      trendConvictionBonus: activeProfile.trendConvictionBonus,
+      mrConvictionBonus: activeProfile.mrConvictionBonus,
+      breakoutConvictionBonus: activeProfile.breakoutConvictionBonus,
     }, {
       spyBearish,
       spySMADeclining,
@@ -933,15 +1125,19 @@ function runWalkForwardBacktest(
     const rawEntryPrice = open[entryIdx];
     const entryPrice = applyTradingCosts(rawEntryPrice, action === "BUY", tradeConfig);
 
-    const trendHold = config.maxHoldBars || 20;
-    const maxHoldBars = signal.strategy === "trend" ? trendHold
-      : signal.strategy === "mean_reversion" ? Math.round(trendHold * 0.5)
-      : signal.strategy === "breakout" ? Math.round(trendHold * 0.75)
+    // Profile-adjusted hold periods and trade params
+    const effectiveMaxHoldTrend = userExplicitMaxHold ? (config.maxHoldBars || 20) : activeProfile.maxHoldTrend;
+    const effectiveMaxHoldMR = userExplicitMaxHold ? Math.round((config.maxHoldBars || 20) * 0.5) : activeProfile.maxHoldMR;
+    const effectiveMaxHoldBO = userExplicitMaxHold ? Math.round((config.maxHoldBars || 20) * 0.75) : activeProfile.maxHoldBreakout;
+    const maxHoldBars = signal.strategy === "trend" ? effectiveMaxHoldTrend
+      : signal.strategy === "mean_reversion" ? effectiveMaxHoldMR
+      : signal.strategy === "breakout" ? effectiveMaxHoldBO
       : STEP;
     const useTrailingStop = signal.strategy === "trend" || signal.strategy === "breakout";
 
     const atrPct = entryPrice > 0 ? signal.atr / entryPrice : 0.02;
-    const tsATRMult = config.trailingStopATRMult || 2.0;
+    const tsATRMult = userExplicitTSMult ? config.trailingStopATRMult : activeProfile.trailingStopATRMult;
+    const effectiveTP = userExplicitTP ? config.takeProfitPct : activeProfile.takeProfitPct;
     const isBearRegime = signal.regime === "bearish" || signal.regime === "strong_bearish";
 
     // Widen trailing distance for SHORTs in bearish regimes (bear rallies are violent)
@@ -976,7 +1172,7 @@ function runWalkForwardBacktest(
     openPositions.push({
       entryIdx, entryPrice, action, strategy: signal.strategy,
       maxHoldBars, useTrailingStop, trailingStopDist, breakevenThreshold,
-      effectiveStopPct, takeProfitPct: config.takeProfitPct / 100,
+      effectiveStopPct, takeProfitPct: effectiveTP / 100,
       positionSize, shares, commission,
       regime: signal.regime, confidence: signal.confidence,
       predictedReturn: signal.predictedReturn, signal_atr: signal.atr,
@@ -1015,7 +1211,7 @@ function runWalkForwardBacktest(
   }
   equityCurve.push({ date: timestamps[close.length - 1], value: capital });
 
-  return { trades, equityCurve, totalBars, barsInTrade };
+  return { trades, equityCurve, totalBars, barsInTrade, stockClassification: currentClassification };
 }
 
 // ============================================================================
@@ -1800,6 +1996,7 @@ serve(async (req) => {
     let combinedEquity: { date: string; value: number }[] = [];
     let totalBarsAll = 0, barsInTradeAll = 0;
     let firstTickerData: DataSet | null = null;
+    const stockProfiles: Record<string, StockClassification> = {};
     const tickerCount = config.tickers.length;
 
     // Bug Fix #2: Count valid tickers FIRST, then split capital properly
@@ -1818,7 +2015,8 @@ serve(async (req) => {
       const tickerConfig = { ...config, initialCapital: capitalPerTicker };
       const tickerTradeConfig = { ...tradeConfig, initialCapital: capitalPerTicker };
 
-      const { trades, equityCurve, totalBars, barsInTrade } = runWalkForwardBacktest(data, config.tickers[idx], tickerConfig, tickerTradeConfig, 1, undefined, spyData);
+      const { trades, equityCurve, totalBars, barsInTrade, stockClassification } = runWalkForwardBacktest(data, config.tickers[idx], tickerConfig, tickerTradeConfig, 1, undefined, spyData);
+      if (stockClassification) stockProfiles[config.tickers[idx]] = stockClassification;
       allTrades = allTrades.concat(trades);
       totalBarsAll += totalBars;
       barsInTradeAll += barsInTrade;
@@ -1953,9 +2151,11 @@ serve(async (req) => {
       benchmarkEquity,
       marketRegimePerformance,
       strategyPerformance,
+      stockProfiles,
     };
 
-    console.log(`Backtest complete: ${allTrades.length} trades, Win Rate: ${metrics.winRate}%, Sharpe: ${metrics.sharpeRatio}, elapsed: ${Date.now() - startTime}ms`);
+    const profileSummary = Object.entries(stockProfiles).map(([t, p]) => `${t}:${p.classification}`).join(', ');
+    console.log(`Backtest complete: ${allTrades.length} trades, Win Rate: ${metrics.winRate}%, Sharpe: ${metrics.sharpeRatio}, Profiles: [${profileSummary}], elapsed: ${Date.now() - startTime}ms`);
 
     return new Response(JSON.stringify(report), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
