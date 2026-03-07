@@ -559,6 +559,18 @@ function computeStrategySignal(
     }
   }
 
+  // --- Apply profile-specific conviction bonuses ---
+  const pb = profileBonuses || {};
+  if (trendSignal !== "HOLD" && pb.trendConvictionBonus) {
+    trendConviction = Math.min(100, trendConviction + pb.trendConvictionBonus);
+  }
+  if (mrSignal !== "HOLD" && pb.mrConvictionBonus) {
+    mrConviction = Math.min(100, mrConviction + pb.mrConvictionBonus);
+  }
+  if (boSignal !== "HOLD" && pb.breakoutConvictionBonus) {
+    boConviction = Math.min(100, boConviction + pb.breakoutConvictionBonus);
+  }
+
   // --- Select best strategy by conviction ---
   let bestSignal: "BUY" | "SHORT" | "HOLD" = "HOLD";
   let bestConviction = 0;
