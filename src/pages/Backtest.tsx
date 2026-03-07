@@ -15,6 +15,7 @@ import {
   AreaChart, Area, BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, ReferenceLine, Cell, ComposedChart,
 } from "recharts";
+import { fetchWithErrorHandling, handleResponseError, showErrorToast } from "@/lib/api-error";
 import {
   Activity, BarChart3, Brain, TrendingUp, TrendingDown, AlertTriangle,
   Play, Loader2, Target, Gauge, DollarSign, Percent, Shuffle, Calendar,
@@ -171,7 +172,7 @@ const Backtest = () => {
     setReport(null);
 
     try {
-      const resp = await fetch(
+      const resp = await fetchWithErrorHandling(
         `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/backtest`,
         {
           method: "POST",
@@ -189,12 +190,13 @@ const Backtest = () => {
             takeProfitPct: takeProfit,
             includeMonteCarlo,
           }),
+          timeoutMs: 120000, // Backtests can take longer
+          retries: 1,
         }
       );
 
       if (!resp.ok) {
-        const err = await resp.json();
-        throw new Error(err.error || "Backtest failed");
+        await handleResponseError(resp, navigate);
       }
 
       const data: BacktestReport = await resp.json();
@@ -202,7 +204,7 @@ const Backtest = () => {
       toast.success(`Backtest complete: ${data.totalTrades} trades analyzed`);
     } catch (e) {
       console.error("Backtest error:", e);
-      toast.error(e instanceof Error ? e.message : "Backtest failed");
+      showErrorToast(e, "Backtest failed. Please try again.");
     } finally {
       setIsLoading(false);
     }
