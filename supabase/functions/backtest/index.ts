@@ -860,6 +860,14 @@ function runWalkForwardBacktest(
     else if (signal.consensusScore < 0) action = "SHORT";
     if (action === "HOLD") continue;
 
+    // Fix 2: Disable shorts when SPY > 200 SMA (bull market filter)
+    if (action === "SHORT" && spy200SMAMap.size > 0) {
+      const currentDate = timestamps[i];
+      // Find closest SPY date
+      const spyAbove200 = spy200SMAMap.get(currentDate);
+      if (spyAbove200 === true) continue; // Skip short in bull market
+    }
+
     // Block duplicate-direction trades on same ticker
     const hasDuplicateDirection = openPositions.some(p => p.action === action);
     if (hasDuplicateDirection) continue;
@@ -880,21 +888,29 @@ function runWalkForwardBacktest(
     const tsATRMult = config.trailingStopATRMult || 2.0;
     const isBearRegime = signal.regime === "bearish" || signal.regime === "strong_bearish";
 
-    // Fix 3: Widen stops and trailing distance for SHORTs in bearish regimes
-    // Bear market rallies are violent — give shorts more room
+    // Widen trailing distance for SHORTs in bearish regimes (bear rallies are violent)
     const effectiveTrailingMult = (action === "SHORT" && isBearRegime) ? tsATRMult * 1.5 : tsATRMult;
     const trailingStopDist = effectiveTrailingMult * atrPct;
     const breakevenThreshold = atrPct;
+
+    // Fix 5: Use 2 ATR for trend stops (was 3)
     let effectiveStopPct = signal.strategy === "trend"
-      ? Math.max(config.stopLossPct / 100, 3 * atrPct)
+      ? Math.max(config.stopLossPct / 100, 2 * atrPct)
       : config.stopLossPct / 100;
     // Widen hard stop by 1.5× for SHORTs in bear regimes
     if (action === "SHORT" && isBearRegime) {
       effectiveStopPct *= 1.5;
     }
+    // Fix 1: Hard 8% loss cap — no trade ever risks more than 8%
+    effectiveStopPct = Math.min(effectiveStopPct, 0.08);
 
-    const adjustedSizePct = config.positionSizePct * signal.positionSizeMultiplier;
-    const positionSize = Math.min(capital * (adjustedSizePct / 100), capital * 0.95);
+    // Fix 3: Risk-based position sizing
+    // Risk riskPerTrade fraction of capital per trade, capped at 25% of capital
+    const riskFraction = config.riskPerTrade || 0.01;
+    const positionSize = Math.min(
+      capital * riskFraction / Math.max(effectiveStopPct, 0.005),
+      capital * 0.25
+    );
     if (positionSize <= 0) continue;
     const shares = positionSize / entryPrice;
     const commission = positionSize * (tradeConfig.commissionPct / 100) * 2;
