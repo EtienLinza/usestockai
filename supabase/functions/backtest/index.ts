@@ -966,7 +966,7 @@ function runWalkForwardBacktest(
       const cHigh = high.slice(i - classWindow, i);
       const cLow = low.slice(i - classWindow, i);
       if (cClose.length >= 50) {
-        currentClassification = classifyStock(cClose, cHigh, cLow);
+        currentClassification = classifyStock(cClose, cHigh, cLow, ticker);
         activeProfile = applyModeToProfile(PROFILE_PARAMS[currentClassification.classification]);
         lastClassifyBar = i;
       }
