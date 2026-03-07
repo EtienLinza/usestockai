@@ -2154,7 +2154,8 @@ serve(async (req) => {
       stockProfiles,
     };
 
-    console.log(`Backtest complete: ${allTrades.length} trades, Win Rate: ${metrics.winRate}%, Sharpe: ${metrics.sharpeRatio}, elapsed: ${Date.now() - startTime}ms`);
+    const profileSummary = Object.entries(stockProfiles).map(([t, p]) => `${t}:${p.classification}`).join(', ');
+    console.log(`Backtest complete: ${allTrades.length} trades, Win Rate: ${metrics.winRate}%, Sharpe: ${metrics.sharpeRatio}, Profiles: [${profileSummary}], elapsed: ${Date.now() - startTime}ms`);
 
     return new Response(JSON.stringify(report), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
