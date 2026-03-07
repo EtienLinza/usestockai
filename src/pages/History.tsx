@@ -32,6 +32,7 @@ import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { format } from "date-fns";
+import { fetchWithErrorHandling, showErrorToast } from "@/lib/api-error";
 
 interface PredictionRun {
   id: string;
@@ -127,7 +128,7 @@ const History = () => {
     // Fetch all tickers in parallel
     const pricePromises = uniqueTickers.map(async (ticker) => {
       try {
-        const response = await fetch(
+        const response = await fetchWithErrorHandling(
           `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/fetch-stock-price`,
           {
             method: "POST",
@@ -135,6 +136,7 @@ const History = () => {
               "Content-Type": "application/json",
             },
             body: JSON.stringify({ ticker }),
+            timeoutMs: 15000,
           }
         );
 

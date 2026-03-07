@@ -11,6 +11,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { format } from "date-fns";
 import { Brain, TrendingUp, Shield, Sparkles, Layers, LayoutGrid } from "lucide-react";
+import { fetchWithErrorHandling, handleResponseError, showErrorToast } from "@/lib/api-error";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
@@ -93,7 +94,7 @@ const Dashboard = () => {
         // Price Target Mode - estimate when price will be reached
         setPriceTargetResult(null);
         
-        const response = await fetch(
+        const response = await fetchWithErrorHandling(
           `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/stock-predict`,
           {
             method: "POST",
@@ -106,18 +107,12 @@ const Dashboard = () => {
               targetPrice: data.targetPrice,
               mode: 'price-target',
             }),
+            timeoutMs: 60000,
           }
         );
 
-        if (response.status === 401) {
-          toast.error("Session expired. Please sign in again.");
-          navigate("/auth");
-          return;
-        }
-
         if (!response.ok) {
-          const errorData = await response.json();
-          throw new Error(errorData.error || "Failed to estimate timeline");
+          await handleResponseError(response, navigate);
         }
 
         const result: PriceTargetData = await response.json();
@@ -133,7 +128,7 @@ const Dashboard = () => {
           toast.info(`${data.ticker} is already being compared. Refreshing...`);
         }
 
-        const response = await fetch(
+        const response = await fetchWithErrorHandling(
           `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/stock-predict`,
           {
             method: "POST",
@@ -145,24 +140,12 @@ const Dashboard = () => {
               ticker: data.ticker,
               targetDate: format(data.targetDate, "yyyy-MM-dd"),
             }),
+            timeoutMs: 60000,
           }
         );
 
-        if (response.status === 401) {
-          toast.error("Session expired. Please sign in again.");
-          navigate("/auth");
-          return;
-        }
-
-        if (response.status === 429) {
-          const errorData = await response.json();
-          toast.error(`Rate limit exceeded. Please wait ${errorData.retryAfter || 60} seconds.`);
-          return;
-        }
-
         if (!response.ok) {
-          const errorData = await response.json();
-          throw new Error(errorData.error || "Failed to generate prediction");
+          await handleResponseError(response, navigate);
         }
 
         const result: PredictionData = await response.json();
@@ -202,7 +185,7 @@ const Dashboard = () => {
       }
     } catch (error) {
       console.error("Prediction error:", error);
-      toast.error(error instanceof Error ? error.message : "Failed to generate prediction");
+      showErrorToast(error, "Failed to generate prediction");
     } finally {
       setIsLoading(false);
     }
