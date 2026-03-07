@@ -213,28 +213,28 @@ interface ProfileParams {
 
 const PROFILE_PARAMS: Record<StockProfile, ProfileParams> = {
   momentum: {
-    adxThreshold: 20, rsiOversold: 35, rsiOverbought: 65,
-    maxHoldTrend: 30, maxHoldMR: 8, maxHoldBreakout: 22,
-    takeProfitPct: 15, trailingStopATRMult: 2.5,
-    buyThreshold: 60, shortThreshold: 70,
+    adxThreshold: 22, rsiOversold: 30, rsiOverbought: 68,
+    maxHoldTrend: 28, maxHoldMR: 8, maxHoldBreakout: 20,
+    takeProfitPct: 14, trailingStopATRMult: 2.5,
+    buyThreshold: 60, shortThreshold: 65,
     trendConvictionBonus: 10, mrConvictionBonus: 0, breakoutConvictionBonus: 0,
   },
   value: {
-    adxThreshold: 30, rsiOversold: 25, rsiOverbought: 75,
-    maxHoldTrend: 15, maxHoldMR: 14, maxHoldBreakout: 11,
-    takeProfitPct: 8, trailingStopATRMult: 1.5,
+    adxThreshold: 26, rsiOversold: 25, rsiOverbought: 75,
+    maxHoldTrend: 16, maxHoldMR: 14, maxHoldBreakout: 12,
+    takeProfitPct: 8, trailingStopATRMult: 1.8,
     buyThreshold: 60, shortThreshold: 55,
-    trendConvictionBonus: 0, mrConvictionBonus: 15, breakoutConvictionBonus: 0,
+    trendConvictionBonus: 0, mrConvictionBonus: 12, breakoutConvictionBonus: 0,
   },
   index: {
-    adxThreshold: 22, rsiOversold: 28, rsiOverbought: 72,
+    adxThreshold: 23, rsiOversold: 28, rsiOverbought: 72,
     maxHoldTrend: 22, maxHoldMR: 12, maxHoldBreakout: 15,
     takeProfitPct: 10, trailingStopATRMult: 2.0,
     buyThreshold: 60, shortThreshold: 60,
     trendConvictionBonus: 5, mrConvictionBonus: 5, breakoutConvictionBonus: 0,
   },
   volatile: {
-    adxThreshold: 20, rsiOversold: 20, rsiOverbought: 80,
+    adxThreshold: 20, rsiOversold: 22, rsiOverbought: 78,
     maxHoldTrend: 12, maxHoldMR: 6, maxHoldBreakout: 9,
     takeProfitPct: 12, trailingStopATRMult: 3.0,
     buyThreshold: 70, shortThreshold: 60,
@@ -242,7 +242,9 @@ const PROFILE_PARAMS: Record<StockProfile, ProfileParams> = {
   },
 };
 
-function classifyStock(close: number[], high: number[], low: number[]): StockClassification {
+const INDEX_TICKERS = new Set(["SPY", "QQQ", "DIA", "IWM", "VOO", "VTI", "IVV", "RSP"]);
+
+function classifyStock(close: number[], high: number[], low: number[], ticker?: string): StockClassification {
   const n = close.length;
 
   // 1. Daily returns
@@ -266,18 +268,16 @@ function classifyStock(close: number[], high: number[], low: number[]): StockCla
       sumY2 += y * y;
     }
     const denom = Math.sqrt(sumX2 * sumY2);
-    totalAutoCorr += denom > 0 ? sumXY / denom : 0;
+    if (denom > 0) totalAutoCorr += sumXY / denom;
   }
   const trendPersistence = maxLag > 0 ? totalAutoCorr / maxLag : 0;
 
-  // 4. Mean reversion rate: % of RSI extremes that snap back within 5 bars
+  // 4. Mean reversion rate: how often RSI extremes revert toward 50
   const rsi = calculateRSI(close, 14);
   let extremeCount = 0, revertCount = 0;
-  for (let i = 20; i < n - 5; i++) {
-    if (isNaN(rsi[i])) continue;
-    if (rsi[i] < 30 || rsi[i] > 70) {
+  for (let i = 14; i < n - 5; i++) {
+    if (!isNaN(rsi[i]) && (rsi[i] < 30 || rsi[i] > 70)) {
       extremeCount++;
-      // Check if RSI reverts toward 50 within 5 bars
       for (let j = 1; j <= 5 && i + j < n; j++) {
         if (!isNaN(rsi[i + j]) && Math.abs(rsi[i + j] - 50) < Math.abs(rsi[i] - 50) * 0.6) {
           revertCount++;
@@ -300,22 +300,26 @@ function classifyStock(close: number[], high: number[], low: number[]): StockCla
   const atrPctAvg = atrPctCount > 0 ? atrPctSum / atrPctCount : 0.02;
 
   // 6. Classification logic
-  // Known index tickers get fast-tracked
   let classification: StockProfile;
 
-  if (atrPctAvg > 0.035 && trendPersistence < 0.05) {
-    // Very high ATR%, low autocorrelation → volatile
+  // Force-classify known index ETFs
+  if (ticker && INDEX_TICKERS.has(ticker.toUpperCase())) {
+    classification = "index";
+  } else if (atrPctAvg > 0.025 && trendPersistence < 0.04) {
+    // High ATR%, low autocorrelation → volatile
     classification = "volatile";
-  } else if (trendPersistence > 0.06 && avgVolatility > 0.012) {
-    // High trend persistence + moderate-high vol → momentum
+  } else if (trendPersistence > 0.03 || (avgVolatility > 0.015 && atrPctAvg < 0.025 && meanReversionRate < 0.5)) {
+    // Trend-following tendency → momentum
     classification = "momentum";
-  } else if (meanReversionRate > 0.55 && trendPersistence < 0.04) {
+  } else if (meanReversionRate > 0.45 && trendPersistence < 0.05) {
     // High mean reversion, low trend persistence → value
     classification = "value";
   } else {
-    // Default: moderate everything → index
+    // Default fallback
     classification = "index";
   }
+
+  console.log(`[Classification] ${ticker || "?"}: ${classification} | trendP=${trendPersistence.toFixed(4)} meanRev=${meanReversionRate.toFixed(3)} vol=${avgVolatility.toFixed(4)} atrPct=${atrPctAvg.toFixed(4)}`);
 
   return { classification, trendPersistence, meanReversionRate, avgVolatility, atrPctAvg };
 }
