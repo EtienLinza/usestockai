@@ -1012,7 +1012,7 @@ function runWalkForwardBacktest(
       const cLow = low.slice(i - classWindow, i);
       if (cClose.length >= 50) {
         currentClassification = classifyStock(cClose, cHigh, cLow, ticker);
-        activeProfile = applyModeToProfile(PROFILE_PARAMS[currentClassification.classification]);
+        activeProfile = applyModeToProfile(currentClassification.blendedParams || PROFILE_PARAMS[currentClassification.classification]);
         lastClassifyBar = i;
       }
     }
