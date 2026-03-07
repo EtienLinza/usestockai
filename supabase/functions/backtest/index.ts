@@ -1687,7 +1687,7 @@ serve(async (req) => {
       positionSizePct = 10,
       stopLossPct = 5,
       takeProfitPct = 10,
-      maxPositions = 5,
+      maxPositions = 3,
       rebalanceFrequency = "weekly",
       includeMonteCarlo = true,
       buyThreshold = 60,
@@ -1697,6 +1697,7 @@ serve(async (req) => {
       rsiOverbought = 70,
       trailingStopATRMult = 2.0,
       maxHoldBars = 20,
+      riskPerTrade = 0.01,
     } = body;
 
     console.log(`Backtest request: ${tickers.join(",")} from ${startYear} to ${endYear}, buyThresh=${buyThreshold}, adx=${adxThreshold}, rsiOS=${rsiOversold}, rsiOB=${rsiOverbought}`);
@@ -1709,6 +1710,7 @@ serve(async (req) => {
       buyThreshold, shortThreshold,
       adxThreshold, rsiOversold, rsiOverbought,
       trailingStopATRMult, maxHoldBars,
+      riskPerTrade,
     };
 
     const tradeConfig: TradeConfig = {
@@ -1760,7 +1762,7 @@ serve(async (req) => {
       const tickerConfig = { ...config, initialCapital: capitalPerTicker };
       const tickerTradeConfig = { ...tradeConfig, initialCapital: capitalPerTicker };
 
-      const { trades, equityCurve, totalBars, barsInTrade } = runWalkForwardBacktest(data, config.tickers[idx], tickerConfig, tickerTradeConfig);
+      const { trades, equityCurve, totalBars, barsInTrade } = runWalkForwardBacktest(data, config.tickers[idx], tickerConfig, tickerTradeConfig, 1, undefined, spyData);
       allTrades = allTrades.concat(trades);
       totalBarsAll += totalBars;
       barsInTradeAll += barsInTrade;
