@@ -161,66 +161,89 @@ function safeGet(arr: number[], defaultVal: number): number {
 }
 
 // ============================================================================
-// SIGNAL CONSENSUS
+// MULTI-STRATEGY REGIME-ADAPTIVE SIGNAL ENGINE
 // ============================================================================
-function computeSignal(close: number[], high: number[], low: number[], volume: number[]): {
+
+// Signal confirmation tracker — persists across calls via closure in walk-forward loop
+interface SignalState {
+  lastDirection: "BUY" | "SHORT" | "HOLD";
+  consecutiveCount: number;
+  cooldownBarsRemaining: number;
+}
+
+function createSignalTracker(): SignalState {
+  return { lastDirection: "HOLD", consecutiveCount: 0, cooldownBarsRemaining: 0 };
+}
+
+function computeStrategySignal(
+  close: number[], high: number[], low: number[], volume: number[],
+  signalState: SignalState, step: number
+): {
   consensusScore: number;
   regime: string;
   predictedReturn: number;
   confidence: number;
+  strategy: "trend" | "mean_reversion" | "breakout" | "none";
+  positionSizeMultiplier: number;
 } {
-  const currentPrice = close[close.length - 1];
+  const HOLD_RESULT = (regime: string) => ({
+    consensusScore: 0, regime, predictedReturn: 0, confidence: 0,
+    strategy: "none" as const, positionSizeMultiplier: 1,
+  });
+
+  // --- Cooldown check ---
+  if (signalState.cooldownBarsRemaining > 0) {
+    signalState.cooldownBarsRemaining -= step;
+    return HOLD_RESULT("cooldown");
+  }
+
+  const n = close.length;
+  const currentPrice = close[n - 1];
+
+  // --- Compute all indicators ---
   const ema12 = calculateEMA(close, 12);
   const ema26 = calculateEMA(close, 26);
   const sma50 = calculateSMA(close, 50);
+  const sma200 = calculateSMA(close, 200);
   const rsi = calculateRSI(close, 14);
-  const macd = calculateMACD(close);
+  const macdData = calculateMACD(close);
   const bb = calculateBollingerBands(close, 20, 2);
-  const adx = calculateADX(high, low, close, 14);
+  const adxData = calculateADX(high, low, close, 14);
   const stochK = calculateStochastic(close, high, low, 14);
-
-  let bullish = 0, bearish = 0;
+  const vol = calculateVolatility(close, 20);
 
   const rsiVal = safeGet(rsi, 50);
-  if (rsiVal < 30) bullish += 1.5;
-  else if (rsiVal > 70) bearish += 1.5;
-  else if (rsiVal > 50) bullish += 0.5;
-  else bearish += 0.5;
-
-  const macdH = safeGet(macd.histogram, 0);
-  const prevMacdH = macd.histogram.length >= 2 ? macd.histogram[macd.histogram.length - 2] : 0;
-  if (macdH > 0 && macdH > prevMacdH) bullish += 1.5;
-  else if (macdH < 0 && macdH < prevMacdH) bearish += 1.5;
-  else if (macdH > 0) bullish += 0.5;
-  else bearish += 0.5;
-
-  const e12 = safeGet(ema12, currentPrice), e26 = safeGet(ema26, currentPrice);
-  if (e12 > e26) bullish += 1; else bearish += 1;
-
+  const adxVal = safeGet(adxData.adx, 0);
+  const pdi = safeGet(adxData.plusDI, 0);
+  const mdi = safeGet(adxData.minusDI, 0);
+  const e12 = safeGet(ema12, currentPrice);
+  const e26 = safeGet(ema26, currentPrice);
   const s50 = safeGet(sma50, currentPrice);
-  if (currentPrice > s50) bullish += 1; else bearish += 1;
-
-  const adxVal = safeGet(adx.adx, 0);
-  const pdi = safeGet(adx.plusDI, 0), mdi = safeGet(adx.minusDI, 0);
-  if (adxVal > 25) { if (pdi > mdi) bullish += 2; else bearish += 2; }
-
-  const sk = safeGet(stochK, 50);
-  if (sk < 20) bullish += 1.5;
-  else if (sk > 80) bearish += 1.5;
-
+  const s200 = safeGet(sma200, currentPrice);
   const bbU = safeGet(bb.upper, currentPrice * 1.1);
   const bbL = safeGet(bb.lower, currentPrice * 0.9);
-  const bbM = safeGet(bb.middle, currentPrice);
-  if (currentPrice < bbL) bullish += 1.5;
-  else if (currentPrice > bbU) bearish += 1.5;
-  else if (currentPrice > bbM) bullish += 0.5;
-  else bearish += 0.5;
+  const bbBW = safeGet(bb.bandwidth, 0.1);
+  const sk = safeGet(stochK, 50);
+  const macdH = safeGet(macdData.histogram, 0);
+  const prevMacdH = macdData.histogram.length >= 2 ? macdData.histogram[macdData.histogram.length - 2] : 0;
+  const currentVol = safeGet(vol, 0.02);
 
-  const total = bullish + bearish;
-  const dirScore = total === 0 ? 0 : ((bullish - bearish) / total) * 100;
-  const conviction = Math.min(1, total / (13.5 * 0.6));
-  const consensusScore = dirScore * conviction;
+  // Volume average (20-period)
+  const volSlice = volume.slice(Math.max(0, n - 20));
+  const avgVolume = volSlice.length > 0 ? volSlice.reduce((a, b) => a + b, 0) / volSlice.length : 1;
+  const currentVolume = volume[n - 1] || 0;
+  const volRatio = avgVolume > 0 ? currentVolume / avgVolume : 1;
 
+  // Bandwidth average (50-period) for squeeze detection
+  const bwSlice = bb.bandwidth.filter(v => !isNaN(v));
+  const bwAvg50 = bwSlice.length >= 50
+    ? bwSlice.slice(-50).reduce((a, b) => a + b, 0) / 50
+    : bwSlice.length > 0 ? bwSlice.reduce((a, b) => a + b, 0) / bwSlice.length : 0.1;
+
+  // SMA deviation
+  const smaDeviation = s50 > 0 ? (currentPrice - s50) / s50 : 0;
+
+  // --- Regime classification (for reporting) ---
   let regime = "neutral";
   if (adxVal > 40 && pdi > mdi && rsiVal > 60) regime = "strong_bullish";
   else if (adxVal > 40 && mdi > pdi && rsiVal < 40) regime = "strong_bearish";
@@ -229,14 +252,149 @@ function computeSignal(close: number[], high: number[], low: number[], volume: n
   else if (rsiVal > 70) regime = "overbought";
   else if (rsiVal < 30) regime = "oversold";
 
+  // --- 200 SMA Trend Guard ---
+  const above200 = currentPrice > s200;
+  const below200 = currentPrice < s200;
+
+  // --- Strategy A: Trend Following (ADX > 25) ---
+  let trendSignal: "BUY" | "SHORT" | "HOLD" = "HOLD";
+  let trendConviction = 0;
+  if (adxVal > 25) {
+    // BUY: EMA12 > EMA26 AND price > SMA50 AND MACD histogram positive & increasing AND RSI 40-70
+    const trendBuyConditions = [
+      e12 > e26,
+      currentPrice > s50,
+      macdH > 0 && macdH > prevMacdH,
+      rsiVal >= 40 && rsiVal <= 70,
+    ];
+    const trendBuyScore = trendBuyConditions.filter(Boolean).length;
+
+    // SHORT: EMA12 < EMA26 AND price < SMA50 AND MACD histogram negative & decreasing AND RSI 30-60
+    const trendShortConditions = [
+      e12 < e26,
+      currentPrice < s50,
+      macdH < 0 && macdH < prevMacdH,
+      rsiVal >= 30 && rsiVal <= 60,
+    ];
+    const trendShortScore = trendShortConditions.filter(Boolean).length;
+
+    if (trendBuyScore === 4 && above200) {
+      trendSignal = "BUY";
+      trendConviction = 60 + (adxVal - 25) * 0.8 + Math.abs(macdH) * 10;
+    } else if (trendShortScore === 4 && below200) {
+      trendSignal = "SHORT";
+      trendConviction = 60 + (adxVal - 25) * 0.8 + Math.abs(macdH) * 10;
+    }
+  }
+
+  // --- Strategy B: Mean Reversion (ADX < 20) ---
+  let mrSignal: "BUY" | "SHORT" | "HOLD" = "HOLD";
+  let mrConviction = 0;
+  if (adxVal < 20) {
+    // BUY: RSI < 25 AND price < lower BB AND > 3% below SMA50 AND stoch < 15 AND volume spike
+    const mrBuyConditions = [
+      rsiVal < 25,
+      currentPrice < bbL,
+      smaDeviation < -0.03,
+      sk < 15,
+      volRatio > 1.5,
+    ];
+    const mrBuyScore = mrBuyConditions.filter(Boolean).length;
+
+    // SHORT: RSI > 75 AND price > upper BB AND > 3% above SMA50 AND stoch > 85 AND volume spike
+    const mrShortConditions = [
+      rsiVal > 75,
+      currentPrice > bbU,
+      smaDeviation > 0.03,
+      sk > 85,
+      volRatio > 1.5,
+    ];
+    const mrShortScore = mrShortConditions.filter(Boolean).length;
+
+    // Require at least 4 of 5 conditions (strict but not impossibly rare)
+    if (mrBuyScore >= 4) {
+      mrSignal = "BUY";
+      mrConviction = 50 + (25 - rsiVal) * 1.5 + Math.abs(smaDeviation) * 200 + mrBuyScore * 5;
+    } else if (mrShortScore >= 4) {
+      mrSignal = "SHORT";
+      mrConviction = 50 + (rsiVal - 75) * 1.5 + Math.abs(smaDeviation) * 200 + mrShortScore * 5;
+    }
+  }
+
+  // --- Strategy C: Breakout (Bollinger squeeze) ---
+  let boSignal: "BUY" | "SHORT" | "HOLD" = "HOLD";
+  let boConviction = 0;
+  const isSqueeze = bbBW < bwAvg50 * 0.5;
+  if (isSqueeze) {
+    const adxRising = adxData.adx.length >= 3
+      && !isNaN(adxData.adx[adxData.adx.length - 1])
+      && !isNaN(adxData.adx[adxData.adx.length - 3])
+      && adxData.adx[adxData.adx.length - 1] > adxData.adx[adxData.adx.length - 3];
+
+    // Bullish breakout: close above upper BB with volume and ADX rising
+    if (currentPrice > bbU && volRatio > 2 && adxRising && above200) {
+      boSignal = "BUY";
+      boConviction = 55 + volRatio * 10 + (currentPrice - bbU) / bbU * 500;
+    }
+    // Bearish breakout: close below lower BB with volume and ADX rising
+    else if (currentPrice < bbL && volRatio > 2 && adxRising && below200) {
+      boSignal = "SHORT";
+      boConviction = 55 + volRatio * 10 + (bbL - currentPrice) / bbL * 500;
+    }
+  }
+
+  // --- Select best strategy by conviction ---
+  let bestSignal: "BUY" | "SHORT" | "HOLD" = "HOLD";
+  let bestConviction = 0;
+  let bestStrategy: "trend" | "mean_reversion" | "breakout" | "none" = "none";
+
+  if (trendConviction > bestConviction && trendSignal !== "HOLD") {
+    bestSignal = trendSignal; bestConviction = trendConviction; bestStrategy = "trend";
+  }
+  if (mrConviction > bestConviction && mrSignal !== "HOLD") {
+    bestSignal = mrSignal; bestConviction = mrConviction; bestStrategy = "mean_reversion";
+  }
+  if (boConviction > bestConviction && boSignal !== "HOLD") {
+    bestSignal = boSignal; bestConviction = boConviction; bestStrategy = "breakout";
+  }
+
+  if (bestSignal === "HOLD") {
+    signalState.lastDirection = "HOLD";
+    signalState.consecutiveCount = 0;
+    return HOLD_RESULT(regime);
+  }
+
+  // --- Signal Confirmation (require 2 consecutive same-direction signals) ---
+  if (bestSignal === signalState.lastDirection) {
+    signalState.consecutiveCount++;
+  } else {
+    signalState.lastDirection = bestSignal;
+    signalState.consecutiveCount = 1;
+  }
+
+  const CONFIRMATION_REQUIRED = 2;
+  if (signalState.consecutiveCount < CONFIRMATION_REQUIRED) {
+    return HOLD_RESULT(regime);
+  }
+
+  // --- Passed all filters — generate signal ---
+  const cappedConviction = Math.min(100, bestConviction);
+
+  // Volatility-adjusted position sizing
+  const TARGET_VOL = 0.015; // 1.5% daily target
+  let positionSizeMultiplier = currentVol > 0 ? TARGET_VOL / currentVol : 1;
+  // Scale by conviction
+  positionSizeMultiplier *= 0.7 + (cappedConviction / 100) * 0.8; // range 0.7x - 1.5x
+  positionSizeMultiplier = Math.max(0.25, Math.min(2.0, positionSizeMultiplier));
+
+  const consensusScore = bestSignal === "BUY" ? cappedConviction : -cappedConviction;
   const predictedReturn = (consensusScore / 100) * 5;
 
-  let confidence = 55 + Math.abs(consensusScore) * 0.25;
-  if (regime.includes("strong")) confidence += 8;
-  if (Math.abs(consensusScore) < 20) confidence -= 8;
-  confidence = Math.max(35, Math.min(92, Math.round(confidence)));
+  let confidence = 50 + cappedConviction * 0.35;
+  if (regime.includes("strong")) confidence += 5;
+  confidence = Math.max(40, Math.min(95, Math.round(confidence)));
 
-  return { consensusScore, regime, predictedReturn, confidence };
+  return { consensusScore, regime, predictedReturn, confidence, strategy: bestStrategy, positionSizeMultiplier };
 }
 
 // ============================================================================
