@@ -694,11 +694,11 @@ function runWalkForwardBacktest(
       if (priceChange > peakReturn) peakReturn = priceChange;
       if (priceChange >= BREAKEVEN_THRESHOLD) breakEvenActivated = true;
 
-      // Hard stop-loss
-      if (priceChange <= -config.stopLossPct / 100) {
+      // Hard stop-loss (ATR-widened for trend strategy)
+      if (priceChange <= -effectiveStopPct) {
         exitPrice = action === "BUY"
-          ? entryPrice * (1 - config.stopLossPct / 100)
-          : entryPrice * (1 + config.stopLossPct / 100);
+          ? entryPrice * (1 - effectiveStopPct)
+          : entryPrice * (1 + effectiveStopPct);
         exitDate = timestamps[j];
         exitIdx = j;
         exitReason = "stop_loss";
@@ -718,7 +718,7 @@ function runWalkForwardBacktest(
 
       // Trailing stop (trend & breakout only)
       if (useTrailingStop && peakReturn > BREAKEVEN_THRESHOLD) {
-        const trailLevel = peakReturn - TRAILING_STOP_PCT;
+        const trailLevel = peakReturn - TRAILING_STOP_DIST;
         const stopLevel = breakEvenActivated ? Math.max(0, trailLevel) : trailLevel;
         if (priceChange <= stopLevel) {
           exitPrice = close[j];
