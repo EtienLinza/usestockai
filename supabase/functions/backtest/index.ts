@@ -574,12 +574,12 @@ interface BacktestConfig {
   includeMonteCarlo: boolean;
   buyThreshold: number;
   shortThreshold: number;
-  // New configurable signal parameters
   adxThreshold: number;
   rsiOversold: number;
   rsiOverbought: number;
   trailingStopATRMult: number;
   maxHoldBars: number;
+  riskPerTrade: number; // Risk-based sizing: fraction of capital risked per trade
 }
 
 interface BacktestReport {
@@ -692,6 +692,7 @@ function runWalkForwardBacktest(
   tradeConfig: TradeConfig,
   executionDelay: number = 1,
   stepOverride?: number,
+  spyData?: DataSet | null,
 ): { trades: Trade[]; equityCurve: { date: string; value: number }[]; totalBars: number; barsInTrade: number } {
   const { close, high, low, open, volume, timestamps } = allData;
   const trades: Trade[] = [];
@@ -699,14 +700,27 @@ function runWalkForwardBacktest(
   const equityCurve: { date: string; value: number }[] = [{ date: timestamps[0], value: capital }];
 
   const TRAIN_WINDOW = 250;
-  const STEP = stepOverride || 3; // Balance between responsiveness and overtrading
+  const STEP = stepOverride || 3;
   let totalBars = 0;
   let barsInTrade = 0;
-  const COOLDOWN_BARS = 5; // Space out entries to reduce noise trades
+  const COOLDOWN_BARS = 5;
 
   const signalState = createSignalTracker();
   const openPositions: OpenPosition[] = [];
-  const cooldownPerTicker = new Map<string, number>(); // Per-ticker cooldown tracking
+  const cooldownPerTicker = new Map<string, number>();
+
+  // Build SPY date→close map + compute SPY 200 SMA for short filtering
+  const spyDateMap = new Map<string, number>();
+  const spy200SMAMap = new Map<string, boolean>(); // date → whether SPY > SMA200
+  if (spyData && spyData.close.length >= 200) {
+    const spySMA200 = calculateSMA(spyData.close, 200);
+    for (let si = 0; si < spyData.timestamps.length; si++) {
+      spyDateMap.set(spyData.timestamps[si], spyData.close[si]);
+      if (!isNaN(spySMA200[si])) {
+        spy200SMAMap.set(spyData.timestamps[si], spyData.close[si] > spySMA200[si]);
+      }
+    }
+  }
 
   for (let i = TRAIN_WINDOW; i < close.length - 1; i += STEP) {
     totalBars += STEP;
