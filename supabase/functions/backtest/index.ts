@@ -154,6 +154,27 @@ function calculateStochastic(close: number[], high: number[], low: number[], kPe
   return k;
 }
 
+function calculateATR(high: number[], low: number[], close: number[], period: number = 14): number[] {
+  const atr: number[] = [NaN];
+  const tr: number[] = [high[0] - low[0]];
+  for (let i = 1; i < close.length; i++) {
+    tr.push(Math.max(
+      high[i] - low[i],
+      Math.abs(high[i] - close[i - 1]),
+      Math.abs(low[i] - close[i - 1])
+    ));
+  }
+  // Initial ATR = simple average of first `period` TRs
+  for (let i = 1; i < period; i++) atr[i] = NaN;
+  if (tr.length >= period) {
+    atr[period - 1] = tr.slice(0, period).reduce((a, b) => a + b, 0) / period;
+    for (let i = period; i < tr.length; i++) {
+      atr[i] = (atr[i - 1] * (period - 1) + tr[i]) / period;
+    }
+  }
+  return atr;
+}
+
 function safeGet(arr: number[], defaultVal: number): number {
   if (!arr || arr.length === 0) return defaultVal;
   const v = arr[arr.length - 1];
@@ -185,10 +206,11 @@ function computeStrategySignal(
   confidence: number;
   strategy: "trend" | "mean_reversion" | "breakout" | "none";
   positionSizeMultiplier: number;
+  atr: number;
 } {
   const HOLD_RESULT = (regime: string) => ({
     consensusScore: 0, regime, predictedReturn: 0, confidence: 0,
-    strategy: "none" as const, positionSizeMultiplier: 1,
+    strategy: "none" as const, positionSizeMultiplier: 1, atr: 0,
   });
 
   // --- Cooldown check ---
@@ -211,7 +233,8 @@ function computeStrategySignal(
   const adxData = calculateADX(high, low, close, 14);
   const stochK = calculateStochastic(close, high, low, 14);
   const vol = calculateVolatility(close, 20);
-
+  const atrArr = calculateATR(high, low, close, 14);
+  const currentATR = safeGet(atrArr, currentPrice * 0.02); // fallback ~2% of price
   const rsiVal = safeGet(rsi, 50);
   const adxVal = safeGet(adxData.adx, 0);
   const pdi = safeGet(adxData.plusDI, 0);
@@ -291,21 +314,22 @@ function computeStrategySignal(
   let mrSignal: "BUY" | "SHORT" | "HOLD" = "HOLD";
   let mrConviction = 0;
   if (adxVal < 25) {
-    // BUY: RSI < 30, price < lower BB, > 2% below SMA50, stoch < 20, volume > 1.2x — need 3/5
+    // BUY: RSI < 30, price < lower BB, deviation > 1.5*ATR (volatility-adjusted), stoch < 20, volume > 1.2x — need 3/5
+    const atrDevThreshold = currentPrice > 0 ? (1.5 * currentATR) / currentPrice : 0.02;
     const mrBuyConditions = [
       rsiVal < 30,
       currentPrice < bbL,
-      smaDeviation < -0.02,
+      smaDeviation < -atrDevThreshold,
       sk < 20,
       volRatio > 1.2,
     ];
     const mrBuyScore = mrBuyConditions.filter(Boolean).length;
 
-    // SHORT: RSI > 70, price > upper BB, > 2% above SMA50, stoch > 80, volume > 1.2x — need 3/5
+    // SHORT: RSI > 70, price > upper BB, deviation > 1.5*ATR, stoch > 80, volume > 1.2x — need 3/5
     const mrShortConditions = [
       rsiVal > 70,
       currentPrice > bbU,
-      smaDeviation > 0.02,
+      smaDeviation > atrDevThreshold,
       sk > 80,
       volRatio > 1.2,
     ];
@@ -321,23 +345,27 @@ function computeStrategySignal(
     }
   }
 
-  // --- Strategy C: Breakout (Bollinger squeeze — relaxed thresholds, no 200 SMA guard) ---
+  // --- Strategy C: Breakout (Bollinger squeeze + range expansion filter) ---
   let boSignal: "BUY" | "SHORT" | "HOLD" = "HOLD";
   let boConviction = 0;
-  const isSqueeze = bbBW < bwAvg50 * 0.7; // relaxed from 0.5
+  const isSqueeze = bbBW < bwAvg50 * 0.7;
   if (isSqueeze) {
     const adxRising = adxData.adx.length >= 3
       && !isNaN(adxData.adx[adxData.adx.length - 1])
       && !isNaN(adxData.adx[adxData.adx.length - 3])
       && adxData.adx[adxData.adx.length - 1] > adxData.adx[adxData.adx.length - 3];
 
-    // Bullish breakout: close above upper BB with volume > 1.5x and ADX rising (no 200 SMA guard)
-    if (currentPrice > bbU && volRatio > 1.5 && adxRising) {
+    // Range expansion filter: current candle range must exceed 1.5 * ATR
+    const currentRange = high[n - 1] - low[n - 1];
+    const rangeExpansion = currentRange > 1.5 * currentATR;
+
+    // Bullish breakout: close above upper BB with volume > 1.5x, ADX rising, and range expansion
+    if (currentPrice > bbU && volRatio > 1.5 && adxRising && rangeExpansion) {
       boSignal = "BUY";
       boConviction = 55 + volRatio * 10 + (currentPrice - bbU) / bbU * 500;
     }
-    // Bearish breakout: close below lower BB with volume > 1.5x and ADX rising
-    else if (currentPrice < bbL && volRatio > 1.5 && adxRising) {
+    // Bearish breakout: close below lower BB with volume > 1.5x, ADX rising, and range expansion
+    else if (currentPrice < bbL && volRatio > 1.5 && adxRising && rangeExpansion) {
       boSignal = "SHORT";
       boConviction = 55 + volRatio * 10 + (bbL - currentPrice) / bbL * 500;
     }
@@ -397,7 +425,7 @@ function computeStrategySignal(
   if (regime.includes("strong")) confidence += 5;
   confidence = Math.max(40, Math.min(95, Math.round(confidence)));
 
-  return { consensusScore, regime, predictedReturn, confidence, strategy: bestStrategy, positionSizeMultiplier };
+  return { consensusScore, regime, predictedReturn, confidence, strategy: bestStrategy, positionSizeMultiplier, atr: currentATR };
 }
 
 // ============================================================================
@@ -634,8 +662,16 @@ function runWalkForwardBacktest(
       : STEP;
     const testEnd = Math.min(entryIdx + maxHoldBars, close.length - 1);
     const useTrailingStop = signal.strategy === "trend" || signal.strategy === "breakout";
-    const TRAILING_STOP_PCT = 0.03; // 3% trail from peak
-    const BREAKEVEN_THRESHOLD = 0.02; // move stop to breakeven after +2%
+
+    // ATR-based trailing stop: 2*ATR distance, breakeven after 1*ATR gain
+    const atrPct = entryPrice > 0 ? signal.atr / entryPrice : 0.02;
+    const TRAILING_STOP_DIST = 2 * atrPct; // 2 × ATR as fraction of price
+    const BREAKEVEN_THRESHOLD = atrPct; // activate breakeven after 1 × ATR gain
+
+    // For trend strategy: widen hard stop to 3 × ATR (let trends breathe)
+    const effectiveStopPct = signal.strategy === "trend"
+      ? Math.max(config.stopLossPct / 100, 3 * atrPct)
+      : config.stopLossPct / 100;
 
     let maxAdverse = 0;
     let maxFavorable = 0;
@@ -658,11 +694,11 @@ function runWalkForwardBacktest(
       if (priceChange > peakReturn) peakReturn = priceChange;
       if (priceChange >= BREAKEVEN_THRESHOLD) breakEvenActivated = true;
 
-      // Hard stop-loss
-      if (priceChange <= -config.stopLossPct / 100) {
+      // Hard stop-loss (ATR-widened for trend strategy)
+      if (priceChange <= -effectiveStopPct) {
         exitPrice = action === "BUY"
-          ? entryPrice * (1 - config.stopLossPct / 100)
-          : entryPrice * (1 + config.stopLossPct / 100);
+          ? entryPrice * (1 - effectiveStopPct)
+          : entryPrice * (1 + effectiveStopPct);
         exitDate = timestamps[j];
         exitIdx = j;
         exitReason = "stop_loss";
@@ -682,7 +718,7 @@ function runWalkForwardBacktest(
 
       // Trailing stop (trend & breakout only)
       if (useTrailingStop && peakReturn > BREAKEVEN_THRESHOLD) {
-        const trailLevel = peakReturn - TRAILING_STOP_PCT;
+        const trailLevel = peakReturn - TRAILING_STOP_DIST;
         const stopLevel = breakEvenActivated ? Math.max(0, trailLevel) : trailLevel;
         if (priceChange <= stopLevel) {
           exitPrice = close[j];
