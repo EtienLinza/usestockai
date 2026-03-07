@@ -792,14 +792,21 @@ function runWalkForwardBacktest(
     const trainVol = volume.slice(Math.max(0, i - TRAIN_WINDOW), i);
     if (trainClose.length < 50) continue;
 
-    const signal = computeStrategySignal(trainClose, trainHigh, trainLow, trainVol, signalState, STEP);
+    const signal = computeStrategySignal(trainClose, trainHigh, trainLow, trainVol, signalState, STEP, {
+      adxThreshold: config.adxThreshold,
+      rsiOversold: config.rsiOversold,
+      rsiOverbought: config.rsiOverbought,
+      buyThreshold: config.buyThreshold,
+      shortThreshold: Math.abs(config.shortThreshold), // normalize to positive for conviction comparison
+    });
 
-    // Minimum conviction floor — skip weak signals
-    if (signal.confidence < 55) continue;
+    // Signal already filtered by conviction threshold inside computeStrategySignal
+    // Just check if we got a directional signal
+    if (signal.consensusScore === 0) continue;
 
     let action: "BUY" | "SHORT" | "HOLD" = "HOLD";
-    if (signal.consensusScore > config.buyThreshold) action = "BUY";
-    else if (signal.consensusScore < config.shortThreshold) action = "SHORT";
+    if (signal.consensusScore > 0) action = "BUY";
+    else if (signal.consensusScore < 0) action = "SHORT";
     if (action === "HOLD") continue;
 
     // Block duplicate-direction trades on same ticker
@@ -811,14 +818,16 @@ function runWalkForwardBacktest(
     const rawEntryPrice = open[entryIdx];
     const entryPrice = applyTradingCosts(rawEntryPrice, action === "BUY", tradeConfig);
 
-    const maxHoldBars = signal.strategy === "trend" ? 20
-      : signal.strategy === "mean_reversion" ? 10
-      : signal.strategy === "breakout" ? 15
+    const trendHold = config.maxHoldBars || 20;
+    const maxHoldBars = signal.strategy === "trend" ? trendHold
+      : signal.strategy === "mean_reversion" ? Math.round(trendHold * 0.5)
+      : signal.strategy === "breakout" ? Math.round(trendHold * 0.75)
       : STEP;
     const useTrailingStop = signal.strategy === "trend" || signal.strategy === "breakout";
 
     const atrPct = entryPrice > 0 ? signal.atr / entryPrice : 0.02;
-    const trailingStopDist = 2 * atrPct;
+    const tsATRMult = config.trailingStopATRMult || 2.0;
+    const trailingStopDist = tsATRMult * atrPct;
     const breakevenThreshold = atrPct;
     const effectiveStopPct = signal.strategy === "trend"
       ? Math.max(config.stopLossPct / 100, 3 * atrPct)
