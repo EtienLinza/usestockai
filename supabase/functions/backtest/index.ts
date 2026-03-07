@@ -1554,8 +1554,6 @@ function computeMetrics(
       alpha = parseFloat(((annualizedReturn / 100) - beta * spyAnnReturn).toFixed(4));
     }
   }
-    }
-  }
 
   // Rolling Sharpe (20-trade window)
   const rollingSharpe: { index: number; value: number }[] = [];
