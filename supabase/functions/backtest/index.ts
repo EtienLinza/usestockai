@@ -903,6 +903,22 @@ function runWalkForwardBacktest(
     }
   }
 
+  // --- Stock Classification (initial + rolling re-eval every 250 bars) ---
+  const CLASSIFY_WINDOW = 250;
+  let currentClassification: StockClassification | null = null;
+  let activeProfile: ProfileParams = PROFILE_PARAMS["index"]; // default
+  let lastClassifyBar = -CLASSIFY_WINDOW; // force initial classification
+
+  // Check if user explicitly set params (non-default = explicit)
+  const userExplicitADX = config.adxThreshold !== 25;
+  const userExplicitRSIOS = config.rsiOversold !== 30;
+  const userExplicitRSIOB = config.rsiOverbought !== 70;
+  const userExplicitBuyThresh = config.buyThreshold !== 60;
+  const userExplicitShortThresh = Math.abs(config.shortThreshold) !== 60;
+  const userExplicitMaxHold = config.maxHoldBars !== 20;
+  const userExplicitTP = config.takeProfitPct !== 10;
+  const userExplicitTSMult = config.trailingStopATRMult !== 2.0;
+
   for (let i = TRAIN_WINDOW; i < close.length - 1; i += STEP) {
     totalBars += STEP;
 
