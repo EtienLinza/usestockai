@@ -643,14 +643,14 @@ function runWalkForwardBacktest(
   const equityCurve: { date: string; value: number }[] = [{ date: timestamps[0], value: capital }];
 
   const TRAIN_WINDOW = 250;
-  const STEP = stepOverride || 2; // Reduced from 5 to 2 for faster signal evaluation
+  const STEP = stepOverride || 3; // Balance between responsiveness and overtrading
   let totalBars = 0;
   let barsInTrade = 0;
-  const COOLDOWN_BARS = 3; // Reduced proportionally with STEP
+  const COOLDOWN_BARS = 5; // Space out entries to reduce noise trades
 
   const signalState = createSignalTracker();
   const openPositions: OpenPosition[] = [];
-  let capitalInPositions = 0; // Track capital deployed
+  const cooldownPerTicker = new Map<string, number>(); // Per-ticker cooldown tracking
 
   for (let i = TRAIN_WINDOW; i < close.length - 1; i += STEP) {
     totalBars += STEP;
@@ -732,8 +732,7 @@ function runWalkForwardBacktest(
         const actualReturn = (close[Math.min(exitIdx, close.length - 1)] - close[pos.entryIdx]) / close[pos.entryIdx] * 100;
         const duration = exitIdx - pos.entryIdx;
 
-        capital += pnl;
-        capitalInPositions -= pos.positionSize;
+        capital += pos.positionSize + pnl; // Return deployed capital + profit/loss
         barsInTrade += duration;
 
         trades.push({
@@ -747,7 +746,15 @@ function runWalkForwardBacktest(
           strategy: pos.strategy, exitReason,
         });
 
-        equityCurve.push({ date: exitDate, value: capital + capitalInPositions });
+        // Equity = cash + mark-to-market of remaining open positions
+        const openMTM = openPositions.reduce((sum, op, idx) => {
+          if (idx === p) return sum; // This one is being closed
+          const currentVal = op.action === "BUY"
+            ? op.shares * close[Math.min(exitIdx, close.length - 1)]
+            : op.positionSize + (op.entryPrice - close[Math.min(exitIdx, close.length - 1)]) * op.shares;
+          return sum + currentVal;
+        }, 0);
+        equityCurve.push({ date: exitDate, value: capital + openMTM });
         openPositions.splice(p, 1);
       }
     }
@@ -755,6 +762,10 @@ function runWalkForwardBacktest(
     // --- Phase 2: Evaluate new signals if we have capacity ---
     if (openPositions.length >= config.maxPositions) continue;
     if (i + executionDelay >= close.length) continue;
+
+    // Per-ticker cooldown check
+    const tickerCooldown = cooldownPerTicker.get(ticker) || 0;
+    if (i < tickerCooldown) continue;
 
     const trainClose = close.slice(Math.max(0, i - TRAIN_WINDOW), i);
     const trainHigh = high.slice(Math.max(0, i - TRAIN_WINDOW), i);
@@ -764,10 +775,17 @@ function runWalkForwardBacktest(
 
     const signal = computeStrategySignal(trainClose, trainHigh, trainLow, trainVol, signalState, STEP);
 
+    // Minimum conviction floor — skip weak signals
+    if (signal.confidence < 55) continue;
+
     let action: "BUY" | "SHORT" | "HOLD" = "HOLD";
     if (signal.consensusScore > config.buyThreshold) action = "BUY";
     else if (signal.consensusScore < config.shortThreshold) action = "SHORT";
     if (action === "HOLD") continue;
+
+    // Block duplicate-direction trades on same ticker
+    const hasDuplicateDirection = openPositions.some(p => p.action === action);
+    if (hasDuplicateDirection) continue;
 
     const entryIdx = i + executionDelay;
     if (entryIdx >= close.length) continue;
@@ -788,13 +806,12 @@ function runWalkForwardBacktest(
       : config.stopLossPct / 100;
 
     const adjustedSizePct = config.positionSizePct * signal.positionSizeMultiplier;
-    const availableCapital = capital - capitalInPositions;
-    const positionSize = Math.min(availableCapital * (adjustedSizePct / 100), availableCapital * 0.95);
+    const positionSize = Math.min(capital * (adjustedSizePct / 100), capital * 0.95);
     if (positionSize <= 0) continue;
     const shares = positionSize / entryPrice;
     const commission = positionSize * (tradeConfig.commissionPct / 100) * 2;
 
-    capitalInPositions += positionSize;
+    capital -= positionSize; // Subtract deployed capital from cash
 
     openPositions.push({
       entryIdx, entryPrice, action, strategy: signal.strategy,
@@ -807,6 +824,7 @@ function runWalkForwardBacktest(
       peakReturn: 0, breakEvenActivated: false, maxAdverse: 0, maxFavorable: 0,
     });
 
+    cooldownPerTicker.set(ticker, i + COOLDOWN_BARS * STEP);
     signalState.cooldownBarsRemaining = COOLDOWN_BARS;
     signalState.consecutiveCount = 0;
   }
@@ -820,7 +838,7 @@ function runWalkForwardBacktest(
       : (pos.entryPrice - exitPrice) * pos.shares - pos.commission;
     const returnPct = (pnl / pos.positionSize) * 100;
     const duration = lastIdx - pos.entryIdx;
-    capital += pnl;
+    capital += pos.positionSize + pnl; // Return deployed capital + pnl
     barsInTrade += duration;
     trades.push({
       date: timestamps[pos.entryIdx], exitDate: timestamps[lastIdx], ticker,
