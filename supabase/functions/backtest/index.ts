@@ -838,7 +838,7 @@ function runWalkForwardBacktest(
       : (pos.entryPrice - exitPrice) * pos.shares - pos.commission;
     const returnPct = (pnl / pos.positionSize) * 100;
     const duration = lastIdx - pos.entryIdx;
-    capital += pnl;
+    capital += pos.positionSize + pnl; // Return deployed capital + pnl
     barsInTrade += duration;
     trades.push({
       date: timestamps[pos.entryIdx], exitDate: timestamps[lastIdx], ticker,
