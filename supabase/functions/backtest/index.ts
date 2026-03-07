@@ -233,7 +233,8 @@ function computeStrategySignal(
   const adxData = calculateADX(high, low, close, 14);
   const stochK = calculateStochastic(close, high, low, 14);
   const vol = calculateVolatility(close, 20);
-
+  const atrArr = calculateATR(high, low, close, 14);
+  const currentATR = safeGet(atrArr, currentPrice * 0.02); // fallback ~2% of price
   const rsiVal = safeGet(rsi, 50);
   const adxVal = safeGet(adxData.adx, 0);
   const pdi = safeGet(adxData.plusDI, 0);
@@ -313,21 +314,22 @@ function computeStrategySignal(
   let mrSignal: "BUY" | "SHORT" | "HOLD" = "HOLD";
   let mrConviction = 0;
   if (adxVal < 25) {
-    // BUY: RSI < 30, price < lower BB, > 2% below SMA50, stoch < 20, volume > 1.2x — need 3/5
+    // BUY: RSI < 30, price < lower BB, deviation > 1.5*ATR (volatility-adjusted), stoch < 20, volume > 1.2x — need 3/5
+    const atrDevThreshold = currentPrice > 0 ? (1.5 * currentATR) / currentPrice : 0.02;
     const mrBuyConditions = [
       rsiVal < 30,
       currentPrice < bbL,
-      smaDeviation < -0.02,
+      smaDeviation < -atrDevThreshold,
       sk < 20,
       volRatio > 1.2,
     ];
     const mrBuyScore = mrBuyConditions.filter(Boolean).length;
 
-    // SHORT: RSI > 70, price > upper BB, > 2% above SMA50, stoch > 80, volume > 1.2x — need 3/5
+    // SHORT: RSI > 70, price > upper BB, deviation > 1.5*ATR, stoch > 80, volume > 1.2x — need 3/5
     const mrShortConditions = [
       rsiVal > 70,
       currentPrice > bbU,
-      smaDeviation > 0.02,
+      smaDeviation > atrDevThreshold,
       sk > 80,
       volRatio > 1.2,
     ];
@@ -343,23 +345,27 @@ function computeStrategySignal(
     }
   }
 
-  // --- Strategy C: Breakout (Bollinger squeeze — relaxed thresholds, no 200 SMA guard) ---
+  // --- Strategy C: Breakout (Bollinger squeeze + range expansion filter) ---
   let boSignal: "BUY" | "SHORT" | "HOLD" = "HOLD";
   let boConviction = 0;
-  const isSqueeze = bbBW < bwAvg50 * 0.7; // relaxed from 0.5
+  const isSqueeze = bbBW < bwAvg50 * 0.7;
   if (isSqueeze) {
     const adxRising = adxData.adx.length >= 3
       && !isNaN(adxData.adx[adxData.adx.length - 1])
       && !isNaN(adxData.adx[adxData.adx.length - 3])
       && adxData.adx[adxData.adx.length - 1] > adxData.adx[adxData.adx.length - 3];
 
-    // Bullish breakout: close above upper BB with volume > 1.5x and ADX rising (no 200 SMA guard)
-    if (currentPrice > bbU && volRatio > 1.5 && adxRising) {
+    // Range expansion filter: current candle range must exceed 1.5 * ATR
+    const currentRange = high[n - 1] - low[n - 1];
+    const rangeExpansion = currentRange > 1.5 * currentATR;
+
+    // Bullish breakout: close above upper BB with volume > 1.5x, ADX rising, and range expansion
+    if (currentPrice > bbU && volRatio > 1.5 && adxRising && rangeExpansion) {
       boSignal = "BUY";
       boConviction = 55 + volRatio * 10 + (currentPrice - bbU) / bbU * 500;
     }
-    // Bearish breakout: close below lower BB with volume > 1.5x and ADX rising
-    else if (currentPrice < bbL && volRatio > 1.5 && adxRising) {
+    // Bearish breakout: close below lower BB with volume > 1.5x, ADX rising, and range expansion
+    else if (currentPrice < bbL && volRatio > 1.5 && adxRising && rangeExpansion) {
       boSignal = "SHORT";
       boConviction = 55 + volRatio * 10 + (bbL - currentPrice) / bbL * 500;
     }
@@ -419,7 +425,7 @@ function computeStrategySignal(
   if (regime.includes("strong")) confidence += 5;
   confidence = Math.max(40, Math.min(95, Math.round(confidence)));
 
-  return { consensusScore, regime, predictedReturn, confidence, strategy: bestStrategy, positionSizeMultiplier };
+  return { consensusScore, regime, predictedReturn, confidence, strategy: bestStrategy, positionSizeMultiplier, atr: currentATR };
 }
 
 // ============================================================================
