@@ -244,7 +244,27 @@ const PROFILE_PARAMS: Record<StockProfile, ProfileParams> = {
 
 const INDEX_TICKERS = new Set(["SPY", "QQQ", "DIA", "IWM", "VOO", "VTI", "IVV", "RSP"]);
 
-function classifyStock(close: number[], high: number[], low: number[], ticker?: string): StockClassification {
+function blendProfiles(a: ProfileParams, b: ProfileParams, weight: number): ProfileParams {
+  // weight=0 → all a, weight=1 → all b
+  const lerp = (x: number, y: number) => x + (y - x) * weight;
+  return {
+    adxThreshold: Math.round(lerp(a.adxThreshold, b.adxThreshold)),
+    rsiOversold: Math.round(lerp(a.rsiOversold, b.rsiOversold)),
+    rsiOverbought: Math.round(lerp(a.rsiOverbought, b.rsiOverbought)),
+    maxHoldTrend: Math.round(lerp(a.maxHoldTrend, b.maxHoldTrend)),
+    maxHoldMR: Math.round(lerp(a.maxHoldMR, b.maxHoldMR)),
+    maxHoldBreakout: Math.round(lerp(a.maxHoldBreakout, b.maxHoldBreakout)),
+    takeProfitPct: lerp(a.takeProfitPct, b.takeProfitPct),
+    trailingStopATRMult: lerp(a.trailingStopATRMult, b.trailingStopATRMult),
+    buyThreshold: Math.round(lerp(a.buyThreshold, b.buyThreshold)),
+    shortThreshold: Math.round(lerp(a.shortThreshold, b.shortThreshold)),
+    trendConvictionBonus: Math.round(lerp(a.trendConvictionBonus, b.trendConvictionBonus)),
+    mrConvictionBonus: Math.round(lerp(a.mrConvictionBonus, b.mrConvictionBonus)),
+    breakoutConvictionBonus: Math.round(lerp(a.breakoutConvictionBonus, b.breakoutConvictionBonus)),
+  };
+}
+
+function classifyStock(close: number[], high: number[], low: number[], ticker?: string): StockClassification & { blendedParams?: ProfileParams } {
   const n = close.length;
 
   // 1. Daily returns
@@ -255,22 +275,35 @@ function classifyStock(close: number[], high: number[], low: number[], ticker?: 
   const retMean = returns.reduce((a, b) => a + b, 0) / returns.length;
   const avgVolatility = Math.sqrt(returns.reduce((a, b) => a + (b - retMean) ** 2, 0) / returns.length);
 
-  // 3. Trend persistence: average autocorrelation of returns (lag 1-5)
-  let totalAutoCorr = 0;
-  const maxLag = Math.min(5, returns.length - 1);
-  for (let lag = 1; lag <= maxLag; lag++) {
-    let sumXY = 0, sumX2 = 0, sumY2 = 0;
-    for (let i = lag; i < returns.length; i++) {
-      const x = returns[i - lag] - retMean;
-      const y = returns[i] - retMean;
-      sumXY += x * y;
-      sumX2 += x * x;
-      sumY2 += y * y;
+  // 3. Trend Score: MA alignment + higher-highs (replaces broken autocorrelation metric)
+  const sma50 = calculateSMA(close, 50);
+  const sma200 = calculateSMA(close, 200);
+  
+  // MA alignment: % of bars where close > SMA(50) > SMA(200)
+  let maAlignedCount = 0, maValidCount = 0;
+  for (let i = 199; i < n; i++) {
+    if (!isNaN(sma50[i]) && !isNaN(sma200[i])) {
+      maValidCount++;
+      if (close[i] > sma50[i] && sma50[i] > sma200[i]) {
+        maAlignedCount++;
+      }
     }
-    const denom = Math.sqrt(sumX2 * sumY2);
-    if (denom > 0) totalAutoCorr += sumXY / denom;
   }
-  const trendPersistence = maxLag > 0 ? totalAutoCorr / maxLag : 0;
+  const maAlignment = maValidCount > 0 ? maAlignedCount / maValidCount : 0;
+  
+  // Higher-highs ratio: rolling 20-bar highs exceeding previous 20-bar high
+  const hhWindow = 20;
+  let hhCount = 0, hhTotal = 0;
+  for (let i = hhWindow * 2; i < n; i += hhWindow) {
+    const currentHigh = Math.max(...close.slice(i - hhWindow, i));
+    const prevHigh = Math.max(...close.slice(i - hhWindow * 2, i - hhWindow));
+    hhTotal++;
+    if (currentHigh > prevHigh) hhCount++;
+  }
+  const higherHighsRatio = hhTotal > 0 ? hhCount / hhTotal : 0.5;
+  
+  // Combined trend score (0-1)
+  const trendScore = maAlignment * 0.6 + higherHighsRatio * 0.4;
 
   // 4. Mean reversion rate: how often RSI extremes revert toward 50
   const rsi = calculateRSI(close, 14);
@@ -299,29 +332,41 @@ function classifyStock(close: number[], high: number[], low: number[], ticker?: 
   }
   const atrPctAvg = atrPctCount > 0 ? atrPctSum / atrPctCount : 0.02;
 
-  // 6. Classification logic
+  // 6. Classification logic using trend score instead of autocorrelation
   let classification: StockProfile;
+  let blendedParams: ProfileParams | undefined;
 
   // Force-classify known index ETFs
   if (ticker && INDEX_TICKERS.has(ticker.toUpperCase())) {
     classification = "index";
-  } else if (atrPctAvg > 0.025 && trendPersistence < 0.04) {
-    // High ATR%, low autocorrelation → volatile
+  } else if (atrPctAvg > 0.025 && trendScore < 0.4) {
+    // High ATR%, weak trend → volatile
     classification = "volatile";
-  } else if (trendPersistence > 0.03 || (avgVolatility > 0.015 && atrPctAvg < 0.025 && meanReversionRate < 0.5)) {
-    // Trend-following tendency → momentum
+  } else if (trendScore > 0.5) {
+    // Spends >50% of time in bullish MA alignment → momentum
     classification = "momentum";
-  } else if (meanReversionRate > 0.45 && trendPersistence < 0.05) {
-    // High mean reversion, low trend persistence → value
+    // Blend if borderline (0.5-0.55)
+    if (trendScore < 0.55) {
+      const secondProfile = meanReversionRate > 0.45 ? "value" : "index";
+      const blendWeight = (0.55 - trendScore) / 0.05; // 1 at 0.5, 0 at 0.55
+      blendedParams = blendProfiles(PROFILE_PARAMS["momentum"], PROFILE_PARAMS[secondProfile], blendWeight * 0.4);
+    }
+  } else if (meanReversionRate > 0.45 && trendScore < 0.4) {
+    // High mean reversion, weak trend → value
     classification = "value";
+    // Blend if borderline meanRev (0.45-0.5)
+    if (meanReversionRate < 0.5) {
+      const blendWeight = (0.5 - meanReversionRate) / 0.05;
+      blendedParams = blendProfiles(PROFILE_PARAMS["value"], PROFILE_PARAMS["index"], blendWeight * 0.4);
+    }
   } else {
     // Default fallback
     classification = "index";
   }
 
-  console.log(`[Classification] ${ticker || "?"}: ${classification} | trendP=${trendPersistence.toFixed(4)} meanRev=${meanReversionRate.toFixed(3)} vol=${avgVolatility.toFixed(4)} atrPct=${atrPctAvg.toFixed(4)}`);
+  console.log(`[Classification] ${ticker || "?"}: ${classification}${blendedParams ? " (blended)" : ""} | trendScore=${trendScore.toFixed(3)} maAlign=${maAlignment.toFixed(3)} hhRatio=${higherHighsRatio.toFixed(3)} meanRev=${meanReversionRate.toFixed(3)} vol=${avgVolatility.toFixed(4)} atrPct=${atrPctAvg.toFixed(4)}`);
 
-  return { classification, trendPersistence, meanReversionRate, avgVolatility, atrPctAvg };
+  return { classification, trendPersistence: trendScore, meanReversionRate, avgVolatility, atrPctAvg, blendedParams };
 }
 
 // ============================================================================
