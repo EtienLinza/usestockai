@@ -64,7 +64,7 @@ interface BacktestReport {
   confidenceCalibration: { bucket: string; predictedConf: number; actualAccuracy: number; count: number }[];
   equityCurve: { date: string; value: number }[];
   drawdownCurve: { date: string; drawdown: number }[];
-  tradeLog: { date: string; exitDate: string; ticker: string; action: string; entryPrice: number; exitPrice: number; returnPct: number; pnl: number; regime: string; confidence: number; duration: number; mae: number; mfe: number }[];
+  tradeLog: { date: string; exitDate: string; ticker: string; action: string; entryPrice: number; exitPrice: number; returnPct: number; pnl: number; regime: string; confidence: number; duration: number; mae: number; mfe: number; strategy?: string }[];
   monteCarlo: { percentile5: number; percentile25: number; median: number; percentile75: number; percentile95: number } | null;
   benchmarkReturn: number;
   annualizedReturn: number;
@@ -95,6 +95,7 @@ interface BacktestReport {
   signalDecay: { day: number; accuracy: number }[];
   benchmarkEquity: { date: string; value: number }[];
   marketRegimePerformance: { regime: string; accuracy: number; avgReturn: number; trades: number }[];
+  strategyPerformance?: { strategy: string; trades: number; winRate: number; avgReturn: number }[];
 }
 
 const MetricCard = ({ label, value, suffix = "", icon: Icon, color = "text-foreground" }: {
