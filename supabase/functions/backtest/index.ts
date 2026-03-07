@@ -591,10 +591,13 @@ function runWalkForwardBacktest(
   let capital = config.initialCapital;
   const equityCurve: { date: string; value: number }[] = [{ date: timestamps[0], value: capital }];
 
-  const TRAIN_WINDOW = 60;
+  const TRAIN_WINDOW = 250; // Need 200+ bars for SMA200
   const STEP = 5;
   let totalBars = 0;
   let barsInTrade = 0;
+  const COOLDOWN_BARS = 15; // 3 evaluation steps
+
+  const signalState = createSignalTracker();
 
   for (let i = TRAIN_WINDOW; i < close.length - STEP - executionDelay; i += STEP) {
     const trainClose = close.slice(Math.max(0, i - TRAIN_WINDOW), i);
@@ -602,10 +605,10 @@ function runWalkForwardBacktest(
     const trainLow = low.slice(Math.max(0, i - TRAIN_WINDOW), i);
     const trainVol = volume.slice(Math.max(0, i - TRAIN_WINDOW), i);
 
-    if (trainClose.length < 30) continue;
+    if (trainClose.length < 50) continue;
     totalBars += STEP;
 
-    const signal = computeSignal(trainClose, trainHigh, trainLow, trainVol);
+    const signal = computeStrategySignal(trainClose, trainHigh, trainLow, trainVol, signalState, STEP);
 
     let action: "BUY" | "SHORT" | "HOLD" = "HOLD";
     if (signal.consensusScore > config.buyThreshold) action = "BUY";
@@ -653,7 +656,9 @@ function runWalkForwardBacktest(
 
     exitPrice = applyTradingCosts(exitPrice, action !== "BUY", tradeConfig);
 
-    const positionSize = capital * (config.positionSizePct / 100);
+    // Volatility-adjusted position sizing
+    const adjustedSizePct = config.positionSizePct * signal.positionSizeMultiplier;
+    const positionSize = capital * (adjustedSizePct / 100);
     const shares = positionSize / entryPrice;
     const commission = positionSize * (tradeConfig.commissionPct / 100) * 2;
 
@@ -670,6 +675,10 @@ function runWalkForwardBacktest(
 
     capital += pnl;
     barsInTrade += duration;
+
+    // Apply cooldown after trade
+    signalState.cooldownBarsRemaining = COOLDOWN_BARS;
+    signalState.consecutiveCount = 0;
 
     trades.push({
       date: timestamps[entryIdx],
@@ -688,6 +697,7 @@ function runWalkForwardBacktest(
       mae: parseFloat((maxAdverse * 100).toFixed(2)),
       mfe: parseFloat((maxFavorable * 100).toFixed(2)),
       volumeAtEntry: volume[entryIdx] || 0,
+      strategy: signal.strategy,
     });
 
     equityCurve.push({ date: exitDate, value: capital });
