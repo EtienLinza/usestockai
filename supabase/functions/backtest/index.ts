@@ -953,11 +953,15 @@ function runWalkForwardBacktest(
     }
   }
 
-  // --- Stock Classification (initial + rolling re-eval every 250 bars) ---
-  const CLASSIFY_WINDOW = 250;
+  // --- Stock Classification (initial + rolling re-eval every 500 bars) ---
+  // Uses expanding window (up to 1000 bars) + EMA smoothing to prevent profile whiplash
+  const CLASSIFY_INTERVAL = 500; // Reclassify every ~2 years instead of ~1 year
+  const MAX_CLASSIFY_WINDOW = 1000; // Cap at ~4 years of history
+  const PROFILE_SMOOTH_FACTOR = 0.3; // 0.3 new + 0.7 old for EMA smoothing
   let currentClassification: StockClassification | null = null;
   let activeProfile: ProfileParams = PROFILE_PARAMS["index"]; // default
-  let lastClassifyBar = -CLASSIFY_WINDOW; // force initial classification
+  let smoothedProfile: ProfileParams | null = null; // Running EMA of profile params
+  let lastClassifyBar = -CLASSIFY_INTERVAL; // force initial classification
 
   // Strategy Mode: only override profile params when mode is "custom" with explicit user changes
   const isCustomMode = (config as any).strategyMode === "custom" && (config as any).explicitOverride === true;
@@ -1005,16 +1009,30 @@ function runWalkForwardBacktest(
   for (let i = TRAIN_WINDOW; i < close.length - 1; i += STEP) {
     totalBars += STEP;
 
-    // --- Rolling stock classification every 250 bars ---
-    if (i - lastClassifyBar >= CLASSIFY_WINDOW && i >= CLASSIFY_WINDOW) {
-      const classWindow = Math.min(i, CLASSIFY_WINDOW);
+    // --- Rolling stock classification every 500 bars with expanding window ---
+    if (i - lastClassifyBar >= CLASSIFY_INTERVAL && i >= 250) {
+      // Expanding window: use all available history up to current bar, capped at 1000
+      const classWindow = Math.min(i, MAX_CLASSIFY_WINDOW);
       const cClose = close.slice(i - classWindow, i);
       const cHigh = high.slice(i - classWindow, i);
       const cLow = low.slice(i - classWindow, i);
       if (cClose.length >= 50) {
         currentClassification = classifyStock(cClose, cHigh, cLow, ticker);
-        activeProfile = applyModeToProfile(currentClassification.blendedParams || PROFILE_PARAMS[currentClassification.classification]);
+        const rawProfile = currentClassification.blendedParams || PROFILE_PARAMS[currentClassification.classification];
+        
+        // EMA smoothing: blend new profile into running average
+        if (smoothedProfile === null) {
+          // First classification — use raw profile directly
+          smoothedProfile = { ...rawProfile };
+        } else {
+          // Subsequent: 0.3 new + 0.7 old
+          smoothedProfile = blendProfiles(smoothedProfile, rawProfile, PROFILE_SMOOTH_FACTOR);
+        }
+        
+        activeProfile = applyModeToProfile(smoothedProfile);
         lastClassifyBar = i;
+        
+        console.log(`[Profile Smoothed] ${ticker} bar=${i} raw=${currentClassification.classification} | adxT=${activeProfile.adxThreshold} rsiOS=${activeProfile.rsiOversold} rsiOB=${activeProfile.rsiOverbought} maxHoldT=${activeProfile.maxHoldTrend} maxHoldMR=${activeProfile.maxHoldMR} TP=${activeProfile.takeProfitPct.toFixed(1)} TSMult=${activeProfile.trailingStopATRMult.toFixed(2)}`);
       }
     }
 
