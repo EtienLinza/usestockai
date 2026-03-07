@@ -213,31 +213,31 @@ interface ProfileParams {
 
 const PROFILE_PARAMS: Record<StockProfile, ProfileParams> = {
   momentum: {
-    adxThreshold: 22, rsiOversold: 30, rsiOverbought: 68,
+    adxThreshold: 23, rsiOversold: 28, rsiOverbought: 70,
     maxHoldTrend: 28, maxHoldMR: 8, maxHoldBreakout: 20,
     takeProfitPct: 14, trailingStopATRMult: 2.5,
-    buyThreshold: 60, shortThreshold: 65,
+    buyThreshold: 62, shortThreshold: 60,
     trendConvictionBonus: 10, mrConvictionBonus: 0, breakoutConvictionBonus: 0,
   },
   value: {
-    adxThreshold: 26, rsiOversold: 25, rsiOverbought: 75,
+    adxThreshold: 24, rsiOversold: 26, rsiOverbought: 74,
     maxHoldTrend: 16, maxHoldMR: 14, maxHoldBreakout: 12,
     takeProfitPct: 8, trailingStopATRMult: 1.8,
-    buyThreshold: 60, shortThreshold: 55,
+    buyThreshold: 62, shortThreshold: 60,
     trendConvictionBonus: 0, mrConvictionBonus: 12, breakoutConvictionBonus: 0,
   },
   index: {
     adxThreshold: 23, rsiOversold: 28, rsiOverbought: 72,
     maxHoldTrend: 22, maxHoldMR: 12, maxHoldBreakout: 15,
     takeProfitPct: 10, trailingStopATRMult: 2.0,
-    buyThreshold: 60, shortThreshold: 60,
+    buyThreshold: 62, shortThreshold: 60,
     trendConvictionBonus: 5, mrConvictionBonus: 5, breakoutConvictionBonus: 0,
   },
   volatile: {
-    adxThreshold: 20, rsiOversold: 22, rsiOverbought: 78,
+    adxThreshold: 21, rsiOversold: 24, rsiOverbought: 76,
     maxHoldTrend: 12, maxHoldMR: 6, maxHoldBreakout: 9,
     takeProfitPct: 12, trailingStopATRMult: 3.0,
-    buyThreshold: 70, shortThreshold: 60,
+    buyThreshold: 62, shortThreshold: 60,
     trendConvictionBonus: 0, mrConvictionBonus: 0, breakoutConvictionBonus: 5,
   },
 };
