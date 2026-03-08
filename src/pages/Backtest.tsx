@@ -583,19 +583,19 @@ const Backtest = () => {
 
                     {/* Benchmark Comparison */}
                     <Card className="glass-card p-4">
-                      <div className="flex items-center justify-between">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                         <div>
                           <div className="text-xs text-muted-foreground">Strategy vs SPY Buy & Hold</div>
-                          <div className="flex items-center gap-4 mt-1">
-                            <span className={`text-lg font-mono font-medium ${report.totalReturn > 0 ? "text-success" : "text-destructive"}`}>
+                          <div className="flex items-center gap-3 sm:gap-4 mt-1 flex-wrap">
+                            <span className={`text-base sm:text-lg font-mono font-medium ${report.totalReturn > 0 ? "text-success" : "text-destructive"}`}>
                               Strategy: {report.totalReturn > 0 ? "+" : ""}{report.totalReturn}%
                             </span>
-                            <span className="text-lg font-mono font-medium text-muted-foreground">
+                            <span className="text-base sm:text-lg font-mono font-medium text-muted-foreground">
                               SPY: {report.benchmarkReturn > 0 ? "+" : ""}{report.benchmarkReturn}%
                             </span>
                           </div>
                         </div>
-                        <div className="flex gap-2">
+                        <div className="flex gap-2 flex-wrap">
                           <Badge variant={report.totalReturn > report.benchmarkReturn ? "default" : "destructive"}>
                             {report.totalReturn > report.benchmarkReturn ? "Outperforms" : "Underperforms"}
                           </Badge>
@@ -619,7 +619,7 @@ const Backtest = () => {
 
                     {/* Equity vs Benchmark Overlay */}
                     {equityVsBenchmark && equityVsBenchmark.length > 0 && (
-                      <Card className="glass-card p-6">
+                      <Card className="glass-card p-4 sm:p-6">
                         <div className="flex items-center gap-4 mb-4">
                           <div className="flex items-center gap-2">
                             <div className="w-3 h-0.5 bg-primary rounded" />
@@ -630,7 +630,7 @@ const Backtest = () => {
                             <span className="text-xs text-muted-foreground">SPY Benchmark</span>
                           </div>
                         </div>
-                        <div className="h-64">
+                        <div className="h-48 sm:h-64">
                           <ResponsiveContainer width="100%" height="100%">
                             <ComposedChart data={equityVsBenchmark}>
                               <defs>
@@ -657,7 +657,7 @@ const Backtest = () => {
 
                     {/* Drawdown Curve */}
                     {report.drawdownCurve.length > 0 && (
-                      <Card className="glass-card p-6">
+                      <Card className="glass-card p-4 sm:p-6">
                         <div className="flex items-center gap-2 mb-1">
                           <div className="w-2 h-2 rounded-full bg-destructive" />
                           <span className="text-sm font-medium">Drawdown</span>
@@ -665,7 +665,7 @@ const Backtest = () => {
                         <div className="text-[10px] text-muted-foreground mb-4">
                           Max duration: {report.maxDrawdownDuration} bars · Avg duration: {report.avgDrawdownDuration} bars
                         </div>
-                        <div className="h-48">
+                        <div className="h-36 sm:h-48">
                           <ResponsiveContainer width="100%" height="100%">
                             <AreaChart data={report.drawdownCurve}>
                               <defs>
@@ -690,7 +690,7 @@ const Backtest = () => {
 
                     {/* Signal Decay */}
                     {report.signalDecay?.length > 0 && (
-                      <Card className="glass-card p-6">
+                      <Card className="glass-card p-4 sm:p-6">
                         <div className="flex items-center gap-2 mb-4">
                           <Signal className="w-4 h-4 text-primary" />
                           <span className="text-sm font-medium">Signal Decay Curve</span>
@@ -1139,7 +1139,7 @@ const Backtest = () => {
                           <Shuffle className="w-4 h-4 text-primary" />
                           <span className="text-sm font-medium">Monte Carlo Simulation (200 runs)</span>
                         </div>
-                        <div className="grid grid-cols-5 gap-3">
+                        <div className="grid grid-cols-3 sm:grid-cols-5 gap-2 sm:gap-3">
                           {[
                             { label: "5th %ile", value: report.monteCarlo.percentile5, worst: true },
                             { label: "25th %ile", value: report.monteCarlo.percentile25 },
@@ -1166,8 +1166,8 @@ const Backtest = () => {
                         {showTradeLog ? "Hide" : "Show"} Trade Log ({report.tradeLog.length} trades)
                       </Button>
                       {showTradeLog && (
-                        <div className="mt-4 max-h-96 overflow-y-auto scrollbar-thin">
-                          <table className="w-full text-xs">
+                        <div className="mt-4 max-h-96 overflow-auto -mx-4 px-4 sm:mx-0 sm:px-0">
+                          <table className="w-full text-[10px] sm:text-xs min-w-[700px]">
                             <thead className="sticky top-0 bg-card">
                               <tr className="border-b border-border/30">
                                 <th className="text-left py-1.5 text-muted-foreground font-normal">Date</th>

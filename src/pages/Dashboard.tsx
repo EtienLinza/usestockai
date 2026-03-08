@@ -456,25 +456,25 @@ const Dashboard = () => {
             {sellAlerts.length > 0 && (
               <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="mb-6">
                 <Card className="border-warning/50 bg-warning/5">
-                  <CardHeader className="pb-3">
-                    <CardTitle className="text-base flex items-center gap-2 text-warning">
+                  <CardHeader className="pb-3 px-4 sm:px-6">
+                    <CardTitle className="text-sm sm:text-base flex items-center gap-2 text-warning">
                       <Bell className="w-4 h-4" />Sell Alerts ({sellAlerts.length})
                     </CardTitle>
                   </CardHeader>
-                  <CardContent className="space-y-2">
+                  <CardContent className="space-y-2 px-4 sm:px-6">
                     {sellAlerts.map((alert) => (
-                      <div key={alert.id} className="flex items-center justify-between p-3 rounded-lg bg-warning/10 border border-warning/20 flex-wrap gap-2">
-                        <div className="flex items-center gap-3">
+                      <div key={alert.id} className="flex flex-col sm:flex-row sm:items-center justify-between p-3 rounded-lg bg-warning/10 border border-warning/20 gap-2">
+                        <div className="flex items-center gap-3 min-w-0">
                           <AlertTriangle className="w-4 h-4 text-warning shrink-0" />
-                          <div>
-                            <span className="font-mono font-bold">{alert.ticker}</span>
-                            <span className="text-sm text-muted-foreground ml-2">{alert.reason}</span>
+                          <div className="min-w-0">
+                            <span className="font-mono font-bold text-sm">{alert.ticker}</span>
+                            <span className="text-xs sm:text-sm text-muted-foreground ml-2 line-clamp-1">{alert.reason}</span>
                           </div>
                         </div>
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 shrink-0 ml-7 sm:ml-0">
                           <span className="font-mono text-sm">${alert.currentPrice.toFixed(2)}</span>
                           <Button size="sm" variant="ghost" onClick={() => handleDismissAlert(alert)} className="text-xs h-7">Dismiss</Button>
-                          <Button size="sm" variant="destructive" onClick={() => handleSellAlertClose(alert)}>Close Position</Button>
+                          <Button size="sm" variant="destructive" onClick={() => handleSellAlertClose(alert)} className="text-xs h-7">Close</Button>
                         </div>
                       </div>
                     ))}
@@ -623,12 +623,12 @@ const Dashboard = () => {
 
                     {/* Equity Curve */}
                     {portfolioHistory.length > 1 && (
-                      <Card className="glass-card p-6">
+                      <Card className="glass-card p-4 sm:p-6">
                         <div className="flex items-center gap-2 mb-4">
                           <BarChart3 className="w-4 h-4 text-primary" />
                           <span className="text-sm font-medium">Equity Curve</span>
                         </div>
-                        <div className="h-48">
+                        <div className="h-36 sm:h-48">
                           <ResponsiveContainer width="100%" height="100%">
                             <AreaChart data={portfolioHistory}>
                               <defs>
@@ -712,69 +712,65 @@ const Dashboard = () => {
                       ) : (
                         <div className="divide-y divide-border/20">
                           {signals.map((signal, idx) => (
-                            <motion.div key={signal.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: idx * 0.02 }} className="p-4 hover:bg-muted/5 transition-colors">
-                              <div className="flex items-center justify-between flex-wrap gap-3">
-                                <div className="flex items-center gap-4 flex-1 min-w-0">
-                                  <div className="flex items-center gap-2">
-                                    {signal.signal_type === "BUY" ? <ArrowUpRight className="w-5 h-5 text-success" /> : <ArrowDownRight className="w-5 h-5 text-destructive" />}
-                                    <span className="text-lg font-bold font-mono">{signal.ticker}</span>
-                                    <Badge variant="outline" className={signal.signal_type === "BUY" ? "bg-success/10 text-success border-success/30" : "bg-destructive/10 text-destructive border-destructive/30"}>
-                                      {signal.signal_type}
-                                    </Badge>
-                                  </div>
-                                  <div className="hidden sm:flex items-center gap-2">
-                                    <Badge variant="outline" className={getRegimeBadge(signal.regime)}>{signal.regime?.replace("_", " ")}</Badge>
-                                    <Badge variant="outline" className="text-xs">{signal.stock_profile}</Badge>
-                                    <Badge variant="outline" className="text-xs">{signal.strategy}</Badge>
-                                  </div>
+                            <motion.div key={signal.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: idx * 0.02 }} className="p-3 sm:p-4 hover:bg-muted/5 transition-colors">
+                              {/* Mobile: stacked layout */}
+                              <div className="flex items-start sm:items-center justify-between gap-2">
+                                <div className="flex items-center gap-2 min-w-0">
+                                  {signal.signal_type === "BUY" ? <ArrowUpRight className="w-4 h-4 sm:w-5 sm:h-5 text-success shrink-0" /> : <ArrowDownRight className="w-4 h-4 sm:w-5 sm:h-5 text-destructive shrink-0" />}
+                                  <span className="text-base sm:text-lg font-bold font-mono">{signal.ticker}</span>
+                                  <Badge variant="outline" className={cn("text-[10px]", signal.signal_type === "BUY" ? "bg-success/10 text-success border-success/30" : "bg-destructive/10 text-destructive border-destructive/30")}>
+                                    {signal.signal_type}
+                                  </Badge>
                                 </div>
-                                <div className="flex items-center gap-4">
-                                  <div className="text-right">
-                                    <div className="text-[10px] text-muted-foreground uppercase">Entry</div>
-                                    <div className="font-mono font-semibold text-sm">${Number(signal.entry_price).toFixed(2)}</div>
-                                  </div>
-                                  <div className="text-right min-w-[60px]">
-                                    <div className="text-[10px] text-muted-foreground uppercase">Conviction</div>
-                                    <div className={cn("font-mono font-bold text-sm", getConfidenceColor(signal.confidence))}>{signal.confidence}%</div>
-                                  </div>
-                                  <Button
-                                    size="sm"
-                                    variant={signal.signal_type === "BUY" ? "success" : "destructive"}
-                                    onClick={() => {
-                                      if (!user) { toast.error("Please sign in first"); return; }
-                                      setSelectedSignal(signal);
-                                      setBuyDialogOpen(true);
-                                    }}
-                                  >
-                                    Register
-                                  </Button>
+                                <Button
+                                  size="sm"
+                                  variant={signal.signal_type === "BUY" ? "success" : "destructive"}
+                                  className="text-xs h-7 shrink-0"
+                                  onClick={() => {
+                                    if (!user) { toast.error("Please sign in first"); return; }
+                                    setSelectedSignal(signal);
+                                    setBuyDialogOpen(true);
+                                  }}
+                                >
+                                  Register
+                                </Button>
+                              </div>
+
+                              {/* Stats row */}
+                              <div className="flex items-center gap-3 sm:gap-4 mt-2 ml-6 sm:ml-0">
+                                <div className="hidden sm:flex items-center gap-2">
+                                  <Badge variant="outline" className={cn("text-[10px]", getRegimeBadge(signal.regime))}>{signal.regime?.replace("_", " ")}</Badge>
+                                  <Badge variant="outline" className="text-[10px]">{signal.stock_profile}</Badge>
+                                  <Badge variant="outline" className="text-[10px]">{signal.strategy}</Badge>
+                                </div>
+                                <div className="flex items-center gap-3 text-xs sm:ml-auto">
+                                  <span className="text-muted-foreground">Entry: <span className="font-mono font-medium text-foreground">${Number(signal.entry_price).toFixed(2)}</span></span>
+                                  <span className="text-muted-foreground">Conv: <span className={cn("font-mono font-bold", getConfidenceColor(signal.confidence))}>{signal.confidence}%</span></span>
+                                  {signal.target_allocation > 0 && (
+                                    <span className="text-muted-foreground hidden sm:inline">Alloc: <span className="font-mono">{signal.target_allocation}%</span></span>
+                                  )}
                                 </div>
                               </div>
 
-                              <div className="mt-3 flex items-center gap-4">
-                                <div className="flex-1">
-                                  <div className="h-1.5 rounded-full bg-muted overflow-hidden">
-                                    <div
-                                      className={cn("h-full rounded-full transition-all", getConfidenceBg(signal.confidence))}
-                                      style={{ width: `${signal.confidence}%` }}
-                                    />
-                                  </div>
+                              {/* Conviction bar */}
+                              <div className="mt-2 ml-6 sm:ml-0">
+                                <div className="h-1 sm:h-1.5 rounded-full bg-muted overflow-hidden">
+                                  <div
+                                    className={cn("h-full rounded-full transition-all", getConfidenceBg(signal.confidence))}
+                                    style={{ width: `${signal.confidence}%` }}
+                                  />
                                 </div>
-                                {signal.target_allocation > 0 && (
-                                  <span className="text-[10px] text-muted-foreground font-mono shrink-0">
-                                    Alloc: {signal.target_allocation}%
-                                  </span>
-                                )}
                               </div>
 
-                              <div className="flex sm:hidden items-center gap-2 mt-2 flex-wrap">
-                                <Badge variant="outline" className={cn("text-[10px]", getRegimeBadge(signal.regime))}>{signal.regime?.replace("_", " ")}</Badge>
-                                <Badge variant="outline" className="text-[10px]">{signal.stock_profile}</Badge>
-                                <Badge variant="outline" className="text-[10px]">{signal.strategy}</Badge>
+                              {/* Mobile badges */}
+                              <div className="flex sm:hidden items-center gap-1.5 mt-2 ml-6 flex-wrap">
+                                <Badge variant="outline" className={cn("text-[9px] px-1.5 py-0", getRegimeBadge(signal.regime))}>{signal.regime?.replace("_", " ")}</Badge>
+                                <Badge variant="outline" className="text-[9px] px-1.5 py-0">{signal.stock_profile}</Badge>
+                                <Badge variant="outline" className="text-[9px] px-1.5 py-0">{signal.strategy}</Badge>
                               </div>
 
                               {signal.reasoning && (
-                                <p className="text-xs text-muted-foreground mt-2 border-t border-border/10 pt-2">{signal.reasoning}</p>
+                                <p className="text-[11px] sm:text-xs text-muted-foreground mt-2 border-t border-border/10 pt-2 ml-6 sm:ml-0 line-clamp-2 sm:line-clamp-none">{signal.reasoning}</p>
                               )}
                             </motion.div>
                           ))}
@@ -801,58 +797,111 @@ const Dashboard = () => {
                             </Button>
                           </div>
                         </div>
-                        <Table>
-                          <TableHeader>
-                            <TableRow className="border-border/10">
-                              <TableHead className="text-[10px]">Ticker</TableHead>
-                              <TableHead className="text-[10px]">Type</TableHead>
-                              <TableHead className="text-[10px]">Entry</TableHead>
-                              <TableHead className="text-[10px]">Current</TableHead>
-                              <TableHead className="text-[10px]">Shares</TableHead>
-                              <TableHead className="text-[10px]">P&L</TableHead>
-                              <TableHead className="text-[10px]">P&L %</TableHead>
-                              <TableHead className="text-[10px]">Opened</TableHead>
-                              <TableHead className="text-[10px]"></TableHead>
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {openPositions.map((pos) => {
-                              const unrealizedPnL = getUnrealizedPnL(pos);
-                              const unrealizedPnLPct = getUnrealizedPnLPct(pos);
-                              const curPrice = currentPrices[pos.ticker];
-                              const hasSellAlert = sellAlerts.some(a => a.ticker === pos.ticker);
-                              return (
-                                <TableRow key={pos.id} className={cn("border-border/10", hasSellAlert && "bg-warning/5")}>
-                                  <TableCell className="font-mono font-bold text-sm">
-                                    <div className="flex items-center gap-2">{pos.ticker}{hasSellAlert && <AlertTriangle className="w-3 h-3 text-warning" />}</div>
-                                  </TableCell>
-                                  <TableCell><Badge variant="outline" className={cn("text-[10px]", pos.position_type === "long" ? "text-success" : "text-destructive")}>{pos.position_type}</Badge></TableCell>
-                                  <TableCell className="font-mono text-sm">${Number(pos.entry_price).toFixed(2)}</TableCell>
-                                  <TableCell className="font-mono text-sm">{curPrice ? `$${curPrice.toFixed(2)}` : pricesLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : "—"}</TableCell>
-                                  <TableCell className="font-mono text-sm">{Number(pos.shares).toFixed(2)}</TableCell>
-                                  <TableCell>{unrealizedPnL !== null ? <span className={cn("font-mono font-bold text-sm", unrealizedPnL >= 0 ? "text-success" : "text-destructive")}>{unrealizedPnL >= 0 ? "+" : ""}${unrealizedPnL.toFixed(2)}</span> : "—"}</TableCell>
-                                  <TableCell>{unrealizedPnLPct !== null ? <span className={cn("font-mono font-bold text-sm", unrealizedPnLPct >= 0 ? "text-success" : "text-destructive")}>{unrealizedPnLPct >= 0 ? "+" : ""}{unrealizedPnLPct.toFixed(2)}%</span> : "—"}</TableCell>
-                                  <TableCell className="text-xs text-muted-foreground">{new Date(pos.created_at).toLocaleDateString()}</TableCell>
-                                  <TableCell>
-                                    <Button
-                                      size="sm"
-                                      variant={hasSellAlert ? "destructive" : "outline"}
-                                      className="text-xs h-7"
-                                      onClick={() => {
-                                        setSelectedPosition(pos);
-                                        const alert = sellAlerts.find(a => a.ticker === pos.ticker);
-                                        setSellPrice(alert ? alert.currentPrice.toFixed(2) : curPrice ? curPrice.toFixed(2) : "");
-                                        setSellDialogOpen(true);
-                                      }}
-                                    >
-                                      Close
-                                    </Button>
-                                  </TableCell>
-                                </TableRow>
-                              );
-                            })}
-                          </TableBody>
-                        </Table>
+                        {/* Mobile: Card layout */}
+                        <div className="sm:hidden divide-y divide-border/20">
+                          {openPositions.map((pos) => {
+                            const unrealizedPnL = getUnrealizedPnL(pos);
+                            const unrealizedPnLPct = getUnrealizedPnLPct(pos);
+                            const curPrice = currentPrices[pos.ticker];
+                            const hasSellAlert = sellAlerts.some(a => a.ticker === pos.ticker);
+                            return (
+                              <div key={pos.id} className={cn("p-3 space-y-2", hasSellAlert && "bg-warning/5")}>
+                                <div className="flex items-center justify-between">
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-mono font-bold text-sm">{pos.ticker}</span>
+                                    {hasSellAlert && <AlertTriangle className="w-3 h-3 text-warning" />}
+                                    <Badge variant="outline" className={cn("text-[9px]", pos.position_type === "long" ? "text-success" : "text-destructive")}>{pos.position_type}</Badge>
+                                  </div>
+                                  <Button
+                                    size="sm"
+                                    variant={hasSellAlert ? "destructive" : "outline"}
+                                    className="text-xs h-7"
+                                    onClick={() => {
+                                      setSelectedPosition(pos);
+                                      const alert = sellAlerts.find(a => a.ticker === pos.ticker);
+                                      setSellPrice(alert ? alert.currentPrice.toFixed(2) : curPrice ? curPrice.toFixed(2) : "");
+                                      setSellDialogOpen(true);
+                                    }}
+                                  >
+                                    Close
+                                  </Button>
+                                </div>
+                                <div className="grid grid-cols-3 gap-2 text-xs">
+                                  <div>
+                                    <div className="text-[9px] text-muted-foreground">Entry</div>
+                                    <div className="font-mono">${Number(pos.entry_price).toFixed(2)}</div>
+                                  </div>
+                                  <div>
+                                    <div className="text-[9px] text-muted-foreground">Current</div>
+                                    <div className="font-mono">{curPrice ? `$${curPrice.toFixed(2)}` : pricesLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : "—"}</div>
+                                  </div>
+                                  <div>
+                                    <div className="text-[9px] text-muted-foreground">P&L</div>
+                                    <div className={cn("font-mono font-bold", unrealizedPnL !== null ? (unrealizedPnL >= 0 ? "text-success" : "text-destructive") : "")}>
+                                      {unrealizedPnL !== null ? `${unrealizedPnL >= 0 ? "+" : ""}$${unrealizedPnL.toFixed(2)}` : "—"}
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+
+                        {/* Desktop: Table layout */}
+                        <div className="hidden sm:block overflow-x-auto">
+                          <Table>
+                            <TableHeader>
+                              <TableRow className="border-border/10">
+                                <TableHead className="text-[10px]">Ticker</TableHead>
+                                <TableHead className="text-[10px]">Type</TableHead>
+                                <TableHead className="text-[10px]">Entry</TableHead>
+                                <TableHead className="text-[10px]">Current</TableHead>
+                                <TableHead className="text-[10px]">Shares</TableHead>
+                                <TableHead className="text-[10px]">P&L</TableHead>
+                                <TableHead className="text-[10px]">P&L %</TableHead>
+                                <TableHead className="text-[10px]">Opened</TableHead>
+                                <TableHead className="text-[10px]"></TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {openPositions.map((pos) => {
+                                const unrealizedPnL = getUnrealizedPnL(pos);
+                                const unrealizedPnLPct = getUnrealizedPnLPct(pos);
+                                const curPrice = currentPrices[pos.ticker];
+                                const hasSellAlert = sellAlerts.some(a => a.ticker === pos.ticker);
+                                return (
+                                  <TableRow key={pos.id} className={cn("border-border/10", hasSellAlert && "bg-warning/5")}>
+                                    <TableCell className="font-mono font-bold text-sm">
+                                      <div className="flex items-center gap-2">{pos.ticker}{hasSellAlert && <AlertTriangle className="w-3 h-3 text-warning" />}</div>
+                                    </TableCell>
+                                    <TableCell><Badge variant="outline" className={cn("text-[10px]", pos.position_type === "long" ? "text-success" : "text-destructive")}>{pos.position_type}</Badge></TableCell>
+                                    <TableCell className="font-mono text-sm">${Number(pos.entry_price).toFixed(2)}</TableCell>
+                                    <TableCell className="font-mono text-sm">{curPrice ? `$${curPrice.toFixed(2)}` : pricesLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : "—"}</TableCell>
+                                    <TableCell className="font-mono text-sm">{Number(pos.shares).toFixed(2)}</TableCell>
+                                    <TableCell>{unrealizedPnL !== null ? <span className={cn("font-mono font-bold text-sm", unrealizedPnL >= 0 ? "text-success" : "text-destructive")}>{unrealizedPnL >= 0 ? "+" : ""}${unrealizedPnL.toFixed(2)}</span> : "—"}</TableCell>
+                                    <TableCell>{unrealizedPnLPct !== null ? <span className={cn("font-mono font-bold text-sm", unrealizedPnLPct >= 0 ? "text-success" : "text-destructive")}>{unrealizedPnLPct >= 0 ? "+" : ""}{unrealizedPnLPct.toFixed(2)}%</span> : "—"}</TableCell>
+                                    <TableCell className="text-xs text-muted-foreground">{new Date(pos.created_at).toLocaleDateString()}</TableCell>
+                                    <TableCell>
+                                      <Button
+                                        size="sm"
+                                        variant={hasSellAlert ? "destructive" : "outline"}
+                                        className="text-xs h-7"
+                                        onClick={() => {
+                                          setSelectedPosition(pos);
+                                          const alert = sellAlerts.find(a => a.ticker === pos.ticker);
+                                          setSellPrice(alert ? alert.currentPrice.toFixed(2) : curPrice ? curPrice.toFixed(2) : "");
+                                          setSellDialogOpen(true);
+                                        }}
+                                      >
+                                        Close
+                                      </Button>
+                                    </TableCell>
+                                  </TableRow>
+                                );
+                              })}
+                            </TableBody>
+                          </Table>
+                        </div>
                       </Card>
                     )}
 
@@ -894,36 +943,61 @@ const Dashboard = () => {
                         </CollapsibleTrigger>
                         <CollapsibleContent>
                           <Card className="glass-card">
-                            <Table>
-                              <TableHeader>
-                                <TableRow className="border-border/10">
-                                  <TableHead className="text-[10px]">Ticker</TableHead>
-                                  <TableHead className="text-[10px]">Type</TableHead>
-                                  <TableHead className="text-[10px]">Entry</TableHead>
-                                  <TableHead className="text-[10px]">Exit</TableHead>
-                                  <TableHead className="text-[10px]">Shares</TableHead>
-                                  <TableHead className="text-[10px]">P&L</TableHead>
-                                  <TableHead className="text-[10px]">Exit Reason</TableHead>
-                                  <TableHead className="text-[10px]">Closed</TableHead>
-                                </TableRow>
-                              </TableHeader>
-                              <TableBody>
-                                {closedPositions.map((pos) => (
-                                  <TableRow key={pos.id} className="border-border/10">
-                                    <TableCell className="font-mono font-bold text-sm">{pos.ticker}</TableCell>
-                                    <TableCell><Badge variant="outline" className={cn("text-[10px]", pos.position_type === "long" ? "text-success" : "text-destructive")}>{pos.position_type}</Badge></TableCell>
-                                    <TableCell className="font-mono text-sm">${Number(pos.entry_price).toFixed(2)}</TableCell>
-                                    <TableCell className="font-mono text-sm">${pos.exit_price ? Number(pos.exit_price).toFixed(2) : "—"}</TableCell>
-                                    <TableCell className="font-mono text-sm">{Number(pos.shares).toFixed(2)}</TableCell>
-                                    <TableCell className={cn("font-mono font-bold text-sm", (Number(pos.pnl) || 0) >= 0 ? "text-success" : "text-destructive")}>
+                            {/* Mobile: card layout */}
+                            <div className="sm:hidden divide-y divide-border/20">
+                              {closedPositions.map((pos) => (
+                                <div key={pos.id} className="p-3 space-y-1.5">
+                                  <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-2">
+                                      <span className="font-mono font-bold text-sm">{pos.ticker}</span>
+                                      <Badge variant="outline" className={cn("text-[9px]", pos.position_type === "long" ? "text-success" : "text-destructive")}>{pos.position_type}</Badge>
+                                    </div>
+                                    <span className={cn("font-mono font-bold text-sm", (Number(pos.pnl) || 0) >= 0 ? "text-success" : "text-destructive")}>
                                       {(Number(pos.pnl) || 0) >= 0 ? "+" : ""}${(Number(pos.pnl) || 0).toFixed(2)}
-                                    </TableCell>
-                                    <TableCell className="text-xs">{pos.exit_reason || "—"}</TableCell>
-                                    <TableCell className="text-xs text-muted-foreground">{pos.closed_at ? new Date(pos.closed_at).toLocaleDateString() : "—"}</TableCell>
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center gap-3 text-[11px] text-muted-foreground">
+                                    <span>${Number(pos.entry_price).toFixed(2)} → ${pos.exit_price ? Number(pos.exit_price).toFixed(2) : "—"}</span>
+                                    <span>{pos.exit_reason || "—"}</span>
+                                    <span className="ml-auto">{pos.closed_at ? new Date(pos.closed_at).toLocaleDateString() : "—"}</span>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+
+                            {/* Desktop: table layout */}
+                            <div className="hidden sm:block overflow-x-auto">
+                              <Table>
+                                <TableHeader>
+                                  <TableRow className="border-border/10">
+                                    <TableHead className="text-[10px]">Ticker</TableHead>
+                                    <TableHead className="text-[10px]">Type</TableHead>
+                                    <TableHead className="text-[10px]">Entry</TableHead>
+                                    <TableHead className="text-[10px]">Exit</TableHead>
+                                    <TableHead className="text-[10px]">Shares</TableHead>
+                                    <TableHead className="text-[10px]">P&L</TableHead>
+                                    <TableHead className="text-[10px]">Exit Reason</TableHead>
+                                    <TableHead className="text-[10px]">Closed</TableHead>
                                   </TableRow>
-                                ))}
-                              </TableBody>
-                            </Table>
+                                </TableHeader>
+                                <TableBody>
+                                  {closedPositions.map((pos) => (
+                                    <TableRow key={pos.id} className="border-border/10">
+                                      <TableCell className="font-mono font-bold text-sm">{pos.ticker}</TableCell>
+                                      <TableCell><Badge variant="outline" className={cn("text-[10px]", pos.position_type === "long" ? "text-success" : "text-destructive")}>{pos.position_type}</Badge></TableCell>
+                                      <TableCell className="font-mono text-sm">${Number(pos.entry_price).toFixed(2)}</TableCell>
+                                      <TableCell className="font-mono text-sm">${pos.exit_price ? Number(pos.exit_price).toFixed(2) : "—"}</TableCell>
+                                      <TableCell className="font-mono text-sm">{Number(pos.shares).toFixed(2)}</TableCell>
+                                      <TableCell className={cn("font-mono font-bold text-sm", (Number(pos.pnl) || 0) >= 0 ? "text-success" : "text-destructive")}>
+                                        {(Number(pos.pnl) || 0) >= 0 ? "+" : ""}${(Number(pos.pnl) || 0).toFixed(2)}
+                                      </TableCell>
+                                      <TableCell className="text-xs">{pos.exit_reason || "—"}</TableCell>
+                                      <TableCell className="text-xs text-muted-foreground">{pos.closed_at ? new Date(pos.closed_at).toLocaleDateString() : "—"}</TableCell>
+                                    </TableRow>
+                                  ))}
+                                </TableBody>
+                              </Table>
+                            </div>
                           </Card>
                         </CollapsibleContent>
                       </Collapsible>
