@@ -268,7 +268,7 @@ const Guide = () => {
         </div>
 
         <main className="pt-20 pb-12 px-4 sm:px-6 relative z-10">
-          <div className="container mx-auto max-w-6xl">
+          <div className="container mx-auto max-w-7xl">
             {/* Header */}
             <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} className="mb-6">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-4">

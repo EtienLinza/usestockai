@@ -273,7 +273,7 @@ const Watchlist = () => {
       </div>
       
       <main className="pt-20 pb-12 px-4 sm:px-6 relative z-10">
-        <div className="container mx-auto max-w-4xl">
+        <div className="container mx-auto max-w-5xl">
           {/* Header */}
           <motion.div
             initial={{ opacity: 0, y: 16 }}

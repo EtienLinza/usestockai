@@ -639,7 +639,7 @@ const Dashboard = () => {
 
           {/* ── Tabs ──────────────────────────────────────────────────────────── */}
           <Tabs value={activeTab} onValueChange={setActiveTab}>
-            <TabsList className="mb-6 flex-wrap h-auto gap-1">
+            <TabsList className="mb-6 flex-wrap h-auto gap-1 bg-secondary/30">
               <TabsTrigger value="analyze" className="gap-1.5 text-xs sm:text-sm">
                 <Brain className="w-4 h-4" />Analyze
               </TabsTrigger>

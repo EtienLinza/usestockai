@@ -10,7 +10,7 @@ const inputVariants = cva(
       variant: {
         default: "border-border focus-visible:ring-2 focus-visible:ring-primary/50 focus-visible:border-primary",
         glass: "border-border/50 bg-card/30 backdrop-blur-sm focus-visible:ring-2 focus-visible:ring-primary/50 focus-visible:border-primary/50 focus-visible:bg-card/50",
-        glow: "border-border focus-visible:ring-2 focus-visible:ring-primary focus-visible:border-primary focus-visible:shadow-[0_0_20px_hsl(187_100%_42%/0.2)]",
+        glow: "border-border focus-visible:ring-2 focus-visible:ring-primary focus-visible:border-primary focus-visible:shadow-[0_0_20px_hsl(var(--primary)/0.2)]",
       },
       inputSize: {
         default: "h-10",
