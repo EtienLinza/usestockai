@@ -1,22 +1,16 @@
 import { useState, useCallback, useEffect, useMemo } from "react";
-import { useSearchParams, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { Navbar } from "@/components/Navbar";
-import { PredictionForm, PredictionMode } from "@/components/PredictionForm";
-import { StockPredictionCard } from "@/components/StockPredictionCard";
-import { StockComparisonView } from "@/components/StockComparisonView";
-import { PriceTargetResult, PriceTargetData } from "@/components/PriceTargetResult";
 import { MetricCard } from "@/components/MetricCard";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
-import { format } from "date-fns";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
@@ -27,15 +21,15 @@ import {
   Collapsible, CollapsibleContent, CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import {
-  Brain, TrendingUp, TrendingDown, Shield, Sparkles, Layers, LayoutGrid,
+  Brain, TrendingUp, TrendingDown, Shield,
   Loader2, AlertTriangle, RefreshCw, Zap, DollarSign, Target,
   ArrowUpRight, ArrowDownRight, Package, BarChart3, Clock, CheckCircle2, Bell,
-  Trophy, Percent, ChevronDown, Activity,
+  Trophy, Percent, ChevronDown, Activity, Sparkles,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { fetchWithErrorHandling, handleResponseError, showErrorToast } from "@/lib/api-error";
 import {
-  LineChart, Line, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine,
+  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine,
 } from "recharts";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -124,19 +118,10 @@ interface PortfolioSnapshot {
 // ── Dashboard ──────────────────────────────────────────────────────────────────
 
 const Dashboard = () => {
-  const { user, session } = useAuth();
+  const { user } = useAuth();
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
 
-  // ─ Analyze tab state ─
-  const [isLoading, setIsLoading] = useState(false);
-  const [predictions, setPredictions] = useState<PredictionData[]>([]);
-  const [priceTargetResult, setPriceTargetResult] = useState<PriceTargetData | null>(null);
-  const [lastFormData, setLastFormData] = useState<{ ticker: string; targetDate?: Date; targetPrice?: number; mode: PredictionMode } | null>(null);
-  const [initialTicker, setInitialTicker] = useState("");
-  const [viewMode, setViewMode] = useState<'single' | 'compare'>('single');
-
-  // ─ Signals tab state ─
+  // ─ State ─
   const [signals, setSignals] = useState<Signal[]>([]);
   const [positions, setPositions] = useState<Position[]>([]);
   const [signalsLoading, setSignalsLoading] = useState(false);
@@ -154,9 +139,6 @@ const Dashboard = () => {
   const [portfolioHistory, setPortfolioHistory] = useState<PortfolioSnapshot[]>([]);
   const [lastScanTime, setLastScanTime] = useState<string | null>(null);
   const [showTradeLog, setShowTradeLog] = useState(false);
-
-  // ─ Active tab ─
-  const [activeTab, setActiveTab] = useState("analyze");
 
   // Derived
   const openPositions = useMemo(() => positions.filter(p => p.status === "open"), [positions]);
@@ -186,7 +168,6 @@ const Dashboard = () => {
     }, 0);
   }, [openPositions, currentPrices]);
 
-  // Portfolio analytics
   const winRate = useMemo(() => {
     if (closedPositions.length === 0) return 0;
     const wins = closedPositions.filter(p => (Number(p.pnl) || 0) > 0).length;
@@ -211,7 +192,6 @@ const Dashboard = () => {
     return grossLoss === 0 ? grossProfit > 0 ? Infinity : 0 : grossProfit / grossLoss;
   }, [closedPositions]);
 
-  // Drawdown from portfolio history
   const drawdownData = useMemo(() => {
     if (portfolioHistory.length < 2) return [];
     let peak = portfolioHistory[0].total_value;
@@ -221,16 +201,6 @@ const Dashboard = () => {
       return { date: snap.date, drawdown: dd };
     });
   }, [portfolioHistory]);
-
-  // ── URL param for ticker ─────────────────────────────────────────────────────
-  useEffect(() => {
-    const t = searchParams.get("ticker");
-    if (t) setInitialTicker(t.toUpperCase());
-  }, [searchParams]);
-
-  useEffect(() => {
-    setViewMode(predictions.length > 1 ? 'compare' : 'single');
-  }, [predictions.length]);
 
   // ── Load signals + positions ─────────────────────────────────────────────────
   const loadSignalData = useCallback(async () => {
@@ -264,13 +234,6 @@ const Dashboard = () => {
   }, [user]);
 
   useEffect(() => { loadSignalData(); }, [loadSignalData]);
-
-  useEffect(() => {
-    if ((signals.length > 0 || openPositions.length > 0) && predictions.length === 0 && !priceTargetResult) {
-      setActiveTab("signals");
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   useEffect(() => {
     const signalChannel = supabase
@@ -307,8 +270,8 @@ const Dashboard = () => {
   }, [openPositions]);
 
   useEffect(() => {
-    if (activeTab === "portfolio" && openPositions.length > 0) fetchCurrentPrices();
-  }, [activeTab, openPositions.length, fetchCurrentPrices]);
+    if (openPositions.length > 0) fetchCurrentPrices();
+  }, [openPositions.length, fetchCurrentPrices]);
 
   // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -351,90 +314,6 @@ const Dashboard = () => {
       oversold: "bg-primary/20 text-primary border-primary/30",
     };
     return colors[regime] || colors.neutral;
-  };
-
-  // ── Prediction submit ────────────────────────────────────────────────────────
-
-  const handleSubmit = async (data: { ticker: string; targetDate?: Date; targetPrice?: number; mode: PredictionMode }) => {
-    if (!session?.access_token) {
-      toast.error("Please sign in to generate predictions");
-      navigate("/auth");
-      return;
-    }
-    setIsLoading(true);
-    setLastFormData(data);
-
-    try {
-      if (data.mode === 'price' && data.targetPrice) {
-        setPriceTargetResult(null);
-        const response = await fetchWithErrorHandling(
-          `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/stock-predict`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` },
-            body: JSON.stringify({ ticker: data.ticker, targetPrice: data.targetPrice, mode: 'price-target' }),
-            timeoutMs: 60000,
-          }
-        );
-        if (!response.ok) await handleResponseError(response, navigate);
-        const result: PriceTargetData = await response.json();
-        setPriceTargetResult(result);
-        setPredictions([]);
-        toast.success(`Timeline estimated for ${data.ticker}`);
-      } else if (data.targetDate) {
-        setPriceTargetResult(null);
-        const response = await fetchWithErrorHandling(
-          `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/stock-predict`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` },
-            body: JSON.stringify({ ticker: data.ticker, targetDate: format(data.targetDate, "yyyy-MM-dd") }),
-            timeoutMs: 60000,
-          }
-        );
-        if (!response.ok) await handleResponseError(response, navigate);
-        const result: PredictionData = await response.json();
-
-        setPredictions(prev => {
-          const idx = prev.findIndex(p => p.ticker === result.ticker);
-          if (idx !== -1) { const u = [...prev]; u[idx] = result; return u; }
-          if (prev.length >= 6) { toast.info("Maximum 6 stocks. Removing oldest."); return [...prev.slice(1), result]; }
-          return [...prev, result];
-        });
-
-        if (user) {
-          await supabase.from("prediction_runs").insert({
-            user_id: user.id, ticker: result.ticker, target_date: result.targetDate,
-            predicted_price: result.predictedPrice, uncertainty_low: result.uncertaintyLow,
-            uncertainty_high: result.uncertaintyHigh, confidence: result.confidence,
-            current_price: result.currentPrice, feature_importance: result.featureImportance,
-            historical_data: result.historicalData, regime: result.regime, sentiment_score: result.sentimentScore,
-          });
-        }
-        toast.success(`Analysis complete for ${data.ticker}`);
-      }
-    } catch (error) {
-      console.error("Prediction error:", error);
-      showErrorToast(error, "Failed to generate prediction");
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleRefresh = useCallback(async () => {
-    if (lastFormData) await handleSubmit(lastFormData);
-  }, [lastFormData, session?.access_token]);
-
-  const handleRemovePrediction = (index: number) => {
-    setPredictions(prev => prev.filter((_, i) => i !== index));
-    toast.success("Stock removed from comparison");
-  };
-
-  const handleClearAll = () => {
-    setPredictions([]);
-    setPriceTargetResult(null);
-    setViewMode('single');
-    toast.success("All predictions cleared");
   };
 
   // ── Market scan ──────────────────────────────────────────────────────────────
@@ -511,7 +390,6 @@ const Dashboard = () => {
       toast.success(`Closed ${selectedPosition.ticker} at $${price.toFixed(2)} | P&L: $${pnl.toFixed(2)}`);
       setSellDialogOpen(false);
       setSellPrice("");
-      // Dismiss any sell alerts for this position
       const alertsForPos = sellAlerts.filter(a => a.ticker === selectedPosition.ticker);
       for (const alert of alertsForPos) {
         if (alert.id) await supabase.from("sell_alerts").update({ is_dismissed: true }).eq("id", alert.id);
@@ -553,9 +431,12 @@ const Dashboard = () => {
           <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} className="mb-6">
             <div className="flex items-center justify-between flex-wrap gap-4">
               <div>
-                <h1 className="text-xl sm:text-2xl font-medium mb-1">Dashboard</h1>
+                <h1 className="text-xl sm:text-2xl font-medium mb-1 flex items-center gap-2">
+                  <BarChart3 className="w-5 h-5 text-primary" />
+                  Trading Hub
+                </h1>
                 <p className="text-xs sm:text-sm text-muted-foreground">
-                  Analyze stocks, track signals & manage positions
+                  AI-powered signals, portfolio tracking & performance analytics
                   {lastScanTime && (
                     <span className="ml-2 text-xs">• Last scan: {new Date(lastScanTime).toLocaleTimeString()}</span>
                   )}
@@ -566,41 +447,7 @@ const Dashboard = () => {
                   <span className="w-1.5 h-1.5 rounded-full bg-success animate-pulse" />
                   Auto-scanning active
                 </div>
-                <Button variant="glow" onClick={runScan} disabled={scanning || !user} className="gap-2">
-                  {scanning ? (
-                    <><Loader2 className="w-4 h-4 animate-spin" />Scanning {scanProgress.batch}/{scanProgress.total}...</>
-                  ) : (
-                    <><RefreshCw className="w-4 h-4" />Scan Now</>
-                  )}
-                </Button>
               </div>
-            </div>
-
-            {/* Stats Row — MetricCard style */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mt-5">
-              <MetricCard icon={TrendingUp} label="Buy Signals" value={buySignals.length} color="text-success" />
-              <MetricCard icon={Package} label="Open Positions" value={openPositions.length} color="text-primary" />
-              <MetricCard icon={DollarSign} label="Portfolio Value" value={`$${totalPortfolioValue.toFixed(0)}`} />
-              <MetricCard
-                icon={TrendingUp}
-                label="Unrealized P&L"
-                value={`${totalUnrealizedPnL >= 0 ? "+" : ""}$${totalUnrealizedPnL.toFixed(2)}`}
-                color={totalUnrealizedPnL >= 0 ? "text-success" : "text-destructive"}
-              />
-              <MetricCard
-                icon={Target}
-                label="Realized P&L"
-                value={`${totalRealizedPnL >= 0 ? "+" : ""}$${totalRealizedPnL.toFixed(2)}`}
-                color={totalRealizedPnL >= 0 ? "text-success" : "text-destructive"}
-              />
-              <MetricCard
-                icon={Trophy}
-                label="Win Rate"
-                value={closedPositions.length > 0 ? `${winRate.toFixed(1)}` : "—"}
-                suffix={closedPositions.length > 0 ? "%" : ""}
-                color={winRate >= 50 ? "text-success" : winRate > 0 ? "text-destructive" : "text-muted-foreground"}
-                subtext={closedPositions.length > 0 ? `${closedPositions.length} trades` : "No closed trades"}
-              />
             </div>
           </motion.div>
 
@@ -637,432 +484,455 @@ const Dashboard = () => {
             )}
           </AnimatePresence>
 
-          {/* ── Tabs ──────────────────────────────────────────────────────────── */}
-          <Tabs value={activeTab} onValueChange={setActiveTab}>
-            <TabsList className="mb-6 flex-wrap h-auto gap-1 bg-secondary/30">
-              <TabsTrigger value="analyze" className="gap-1.5 text-xs sm:text-sm">
-                <Brain className="w-4 h-4" />Analyze
-              </TabsTrigger>
-              <TabsTrigger value="signals" className="gap-1.5 text-xs sm:text-sm">
-                <Zap className="w-4 h-4" />Signals
-                {signals.length > 0 && <Badge variant="secondary" className="ml-1 text-[10px] px-1.5 h-4">{signals.length}</Badge>}
-              </TabsTrigger>
-              <TabsTrigger value="portfolio" className="gap-1.5 text-xs sm:text-sm">
-                <Package className="w-4 h-4" />Portfolio
-                {sellAlerts.length > 0 && (
-                  <span className="ml-1 w-4 h-4 rounded-full bg-warning text-warning-foreground text-[10px] flex items-center justify-center">{sellAlerts.length}</span>
-                )}
-              </TabsTrigger>
-            </TabsList>
+          {/* ── Backtester-style layout: Config Left + Content Right ── */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-8">
 
-            {/* ── Analyze Tab ──────────────────────────────────────────────────── */}
-            <TabsContent value="analyze">
-              {predictions.length > 0 && (
-                <div className="flex items-center gap-2 mb-4">
-                  {predictions.length > 1 && (
-                    <div className="flex items-center gap-1 p-1 bg-secondary/50 rounded-lg">
-                      <Button variant="ghost" size="sm" onClick={() => setViewMode('single')} className={cn("h-7 px-2 text-xs gap-1", viewMode === 'single' && "bg-background shadow-sm")}>
-                        <LayoutGrid className="w-3 h-3" /><span className="hidden sm:inline">Single</span>
-                      </Button>
-                      <Button variant="ghost" size="sm" onClick={() => setViewMode('compare')} className={cn("h-7 px-2 text-xs gap-1", viewMode === 'compare' && "bg-background shadow-sm")}>
-                        <Layers className="w-3 h-3" /><span className="hidden sm:inline">Compare</span>
-                      </Button>
+            {/* ── Left Panel: Scanner + Portfolio Summary ── */}
+            <motion.div initial={{ opacity: 0, x: -16 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.1 }} className="lg:col-span-4 xl:col-span-3">
+              <div className="sticky top-20 space-y-4">
+
+                {/* Scanner Control */}
+                <Card className="glass-card p-5 space-y-5">
+                  <div className="flex items-center gap-2 text-sm font-medium">
+                    <Brain className="w-4 h-4 text-primary" />
+                    Market Scanner
+                  </div>
+
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    Scan 75+ stocks across all sectors using the quantitative algorithm to find high-conviction trade signals.
+                  </p>
+
+                  {scanning && (
+                    <div className="space-y-2">
+                      <Progress value={(scanProgress.batch / scanProgress.total) * 100} className="h-1.5" />
+                      <p className="text-[10px] text-muted-foreground text-center">
+                        Batch {scanProgress.batch} of {scanProgress.total}
+                      </p>
                     </div>
                   )}
-                  <Badge variant="outline" className="text-xs">{predictions.length}/6</Badge>
-                  <Button variant="ghost" size="sm" onClick={handleClearAll} className="h-7 px-2 text-xs text-muted-foreground hover:text-destructive">Clear All</Button>
-                </div>
-              )}
 
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-8">
-                <div className="lg:col-span-4 xl:col-span-3">
-                  <div className="sticky top-20">
-                    <PredictionForm onSubmit={handleSubmit} isLoading={isLoading} initialTicker={initialTicker} />
-                    {predictions.length === 0 && !priceTargetResult && (
-                      <div className="mt-4 p-4 border border-border/30 rounded-lg">
-                        <p className="text-xs text-muted-foreground">
-                          <span className="text-primary font-medium">Tip:</span> Add multiple stocks to compare them side by side. Up to 6 stocks supported.
-                        </p>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                <div className="lg:col-span-8 xl:col-span-9">
-                  <AnimatePresence mode="wait">
-                    {priceTargetResult ? (
-                      <motion.div key="price-target" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-                        <PriceTargetResult data={priceTargetResult} />
-                      </motion.div>
-                    ) : predictions.length === 0 ? (
-                      <motion.div key="empty" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-6">
-                        <div className="glass-card p-6 sm:p-8">
-                          <h3 className="text-base sm:text-lg font-medium mb-6 flex items-center gap-2">
-                            <Sparkles className="w-4 h-4 sm:w-5 sm:h-5 text-primary" />How StockAI Works
-                          </h3>
-                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
-                            <div className="space-y-3">
-                              <div className="w-9 h-9 rounded-lg bg-primary/10 flex items-center justify-center"><TrendingUp className="w-4 h-4 text-primary" /></div>
-                              <h4 className="text-xs sm:text-sm font-medium">Real Market Data</h4>
-                              <p className="text-[11px] sm:text-xs text-muted-foreground leading-relaxed">We pull live price data and compute technical indicators like RSI, MACD, EMA, and volatility metrics.</p>
-                            </div>
-                            <div className="space-y-3">
-                              <div className="w-9 h-9 rounded-lg bg-primary/10 flex items-center justify-center"><Brain className="w-4 h-4 text-primary" /></div>
-                              <h4 className="text-xs sm:text-sm font-medium">AI Analysis</h4>
-                              <p className="text-[11px] sm:text-xs text-muted-foreground leading-relaxed">Advanced AI models analyze patterns, market regime, and sentiment to generate predictions.</p>
-                            </div>
-                            <div className="space-y-3">
-                              <div className="w-9 h-9 rounded-lg bg-primary/10 flex items-center justify-center"><Shield className="w-4 h-4 text-primary" /></div>
-                              <h4 className="text-xs sm:text-sm font-medium">Risk Assessment</h4>
-                              <p className="text-[11px] sm:text-xs text-muted-foreground leading-relaxed">Every prediction includes uncertainty ranges and confidence levels.</p>
-                            </div>
-                          </div>
-                        </div>
-                        <div className="flex items-start gap-3 p-4 border border-border/30 rounded-lg">
-                          <Shield className="w-4 h-4 text-warning mt-0.5 shrink-0" />
-                          <p className="text-[11px] sm:text-xs text-muted-foreground leading-relaxed">
-                            <span className="font-medium text-foreground">Important:</span> StockAI provides AI-generated analysis for informational purposes only. This is not financial advice.
-                          </p>
-                        </div>
-                      </motion.div>
-                    ) : predictions.length === 1 && viewMode === 'single' ? (
-                      <motion.div key="single" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-                        <StockPredictionCard data={predictions[0]} />
-                      </motion.div>
+                  <Button onClick={runScan} disabled={scanning || !user} className="w-full gap-2">
+                    {scanning ? (
+                      <><Loader2 className="w-4 h-4 animate-spin" />Scanning...</>
                     ) : (
-                      <motion.div key="compare" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-                        <StockComparisonView predictions={predictions} onRemove={handleRemovePrediction} />
-                      </motion.div>
+                      <><RefreshCw className="w-4 h-4" />Scan Market</>
                     )}
-                  </AnimatePresence>
-                </div>
-              </div>
-            </TabsContent>
+                  </Button>
+                </Card>
 
-            {/* ── Signals Tab ──────────────────────────────────────────────────── */}
-            <TabsContent value="signals">
+                {/* Portfolio Summary */}
+                <Card className="glass-card p-5 space-y-4">
+                  <div className="flex items-center gap-2 text-sm font-medium">
+                    <Package className="w-4 h-4 text-primary" />
+                    Portfolio Summary
+                  </div>
+
+                  <div className="space-y-2 text-xs">
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Open Positions</span>
+                      <span className="font-mono font-medium">{openPositions.length}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Portfolio Value</span>
+                      <span className="font-mono font-medium">${totalPortfolioValue.toFixed(0)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Unrealized P&L</span>
+                      <span className={cn("font-mono font-medium", totalUnrealizedPnL >= 0 ? "text-success" : "text-destructive")}>
+                        {totalUnrealizedPnL >= 0 ? "+" : ""}${totalUnrealizedPnL.toFixed(2)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Realized P&L</span>
+                      <span className={cn("font-mono font-medium", totalRealizedPnL >= 0 ? "text-success" : "text-destructive")}>
+                        {totalRealizedPnL >= 0 ? "+" : ""}${totalRealizedPnL.toFixed(2)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Win Rate</span>
+                      <span className={cn("font-mono font-medium", winRate >= 50 ? "text-success" : winRate > 0 ? "text-destructive" : "text-muted-foreground")}>
+                        {closedPositions.length > 0 ? `${winRate.toFixed(1)}%` : "—"}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Closed Trades</span>
+                      <span className="font-mono font-medium">{closedPositions.length}</span>
+                    </div>
+                  </div>
+                </Card>
+
+                {/* Anti-Bias Info (matching backtester) */}
+                <Card className="glass-card p-4">
+                  <div className="text-[10px] text-muted-foreground uppercase tracking-wide mb-2">Algorithm Details</div>
+                  <div className="space-y-1 text-xs text-muted-foreground">
+                    <div className="flex justify-between"><span>Indicators</span><span className="font-mono text-primary">10+</span></div>
+                    <div className="flex justify-between"><span>Regime Detection</span><span className="font-mono text-success">Active</span></div>
+                    <div className="flex justify-between"><span>Signal Consensus</span><span className="font-mono text-success">Weighted</span></div>
+                    <div className="flex justify-between"><span>Conviction Range</span><span className="font-mono">35–92%</span></div>
+                    <div className="flex justify-between"><span>Auto-Scan</span><span className="font-mono text-success">Scheduled</span></div>
+                  </div>
+                </Card>
+              </div>
+            </motion.div>
+
+            {/* ── Right Panel: Signals + Positions + Charts ── */}
+            <motion.div initial={{ opacity: 0, x: 16 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.2 }} className="lg:col-span-8 xl:col-span-9">
               <AnimatePresence mode="wait">
                 {signalsLoading ? (
-                  <div className="flex items-center justify-center py-20"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>
-                ) : signals.length === 0 ? (
-                  <Card variant="glass" className="p-12 text-center">
-                    <Zap className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
-                    <h3 className="text-lg font-semibold mb-2">No Active Signals</h3>
-                    <p className="text-muted-foreground mb-6">Click "Scan Market" to analyze 75 stocks across all sectors</p>
-                    <Button variant="glow" onClick={runScan} disabled={scanning || !user}><RefreshCw className="w-4 h-4 mr-2" />Run First Scan</Button>
-                  </Card>
+                  <motion.div key="loading" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="glass-card p-12 text-center">
+                    <Loader2 className="w-8 h-8 text-primary animate-spin mx-auto mb-4" />
+                    <p className="text-sm text-muted-foreground">Loading signals & positions...</p>
+                  </motion.div>
                 ) : (
-                  <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-3">
-                    {signals.map((signal, idx) => (
-                      <motion.div key={signal.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: idx * 0.03 }}>
-                        <Card variant="glass" className="hover:border-primary/30 transition-all">
-                          <CardContent className="p-4">
-                            <div className="flex items-center justify-between flex-wrap gap-3">
-                              <div className="flex items-center gap-4 flex-1 min-w-0">
-                                <div className="flex items-center gap-2">
-                                  {signal.signal_type === "BUY" ? <ArrowUpRight className="w-5 h-5 text-success" /> : <ArrowDownRight className="w-5 h-5 text-destructive" />}
-                                  <span className="text-lg font-bold font-mono">{signal.ticker}</span>
-                                  <Badge variant="outline" className={signal.signal_type === "BUY" ? "bg-success/10 text-success border-success/30" : "bg-destructive/10 text-destructive border-destructive/30"}>
-                                    {signal.signal_type}
-                                  </Badge>
-                                </div>
-                                <div className="hidden sm:flex items-center gap-2">
-                                  <Badge variant="outline" className={getRegimeBadge(signal.regime)}>{signal.regime?.replace("_", " ")}</Badge>
-                                  <Badge variant="outline" className="text-xs">{signal.stock_profile}</Badge>
-                                  <Badge variant="outline" className="text-xs">{signal.strategy}</Badge>
-                                </div>
-                              </div>
-                              <div className="flex items-center gap-4">
-                                <div className="text-right">
-                                  <div className="text-[10px] text-muted-foreground uppercase">Entry</div>
-                                  <div className="font-mono font-semibold text-sm">${Number(signal.entry_price).toFixed(2)}</div>
-                                </div>
-                                <div className="text-right min-w-[60px]">
-                                  <div className="text-[10px] text-muted-foreground uppercase">Conviction</div>
-                                  <div className={cn("font-mono font-bold text-sm", getConfidenceColor(signal.confidence))}>{signal.confidence}%</div>
-                                </div>
-                                <Button
-                                  size="sm"
-                                  variant={signal.signal_type === "BUY" ? "success" : "destructive"}
-                                  onClick={() => {
-                                    if (!user) { toast.error("Please sign in first"); return; }
-                                    setSelectedSignal(signal);
-                                    setBuyDialogOpen(true);
+                  <motion.div key="content" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-6">
+
+                    {/* Primary Metrics Row */}
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                      <MetricCard icon={Zap} label="Buy Signals" value={buySignals.length} color="text-success" />
+                      <MetricCard icon={Package} label="Open Positions" value={openPositions.length} color="text-primary" />
+                      <MetricCard icon={DollarSign} label="Portfolio Value" value={`$${totalPortfolioValue.toFixed(0)}`} />
+                      <MetricCard
+                        icon={Trophy}
+                        label="Win Rate"
+                        value={closedPositions.length > 0 ? `${winRate.toFixed(1)}` : "—"}
+                        suffix={closedPositions.length > 0 ? "%" : ""}
+                        color={winRate >= 50 ? "text-success" : winRate > 0 ? "text-destructive" : "text-muted-foreground"}
+                        subtext={closedPositions.length > 0 ? `${closedPositions.length} trades` : "No closed trades"}
+                      />
+                    </div>
+
+                    {/* Performance Metrics (if closed trades) */}
+                    {closedPositions.length > 0 && (
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                        <MetricCard icon={TrendingUp} label="Avg Win" value={`+$${avgWin.toFixed(2)}`} color="text-success" />
+                        <MetricCard icon={TrendingDown} label="Avg Loss" value={`$${avgLoss.toFixed(2)}`} color="text-destructive" />
+                        <MetricCard
+                          icon={Activity}
+                          label="Profit Factor"
+                          value={profitFactor === Infinity ? "∞" : profitFactor.toFixed(2)}
+                          color={profitFactor >= 1.5 ? "text-success" : profitFactor >= 1 ? "text-primary" : "text-destructive"}
+                        />
+                        <MetricCard
+                          icon={Target}
+                          label="Total P&L"
+                          value={`${totalRealizedPnL >= 0 ? "+" : ""}$${totalRealizedPnL.toFixed(2)}`}
+                          color={totalRealizedPnL >= 0 ? "text-success" : "text-destructive"}
+                        />
+                      </div>
+                    )}
+
+                    {/* Equity Curve */}
+                    {portfolioHistory.length > 1 && (
+                      <Card className="glass-card p-6">
+                        <div className="flex items-center gap-2 mb-4">
+                          <BarChart3 className="w-4 h-4 text-primary" />
+                          <span className="text-sm font-medium">Equity Curve</span>
+                        </div>
+                        <div className="h-48">
+                          <ResponsiveContainer width="100%" height="100%">
+                            <AreaChart data={portfolioHistory}>
+                              <defs>
+                                <linearGradient id="equityFill" x1="0" y1="0" x2="0" y2="1">
+                                  <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.3} />
+                                  <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0} />
+                                </linearGradient>
+                              </defs>
+                              <CartesianGrid strokeDasharray="3 3" className="stroke-border/20" />
+                              <XAxis dataKey="date" tick={{ fontSize: 10 }} className="fill-muted-foreground" />
+                              <YAxis tick={{ fontSize: 10 }} className="fill-muted-foreground" tickFormatter={(v) => `$${v.toLocaleString()}`} />
+                              <Tooltip
+                                contentStyle={{
+                                  backgroundColor: "hsl(var(--card))",
+                                  border: "1px solid hsl(var(--border))",
+                                  borderRadius: "8px",
+                                  fontSize: "12px",
+                                }}
+                                formatter={(value: number) => [`$${value.toFixed(2)}`, "Portfolio Value"]}
+                              />
+                              <Area type="monotone" dataKey="total_value" stroke="hsl(var(--primary))" strokeWidth={2} fill="url(#equityFill)" />
+                            </AreaChart>
+                          </ResponsiveContainer>
+                        </div>
+
+                        {drawdownData.length > 0 && (
+                          <div className="h-24 mt-4">
+                            <div className="text-[10px] text-muted-foreground uppercase tracking-wide mb-1">Drawdown</div>
+                            <ResponsiveContainer width="100%" height="100%">
+                              <AreaChart data={drawdownData}>
+                                <defs>
+                                  <linearGradient id="ddFill" x1="0" y1="0" x2="0" y2="1">
+                                    <stop offset="5%" stopColor="hsl(var(--destructive))" stopOpacity={0.3} />
+                                    <stop offset="95%" stopColor="hsl(var(--destructive))" stopOpacity={0} />
+                                  </linearGradient>
+                                </defs>
+                                <CartesianGrid strokeDasharray="3 3" className="stroke-border/10" />
+                                <XAxis dataKey="date" tick={false} />
+                                <YAxis tick={{ fontSize: 9 }} className="fill-muted-foreground" tickFormatter={(v) => `${v.toFixed(0)}%`} />
+                                <Tooltip
+                                  contentStyle={{
+                                    backgroundColor: "hsl(var(--card))",
+                                    border: "1px solid hsl(var(--border))",
+                                    borderRadius: "8px",
+                                    fontSize: "11px",
                                   }}
-                                >
-                                  Register {signal.signal_type === "BUY" ? "Buy" : "Short"}
-                                </Button>
-                              </div>
-                            </div>
+                                  formatter={(value: number) => [`${value.toFixed(2)}%`, "Drawdown"]}
+                                />
+                                <ReferenceLine y={0} className="stroke-border" />
+                                <Area type="monotone" dataKey="drawdown" stroke="hsl(var(--destructive))" strokeWidth={1.5} fill="url(#ddFill)" />
+                              </AreaChart>
+                            </ResponsiveContainer>
+                          </div>
+                        )}
+                      </Card>
+                    )}
 
-                            {/* Conviction bar + Allocation */}
-                            <div className="mt-3 flex items-center gap-4">
-                              <div className="flex-1">
-                                <div className="h-1.5 rounded-full bg-muted overflow-hidden">
-                                  <div
-                                    className={cn("h-full rounded-full transition-all", getConfidenceBg(signal.confidence))}
-                                    style={{ width: `${signal.confidence}%` }}
-                                  />
+                    {/* Active Signals */}
+                    <Card className="glass-card">
+                      <div className="p-4 border-b border-border/30 flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <Zap className="w-4 h-4 text-primary" />
+                          <span className="text-sm font-medium">Active Signals</span>
+                          {signals.length > 0 && <Badge variant="secondary" className="text-[10px] px-1.5 h-4">{signals.length}</Badge>}
+                        </div>
+                        <Button variant="outline" size="sm" onClick={runScan} disabled={scanning || !user} className="gap-1.5 text-xs h-7">
+                          {scanning ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+                          Scan
+                        </Button>
+                      </div>
+
+                      {signals.length === 0 ? (
+                        <div className="p-8 text-center">
+                          <Zap className="w-10 h-10 text-muted-foreground/30 mx-auto mb-3" />
+                          <h3 className="text-sm font-medium mb-1">No Active Signals</h3>
+                          <p className="text-xs text-muted-foreground mb-4">Click "Scan Market" to analyze 75 stocks across all sectors</p>
+                          <Button variant="glow" size="sm" onClick={runScan} disabled={scanning || !user}>
+                            <RefreshCw className="w-3.5 h-3.5 mr-1.5" />Run First Scan
+                          </Button>
+                        </div>
+                      ) : (
+                        <div className="divide-y divide-border/20">
+                          {signals.map((signal, idx) => (
+                            <motion.div key={signal.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: idx * 0.02 }} className="p-4 hover:bg-muted/5 transition-colors">
+                              <div className="flex items-center justify-between flex-wrap gap-3">
+                                <div className="flex items-center gap-4 flex-1 min-w-0">
+                                  <div className="flex items-center gap-2">
+                                    {signal.signal_type === "BUY" ? <ArrowUpRight className="w-5 h-5 text-success" /> : <ArrowDownRight className="w-5 h-5 text-destructive" />}
+                                    <span className="text-lg font-bold font-mono">{signal.ticker}</span>
+                                    <Badge variant="outline" className={signal.signal_type === "BUY" ? "bg-success/10 text-success border-success/30" : "bg-destructive/10 text-destructive border-destructive/30"}>
+                                      {signal.signal_type}
+                                    </Badge>
+                                  </div>
+                                  <div className="hidden sm:flex items-center gap-2">
+                                    <Badge variant="outline" className={getRegimeBadge(signal.regime)}>{signal.regime?.replace("_", " ")}</Badge>
+                                    <Badge variant="outline" className="text-xs">{signal.stock_profile}</Badge>
+                                    <Badge variant="outline" className="text-xs">{signal.strategy}</Badge>
+                                  </div>
+                                </div>
+                                <div className="flex items-center gap-4">
+                                  <div className="text-right">
+                                    <div className="text-[10px] text-muted-foreground uppercase">Entry</div>
+                                    <div className="font-mono font-semibold text-sm">${Number(signal.entry_price).toFixed(2)}</div>
+                                  </div>
+                                  <div className="text-right min-w-[60px]">
+                                    <div className="text-[10px] text-muted-foreground uppercase">Conviction</div>
+                                    <div className={cn("font-mono font-bold text-sm", getConfidenceColor(signal.confidence))}>{signal.confidence}%</div>
+                                  </div>
+                                  <Button
+                                    size="sm"
+                                    variant={signal.signal_type === "BUY" ? "success" : "destructive"}
+                                    onClick={() => {
+                                      if (!user) { toast.error("Please sign in first"); return; }
+                                      setSelectedSignal(signal);
+                                      setBuyDialogOpen(true);
+                                    }}
+                                  >
+                                    Register
+                                  </Button>
                                 </div>
                               </div>
-                              {signal.target_allocation > 0 && (
-                                <span className="text-[10px] text-muted-foreground font-mono shrink-0">
-                                  Alloc: {signal.target_allocation}%
-                                </span>
+
+                              <div className="mt-3 flex items-center gap-4">
+                                <div className="flex-1">
+                                  <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+                                    <div
+                                      className={cn("h-full rounded-full transition-all", getConfidenceBg(signal.confidence))}
+                                      style={{ width: `${signal.confidence}%` }}
+                                    />
+                                  </div>
+                                </div>
+                                {signal.target_allocation > 0 && (
+                                  <span className="text-[10px] text-muted-foreground font-mono shrink-0">
+                                    Alloc: {signal.target_allocation}%
+                                  </span>
+                                )}
+                              </div>
+
+                              <div className="flex sm:hidden items-center gap-2 mt-2 flex-wrap">
+                                <Badge variant="outline" className={cn("text-[10px]", getRegimeBadge(signal.regime))}>{signal.regime?.replace("_", " ")}</Badge>
+                                <Badge variant="outline" className="text-[10px]">{signal.stock_profile}</Badge>
+                                <Badge variant="outline" className="text-[10px]">{signal.strategy}</Badge>
+                              </div>
+
+                              {signal.reasoning && (
+                                <p className="text-xs text-muted-foreground mt-2 border-t border-border/10 pt-2">{signal.reasoning}</p>
                               )}
-                            </div>
+                            </motion.div>
+                          ))}
+                        </div>
+                      )}
+                    </Card>
 
-                            {/* Mobile badges */}
-                            <div className="flex sm:hidden items-center gap-2 mt-2 flex-wrap">
-                              <Badge variant="outline" className={cn("text-[10px]", getRegimeBadge(signal.regime))}>{signal.regime?.replace("_", " ")}</Badge>
-                              <Badge variant="outline" className="text-[10px]">{signal.stock_profile}</Badge>
-                              <Badge variant="outline" className="text-[10px]">{signal.strategy}</Badge>
-                            </div>
+                    {/* Open Positions */}
+                    {openPositions.length > 0 && (
+                      <Card className="glass-card">
+                        <div className="p-4 border-b border-border/30 flex items-center justify-between">
+                          <span className="text-sm font-medium flex items-center gap-2">
+                            <Package className="w-4 h-4 text-primary" />
+                            Open Positions ({openPositions.length})
+                          </span>
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] text-muted-foreground">
+                              {pricesLoading ? (
+                                <span className="flex items-center gap-1"><Loader2 className="w-3 h-3 animate-spin" />Fetching...</span>
+                              ) : Object.keys(currentPrices).length > 0 ? "Live" : "—"}
+                            </span>
+                            <Button size="sm" variant="ghost" onClick={fetchCurrentPrices} disabled={pricesLoading} className="h-7 px-2 text-xs">
+                              <RefreshCw className={cn("w-3 h-3", pricesLoading && "animate-spin")} />
+                            </Button>
+                          </div>
+                        </div>
+                        <Table>
+                          <TableHeader>
+                            <TableRow className="border-border/10">
+                              <TableHead className="text-[10px]">Ticker</TableHead>
+                              <TableHead className="text-[10px]">Type</TableHead>
+                              <TableHead className="text-[10px]">Entry</TableHead>
+                              <TableHead className="text-[10px]">Current</TableHead>
+                              <TableHead className="text-[10px]">Shares</TableHead>
+                              <TableHead className="text-[10px]">P&L</TableHead>
+                              <TableHead className="text-[10px]">P&L %</TableHead>
+                              <TableHead className="text-[10px]">Opened</TableHead>
+                              <TableHead className="text-[10px]"></TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {openPositions.map((pos) => {
+                              const unrealizedPnL = getUnrealizedPnL(pos);
+                              const unrealizedPnLPct = getUnrealizedPnLPct(pos);
+                              const curPrice = currentPrices[pos.ticker];
+                              const hasSellAlert = sellAlerts.some(a => a.ticker === pos.ticker);
+                              return (
+                                <TableRow key={pos.id} className={cn("border-border/10", hasSellAlert && "bg-warning/5")}>
+                                  <TableCell className="font-mono font-bold text-sm">
+                                    <div className="flex items-center gap-2">{pos.ticker}{hasSellAlert && <AlertTriangle className="w-3 h-3 text-warning" />}</div>
+                                  </TableCell>
+                                  <TableCell><Badge variant="outline" className={cn("text-[10px]", pos.position_type === "long" ? "text-success" : "text-destructive")}>{pos.position_type}</Badge></TableCell>
+                                  <TableCell className="font-mono text-sm">${Number(pos.entry_price).toFixed(2)}</TableCell>
+                                  <TableCell className="font-mono text-sm">{curPrice ? `$${curPrice.toFixed(2)}` : pricesLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : "—"}</TableCell>
+                                  <TableCell className="font-mono text-sm">{Number(pos.shares).toFixed(2)}</TableCell>
+                                  <TableCell>{unrealizedPnL !== null ? <span className={cn("font-mono font-bold text-sm", unrealizedPnL >= 0 ? "text-success" : "text-destructive")}>{unrealizedPnL >= 0 ? "+" : ""}${unrealizedPnL.toFixed(2)}</span> : "—"}</TableCell>
+                                  <TableCell>{unrealizedPnLPct !== null ? <span className={cn("font-mono font-bold text-sm", unrealizedPnLPct >= 0 ? "text-success" : "text-destructive")}>{unrealizedPnLPct >= 0 ? "+" : ""}{unrealizedPnLPct.toFixed(2)}%</span> : "—"}</TableCell>
+                                  <TableCell className="text-xs text-muted-foreground">{new Date(pos.created_at).toLocaleDateString()}</TableCell>
+                                  <TableCell>
+                                    <Button
+                                      size="sm"
+                                      variant={hasSellAlert ? "destructive" : "outline"}
+                                      className="text-xs h-7"
+                                      onClick={() => {
+                                        setSelectedPosition(pos);
+                                        const alert = sellAlerts.find(a => a.ticker === pos.ticker);
+                                        setSellPrice(alert ? alert.currentPrice.toFixed(2) : curPrice ? curPrice.toFixed(2) : "");
+                                        setSellDialogOpen(true);
+                                      }}
+                                    >
+                                      Close
+                                    </Button>
+                                  </TableCell>
+                                </TableRow>
+                              );
+                            })}
+                          </TableBody>
+                        </Table>
+                      </Card>
+                    )}
 
-                            {signal.reasoning && (
-                              <p className="text-xs text-muted-foreground mt-2 border-t border-border/30 pt-2">{signal.reasoning}</p>
-                            )}
-                          </CardContent>
-                        </Card>
-                      </motion.div>
-                    ))}
+                    {/* Empty state if no positions and no signals */}
+                    {openPositions.length === 0 && closedPositions.length === 0 && signals.length === 0 && (
+                      <Card className="glass-card p-8 text-center">
+                        <BarChart3 className="w-12 h-12 text-muted-foreground/30 mx-auto mb-4" />
+                        <h3 className="text-lg font-medium mb-2">Welcome to the Trading Hub</h3>
+                        <p className="text-sm text-muted-foreground max-w-md mx-auto mb-6">
+                          Scan the market to discover AI-powered trade signals, then register positions to track your portfolio performance.
+                        </p>
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 max-w-lg mx-auto">
+                          {[
+                            { icon: Brain, label: "10+ Indicators" },
+                            { icon: Sparkles, label: "AI Signals" },
+                            { icon: Shield, label: "Regime Detection" },
+                            { icon: Trophy, label: "P&L Tracking" },
+                          ].map(({ icon: Icon, label }) => (
+                            <div key={label} className="flex flex-col items-center gap-1.5 p-3 rounded-lg bg-secondary/30">
+                              <Icon className="w-4 h-4 text-primary" />
+                              <span className="text-[10px] text-muted-foreground">{label}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </Card>
+                    )}
+
+                    {/* Collapsible Trade Log */}
+                    {closedPositions.length > 0 && (
+                      <Collapsible open={showTradeLog} onOpenChange={setShowTradeLog}>
+                        <CollapsibleTrigger asChild>
+                          <Button variant="ghost" className="w-full justify-between text-xs text-muted-foreground hover:text-foreground mb-2">
+                            <span className="flex items-center gap-2">
+                              <Clock className="w-3.5 h-3.5" />
+                              {showTradeLog ? "Hide" : "Show"} Trade Log ({closedPositions.length} trades)
+                            </span>
+                            <ChevronDown className={cn("w-4 h-4 transition-transform", showTradeLog && "rotate-180")} />
+                          </Button>
+                        </CollapsibleTrigger>
+                        <CollapsibleContent>
+                          <Card className="glass-card">
+                            <Table>
+                              <TableHeader>
+                                <TableRow className="border-border/10">
+                                  <TableHead className="text-[10px]">Ticker</TableHead>
+                                  <TableHead className="text-[10px]">Type</TableHead>
+                                  <TableHead className="text-[10px]">Entry</TableHead>
+                                  <TableHead className="text-[10px]">Exit</TableHead>
+                                  <TableHead className="text-[10px]">Shares</TableHead>
+                                  <TableHead className="text-[10px]">P&L</TableHead>
+                                  <TableHead className="text-[10px]">Exit Reason</TableHead>
+                                  <TableHead className="text-[10px]">Closed</TableHead>
+                                </TableRow>
+                              </TableHeader>
+                              <TableBody>
+                                {closedPositions.map((pos) => (
+                                  <TableRow key={pos.id} className="border-border/10">
+                                    <TableCell className="font-mono font-bold text-sm">{pos.ticker}</TableCell>
+                                    <TableCell><Badge variant="outline" className={cn("text-[10px]", pos.position_type === "long" ? "text-success" : "text-destructive")}>{pos.position_type}</Badge></TableCell>
+                                    <TableCell className="font-mono text-sm">${Number(pos.entry_price).toFixed(2)}</TableCell>
+                                    <TableCell className="font-mono text-sm">${pos.exit_price ? Number(pos.exit_price).toFixed(2) : "—"}</TableCell>
+                                    <TableCell className="font-mono text-sm">{Number(pos.shares).toFixed(2)}</TableCell>
+                                    <TableCell className={cn("font-mono font-bold text-sm", (Number(pos.pnl) || 0) >= 0 ? "text-success" : "text-destructive")}>
+                                      {(Number(pos.pnl) || 0) >= 0 ? "+" : ""}${(Number(pos.pnl) || 0).toFixed(2)}
+                                    </TableCell>
+                                    <TableCell className="text-xs">{pos.exit_reason || "—"}</TableCell>
+                                    <TableCell className="text-xs text-muted-foreground">{pos.closed_at ? new Date(pos.closed_at).toLocaleDateString() : "—"}</TableCell>
+                                  </TableRow>
+                                ))}
+                              </TableBody>
+                            </Table>
+                          </Card>
+                        </CollapsibleContent>
+                      </Collapsible>
+                    )}
                   </motion.div>
                 )}
               </AnimatePresence>
-            </TabsContent>
-
-            {/* ── Portfolio Tab ─────────────────────────────────────────────────── */}
-            <TabsContent value="portfolio">
-              {/* Performance Metrics Row (from closed trades) */}
-              {closedPositions.length > 0 && (
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
-                  <MetricCard
-                    icon={Trophy}
-                    label="Win Rate"
-                    value={`${winRate.toFixed(1)}`}
-                    suffix="%"
-                    color={winRate >= 50 ? "text-success" : "text-destructive"}
-                    subtext={`${closedPositions.filter(p => (Number(p.pnl) || 0) > 0).length}W / ${closedPositions.filter(p => (Number(p.pnl) || 0) <= 0).length}L`}
-                  />
-                  <MetricCard
-                    icon={TrendingUp}
-                    label="Avg Win"
-                    value={`+$${avgWin.toFixed(2)}`}
-                    color="text-success"
-                  />
-                  <MetricCard
-                    icon={TrendingDown}
-                    label="Avg Loss"
-                    value={`$${avgLoss.toFixed(2)}`}
-                    color="text-destructive"
-                  />
-                  <MetricCard
-                    icon={Activity}
-                    label="Profit Factor"
-                    value={profitFactor === Infinity ? "∞" : profitFactor.toFixed(2)}
-                    color={profitFactor >= 1.5 ? "text-success" : profitFactor >= 1 ? "text-primary" : "text-destructive"}
-                  />
-                </div>
-              )}
-
-              {/* Equity Curve + Drawdown */}
-              {portfolioHistory.length > 1 && (
-                <Card className="glass-card mb-6">
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-sm flex items-center gap-2">
-                      <BarChart3 className="w-4 h-4 text-primary" />Equity Curve
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div className="h-48">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <AreaChart data={portfolioHistory}>
-                          <defs>
-                            <linearGradient id="equityFill" x1="0" y1="0" x2="0" y2="1">
-                              <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.3} />
-                              <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0} />
-                            </linearGradient>
-                          </defs>
-                          <CartesianGrid strokeDasharray="3 3" className="stroke-border/20" />
-                          <XAxis dataKey="date" tick={{ fontSize: 10 }} className="fill-muted-foreground" />
-                          <YAxis tick={{ fontSize: 10 }} className="fill-muted-foreground" tickFormatter={(v) => `$${v.toLocaleString()}`} />
-                          <Tooltip
-                            contentStyle={{
-                              backgroundColor: "hsl(var(--card))",
-                              border: "1px solid hsl(var(--border))",
-                              borderRadius: "8px",
-                              fontSize: "12px",
-                            }}
-                            formatter={(value: number) => [`$${value.toFixed(2)}`, "Portfolio Value"]}
-                          />
-                          <Area type="monotone" dataKey="total_value" stroke="hsl(var(--primary))" strokeWidth={2} fill="url(#equityFill)" />
-                        </AreaChart>
-                      </ResponsiveContainer>
-                    </div>
-
-                    {/* Drawdown */}
-                    {drawdownData.length > 0 && (
-                      <div className="h-24">
-                        <div className="text-[10px] text-muted-foreground uppercase tracking-wide mb-1">Drawdown</div>
-                        <ResponsiveContainer width="100%" height="100%">
-                          <AreaChart data={drawdownData}>
-                            <defs>
-                              <linearGradient id="ddFill" x1="0" y1="0" x2="0" y2="1">
-                                <stop offset="5%" stopColor="hsl(var(--destructive))" stopOpacity={0.3} />
-                                <stop offset="95%" stopColor="hsl(var(--destructive))" stopOpacity={0} />
-                              </linearGradient>
-                            </defs>
-                            <CartesianGrid strokeDasharray="3 3" className="stroke-border/10" />
-                            <XAxis dataKey="date" tick={false} />
-                            <YAxis tick={{ fontSize: 9 }} className="fill-muted-foreground" tickFormatter={(v) => `${v.toFixed(0)}%`} />
-                            <Tooltip
-                              contentStyle={{
-                                backgroundColor: "hsl(var(--card))",
-                                border: "1px solid hsl(var(--border))",
-                                borderRadius: "8px",
-                                fontSize: "11px",
-                              }}
-                              formatter={(value: number) => [`${value.toFixed(2)}%`, "Drawdown"]}
-                            />
-                            <ReferenceLine y={0} className="stroke-border" />
-                            <Area type="monotone" dataKey="drawdown" stroke="hsl(var(--destructive))" strokeWidth={1.5} fill="url(#ddFill)" />
-                          </AreaChart>
-                        </ResponsiveContainer>
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
-              )}
-
-              {/* Open Positions */}
-              {openPositions.length === 0 && closedPositions.length === 0 ? (
-                <Card variant="glass" className="p-12 text-center">
-                  <Package className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
-                  <h3 className="text-lg font-semibold mb-2">No Positions Yet</h3>
-                  <p className="text-muted-foreground">Register a buy from the Signals tab to start tracking</p>
-                </Card>
-              ) : openPositions.length > 0 && (
-                <Card className="glass-card mb-6">
-                  <div className="p-4 border-b border-border/30 flex items-center justify-between">
-                    <span className="text-xs text-muted-foreground font-medium uppercase tracking-wide">
-                      Open Positions ({openPositions.length})
-                    </span>
-                    <div className="flex items-center gap-2">
-                      <span className="text-[10px] text-muted-foreground">
-                        {pricesLoading ? (
-                          <span className="flex items-center gap-1"><Loader2 className="w-3 h-3 animate-spin" />Fetching...</span>
-                        ) : Object.keys(currentPrices).length > 0 ? "Live" : "—"}
-                      </span>
-                      <Button size="sm" variant="ghost" onClick={fetchCurrentPrices} disabled={pricesLoading} className="h-7 px-2 text-xs">
-                        <RefreshCw className={cn("w-3 h-3", pricesLoading && "animate-spin")} />
-                      </Button>
-                    </div>
-                  </div>
-                  <Table>
-                    <TableHeader>
-                      <TableRow className="border-border/10">
-                        <TableHead className="text-[10px]">Ticker</TableHead>
-                        <TableHead className="text-[10px]">Type</TableHead>
-                        <TableHead className="text-[10px]">Entry</TableHead>
-                        <TableHead className="text-[10px]">Current</TableHead>
-                        <TableHead className="text-[10px]">Shares</TableHead>
-                        <TableHead className="text-[10px]">Unrealized P&L</TableHead>
-                        <TableHead className="text-[10px]">P&L %</TableHead>
-                        <TableHead className="text-[10px]">Opened</TableHead>
-                        <TableHead className="text-[10px]"></TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {openPositions.map((pos) => {
-                        const unrealizedPnL = getUnrealizedPnL(pos);
-                        const unrealizedPnLPct = getUnrealizedPnLPct(pos);
-                        const curPrice = currentPrices[pos.ticker];
-                        const hasSellAlert = sellAlerts.some(a => a.ticker === pos.ticker);
-                        return (
-                          <TableRow key={pos.id} className={cn("border-border/10", hasSellAlert && "bg-warning/5")}>
-                            <TableCell className="font-mono font-bold text-sm">
-                              <div className="flex items-center gap-2">{pos.ticker}{hasSellAlert && <AlertTriangle className="w-3 h-3 text-warning" />}</div>
-                            </TableCell>
-                            <TableCell><Badge variant="outline" className={cn("text-[10px]", pos.position_type === "long" ? "text-success" : "text-destructive")}>{pos.position_type}</Badge></TableCell>
-                            <TableCell className="font-mono text-sm">${Number(pos.entry_price).toFixed(2)}</TableCell>
-                            <TableCell className="font-mono text-sm">{curPrice ? `$${curPrice.toFixed(2)}` : pricesLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : "—"}</TableCell>
-                            <TableCell className="font-mono text-sm">{Number(pos.shares).toFixed(2)}</TableCell>
-                            <TableCell>{unrealizedPnL !== null ? <span className={cn("font-mono font-bold text-sm", unrealizedPnL >= 0 ? "text-success" : "text-destructive")}>{unrealizedPnL >= 0 ? "+" : ""}${unrealizedPnL.toFixed(2)}</span> : "—"}</TableCell>
-                            <TableCell>{unrealizedPnLPct !== null ? <span className={cn("font-mono font-bold text-sm", unrealizedPnLPct >= 0 ? "text-success" : "text-destructive")}>{unrealizedPnLPct >= 0 ? "+" : ""}{unrealizedPnLPct.toFixed(2)}%</span> : "—"}</TableCell>
-                            <TableCell className="text-xs text-muted-foreground">{new Date(pos.created_at).toLocaleDateString()}</TableCell>
-                            <TableCell>
-                              <Button
-                                size="sm"
-                                variant={hasSellAlert ? "destructive" : "outline"}
-                                className="text-xs h-7"
-                                onClick={() => {
-                                  setSelectedPosition(pos);
-                                  const alert = sellAlerts.find(a => a.ticker === pos.ticker);
-                                  setSellPrice(alert ? alert.currentPrice.toFixed(2) : curPrice ? curPrice.toFixed(2) : "");
-                                  setSellDialogOpen(true);
-                                }}
-                              >
-                                Close
-                              </Button>
-                            </TableCell>
-                          </TableRow>
-                        );
-                      })}
-                    </TableBody>
-                  </Table>
-                </Card>
-              )}
-
-              {/* Collapsible Trade Log (closed positions) */}
-              {closedPositions.length > 0 && (
-                <Collapsible open={showTradeLog} onOpenChange={setShowTradeLog}>
-                  <CollapsibleTrigger asChild>
-                    <Button variant="ghost" className="w-full justify-between text-xs text-muted-foreground hover:text-foreground mb-2">
-                      <span className="flex items-center gap-2">
-                        <Clock className="w-3.5 h-3.5" />
-                        {showTradeLog ? "Hide" : "Show"} Trade Log ({closedPositions.length} trades)
-                      </span>
-                      <ChevronDown className={cn("w-4 h-4 transition-transform", showTradeLog && "rotate-180")} />
-                    </Button>
-                  </CollapsibleTrigger>
-                  <CollapsibleContent>
-                    <Card className="glass-card">
-                      <Table>
-                        <TableHeader>
-                          <TableRow className="border-border/10">
-                            <TableHead className="text-[10px]">Ticker</TableHead>
-                            <TableHead className="text-[10px]">Type</TableHead>
-                            <TableHead className="text-[10px]">Entry</TableHead>
-                            <TableHead className="text-[10px]">Exit</TableHead>
-                            <TableHead className="text-[10px]">Shares</TableHead>
-                            <TableHead className="text-[10px]">P&L</TableHead>
-                            <TableHead className="text-[10px]">Exit Reason</TableHead>
-                            <TableHead className="text-[10px]">Closed</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {closedPositions.map((pos) => (
-                            <TableRow key={pos.id} className="border-border/10">
-                              <TableCell className="font-mono font-bold text-sm">{pos.ticker}</TableCell>
-                              <TableCell><Badge variant="outline" className={cn("text-[10px]", pos.position_type === "long" ? "text-success" : "text-destructive")}>{pos.position_type}</Badge></TableCell>
-                              <TableCell className="font-mono text-sm">${Number(pos.entry_price).toFixed(2)}</TableCell>
-                              <TableCell className="font-mono text-sm">${pos.exit_price ? Number(pos.exit_price).toFixed(2) : "—"}</TableCell>
-                              <TableCell className="font-mono text-sm">{Number(pos.shares).toFixed(2)}</TableCell>
-                              <TableCell className={cn("font-mono font-bold text-sm", (Number(pos.pnl) || 0) >= 0 ? "text-success" : "text-destructive")}>
-                                {(Number(pos.pnl) || 0) >= 0 ? "+" : ""}${(Number(pos.pnl) || 0).toFixed(2)}
-                              </TableCell>
-                              <TableCell className="text-xs">{pos.exit_reason || "—"}</TableCell>
-                              <TableCell className="text-xs text-muted-foreground">{pos.closed_at ? new Date(pos.closed_at).toLocaleDateString() : "—"}</TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    </Card>
-                  </CollapsibleContent>
-                </Collapsible>
-              )}
-            </TabsContent>
-          </Tabs>
+            </motion.div>
+          </div>
         </div>
       </main>
 
