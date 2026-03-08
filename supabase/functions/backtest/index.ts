@@ -1122,8 +1122,25 @@ function runWalkForwardBacktest(
     }
   }
 
-  // Weekly ATR for hard stops
+  // Weekly ATR for hard stops + low-vol detection
   const weeklyATR = calculateATR(weeklyData.high, weeklyData.low, weeklyData.close, 14);
+
+  // Detect low-volatility stock: weekly ATR% < 2% on average
+  let isLowVolStock = false;
+  {
+    let wAtrPctSum = 0, wAtrPctCount = 0;
+    for (let wi = 14; wi < weeklyData.close.length; wi++) {
+      if (!isNaN(weeklyATR[wi]) && weeklyData.close[wi] > 0) {
+        wAtrPctSum += weeklyATR[wi] / weeklyData.close[wi];
+        wAtrPctCount++;
+      }
+    }
+    const avgWeeklyAtrPct = wAtrPctCount > 0 ? wAtrPctSum / wAtrPctCount : 0;
+    isLowVolStock = avgWeeklyAtrPct < 0.02;
+    if (isLowVolStock) {
+      console.log(`[LowVol] ${ticker}: weekly ATR%=${(avgWeeklyAtrPct * 100).toFixed(2)}% → switching to defensive mean-reversion mode`);
+    }
+  }
 
   // Build SPY regime maps
   const spyDateMap = new Map<string, number>();
