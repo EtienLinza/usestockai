@@ -273,12 +273,21 @@ const Dashboard = () => {
   }, []);
 
   useEffect(() => {
-    const channel = supabase
+    const signalChannel = supabase
       .channel("live-signals")
       .on("postgres_changes", { event: "*", schema: "public", table: "live_signals" }, () => loadSignalData())
       .subscribe();
-    return () => { supabase.removeChannel(channel); };
-  }, [loadSignalData]);
+
+    const alertChannel = user ? supabase
+      .channel("sell-alerts-realtime")
+      .on("postgres_changes", { event: "*", schema: "public", table: "sell_alerts", filter: `user_id=eq.${user.id}` }, () => loadSignalData())
+      .subscribe() : null;
+
+    return () => {
+      supabase.removeChannel(signalChannel);
+      if (alertChannel) supabase.removeChannel(alertChannel);
+    };
+  }, [loadSignalData, user]);
 
   const fetchCurrentPrices = useCallback(async () => {
     const tickers = [...new Set(openPositions.map(p => p.ticker))];
