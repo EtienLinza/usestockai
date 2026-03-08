@@ -88,6 +88,7 @@ interface TradingTabProps {
   tradingStyle: string;
   setTradingStyle: (v: string) => void;
   runScan: () => void;
+  onClearSignals: () => void;
   fetchCurrentPrices: () => void;
   onRegisterSignal: (signal: Signal) => void;
   onClosePosition: (position: Position, price?: string) => void;
