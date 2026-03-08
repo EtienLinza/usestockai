@@ -105,9 +105,13 @@ interface Position {
 }
 
 interface SellAlert {
+  id: string;
   ticker: string;
   reason: string;
+  current_price: number;
   currentPrice: number;
+  position_id: string | null;
+  is_dismissed: boolean;
 }
 
 interface PortfolioSnapshot {
