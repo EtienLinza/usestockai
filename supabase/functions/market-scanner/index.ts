@@ -661,7 +661,6 @@ serve(async (req) => {
 
     return new Response(JSON.stringify({
       signals,
-      sellSignals,
       batch,
       totalBatches: Math.ceil(ALL_TICKERS.length / batchSize),
       done: end >= ALL_TICKERS.length,
