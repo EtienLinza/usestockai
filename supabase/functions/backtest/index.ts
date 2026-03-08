@@ -387,7 +387,7 @@ function createSignalTracker(): SignalState {
 function computeStrategySignal(
   close: number[], high: number[], low: number[], volume: number[],
   signalState: SignalState, step: number,
-  signalParams?: { adxThreshold?: number; rsiOversold?: number; rsiOverbought?: number; buyThreshold?: number; shortThreshold?: number },
+  signalParams?: { adxThreshold?: number; rsiOversold?: number; rsiOverbought?: number; buyThreshold?: number; shortThreshold?: number; forceValueMR?: boolean },
   profileBonuses?: { trendConvictionBonus?: number; mrConvictionBonus?: number; breakoutConvictionBonus?: number },
   adaptiveContext?: { spyBearish?: boolean; spySMADeclining?: boolean; isLeader?: boolean }
 ): {
