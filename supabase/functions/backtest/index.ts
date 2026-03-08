@@ -1400,16 +1400,18 @@ function runWalkForwardBacktest(
     const trailingStopDist = effectiveTrailingMult * atrPct;
     const breakevenThreshold = atrPct;
 
-    // Fix 5: Use 2 ATR for trend stops (was 3)
+    // Fix 8: Wider ATR-proportional stops: 2.5× ATR (was 2×), min 3%, cap 10%
     let effectiveStopPct = signal.strategy === "trend"
-      ? Math.max(config.stopLossPct / 100, 2 * atrPct)
-      : config.stopLossPct / 100;
+      ? Math.max(config.stopLossPct / 100, 2.5 * atrPct)
+      : Math.max(config.stopLossPct / 100, 2 * atrPct);
+    // Minimum 3% stop for low-vol stocks
+    effectiveStopPct = Math.max(effectiveStopPct, 0.03);
     // Widen hard stop by 1.5× for SHORTs in bear regimes
     if (action === "SHORT" && isBearRegime) {
       effectiveStopPct *= 1.5;
     }
-    // Fix 1: Hard 8% loss cap — no trade ever risks more than 8%
-    effectiveStopPct = Math.min(effectiveStopPct, 0.08);
+    // Hard 10% loss cap (was 8%)
+    effectiveStopPct = Math.min(effectiveStopPct, 0.10);
 
     // Fix 3: Risk-based position sizing
     // Risk riskPerTrade fraction of capital per trade, capped at 25% of capital
