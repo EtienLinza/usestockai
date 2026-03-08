@@ -2340,6 +2340,7 @@ serve(async (req) => {
 
     let allTrades: Trade[] = [];
     let combinedEquity: { date: string; value: number }[] = [];
+    const tickerEquityMaps: { idx: number; map: Map<string, number>; capitalPerTicker: number }[] = [];
     let totalBarsAll = 0, barsInTradeAll = 0;
     let firstTickerData: DataSet | null = null;
     const stockProfiles: Record<string, StockClassification> = {};
@@ -2378,22 +2379,37 @@ serve(async (req) => {
       totalBarsAll += totalBars;
       barsInTradeAll += barsInTrade;
 
-      if (combinedEquity.length === 0) {
-        combinedEquity = equityCurve.map(p => ({ date: p.date, value: p.value }));
-      } else {
-        for (const point of equityCurve) {
-          const pnl = point.value - capitalPerTicker;
-          const existing = combinedEquity.find(c => c.date === point.date);
-          if (existing) {
-            existing.value += pnl;
-          } else {
-            combinedEquity.push({ date: point.date, value: capitalPerTicker + pnl });
-          }
-        }
+      // Accumulate absolute equity values from each ticker into per-ticker map
+      const tickerEquityMap = new Map<string, number>();
+      for (const point of equityCurve) {
+        tickerEquityMap.set(point.date, point.value);
       }
+      // Store this ticker's equity map for post-loop combining
+      tickerEquityMaps.push({ idx, map: tickerEquityMap, capitalPerTicker });
     }
 
-    combinedEquity.sort((a, b) => a.date.localeCompare(b.date));
+    // Combine equity curves: sum absolute values from all tickers with carry-forward
+    {
+      // Collect all unique dates
+      const allDatesSet = new Set<string>();
+      for (const t of tickerEquityMaps) {
+        for (const d of t.map.keys()) allDatesSet.add(d);
+      }
+      const allDates = Array.from(allDatesSet).sort();
+
+      for (const d of allDates) {
+        let total = 0;
+        for (const t of tickerEquityMaps) {
+          if (t.map.has(d)) {
+            total += t.map.get(d)!;
+            (t as any).lastVal = t.map.get(d)!; // track last known
+          } else {
+            total += (t as any).lastVal ?? t.capitalPerTicker;
+          }
+        }
+        combinedEquity.push({ date: d, value: total });
+      }
+    }
 
     // Cap equity curve points to 500 to reduce serialization
     if (combinedEquity.length > 500) {
