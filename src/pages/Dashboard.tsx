@@ -321,27 +321,39 @@ const Dashboard = () => {
   const runScan = async () => {
     if (!user) { toast.error("Please sign in to scan the market"); return; }
     setScanning(true);
-    setScanProgress({ batch: 0, total: 3 });
+    setScanProgress({ batch: 0, total: 0 });
 
     try {
       let batch = 0;
       let done = false;
       let totalSignals = 0;
+      let tickerList: string[] | undefined;
+      let totalBatches = 0;
 
       while (!done) {
-        setScanProgress({ batch: batch + 1, total: 3 });
+        setScanProgress({ batch: batch + 1, total: totalBatches || batch + 2 });
+        const invokeBody: any = { batch, batchSize: 25 };
+        // Pass the discovered tickerList to subsequent batches so the edge function
+        // doesn't re-discover on every call
+        if (tickerList) invokeBody.tickerList = tickerList;
+
         const { data, error } = await supabase.functions.invoke("market-scanner", {
-          body: { batch, batchSize: 25 },
+          body: invokeBody,
         });
         if (error) throw error;
         totalSignals += data.signals?.length || 0;
         done = data.done;
+        // Capture the tickerList from the first batch response
+        if (data.tickerList && !tickerList) tickerList = data.tickerList;
+        if (data.totalBatches) totalBatches = data.totalBatches;
+        setScanProgress({ batch: batch + 1, total: totalBatches });
         batch++;
         if (!done) await new Promise(r => setTimeout(r, 500));
       }
 
       setLastScanTime(new Date().toISOString());
-      toast.success(`Scan complete! Found ${totalSignals} signals across ${batch} batches`);
+      const tickerCount = tickerList?.length || batch * 25;
+      toast.success(`Scan complete! Found ${totalSignals} signals across ${tickerCount} stocks`);
       await loadSignalData();
       if (openPositions.length > 0) fetchCurrentPrices();
     } catch (err: any) {
