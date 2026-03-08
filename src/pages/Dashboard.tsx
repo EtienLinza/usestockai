@@ -26,11 +26,14 @@ import {
   ArrowUpRight, ArrowDownRight, Package, BarChart3, Clock, CheckCircle2, Bell,
   Trophy, Percent, ChevronDown, Activity, Sparkles,
 } from "lucide-react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import { fetchWithErrorHandling, handleResponseError, showErrorToast } from "@/lib/api-error";
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine,
 } from "recharts";
+import { MarketTab } from "@/components/dashboard/MarketTab";
+import { SectorsTab } from "@/components/dashboard/SectorsTab";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
