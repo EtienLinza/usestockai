@@ -1354,7 +1354,8 @@ function runWalkForwardBacktest(
       if (wIdx >= Math.max(activeProfile.weeklySlowMA, 40) + 10) {
         const weeklyBias = computeWeeklyBias(
           weeklyData.close, weeklyData.high, weeklyData.low, wIdx,
-          { fastMA: activeProfile.weeklyFastMA, slowMA: activeProfile.weeklySlowMA, rsiLong: activeProfile.weeklyRSILong }
+          { fastMA: activeProfile.weeklyFastMA, slowMA: activeProfile.weeklySlowMA, rsiLong: activeProfile.weeklyRSILong },
+          isLowVolStock,
         );
         currentBias = weeklyBias.bias;
         const absTarget = Math.abs(weeklyBias.targetAllocation);
