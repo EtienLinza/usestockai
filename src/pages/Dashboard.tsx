@@ -248,12 +248,14 @@ const Dashboard = () => {
       }
 
       if (user) {
-        const [{ data: posData }, { data: histData }] = await Promise.all([
+        const [{ data: posData }, { data: histData }, { data: alertData }] = await Promise.all([
           supabase.from("virtual_positions").select("*").eq("user_id", user.id).order("created_at", { ascending: false }),
           supabase.from("virtual_portfolio_log").select("*").eq("user_id", user.id).order("date", { ascending: true }),
+          supabase.from("sell_alerts").select("*").eq("user_id", user.id).eq("is_dismissed", false).order("created_at", { ascending: false }),
         ]);
         if (posData) setPositions(posData as Position[]);
         if (histData) setPortfolioHistory(histData as PortfolioSnapshot[]);
+        if (alertData) setSellAlerts(alertData.map((a: any) => ({ ...a, currentPrice: Number(a.current_price) })) as SellAlert[]);
       }
     } catch (err) {
       console.error("Failed to load signal data:", err);
