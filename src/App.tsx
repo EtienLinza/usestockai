@@ -12,7 +12,7 @@ import Guide from "./pages/Guide";
 import Watchlist from "./pages/Watchlist";
 import History from "./pages/History";
 import Backtest from "./pages/Backtest";
-import Signals from "./pages/Signals";
+
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
