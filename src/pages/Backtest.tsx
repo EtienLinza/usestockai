@@ -1166,8 +1166,8 @@ const Backtest = () => {
                         {showTradeLog ? "Hide" : "Show"} Trade Log ({report.tradeLog.length} trades)
                       </Button>
                       {showTradeLog && (
-                        <div className="mt-4 max-h-96 overflow-y-auto scrollbar-thin">
-                          <table className="w-full text-xs">
+                        <div className="mt-4 max-h-96 overflow-auto -mx-4 px-4 sm:mx-0 sm:px-0">
+                          <table className="w-full text-[10px] sm:text-xs min-w-[700px]">
                             <thead className="sticky top-0 bg-card">
                               <tr className="border-b border-border/30">
                                 <th className="text-left py-1.5 text-muted-foreground font-normal">Date</th>
