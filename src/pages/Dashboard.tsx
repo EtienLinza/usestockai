@@ -511,7 +511,11 @@ const Dashboard = () => {
       toast.success(`Closed ${selectedPosition.ticker} at $${price.toFixed(2)} | P&L: $${pnl.toFixed(2)}`);
       setSellDialogOpen(false);
       setSellPrice("");
-      setSellAlerts(prev => prev.filter(a => a.ticker !== selectedPosition.ticker));
+      // Dismiss any sell alerts for this position
+      const alertsForPos = sellAlerts.filter(a => a.ticker === selectedPosition.ticker);
+      for (const alert of alertsForPos) {
+        if (alert.id) await supabase.from("sell_alerts").update({ is_dismissed: true }).eq("id", alert.id);
+      }
       await loadSignalData();
     }
   };
