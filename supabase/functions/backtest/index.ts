@@ -306,7 +306,30 @@ function hasDailyEntrySignal(
   }
 }
 
-function safeGet(arr: number[], defaultVal: number): number {
+// Mean-reversion daily entry for low-vol stocks: RSI pullback confirmation
+function hasDailyMeanReversionEntry(
+  close: number[], idx: number, direction: "long" | "short"
+): boolean {
+  if (idx < 30) return false;
+  const n = Math.min(idx + 1, close.length);
+  const slice = close.slice(Math.max(0, n - 60), n);
+  if (slice.length < 20) return false;
+
+  const rsi = calculateRSI(slice, 14);
+  const sma20 = calculateSMA(slice, 20);
+  const rsiVal = safeGet(rsi, 50);
+  const smaVal = safeGet(sma20, slice[slice.length - 1]);
+  const price = slice[slice.length - 1];
+
+  if (direction === "long") {
+    // Enter on RSI < 45 (oversold pullback) OR price touching/below SMA20
+    return rsiVal < 45 || price <= smaVal * 1.005;
+  } else {
+    return rsiVal > 55 || price >= smaVal * 0.995;
+  }
+}
+
+
   if (!arr || arr.length === 0) return defaultVal;
   const v = arr[arr.length - 1];
   return (v == null || isNaN(v)) ? defaultVal : v;
