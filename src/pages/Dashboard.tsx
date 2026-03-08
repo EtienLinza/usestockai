@@ -943,36 +943,61 @@ const Dashboard = () => {
                         </CollapsibleTrigger>
                         <CollapsibleContent>
                           <Card className="glass-card">
-                            <Table>
-                              <TableHeader>
-                                <TableRow className="border-border/10">
-                                  <TableHead className="text-[10px]">Ticker</TableHead>
-                                  <TableHead className="text-[10px]">Type</TableHead>
-                                  <TableHead className="text-[10px]">Entry</TableHead>
-                                  <TableHead className="text-[10px]">Exit</TableHead>
-                                  <TableHead className="text-[10px]">Shares</TableHead>
-                                  <TableHead className="text-[10px]">P&L</TableHead>
-                                  <TableHead className="text-[10px]">Exit Reason</TableHead>
-                                  <TableHead className="text-[10px]">Closed</TableHead>
-                                </TableRow>
-                              </TableHeader>
-                              <TableBody>
-                                {closedPositions.map((pos) => (
-                                  <TableRow key={pos.id} className="border-border/10">
-                                    <TableCell className="font-mono font-bold text-sm">{pos.ticker}</TableCell>
-                                    <TableCell><Badge variant="outline" className={cn("text-[10px]", pos.position_type === "long" ? "text-success" : "text-destructive")}>{pos.position_type}</Badge></TableCell>
-                                    <TableCell className="font-mono text-sm">${Number(pos.entry_price).toFixed(2)}</TableCell>
-                                    <TableCell className="font-mono text-sm">${pos.exit_price ? Number(pos.exit_price).toFixed(2) : "—"}</TableCell>
-                                    <TableCell className="font-mono text-sm">{Number(pos.shares).toFixed(2)}</TableCell>
-                                    <TableCell className={cn("font-mono font-bold text-sm", (Number(pos.pnl) || 0) >= 0 ? "text-success" : "text-destructive")}>
+                            {/* Mobile: card layout */}
+                            <div className="sm:hidden divide-y divide-border/20">
+                              {closedPositions.map((pos) => (
+                                <div key={pos.id} className="p-3 space-y-1.5">
+                                  <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-2">
+                                      <span className="font-mono font-bold text-sm">{pos.ticker}</span>
+                                      <Badge variant="outline" className={cn("text-[9px]", pos.position_type === "long" ? "text-success" : "text-destructive")}>{pos.position_type}</Badge>
+                                    </div>
+                                    <span className={cn("font-mono font-bold text-sm", (Number(pos.pnl) || 0) >= 0 ? "text-success" : "text-destructive")}>
                                       {(Number(pos.pnl) || 0) >= 0 ? "+" : ""}${(Number(pos.pnl) || 0).toFixed(2)}
-                                    </TableCell>
-                                    <TableCell className="text-xs">{pos.exit_reason || "—"}</TableCell>
-                                    <TableCell className="text-xs text-muted-foreground">{pos.closed_at ? new Date(pos.closed_at).toLocaleDateString() : "—"}</TableCell>
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center gap-3 text-[11px] text-muted-foreground">
+                                    <span>${Number(pos.entry_price).toFixed(2)} → ${pos.exit_price ? Number(pos.exit_price).toFixed(2) : "—"}</span>
+                                    <span>{pos.exit_reason || "—"}</span>
+                                    <span className="ml-auto">{pos.closed_at ? new Date(pos.closed_at).toLocaleDateString() : "—"}</span>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+
+                            {/* Desktop: table layout */}
+                            <div className="hidden sm:block overflow-x-auto">
+                              <Table>
+                                <TableHeader>
+                                  <TableRow className="border-border/10">
+                                    <TableHead className="text-[10px]">Ticker</TableHead>
+                                    <TableHead className="text-[10px]">Type</TableHead>
+                                    <TableHead className="text-[10px]">Entry</TableHead>
+                                    <TableHead className="text-[10px]">Exit</TableHead>
+                                    <TableHead className="text-[10px]">Shares</TableHead>
+                                    <TableHead className="text-[10px]">P&L</TableHead>
+                                    <TableHead className="text-[10px]">Exit Reason</TableHead>
+                                    <TableHead className="text-[10px]">Closed</TableHead>
                                   </TableRow>
-                                ))}
-                              </TableBody>
-                            </Table>
+                                </TableHeader>
+                                <TableBody>
+                                  {closedPositions.map((pos) => (
+                                    <TableRow key={pos.id} className="border-border/10">
+                                      <TableCell className="font-mono font-bold text-sm">{pos.ticker}</TableCell>
+                                      <TableCell><Badge variant="outline" className={cn("text-[10px]", pos.position_type === "long" ? "text-success" : "text-destructive")}>{pos.position_type}</Badge></TableCell>
+                                      <TableCell className="font-mono text-sm">${Number(pos.entry_price).toFixed(2)}</TableCell>
+                                      <TableCell className="font-mono text-sm">${pos.exit_price ? Number(pos.exit_price).toFixed(2) : "—"}</TableCell>
+                                      <TableCell className="font-mono text-sm">{Number(pos.shares).toFixed(2)}</TableCell>
+                                      <TableCell className={cn("font-mono font-bold text-sm", (Number(pos.pnl) || 0) >= 0 ? "text-success" : "text-destructive")}>
+                                        {(Number(pos.pnl) || 0) >= 0 ? "+" : ""}${(Number(pos.pnl) || 0).toFixed(2)}
+                                      </TableCell>
+                                      <TableCell className="text-xs">{pos.exit_reason || "—"}</TableCell>
+                                      <TableCell className="text-xs text-muted-foreground">{pos.closed_at ? new Date(pos.closed_at).toLocaleDateString() : "—"}</TableCell>
+                                    </TableRow>
+                                  ))}
+                                </TableBody>
+                              </Table>
+                            </div>
                           </Card>
                         </CollapsibleContent>
                       </Collapsible>
