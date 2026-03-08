@@ -154,7 +154,7 @@ export function TradingTab({
   openPositions, closedPositions, currentPrices, pricesLoading,
   sellAlerts, portfolioHistory, showTradeLog, setShowTradeLog,
   user, tradingStyle, setTradingStyle,
-  runScan, fetchCurrentPrices, onRegisterSignal, onClosePosition, onDismissAlert, onSellAlertClose,
+  runScan, onClearSignals, fetchCurrentPrices, onRegisterSignal, onClosePosition, onDismissAlert, onSellAlertClose,
 }: TradingTabProps) {
 
   const buySignals = useMemo(() => signals.filter(s => s.signal_type === "BUY"), [signals]);
