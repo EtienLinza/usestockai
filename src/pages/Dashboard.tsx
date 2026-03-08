@@ -6,6 +6,7 @@ import { PredictionForm, PredictionMode } from "@/components/PredictionForm";
 import { StockPredictionCard } from "@/components/StockPredictionCard";
 import { StockComparisonView } from "@/components/StockComparisonView";
 import { PriceTargetResult, PriceTargetData } from "@/components/PriceTargetResult";
+import { MetricCard } from "@/components/MetricCard";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
@@ -14,6 +15,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
@@ -22,14 +24,18 @@ import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 import {
+  Collapsible, CollapsibleContent, CollapsibleTrigger,
+} from "@/components/ui/collapsible";
+import {
   Brain, TrendingUp, TrendingDown, Shield, Sparkles, Layers, LayoutGrid,
   Loader2, AlertTriangle, RefreshCw, Zap, DollarSign, Target,
   ArrowUpRight, ArrowDownRight, Package, BarChart3, Clock, CheckCircle2, Bell,
+  Trophy, Percent, ChevronDown, Activity,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { fetchWithErrorHandling, handleResponseError, showErrorToast } from "@/lib/api-error";
 import {
-  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  LineChart, Line, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine,
 } from "recharts";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -143,6 +149,7 @@ const Dashboard = () => {
   const [sellAlerts, setSellAlerts] = useState<SellAlert[]>([]);
   const [portfolioHistory, setPortfolioHistory] = useState<PortfolioSnapshot[]>([]);
   const [lastScanTime, setLastScanTime] = useState<string | null>(null);
+  const [showTradeLog, setShowTradeLog] = useState(false);
 
   // ─ Active tab ─
   const [activeTab, setActiveTab] = useState("analyze");
@@ -175,13 +182,48 @@ const Dashboard = () => {
     }, 0);
   }, [openPositions, currentPrices]);
 
+  // Portfolio analytics
+  const winRate = useMemo(() => {
+    if (closedPositions.length === 0) return 0;
+    const wins = closedPositions.filter(p => (Number(p.pnl) || 0) > 0).length;
+    return (wins / closedPositions.length) * 100;
+  }, [closedPositions]);
+
+  const avgWin = useMemo(() => {
+    const wins = closedPositions.filter(p => (Number(p.pnl) || 0) > 0);
+    if (wins.length === 0) return 0;
+    return wins.reduce((sum, p) => sum + Number(p.pnl), 0) / wins.length;
+  }, [closedPositions]);
+
+  const avgLoss = useMemo(() => {
+    const losses = closedPositions.filter(p => (Number(p.pnl) || 0) < 0);
+    if (losses.length === 0) return 0;
+    return losses.reduce((sum, p) => sum + Number(p.pnl), 0) / losses.length;
+  }, [closedPositions]);
+
+  const profitFactor = useMemo(() => {
+    const grossProfit = closedPositions.filter(p => (Number(p.pnl) || 0) > 0).reduce((s, p) => s + Number(p.pnl), 0);
+    const grossLoss = Math.abs(closedPositions.filter(p => (Number(p.pnl) || 0) < 0).reduce((s, p) => s + Number(p.pnl), 0));
+    return grossLoss === 0 ? grossProfit > 0 ? Infinity : 0 : grossProfit / grossLoss;
+  }, [closedPositions]);
+
+  // Drawdown from portfolio history
+  const drawdownData = useMemo(() => {
+    if (portfolioHistory.length < 2) return [];
+    let peak = portfolioHistory[0].total_value;
+    return portfolioHistory.map(snap => {
+      if (snap.total_value > peak) peak = snap.total_value;
+      const dd = peak > 0 ? ((snap.total_value - peak) / peak) * 100 : 0;
+      return { date: snap.date, drawdown: dd };
+    });
+  }, [portfolioHistory]);
+
   // ── URL param for ticker ─────────────────────────────────────────────────────
   useEffect(() => {
     const t = searchParams.get("ticker");
     if (t) setInitialTicker(t.toUpperCase());
   }, [searchParams]);
 
-  // Auto-compare mode
   useEffect(() => {
     setViewMode(predictions.length > 1 ? 'compare' : 'single');
   }, [predictions.length]);
@@ -217,15 +259,13 @@ const Dashboard = () => {
 
   useEffect(() => { loadSignalData(); }, [loadSignalData]);
 
-  // Default tab: if user has signals or positions, show signals tab
   useEffect(() => {
     if ((signals.length > 0 || openPositions.length > 0) && predictions.length === 0 && !priceTargetResult) {
       setActiveTab("signals");
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // only on mount
+  }, []);
 
-  // Realtime
   useEffect(() => {
     const channel = supabase
       .channel("live-signals")
@@ -234,7 +274,6 @@ const Dashboard = () => {
     return () => { supabase.removeChannel(channel); };
   }, [loadSignalData]);
 
-  // Fetch current prices
   const fetchCurrentPrices = useCallback(async () => {
     const tickers = [...new Set(openPositions.map(p => p.ticker))];
     if (tickers.length === 0) return;
@@ -278,6 +317,12 @@ const Dashboard = () => {
     if (c >= 80) return "text-success";
     if (c >= 65) return "text-primary";
     return "text-warning";
+  };
+
+  const getConfidenceBg = (c: number) => {
+    if (c >= 80) return "bg-success";
+    if (c >= 65) return "bg-primary";
+    return "bg-warning";
   };
 
   const getRegimeBadge = (regime: string) => {
@@ -502,42 +547,31 @@ const Dashboard = () => {
               </Button>
             </div>
 
-            {/* Stats Row */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mt-5">
-              <Card variant="stat">
-                <CardContent className="p-3">
-                  <div className="flex items-center gap-2 text-muted-foreground text-xs"><TrendingUp className="w-3.5 h-3.5 text-success" />Buy Signals</div>
-                  <div className="text-xl font-bold mt-1">{buySignals.length}</div>
-                </CardContent>
-              </Card>
-              <Card variant="stat">
-                <CardContent className="p-3">
-                  <div className="flex items-center gap-2 text-muted-foreground text-xs"><Package className="w-3.5 h-3.5 text-primary" />Open Positions</div>
-                  <div className="text-xl font-bold mt-1">{openPositions.length}</div>
-                </CardContent>
-              </Card>
-              <Card variant="stat">
-                <CardContent className="p-3">
-                  <div className="flex items-center gap-2 text-muted-foreground text-xs"><Target className="w-3.5 h-3.5 text-primary" />Portfolio Value</div>
-                  <div className="text-xl font-bold mt-1 font-mono">${totalPortfolioValue.toFixed(0)}</div>
-                </CardContent>
-              </Card>
-              <Card variant="stat">
-                <CardContent className="p-3">
-                  <div className="flex items-center gap-2 text-muted-foreground text-xs"><TrendingUp className="w-3.5 h-3.5" />Unrealized P&L</div>
-                  <div className={cn("text-xl font-bold mt-1 font-mono", totalUnrealizedPnL >= 0 ? "text-success" : "text-destructive")}>
-                    {totalUnrealizedPnL >= 0 ? "+" : ""}${totalUnrealizedPnL.toFixed(2)}
-                  </div>
-                </CardContent>
-              </Card>
-              <Card variant="stat">
-                <CardContent className="p-3">
-                  <div className="flex items-center gap-2 text-muted-foreground text-xs"><DollarSign className="w-3.5 h-3.5" />Realized P&L</div>
-                  <div className={cn("text-xl font-bold mt-1 font-mono", totalRealizedPnL >= 0 ? "text-success" : "text-destructive")}>
-                    {totalRealizedPnL >= 0 ? "+" : ""}${totalRealizedPnL.toFixed(2)}
-                  </div>
-                </CardContent>
-              </Card>
+            {/* Stats Row — MetricCard style */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mt-5">
+              <MetricCard icon={TrendingUp} label="Buy Signals" value={buySignals.length} color="text-success" />
+              <MetricCard icon={Package} label="Open Positions" value={openPositions.length} color="text-primary" />
+              <MetricCard icon={DollarSign} label="Portfolio Value" value={`$${totalPortfolioValue.toFixed(0)}`} />
+              <MetricCard
+                icon={TrendingUp}
+                label="Unrealized P&L"
+                value={`${totalUnrealizedPnL >= 0 ? "+" : ""}$${totalUnrealizedPnL.toFixed(2)}`}
+                color={totalUnrealizedPnL >= 0 ? "text-success" : "text-destructive"}
+              />
+              <MetricCard
+                icon={Target}
+                label="Realized P&L"
+                value={`${totalRealizedPnL >= 0 ? "+" : ""}$${totalRealizedPnL.toFixed(2)}`}
+                color={totalRealizedPnL >= 0 ? "text-success" : "text-destructive"}
+              />
+              <MetricCard
+                icon={Trophy}
+                label="Win Rate"
+                value={closedPositions.length > 0 ? `${winRate.toFixed(1)}` : "—"}
+                suffix={closedPositions.length > 0 ? "%" : ""}
+                color={winRate >= 50 ? "text-success" : winRate > 0 ? "text-destructive" : "text-muted-foreground"}
+                subtext={closedPositions.length > 0 ? `${closedPositions.length} trades` : "No closed trades"}
+              />
             </div>
           </motion.div>
 
@@ -589,15 +623,10 @@ const Dashboard = () => {
                   <span className="ml-1 w-4 h-4 rounded-full bg-warning text-warning-foreground text-[10px] flex items-center justify-center">{sellAlerts.length}</span>
                 )}
               </TabsTrigger>
-              <TabsTrigger value="history" className="gap-1.5 text-xs sm:text-sm">
-                <Clock className="w-4 h-4" />History
-                {closedPositions.length > 0 && <Badge variant="secondary" className="ml-1 text-[10px] px-1.5 h-4">{closedPositions.length}</Badge>}
-              </TabsTrigger>
             </TabsList>
 
             {/* ── Analyze Tab ──────────────────────────────────────────────────── */}
             <TabsContent value="analyze">
-              {/* View mode actions for compare */}
               {predictions.length > 0 && (
                 <div className="flex items-center gap-2 mb-4">
                   {predictions.length > 1 && (
@@ -616,7 +645,6 @@ const Dashboard = () => {
               )}
 
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-8">
-                {/* Form */}
                 <div className="lg:col-span-4 xl:col-span-3">
                   <div className="sticky top-20">
                     <PredictionForm onSubmit={handleSubmit} isLoading={isLoading} initialTicker={initialTicker} />
@@ -630,7 +658,6 @@ const Dashboard = () => {
                   </div>
                 </div>
 
-                {/* Results */}
                 <div className="lg:col-span-8 xl:col-span-9">
                   <AnimatePresence mode="wait">
                     {priceTargetResult ? (
@@ -701,7 +728,7 @@ const Dashboard = () => {
                         <Card variant="glass" className="hover:border-primary/30 transition-all">
                           <CardContent className="p-4">
                             <div className="flex items-center justify-between flex-wrap gap-3">
-                              <div className="flex items-center gap-4">
+                              <div className="flex items-center gap-4 flex-1 min-w-0">
                                 <div className="flex items-center gap-2">
                                   {signal.signal_type === "BUY" ? <ArrowUpRight className="w-5 h-5 text-success" /> : <ArrowDownRight className="w-5 h-5 text-destructive" />}
                                   <span className="text-lg font-bold font-mono">{signal.ticker}</span>
@@ -717,12 +744,12 @@ const Dashboard = () => {
                               </div>
                               <div className="flex items-center gap-4">
                                 <div className="text-right">
-                                  <div className="text-sm text-muted-foreground">Entry</div>
-                                  <div className="font-mono font-semibold">${Number(signal.entry_price).toFixed(2)}</div>
+                                  <div className="text-[10px] text-muted-foreground uppercase">Entry</div>
+                                  <div className="font-mono font-semibold text-sm">${Number(signal.entry_price).toFixed(2)}</div>
                                 </div>
-                                <div className="text-right">
-                                  <div className="text-sm text-muted-foreground">Confidence</div>
-                                  <div className={cn("font-mono font-bold", getConfidenceColor(signal.confidence))}>{signal.confidence}%</div>
+                                <div className="text-right min-w-[60px]">
+                                  <div className="text-[10px] text-muted-foreground uppercase">Conviction</div>
+                                  <div className={cn("font-mono font-bold text-sm", getConfidenceColor(signal.confidence))}>{signal.confidence}%</div>
                                 </div>
                                 <Button
                                   size="sm"
@@ -737,8 +764,33 @@ const Dashboard = () => {
                                 </Button>
                               </div>
                             </div>
+
+                            {/* Conviction bar + Allocation */}
+                            <div className="mt-3 flex items-center gap-4">
+                              <div className="flex-1">
+                                <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+                                  <div
+                                    className={cn("h-full rounded-full transition-all", getConfidenceBg(signal.confidence))}
+                                    style={{ width: `${signal.confidence}%` }}
+                                  />
+                                </div>
+                              </div>
+                              {signal.target_allocation > 0 && (
+                                <span className="text-[10px] text-muted-foreground font-mono shrink-0">
+                                  Alloc: {signal.target_allocation}%
+                                </span>
+                              )}
+                            </div>
+
+                            {/* Mobile badges */}
+                            <div className="flex sm:hidden items-center gap-2 mt-2 flex-wrap">
+                              <Badge variant="outline" className={cn("text-[10px]", getRegimeBadge(signal.regime))}>{signal.regime?.replace("_", " ")}</Badge>
+                              <Badge variant="outline" className="text-[10px]">{signal.stock_profile}</Badge>
+                              <Badge variant="outline" className="text-[10px]">{signal.strategy}</Badge>
+                            </div>
+
                             {signal.reasoning && (
-                              <p className="text-sm text-muted-foreground mt-2 border-t border-border/30 pt-2">{signal.reasoning}</p>
+                              <p className="text-xs text-muted-foreground mt-2 border-t border-border/30 pt-2">{signal.reasoning}</p>
                             )}
                           </CardContent>
                         </Card>
@@ -751,60 +803,143 @@ const Dashboard = () => {
 
             {/* ── Portfolio Tab ─────────────────────────────────────────────────── */}
             <TabsContent value="portfolio">
+              {/* Performance Metrics Row (from closed trades) */}
+              {closedPositions.length > 0 && (
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+                  <MetricCard
+                    icon={Trophy}
+                    label="Win Rate"
+                    value={`${winRate.toFixed(1)}`}
+                    suffix="%"
+                    color={winRate >= 50 ? "text-success" : "text-destructive"}
+                    subtext={`${closedPositions.filter(p => (Number(p.pnl) || 0) > 0).length}W / ${closedPositions.filter(p => (Number(p.pnl) || 0) <= 0).length}L`}
+                  />
+                  <MetricCard
+                    icon={TrendingUp}
+                    label="Avg Win"
+                    value={`+$${avgWin.toFixed(2)}`}
+                    color="text-success"
+                  />
+                  <MetricCard
+                    icon={TrendingDown}
+                    label="Avg Loss"
+                    value={`$${avgLoss.toFixed(2)}`}
+                    color="text-destructive"
+                  />
+                  <MetricCard
+                    icon={Activity}
+                    label="Profit Factor"
+                    value={profitFactor === Infinity ? "∞" : profitFactor.toFixed(2)}
+                    color={profitFactor >= 1.5 ? "text-success" : profitFactor >= 1 ? "text-primary" : "text-destructive"}
+                  />
+                </div>
+              )}
+
+              {/* Equity Curve + Drawdown */}
               {portfolioHistory.length > 1 && (
-                <Card variant="glass" className="mb-6">
+                <Card className="glass-card mb-6">
                   <CardHeader className="pb-2">
-                    <CardTitle className="text-base flex items-center gap-2"><BarChart3 className="w-4 h-4 text-primary" />Portfolio Performance</CardTitle>
+                    <CardTitle className="text-sm flex items-center gap-2">
+                      <BarChart3 className="w-4 h-4 text-primary" />Equity Curve
+                    </CardTitle>
                   </CardHeader>
-                  <CardContent>
+                  <CardContent className="space-y-4">
                     <div className="h-48">
                       <ResponsiveContainer width="100%" height="100%">
-                        <LineChart data={portfolioHistory}>
-                          <CartesianGrid strokeDasharray="3 3" className="stroke-border/30" />
-                          <XAxis dataKey="date" tick={{ fontSize: 11 }} className="fill-muted-foreground" />
-                          <YAxis tick={{ fontSize: 11 }} className="fill-muted-foreground" tickFormatter={(v) => `$${v.toLocaleString()}`} />
+                        <AreaChart data={portfolioHistory}>
+                          <defs>
+                            <linearGradient id="equityFill" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.3} />
+                              <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0} />
+                            </linearGradient>
+                          </defs>
+                          <CartesianGrid strokeDasharray="3 3" className="stroke-border/20" />
+                          <XAxis dataKey="date" tick={{ fontSize: 10 }} className="fill-muted-foreground" />
+                          <YAxis tick={{ fontSize: 10 }} className="fill-muted-foreground" tickFormatter={(v) => `$${v.toLocaleString()}`} />
                           <Tooltip
-                            contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: "8px" }}
+                            contentStyle={{
+                              backgroundColor: "hsl(var(--card))",
+                              border: "1px solid hsl(var(--border))",
+                              borderRadius: "8px",
+                              fontSize: "12px",
+                            }}
                             formatter={(value: number) => [`$${value.toFixed(2)}`, "Portfolio Value"]}
                           />
-                          <Line type="monotone" dataKey="total_value" stroke="hsl(var(--primary))" strokeWidth={2} dot={false} />
-                        </LineChart>
+                          <Area type="monotone" dataKey="total_value" stroke="hsl(var(--primary))" strokeWidth={2} fill="url(#equityFill)" />
+                        </AreaChart>
                       </ResponsiveContainer>
                     </div>
+
+                    {/* Drawdown */}
+                    {drawdownData.length > 0 && (
+                      <div className="h-24">
+                        <div className="text-[10px] text-muted-foreground uppercase tracking-wide mb-1">Drawdown</div>
+                        <ResponsiveContainer width="100%" height="100%">
+                          <AreaChart data={drawdownData}>
+                            <defs>
+                              <linearGradient id="ddFill" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="5%" stopColor="hsl(var(--destructive))" stopOpacity={0.3} />
+                                <stop offset="95%" stopColor="hsl(var(--destructive))" stopOpacity={0} />
+                              </linearGradient>
+                            </defs>
+                            <CartesianGrid strokeDasharray="3 3" className="stroke-border/10" />
+                            <XAxis dataKey="date" tick={false} />
+                            <YAxis tick={{ fontSize: 9 }} className="fill-muted-foreground" tickFormatter={(v) => `${v.toFixed(0)}%`} />
+                            <Tooltip
+                              contentStyle={{
+                                backgroundColor: "hsl(var(--card))",
+                                border: "1px solid hsl(var(--border))",
+                                borderRadius: "8px",
+                                fontSize: "11px",
+                              }}
+                              formatter={(value: number) => [`${value.toFixed(2)}%`, "Drawdown"]}
+                            />
+                            <ReferenceLine y={0} className="stroke-border" />
+                            <Area type="monotone" dataKey="drawdown" stroke="hsl(var(--destructive))" strokeWidth={1.5} fill="url(#ddFill)" />
+                          </AreaChart>
+                        </ResponsiveContainer>
+                      </div>
+                    )}
                   </CardContent>
                 </Card>
               )}
 
-              {openPositions.length === 0 ? (
+              {/* Open Positions */}
+              {openPositions.length === 0 && closedPositions.length === 0 ? (
                 <Card variant="glass" className="p-12 text-center">
                   <Package className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
-                  <h3 className="text-lg font-semibold mb-2">No Open Positions</h3>
+                  <h3 className="text-lg font-semibold mb-2">No Positions Yet</h3>
                   <p className="text-muted-foreground">Register a buy from the Signals tab to start tracking</p>
                 </Card>
-              ) : (
-                <Card variant="glass">
+              ) : openPositions.length > 0 && (
+                <Card className="glass-card mb-6">
                   <div className="p-4 border-b border-border/30 flex items-center justify-between">
-                    <span className="text-sm text-muted-foreground">
-                      {pricesLoading ? (
-                        <span className="flex items-center gap-2"><Loader2 className="w-3 h-3 animate-spin" />Fetching live prices...</span>
-                      ) : Object.keys(currentPrices).length > 0 ? "Live prices loaded" : "Prices not yet loaded"}
+                    <span className="text-xs text-muted-foreground font-medium uppercase tracking-wide">
+                      Open Positions ({openPositions.length})
                     </span>
-                    <Button size="sm" variant="outline" onClick={fetchCurrentPrices} disabled={pricesLoading}>
-                      <RefreshCw className={cn("w-3 h-3 mr-1", pricesLoading && "animate-spin")} />Refresh Prices
-                    </Button>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] text-muted-foreground">
+                        {pricesLoading ? (
+                          <span className="flex items-center gap-1"><Loader2 className="w-3 h-3 animate-spin" />Fetching...</span>
+                        ) : Object.keys(currentPrices).length > 0 ? "Live" : "—"}
+                      </span>
+                      <Button size="sm" variant="ghost" onClick={fetchCurrentPrices} disabled={pricesLoading} className="h-7 px-2 text-xs">
+                        <RefreshCw className={cn("w-3 h-3", pricesLoading && "animate-spin")} />
+                      </Button>
+                    </div>
                   </div>
                   <Table>
                     <TableHeader>
-                      <TableRow>
-                        <TableHead>Ticker</TableHead>
-                        <TableHead>Type</TableHead>
-                        <TableHead>Entry</TableHead>
-                        <TableHead>Current</TableHead>
-                        <TableHead>Shares</TableHead>
-                        <TableHead>Unrealized P&L</TableHead>
-                        <TableHead>P&L %</TableHead>
-                        <TableHead>Opened</TableHead>
-                        <TableHead></TableHead>
+                      <TableRow className="border-border/10">
+                        <TableHead className="text-[10px]">Ticker</TableHead>
+                        <TableHead className="text-[10px]">Type</TableHead>
+                        <TableHead className="text-[10px]">Entry</TableHead>
+                        <TableHead className="text-[10px]">Current</TableHead>
+                        <TableHead className="text-[10px]">Shares</TableHead>
+                        <TableHead className="text-[10px]">Unrealized P&L</TableHead>
+                        <TableHead className="text-[10px]">P&L %</TableHead>
+                        <TableHead className="text-[10px]">Opened</TableHead>
+                        <TableHead className="text-[10px]"></TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -814,21 +949,22 @@ const Dashboard = () => {
                         const curPrice = currentPrices[pos.ticker];
                         const hasSellAlert = sellAlerts.some(a => a.ticker === pos.ticker);
                         return (
-                          <TableRow key={pos.id} className={hasSellAlert ? "bg-warning/5" : ""}>
-                            <TableCell className="font-mono font-bold">
+                          <TableRow key={pos.id} className={cn("border-border/10", hasSellAlert && "bg-warning/5")}>
+                            <TableCell className="font-mono font-bold text-sm">
                               <div className="flex items-center gap-2">{pos.ticker}{hasSellAlert && <AlertTriangle className="w-3 h-3 text-warning" />}</div>
                             </TableCell>
-                            <TableCell><Badge variant="outline" className={pos.position_type === "long" ? "text-success" : "text-destructive"}>{pos.position_type}</Badge></TableCell>
-                            <TableCell className="font-mono">${Number(pos.entry_price).toFixed(2)}</TableCell>
-                            <TableCell className="font-mono">{curPrice ? `$${curPrice.toFixed(2)}` : pricesLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : "—"}</TableCell>
-                            <TableCell className="font-mono">{Number(pos.shares).toFixed(2)}</TableCell>
-                            <TableCell>{unrealizedPnL !== null ? <span className={cn("font-mono font-bold", unrealizedPnL >= 0 ? "text-success" : "text-destructive")}>{unrealizedPnL >= 0 ? "+" : ""}${unrealizedPnL.toFixed(2)}</span> : "—"}</TableCell>
-                            <TableCell>{unrealizedPnLPct !== null ? <span className={cn("font-mono font-bold", unrealizedPnLPct >= 0 ? "text-success" : "text-destructive")}>{unrealizedPnLPct >= 0 ? "+" : ""}{unrealizedPnLPct.toFixed(2)}%</span> : "—"}</TableCell>
-                            <TableCell className="text-sm text-muted-foreground">{new Date(pos.created_at).toLocaleDateString()}</TableCell>
+                            <TableCell><Badge variant="outline" className={cn("text-[10px]", pos.position_type === "long" ? "text-success" : "text-destructive")}>{pos.position_type}</Badge></TableCell>
+                            <TableCell className="font-mono text-sm">${Number(pos.entry_price).toFixed(2)}</TableCell>
+                            <TableCell className="font-mono text-sm">{curPrice ? `$${curPrice.toFixed(2)}` : pricesLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : "—"}</TableCell>
+                            <TableCell className="font-mono text-sm">{Number(pos.shares).toFixed(2)}</TableCell>
+                            <TableCell>{unrealizedPnL !== null ? <span className={cn("font-mono font-bold text-sm", unrealizedPnL >= 0 ? "text-success" : "text-destructive")}>{unrealizedPnL >= 0 ? "+" : ""}${unrealizedPnL.toFixed(2)}</span> : "—"}</TableCell>
+                            <TableCell>{unrealizedPnLPct !== null ? <span className={cn("font-mono font-bold text-sm", unrealizedPnLPct >= 0 ? "text-success" : "text-destructive")}>{unrealizedPnLPct >= 0 ? "+" : ""}{unrealizedPnLPct.toFixed(2)}%</span> : "—"}</TableCell>
+                            <TableCell className="text-xs text-muted-foreground">{new Date(pos.created_at).toLocaleDateString()}</TableCell>
                             <TableCell>
                               <Button
                                 size="sm"
                                 variant={hasSellAlert ? "destructive" : "outline"}
+                                className="text-xs h-7"
                                 onClick={() => {
                                   setSelectedPosition(pos);
                                   const alert = sellAlerts.find(a => a.ticker === pos.ticker);
@@ -836,7 +972,7 @@ const Dashboard = () => {
                                   setSellDialogOpen(true);
                                 }}
                               >
-                                Close Position
+                                Close
                               </Button>
                             </TableCell>
                           </TableRow>
@@ -846,49 +982,54 @@ const Dashboard = () => {
                   </Table>
                 </Card>
               )}
-            </TabsContent>
 
-            {/* ── History Tab ──────────────────────────────────────────────────── */}
-            <TabsContent value="history">
-              {closedPositions.length === 0 ? (
-                <Card variant="glass" className="p-12 text-center">
-                  <Clock className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
-                  <h3 className="text-lg font-semibold mb-2">No Trade History</h3>
-                  <p className="text-muted-foreground">Closed positions will appear here</p>
-                </Card>
-              ) : (
-                <Card variant="glass">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Ticker</TableHead>
-                        <TableHead>Type</TableHead>
-                        <TableHead>Entry</TableHead>
-                        <TableHead>Exit</TableHead>
-                        <TableHead>Shares</TableHead>
-                        <TableHead>P&L</TableHead>
-                        <TableHead>Exit Reason</TableHead>
-                        <TableHead>Closed</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {closedPositions.map((pos) => (
-                        <TableRow key={pos.id}>
-                          <TableCell className="font-mono font-bold">{pos.ticker}</TableCell>
-                          <TableCell><Badge variant="outline" className={pos.position_type === "long" ? "text-success" : "text-destructive"}>{pos.position_type}</Badge></TableCell>
-                          <TableCell className="font-mono">${Number(pos.entry_price).toFixed(2)}</TableCell>
-                          <TableCell className="font-mono">${pos.exit_price ? Number(pos.exit_price).toFixed(2) : "—"}</TableCell>
-                          <TableCell className="font-mono">{Number(pos.shares).toFixed(2)}</TableCell>
-                          <TableCell className={cn("font-mono font-bold", (Number(pos.pnl) || 0) >= 0 ? "text-success" : "text-destructive")}>
-                            {(Number(pos.pnl) || 0) >= 0 ? "+" : ""}${(Number(pos.pnl) || 0).toFixed(2)}
-                          </TableCell>
-                          <TableCell className="text-sm">{pos.exit_reason || "—"}</TableCell>
-                          <TableCell className="text-sm text-muted-foreground">{pos.closed_at ? new Date(pos.closed_at).toLocaleDateString() : "—"}</TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </Card>
+              {/* Collapsible Trade Log (closed positions) */}
+              {closedPositions.length > 0 && (
+                <Collapsible open={showTradeLog} onOpenChange={setShowTradeLog}>
+                  <CollapsibleTrigger asChild>
+                    <Button variant="ghost" className="w-full justify-between text-xs text-muted-foreground hover:text-foreground mb-2">
+                      <span className="flex items-center gap-2">
+                        <Clock className="w-3.5 h-3.5" />
+                        {showTradeLog ? "Hide" : "Show"} Trade Log ({closedPositions.length} trades)
+                      </span>
+                      <ChevronDown className={cn("w-4 h-4 transition-transform", showTradeLog && "rotate-180")} />
+                    </Button>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent>
+                    <Card className="glass-card">
+                      <Table>
+                        <TableHeader>
+                          <TableRow className="border-border/10">
+                            <TableHead className="text-[10px]">Ticker</TableHead>
+                            <TableHead className="text-[10px]">Type</TableHead>
+                            <TableHead className="text-[10px]">Entry</TableHead>
+                            <TableHead className="text-[10px]">Exit</TableHead>
+                            <TableHead className="text-[10px]">Shares</TableHead>
+                            <TableHead className="text-[10px]">P&L</TableHead>
+                            <TableHead className="text-[10px]">Exit Reason</TableHead>
+                            <TableHead className="text-[10px]">Closed</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {closedPositions.map((pos) => (
+                            <TableRow key={pos.id} className="border-border/10">
+                              <TableCell className="font-mono font-bold text-sm">{pos.ticker}</TableCell>
+                              <TableCell><Badge variant="outline" className={cn("text-[10px]", pos.position_type === "long" ? "text-success" : "text-destructive")}>{pos.position_type}</Badge></TableCell>
+                              <TableCell className="font-mono text-sm">${Number(pos.entry_price).toFixed(2)}</TableCell>
+                              <TableCell className="font-mono text-sm">${pos.exit_price ? Number(pos.exit_price).toFixed(2) : "—"}</TableCell>
+                              <TableCell className="font-mono text-sm">{Number(pos.shares).toFixed(2)}</TableCell>
+                              <TableCell className={cn("font-mono font-bold text-sm", (Number(pos.pnl) || 0) >= 0 ? "text-success" : "text-destructive")}>
+                                {(Number(pos.pnl) || 0) >= 0 ? "+" : ""}${(Number(pos.pnl) || 0).toFixed(2)}
+                              </TableCell>
+                              <TableCell className="text-xs">{pos.exit_reason || "—"}</TableCell>
+                              <TableCell className="text-xs text-muted-foreground">{pos.closed_at ? new Date(pos.closed_at).toLocaleDateString() : "—"}</TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </Card>
+                  </CollapsibleContent>
+                </Collapsible>
               )}
             </TabsContent>
           </Tabs>
