@@ -657,11 +657,11 @@ function computeStrategySignal(
   // --- Adaptive Layer 3: Conviction Bonus for stocks in their own strong trend ---
   // If stock is in its own strong uptrend, boost BUY conviction
   if (above200 && sma200Slope > 0.02 && rsiVal > 40 && rsiVal < 70) {
-    if (bestSignal === "BUY") adjustedConviction += 15;
+    if (bestSignal === "BUY") adjustedConviction += 8;
   }
   // If stock is in its own strong downtrend, boost SHORT conviction
   if (below200 && sma200Slope < -0.02 && rsiVal > 30 && rsiVal < 60) {
-    if (bestSignal === "SHORT") adjustedConviction += 15;
+    if (bestSignal === "SHORT") adjustedConviction += 8;
   }
 
   // --- Conviction threshold filter ---
