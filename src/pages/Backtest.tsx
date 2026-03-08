@@ -619,7 +619,7 @@ const Backtest = () => {
 
                     {/* Equity vs Benchmark Overlay */}
                     {equityVsBenchmark && equityVsBenchmark.length > 0 && (
-                      <Card className="glass-card p-6">
+                      <Card className="glass-card p-4 sm:p-6">
                         <div className="flex items-center gap-4 mb-4">
                           <div className="flex items-center gap-2">
                             <div className="w-3 h-0.5 bg-primary rounded" />
