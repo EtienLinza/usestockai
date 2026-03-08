@@ -797,58 +797,111 @@ const Dashboard = () => {
                             </Button>
                           </div>
                         </div>
-                        <Table>
-                          <TableHeader>
-                            <TableRow className="border-border/10">
-                              <TableHead className="text-[10px]">Ticker</TableHead>
-                              <TableHead className="text-[10px]">Type</TableHead>
-                              <TableHead className="text-[10px]">Entry</TableHead>
-                              <TableHead className="text-[10px]">Current</TableHead>
-                              <TableHead className="text-[10px]">Shares</TableHead>
-                              <TableHead className="text-[10px]">P&L</TableHead>
-                              <TableHead className="text-[10px]">P&L %</TableHead>
-                              <TableHead className="text-[10px]">Opened</TableHead>
-                              <TableHead className="text-[10px]"></TableHead>
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {openPositions.map((pos) => {
-                              const unrealizedPnL = getUnrealizedPnL(pos);
-                              const unrealizedPnLPct = getUnrealizedPnLPct(pos);
-                              const curPrice = currentPrices[pos.ticker];
-                              const hasSellAlert = sellAlerts.some(a => a.ticker === pos.ticker);
-                              return (
-                                <TableRow key={pos.id} className={cn("border-border/10", hasSellAlert && "bg-warning/5")}>
-                                  <TableCell className="font-mono font-bold text-sm">
-                                    <div className="flex items-center gap-2">{pos.ticker}{hasSellAlert && <AlertTriangle className="w-3 h-3 text-warning" />}</div>
-                                  </TableCell>
-                                  <TableCell><Badge variant="outline" className={cn("text-[10px]", pos.position_type === "long" ? "text-success" : "text-destructive")}>{pos.position_type}</Badge></TableCell>
-                                  <TableCell className="font-mono text-sm">${Number(pos.entry_price).toFixed(2)}</TableCell>
-                                  <TableCell className="font-mono text-sm">{curPrice ? `$${curPrice.toFixed(2)}` : pricesLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : "—"}</TableCell>
-                                  <TableCell className="font-mono text-sm">{Number(pos.shares).toFixed(2)}</TableCell>
-                                  <TableCell>{unrealizedPnL !== null ? <span className={cn("font-mono font-bold text-sm", unrealizedPnL >= 0 ? "text-success" : "text-destructive")}>{unrealizedPnL >= 0 ? "+" : ""}${unrealizedPnL.toFixed(2)}</span> : "—"}</TableCell>
-                                  <TableCell>{unrealizedPnLPct !== null ? <span className={cn("font-mono font-bold text-sm", unrealizedPnLPct >= 0 ? "text-success" : "text-destructive")}>{unrealizedPnLPct >= 0 ? "+" : ""}{unrealizedPnLPct.toFixed(2)}%</span> : "—"}</TableCell>
-                                  <TableCell className="text-xs text-muted-foreground">{new Date(pos.created_at).toLocaleDateString()}</TableCell>
-                                  <TableCell>
-                                    <Button
-                                      size="sm"
-                                      variant={hasSellAlert ? "destructive" : "outline"}
-                                      className="text-xs h-7"
-                                      onClick={() => {
-                                        setSelectedPosition(pos);
-                                        const alert = sellAlerts.find(a => a.ticker === pos.ticker);
-                                        setSellPrice(alert ? alert.currentPrice.toFixed(2) : curPrice ? curPrice.toFixed(2) : "");
-                                        setSellDialogOpen(true);
-                                      }}
-                                    >
-                                      Close
-                                    </Button>
-                                  </TableCell>
-                                </TableRow>
-                              );
-                            })}
-                          </TableBody>
-                        </Table>
+                        {/* Mobile: Card layout */}
+                        <div className="sm:hidden divide-y divide-border/20">
+                          {openPositions.map((pos) => {
+                            const unrealizedPnL = getUnrealizedPnL(pos);
+                            const unrealizedPnLPct = getUnrealizedPnLPct(pos);
+                            const curPrice = currentPrices[pos.ticker];
+                            const hasSellAlert = sellAlerts.some(a => a.ticker === pos.ticker);
+                            return (
+                              <div key={pos.id} className={cn("p-3 space-y-2", hasSellAlert && "bg-warning/5")}>
+                                <div className="flex items-center justify-between">
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-mono font-bold text-sm">{pos.ticker}</span>
+                                    {hasSellAlert && <AlertTriangle className="w-3 h-3 text-warning" />}
+                                    <Badge variant="outline" className={cn("text-[9px]", pos.position_type === "long" ? "text-success" : "text-destructive")}>{pos.position_type}</Badge>
+                                  </div>
+                                  <Button
+                                    size="sm"
+                                    variant={hasSellAlert ? "destructive" : "outline"}
+                                    className="text-xs h-7"
+                                    onClick={() => {
+                                      setSelectedPosition(pos);
+                                      const alert = sellAlerts.find(a => a.ticker === pos.ticker);
+                                      setSellPrice(alert ? alert.currentPrice.toFixed(2) : curPrice ? curPrice.toFixed(2) : "");
+                                      setSellDialogOpen(true);
+                                    }}
+                                  >
+                                    Close
+                                  </Button>
+                                </div>
+                                <div className="grid grid-cols-3 gap-2 text-xs">
+                                  <div>
+                                    <div className="text-[9px] text-muted-foreground">Entry</div>
+                                    <div className="font-mono">${Number(pos.entry_price).toFixed(2)}</div>
+                                  </div>
+                                  <div>
+                                    <div className="text-[9px] text-muted-foreground">Current</div>
+                                    <div className="font-mono">{curPrice ? `$${curPrice.toFixed(2)}` : pricesLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : "—"}</div>
+                                  </div>
+                                  <div>
+                                    <div className="text-[9px] text-muted-foreground">P&L</div>
+                                    <div className={cn("font-mono font-bold", unrealizedPnL !== null ? (unrealizedPnL >= 0 ? "text-success" : "text-destructive") : "")}>
+                                      {unrealizedPnL !== null ? `${unrealizedPnL >= 0 ? "+" : ""}$${unrealizedPnL.toFixed(2)}` : "—"}
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+
+                        {/* Desktop: Table layout */}
+                        <div className="hidden sm:block overflow-x-auto">
+                          <Table>
+                            <TableHeader>
+                              <TableRow className="border-border/10">
+                                <TableHead className="text-[10px]">Ticker</TableHead>
+                                <TableHead className="text-[10px]">Type</TableHead>
+                                <TableHead className="text-[10px]">Entry</TableHead>
+                                <TableHead className="text-[10px]">Current</TableHead>
+                                <TableHead className="text-[10px]">Shares</TableHead>
+                                <TableHead className="text-[10px]">P&L</TableHead>
+                                <TableHead className="text-[10px]">P&L %</TableHead>
+                                <TableHead className="text-[10px]">Opened</TableHead>
+                                <TableHead className="text-[10px]"></TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {openPositions.map((pos) => {
+                                const unrealizedPnL = getUnrealizedPnL(pos);
+                                const unrealizedPnLPct = getUnrealizedPnLPct(pos);
+                                const curPrice = currentPrices[pos.ticker];
+                                const hasSellAlert = sellAlerts.some(a => a.ticker === pos.ticker);
+                                return (
+                                  <TableRow key={pos.id} className={cn("border-border/10", hasSellAlert && "bg-warning/5")}>
+                                    <TableCell className="font-mono font-bold text-sm">
+                                      <div className="flex items-center gap-2">{pos.ticker}{hasSellAlert && <AlertTriangle className="w-3 h-3 text-warning" />}</div>
+                                    </TableCell>
+                                    <TableCell><Badge variant="outline" className={cn("text-[10px]", pos.position_type === "long" ? "text-success" : "text-destructive")}>{pos.position_type}</Badge></TableCell>
+                                    <TableCell className="font-mono text-sm">${Number(pos.entry_price).toFixed(2)}</TableCell>
+                                    <TableCell className="font-mono text-sm">{curPrice ? `$${curPrice.toFixed(2)}` : pricesLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : "—"}</TableCell>
+                                    <TableCell className="font-mono text-sm">{Number(pos.shares).toFixed(2)}</TableCell>
+                                    <TableCell>{unrealizedPnL !== null ? <span className={cn("font-mono font-bold text-sm", unrealizedPnL >= 0 ? "text-success" : "text-destructive")}>{unrealizedPnL >= 0 ? "+" : ""}${unrealizedPnL.toFixed(2)}</span> : "—"}</TableCell>
+                                    <TableCell>{unrealizedPnLPct !== null ? <span className={cn("font-mono font-bold text-sm", unrealizedPnLPct >= 0 ? "text-success" : "text-destructive")}>{unrealizedPnLPct >= 0 ? "+" : ""}{unrealizedPnLPct.toFixed(2)}%</span> : "—"}</TableCell>
+                                    <TableCell className="text-xs text-muted-foreground">{new Date(pos.created_at).toLocaleDateString()}</TableCell>
+                                    <TableCell>
+                                      <Button
+                                        size="sm"
+                                        variant={hasSellAlert ? "destructive" : "outline"}
+                                        className="text-xs h-7"
+                                        onClick={() => {
+                                          setSelectedPosition(pos);
+                                          const alert = sellAlerts.find(a => a.ticker === pos.ticker);
+                                          setSellPrice(alert ? alert.currentPrice.toFixed(2) : curPrice ? curPrice.toFixed(2) : "");
+                                          setSellDialogOpen(true);
+                                        }}
+                                      >
+                                        Close
+                                      </Button>
+                                    </TableCell>
+                                  </TableRow>
+                                );
+                              })}
+                            </TableBody>
+                          </Table>
+                        </div>
                       </Card>
                     )}
 
