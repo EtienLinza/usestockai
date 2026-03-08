@@ -550,7 +550,7 @@ const Dashboard = () => {
         <div className="container mx-auto max-w-7xl">
 
           {/* Header */}
-          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="mb-6">
+          <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} className="mb-6">
             <div className="flex items-center justify-between flex-wrap gap-4">
               <div>
                 <h1 className="text-xl sm:text-2xl font-medium mb-1">Dashboard</h1>
