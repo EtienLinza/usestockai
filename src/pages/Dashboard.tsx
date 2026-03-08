@@ -561,13 +561,19 @@ const Dashboard = () => {
                   )}
                 </p>
               </div>
-              <Button variant="glow" onClick={runScan} disabled={scanning || !user} className="gap-2">
-                {scanning ? (
-                  <><Loader2 className="w-4 h-4 animate-spin" />Scanning {scanProgress.batch}/{scanProgress.total}...</>
-                ) : (
-                  <><RefreshCw className="w-4 h-4" />Scan Market</>
-                )}
-              </Button>
+              <div className="flex items-center gap-3">
+                <div className="hidden sm:flex items-center gap-1.5 text-[10px] text-muted-foreground bg-muted/50 px-2.5 py-1 rounded-full">
+                  <span className="w-1.5 h-1.5 rounded-full bg-success animate-pulse" />
+                  Auto-scanning active
+                </div>
+                <Button variant="glow" onClick={runScan} disabled={scanning || !user} className="gap-2">
+                  {scanning ? (
+                    <><Loader2 className="w-4 h-4 animate-spin" />Scanning {scanProgress.batch}/{scanProgress.total}...</>
+                  ) : (
+                    <><RefreshCw className="w-4 h-4" />Scan Now</>
+                  )}
+                </Button>
+              </div>
             </div>
 
             {/* Stats Row — MetricCard style */}
