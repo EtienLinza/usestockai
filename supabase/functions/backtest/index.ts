@@ -520,17 +520,17 @@ function computeStrategySignal(
     // Dual-Regime Layer 1: Block trend BUYs only when BOTH stock AND SPY 200 SMA are declining
     if (trendBuyScore >= 3 && above200 && !dualSMADeclining) {
       trendSignal = "BUY";
-      let conv = trendBuyScore * 20;
-      conv += Math.min((adxVal - ADX_THRESH) * 0.5, 15);
-      conv += Math.min(Math.abs(macdH) * 5, 10);
+      let conv = trendBuyScore * 15;
+      conv += Math.min((adxVal - ADX_THRESH) * 0.5, 10);
+      conv += Math.min(Math.abs(macdH) * 5, 8);
       if (rsiVal >= 40 && rsiVal <= 60) conv += 5;
       trendConviction = Math.min(100, conv);
     // Dual-Regime Layer 1: Block trend SHORTs only when BOTH stock AND SPY 200 SMA are rising
     } else if (trendShortScore >= 3 && below200 && !(sma200Rising && ctx.spyBearish === false)) {
       trendSignal = "SHORT";
-      let conv = trendShortScore * 20;
-      conv += Math.min((adxVal - ADX_THRESH) * 0.5, 15);
-      conv += Math.min(Math.abs(macdH) * 5, 10);
+      let conv = trendShortScore * 15;
+      conv += Math.min((adxVal - ADX_THRESH) * 0.5, 10);
+      conv += Math.min(Math.abs(macdH) * 5, 8);
       if (rsiVal >= 40 && rsiVal <= 55) conv += 5;
       trendConviction = Math.min(100, conv);
     }
