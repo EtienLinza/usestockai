@@ -176,10 +176,6 @@ export const Navbar = () => {
                     <Heart className="w-4 h-4 mr-2" />
                     Watchlist
                   </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => navigate("/history")}>
-                    <History className="w-4 h-4 mr-2" />
-                    History
-                  </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem onClick={handleSignOut} className="text-destructive">
                     <LogOut className="w-4 h-4 mr-2" />
