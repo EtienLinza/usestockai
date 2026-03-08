@@ -220,7 +220,8 @@ interface WeeklyBias {
 function computeWeeklyBias(
   weeklyClose: number[], weeklyHigh: number[], weeklyLow: number[],
   idx: number,
-  params: { fastMA: number; slowMA: number; rsiLong: number }
+  params: { fastMA: number; slowMA: number; rsiLong: number },
+  isLowVol: boolean = false,
 ): WeeklyBias {
   if (idx < params.slowMA + 10) return { bias: "flat", targetAllocation: 0 };
 
@@ -237,6 +238,26 @@ function computeWeeklyBias(
   const slow = safeGet(slowEMA, c);
   const rsiVal = safeGet(rsi, 50);
   const adxVal = safeGet(adxData.adx, 0);
+
+  // ============================================================
+  // DEFENSIVE MEAN-REVERSION MODE for low-volatility stocks
+  // Only trades at extreme weekly RSI levels (oversold/overbought)
+  // ============================================================
+  if (isLowVol) {
+    // Only enter long at deeply oversold extremes
+    if (rsiVal < 30 && c > slow) return { bias: "long", targetAllocation: 0.75 };
+    if (rsiVal < 35 && c > slow && adxVal < 25) return { bias: "long", targetAllocation: 0.5 };
+    // Only go flat/exit at overbought
+    if (rsiVal > 70) return { bias: "flat", targetAllocation: 0 };
+    // If already positioned and RSI normalizing (40-65), hold at reduced allocation
+    if (rsiVal >= 35 && rsiVal <= 65 && c > slow) return { bias: "long", targetAllocation: 0.25 };
+    // No shorts for low-vol stocks
+    return { bias: "flat", targetAllocation: 0 };
+  }
+
+  // ============================================================
+  // STANDARD TREND-FOLLOWING MODE
+  // ============================================================
 
   // LONG: price > fast EMA AND fast > slow EMA
   if (c > fast && fast > slow) {
@@ -285,7 +306,30 @@ function hasDailyEntrySignal(
   }
 }
 
-function safeGet(arr: number[], defaultVal: number): number {
+// Mean-reversion daily entry for low-vol stocks: RSI pullback confirmation
+function hasDailyMeanReversionEntry(
+  close: number[], idx: number, direction: "long" | "short"
+): boolean {
+  if (idx < 30) return false;
+  const n = Math.min(idx + 1, close.length);
+  const slice = close.slice(Math.max(0, n - 60), n);
+  if (slice.length < 20) return false;
+
+  const rsi = calculateRSI(slice, 14);
+  const sma20 = calculateSMA(slice, 20);
+  const rsiVal = safeGet(rsi, 50);
+  const smaVal = safeGet(sma20, slice[slice.length - 1]);
+  const price = slice[slice.length - 1];
+
+  if (direction === "long") {
+    // Enter on RSI < 45 (oversold pullback) OR price touching/below SMA20
+    return rsiVal < 45 || price <= smaVal * 1.005;
+  } else {
+    return rsiVal > 55 || price >= smaVal * 0.995;
+  }
+}
+
+
   if (!arr || arr.length === 0) return defaultVal;
   const v = arr[arr.length - 1];
   return (v == null || isNaN(v)) ? defaultVal : v;
@@ -1101,8 +1145,25 @@ function runWalkForwardBacktest(
     }
   }
 
-  // Weekly ATR for hard stops
+  // Weekly ATR for hard stops + low-vol detection
   const weeklyATR = calculateATR(weeklyData.high, weeklyData.low, weeklyData.close, 14);
+
+  // Detect low-volatility stock: weekly ATR% < 2% on average
+  let isLowVolStock = false;
+  {
+    let wAtrPctSum = 0, wAtrPctCount = 0;
+    for (let wi = 14; wi < weeklyData.close.length; wi++) {
+      if (!isNaN(weeklyATR[wi]) && weeklyData.close[wi] > 0) {
+        wAtrPctSum += weeklyATR[wi] / weeklyData.close[wi];
+        wAtrPctCount++;
+      }
+    }
+    const avgWeeklyAtrPct = wAtrPctCount > 0 ? wAtrPctSum / wAtrPctCount : 0;
+    isLowVolStock = avgWeeklyAtrPct < 0.02;
+    if (isLowVolStock) {
+      console.log(`[LowVol] ${ticker}: weekly ATR%=${(avgWeeklyAtrPct * 100).toFixed(2)}% → switching to defensive mean-reversion mode`);
+    }
+  }
 
   // Build SPY regime maps
   const spyDateMap = new Map<string, number>();
@@ -1316,7 +1377,8 @@ function runWalkForwardBacktest(
       if (wIdx >= Math.max(activeProfile.weeklySlowMA, 40) + 10) {
         const weeklyBias = computeWeeklyBias(
           weeklyData.close, weeklyData.high, weeklyData.low, wIdx,
-          { fastMA: activeProfile.weeklyFastMA, slowMA: activeProfile.weeklySlowMA, rsiLong: activeProfile.weeklyRSILong }
+          { fastMA: activeProfile.weeklyFastMA, slowMA: activeProfile.weeklySlowMA, rsiLong: activeProfile.weeklyRSILong },
+          isLowVolStock,
         );
         currentBias = weeklyBias.bias;
         const absTarget = Math.abs(weeklyBias.targetAllocation);
@@ -1391,7 +1453,11 @@ function runWalkForwardBacktest(
       const targetDir: "long" | "short" = currentBias === "long" ? "long" : "short";
 
       if (currentAlloc < currentTargetAllocation - 0.01) {
-        if (hasDailyEntrySignal(close, high, low, volume, i, targetDir)) {
+        // Low-vol stocks use relaxed entry (RSI pullback only), standard stocks use 2/3 confirm
+        const hasEntry = isLowVolStock
+          ? hasDailyMeanReversionEntry(close, i, targetDir)
+          : hasDailyEntrySignal(close, high, low, volume, i, targetDir);
+        if (hasEntry) {
           const entryIdx = Math.min(i + executionDelay, close.length - 1);
           if (entryIdx < close.length) {
             const entryPrice = applyTradingCosts(open[entryIdx], targetDir === "long", tradeConfig);
