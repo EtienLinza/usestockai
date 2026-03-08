@@ -2388,7 +2388,28 @@ serve(async (req) => {
       tickerEquityMaps.push({ idx, map: tickerEquityMap, capitalPerTicker });
     }
 
-    combinedEquity.sort((a, b) => a.date.localeCompare(b.date));
+    // Combine equity curves: sum absolute values from all tickers with carry-forward
+    {
+      // Collect all unique dates
+      const allDatesSet = new Set<string>();
+      for (const t of tickerEquityMaps) {
+        for (const d of t.map.keys()) allDatesSet.add(d);
+      }
+      const allDates = Array.from(allDatesSet).sort();
+
+      for (const d of allDates) {
+        let total = 0;
+        for (const t of tickerEquityMaps) {
+          if (t.map.has(d)) {
+            total += t.map.get(d)!;
+            (t as any).lastVal = t.map.get(d)!; // track last known
+          } else {
+            total += (t as any).lastVal ?? t.capitalPerTicker;
+          }
+        }
+        combinedEquity.push({ date: d, value: total });
+      }
+    }
 
     // Cap equity curve points to 500 to reduce serialization
     if (combinedEquity.length > 500) {
