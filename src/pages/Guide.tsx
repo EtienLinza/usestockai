@@ -264,11 +264,11 @@ const Guide = () => {
       <div className="min-h-screen bg-background">
         <Navbar />
         <div className="fixed inset-0 pointer-events-none">
-          <div className="absolute top-1/3 right-1/4 w-[600px] h-[600px] bg-primary/2 rounded-full blur-[150px]" />
+          <div className="absolute top-1/4 left-1/2 -translate-x-1/2 w-[800px] h-[800px] bg-primary/2 rounded-full blur-[150px]" />
         </div>
 
         <main className="pt-20 pb-12 px-4 sm:px-6 relative z-10">
-          <div className="container mx-auto max-w-6xl">
+          <div className="container mx-auto max-w-7xl">
             {/* Header */}
             <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} className="mb-6">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-4">
