@@ -165,10 +165,6 @@ export const Navbar = () => {
                     <LayoutDashboard className="w-4 h-4 mr-2" />
                     Dashboard
                   </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => navigate("/guide")}>
-                    <BookOpen className="w-4 h-4 mr-2" />
-                    Guide
-                  </DropdownMenuItem>
                   <DropdownMenuItem onClick={() => navigate("/watchlist")}>
                     <Heart className="w-4 h-4 mr-2" />
                     Watchlist
