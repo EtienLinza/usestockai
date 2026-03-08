@@ -15,7 +15,7 @@ import {
   Brain, TrendingUp, TrendingDown, Shield,
   Loader2, AlertTriangle, RefreshCw, Zap, DollarSign, Target,
   ArrowUpRight, ArrowDownRight, Package, BarChart3, Clock, Bell,
-  Trophy, ChevronDown, Activity, Sparkles,
+  Trophy, ChevronDown, Activity, Sparkles, Trash2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -88,6 +88,7 @@ interface TradingTabProps {
   tradingStyle: string;
   setTradingStyle: (v: string) => void;
   runScan: () => void;
+  onClearSignals: () => void;
   fetchCurrentPrices: () => void;
   onRegisterSignal: (signal: Signal) => void;
   onClosePosition: (position: Position, price?: string) => void;
@@ -153,7 +154,7 @@ export function TradingTab({
   openPositions, closedPositions, currentPrices, pricesLoading,
   sellAlerts, portfolioHistory, showTradeLog, setShowTradeLog,
   user, tradingStyle, setTradingStyle,
-  runScan, fetchCurrentPrices, onRegisterSignal, onClosePosition, onDismissAlert, onSellAlertClose,
+  runScan, onClearSignals, fetchCurrentPrices, onRegisterSignal, onClosePosition, onDismissAlert, onSellAlertClose,
 }: TradingTabProps) {
 
   const buySignals = useMemo(() => signals.filter(s => s.signal_type === "BUY"), [signals]);
@@ -415,6 +416,12 @@ export function TradingTab({
                   {scanning ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
                   Scan
                 </Button>
+                {signals.length > 0 && (
+                  <Button variant="ghost" size="sm" onClick={onClearSignals} disabled={!user} className="gap-1.5 text-xs h-7 text-destructive hover:text-destructive">
+                    <Trash2 className="w-3 h-3" />
+                    Clear
+                  </Button>
+                )}
               </div>
             </div>
 

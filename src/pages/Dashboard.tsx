@@ -542,6 +542,17 @@ const Dashboard = () => {
                     tradingStyle={tradingStyle}
                     setTradingStyle={setTradingStyle}
                     runScan={runScan}
+                    onClearSignals={async () => {
+                      if (!user) return;
+                      try {
+                        const { error } = await supabase.functions.invoke("clear-signals");
+                        if (error) throw error;
+                        setSignals([]);
+                        toast.success("All signals cleared");
+                      } catch {
+                        toast.error("Failed to clear signals");
+                      }
+                    }}
                     fetchCurrentPrices={fetchCurrentPrices}
                     onRegisterSignal={(signal) => {
                       if (!user) { toast.error("Please sign in first"); return; }
