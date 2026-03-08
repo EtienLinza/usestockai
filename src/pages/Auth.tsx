@@ -140,7 +140,7 @@ const Auth = () => {
                     />
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    {isSignUp ? "Password must be at least 6 characters" : ""}
+                    {isSignUp ? "Must include uppercase, lowercase, number, and special character" : ""}
                   </p>
                 </div>
 
