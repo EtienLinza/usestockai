@@ -23,3 +23,6 @@ verify_jwt = false
 
 [functions.backtest]
 verify_jwt = false
+
+[functions.market-scanner]
+verify_jwt = false

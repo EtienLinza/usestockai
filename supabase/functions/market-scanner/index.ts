@@ -666,11 +666,19 @@ serve(async (req) => {
         .eq("status", "open");
 
       if (openPositions && openPositions.length > 0) {
-        for (const pos of openPositions) {
-          const data = allData[tickersToScan.indexOf(pos.ticker)];
-          if (!data) continue;
+        let totalPositionsValue = 0;
 
-          const currentPrice = data.close[data.close.length - 1];
+        for (const pos of openPositions) {
+          // Try to get data from current batch, otherwise fetch individually
+          let posData = allData[tickersToScan.indexOf(pos.ticker)];
+          if (!posData) {
+            posData = await fetchYahooData(pos.ticker, "1y");
+          }
+          if (!posData) continue;
+
+          const currentPrice = posData.close[posData.close.length - 1];
+          totalPositionsValue += currentPrice * Number(pos.shares);
+
           const pnlPct = pos.position_type === "long"
             ? ((currentPrice - Number(pos.entry_price)) / Number(pos.entry_price)) * 100
             : ((Number(pos.entry_price) - currentPrice) / Number(pos.entry_price)) * 100;
@@ -684,9 +692,9 @@ serve(async (req) => {
             sellSignals.push({ ticker: pos.ticker, reason: `Take profit target reached (+${pnlPct.toFixed(1)}%)`, currentPrice });
           }
           // Weekly reversal check
-          else {
-            const profile = classifyStockSimple(data.close, data.high, data.low, pos.ticker);
-            const weeklyData = aggregateToWeekly(data);
+          else if (posData.close.length >= 200) {
+            const profile = classifyStockSimple(posData.close, posData.high, posData.low, pos.ticker);
+            const weeklyData = aggregateToWeekly(posData);
             const wIdx = weeklyData.close.length - 1;
             const weeklyParams = PROFILE_WEEKLY_PARAMS[profile];
             const weeklyBias = computeWeeklyBias(weeklyData.close, weeklyData.high, weeklyData.low, wIdx, weeklyParams);
@@ -697,6 +705,25 @@ serve(async (req) => {
             }
           }
         }
+
+        // Log portfolio snapshot
+        const STARTING_CASH = 100000;
+        const totalInvested = openPositions.reduce((sum, p) => sum + Number(p.entry_price) * Number(p.shares), 0);
+        const cash = STARTING_CASH - totalInvested;
+        const totalValue = cash + totalPositionsValue;
+        const today = new Date().toISOString().split("T")[0];
+
+        const { error: logError } = await supabase.from("virtual_portfolio_log").upsert(
+          {
+            user_id: userId,
+            date: today,
+            total_value: totalValue,
+            cash,
+            positions_value: totalPositionsValue,
+          },
+          { onConflict: "user_id,date", ignoreDuplicates: false }
+        );
+        if (logError) console.error("Portfolio log error:", logError);
       }
     }
 
