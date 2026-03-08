@@ -583,19 +583,19 @@ const Backtest = () => {
 
                     {/* Benchmark Comparison */}
                     <Card className="glass-card p-4">
-                      <div className="flex items-center justify-between">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                         <div>
                           <div className="text-xs text-muted-foreground">Strategy vs SPY Buy & Hold</div>
-                          <div className="flex items-center gap-4 mt-1">
-                            <span className={`text-lg font-mono font-medium ${report.totalReturn > 0 ? "text-success" : "text-destructive"}`}>
+                          <div className="flex items-center gap-3 sm:gap-4 mt-1 flex-wrap">
+                            <span className={`text-base sm:text-lg font-mono font-medium ${report.totalReturn > 0 ? "text-success" : "text-destructive"}`}>
                               Strategy: {report.totalReturn > 0 ? "+" : ""}{report.totalReturn}%
                             </span>
-                            <span className="text-lg font-mono font-medium text-muted-foreground">
+                            <span className="text-base sm:text-lg font-mono font-medium text-muted-foreground">
                               SPY: {report.benchmarkReturn > 0 ? "+" : ""}{report.benchmarkReturn}%
                             </span>
                           </div>
                         </div>
-                        <div className="flex gap-2">
+                        <div className="flex gap-2 flex-wrap">
                           <Badge variant={report.totalReturn > report.benchmarkReturn ? "default" : "destructive"}>
                             {report.totalReturn > report.benchmarkReturn ? "Outperforms" : "Underperforms"}
                           </Badge>
