@@ -2378,17 +2378,20 @@ serve(async (req) => {
       totalBarsAll += totalBars;
       barsInTradeAll += barsInTrade;
 
-      if (combinedEquity.length === 0) {
-        combinedEquity = equityCurve.map(p => ({ date: p.date, value: p.value }));
-      } else {
-        for (const point of equityCurve) {
-          const pnl = point.value - capitalPerTicker;
-          const existing = combinedEquity.find(c => c.date === point.date);
-          if (existing) {
-            existing.value += pnl;
-          } else {
-            combinedEquity.push({ date: point.date, value: capitalPerTicker + pnl });
-          }
+      // Accumulate absolute equity values from each ticker into a Map
+      for (const point of equityCurve) {
+        equityMap.set(point.date, (equityMap.get(point.date) || 0) + point.value);
+      }
+      // For dates in the map that this ticker doesn't have, carry forward its last known value
+      let lastVal = capitalPerTicker;
+      const allDates = Array.from(equityMap.keys()).sort();
+      const tickerDates = new Set(equityCurve.map(p => p.date));
+      for (const d of allDates) {
+        if (tickerDates.has(d)) {
+          lastVal = equityCurve.find(p => p.date === d)!.value;
+        } else {
+          // This date exists from other tickers but not this one — add carry-forward
+          equityMap.set(d, equityMap.get(d)! + lastVal);
         }
       }
     }
