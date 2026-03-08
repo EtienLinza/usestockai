@@ -2340,6 +2340,8 @@ serve(async (req) => {
 
     let allTrades: Trade[] = [];
     let combinedEquity: { date: string; value: number }[] = [];
+    const equityMap = new Map<string, number>();
+    const tickerLastValues = new Map<number, number>(); // track last known value per ticker index
     let totalBarsAll = 0, barsInTradeAll = 0;
     let firstTickerData: DataSet | null = null;
     const stockProfiles: Record<string, StockClassification> = {};
