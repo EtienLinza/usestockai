@@ -528,6 +528,14 @@ const Dashboard = () => {
     setSellDialogOpen(true);
   };
 
+  const handleDismissAlert = async (alert: SellAlert) => {
+    if (alert.id) {
+      await supabase.from("sell_alerts").update({ is_dismissed: true }).eq("id", alert.id);
+      setSellAlerts(prev => prev.filter(a => a.id !== alert.id));
+      toast.success(`Dismissed alert for ${alert.ticker}`);
+    }
+  };
+
   // ── Render ───────────────────────────────────────────────────────────────────
 
   return (
