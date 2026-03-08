@@ -4,12 +4,15 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Activity, RefreshCw, Clock } from "lucide-react";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Activity, RefreshCw, Clock, LayoutGrid, Grid3X3 } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { SentimentGauge } from "@/components/market/SentimentGauge";
 import { MarketIndicators } from "@/components/market/MarketIndicators";
 import { TrendingTickers } from "@/components/market/TrendingTickers";
+import { SectorCard } from "@/components/sectors/SectorCard";
+import { SectorHeatmap } from "@/components/sectors/SectorHeatmap";
 
 interface MarketData {
   fearGreedScore: number;
@@ -20,6 +23,14 @@ interface MarketData {
   gainers: { ticker: string; name: string; change: number; volume: number }[];
   losers: { ticker: string; name: string; change: number; volume: number }[];
   updatedAt: string;
+}
+
+interface SectorData {
+  sector: string;
+  etfTicker: string;
+  dailyChange: number;
+  weeklyChange: number;
+  monthlyChange: number;
 }
 
 function getMarketStatus() {
