@@ -24,13 +24,16 @@ import {
   Brain, TrendingUp, TrendingDown, Shield,
   Loader2, AlertTriangle, RefreshCw, Zap, DollarSign, Target,
   ArrowUpRight, ArrowDownRight, Package, BarChart3, Clock, CheckCircle2, Bell,
-  Trophy, Percent, ChevronDown, Activity, Sparkles,
+  Trophy, Percent, ChevronDown, Activity, Sparkles, Globe, PieChart,
 } from "lucide-react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import { fetchWithErrorHandling, handleResponseError, showErrorToast } from "@/lib/api-error";
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine,
 } from "recharts";
+import { MarketTab } from "@/components/dashboard/MarketTab";
+import { SectorsTab } from "@/components/dashboard/SectorsTab";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -589,6 +592,14 @@ const Dashboard = () => {
 
             {/* ── Right Panel: Signals + Positions + Charts ── */}
             <motion.div initial={{ opacity: 0, x: 16 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.2 }} className="lg:col-span-8 xl:col-span-9">
+              <Tabs defaultValue="trading" className="w-full">
+                <TabsList className="bg-secondary/30 mb-6">
+                  <TabsTrigger value="trading" className="text-xs sm:text-sm gap-1.5"><Zap className="w-3.5 h-3.5" />Trading</TabsTrigger>
+                  <TabsTrigger value="market" className="text-xs sm:text-sm gap-1.5"><Globe className="w-3.5 h-3.5" />Market</TabsTrigger>
+                  <TabsTrigger value="sectors" className="text-xs sm:text-sm gap-1.5"><PieChart className="w-3.5 h-3.5" />Sectors</TabsTrigger>
+                </TabsList>
+
+                <TabsContent value="trading">
               <AnimatePresence mode="wait">
                 {signalsLoading ? (
                   <motion.div key="loading" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="glass-card p-12 text-center">
@@ -1017,6 +1028,16 @@ const Dashboard = () => {
                   </motion.div>
                 )}
               </AnimatePresence>
+                </TabsContent>
+
+                <TabsContent value="market">
+                  <MarketTab />
+                </TabsContent>
+
+                <TabsContent value="sectors">
+                  <SectorsTab />
+                </TabsContent>
+              </Tabs>
             </motion.div>
           </div>
         </div>

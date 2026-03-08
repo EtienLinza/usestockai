@@ -8,7 +8,6 @@ import { AuthProvider } from "@/hooks/useAuth";
 import Landing from "./pages/Landing";
 import Auth from "./pages/Auth";
 import Dashboard from "./pages/Dashboard";
-import Guide from "./pages/Guide";
 import Watchlist from "./pages/Watchlist";
 
 import Backtest from "./pages/Backtest";
@@ -29,7 +28,7 @@ const App = () => (
               <Route path="/" element={<Landing />} />
               <Route path="/auth" element={<Auth />} />
               <Route path="/dashboard" element={<Dashboard />} />
-              <Route path="/guide" element={<Guide />} />
+              
               <Route path="/watchlist" element={<Watchlist />} />
               
               <Route path="/backtest" element={<Backtest />} />

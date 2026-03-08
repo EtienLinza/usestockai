@@ -19,7 +19,7 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
-import { User, LogOut, LayoutDashboard, BookOpen, Heart, Menu, BarChart3 } from "lucide-react";
+import { User, LogOut, LayoutDashboard, Heart, Menu, BarChart3 } from "lucide-react";
 
 export const Navbar = () => {
   const location = useLocation();
@@ -29,11 +29,8 @@ export const Navbar = () => {
 
   const navLinks = [
     { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-    { href: "/guide", label: "Guide", icon: BookOpen },
     { href: "/watchlist", label: "Watchlist", icon: Heart },
-    
     { href: "/backtest", label: "Backtest", icon: BarChart3 },
-    
   ];
 
   const handleSignOut = async () => {
@@ -167,10 +164,6 @@ export const Navbar = () => {
                   <DropdownMenuItem onClick={() => navigate("/dashboard")}>
                     <LayoutDashboard className="w-4 h-4 mr-2" />
                     Dashboard
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => navigate("/guide")}>
-                    <BookOpen className="w-4 h-4 mr-2" />
-                    Guide
                   </DropdownMenuItem>
                   <DropdownMenuItem onClick={() => navigate("/watchlist")}>
                     <Heart className="w-4 h-4 mr-2" />
