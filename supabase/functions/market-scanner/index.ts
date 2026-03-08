@@ -462,7 +462,7 @@ async function fetchYahooData(ticker: string, range: string = "1y"): Promise<Dat
 }
 
 // ============================================================================
-// SCANNING UNIVERSE — 75 tickers across all 11 GICS sectors
+// SCANNING UNIVERSE — hardcoded fallback across all 11 GICS sectors
 // ============================================================================
 
 const SCAN_UNIVERSE: Record<string, string[]> = {
@@ -479,7 +479,93 @@ const SCAN_UNIVERSE: Record<string, string[]> = {
   "Materials": ["LIN", "APD", "SHW", "FCX"],
 };
 
-const ALL_TICKERS = Object.values(SCAN_UNIVERSE).flat();
+const HARDCODED_TICKERS = Object.values(SCAN_UNIVERSE).flat();
+
+// ============================================================================
+// DYNAMIC TICKER DISCOVERY via Yahoo Finance Screeners
+// ============================================================================
+
+const SCREENER_IDS = [
+  "most_actives",
+  "day_gainers",
+  "undervalued_growth_stocks",
+  "aggressive_small_caps",
+  "growth_technology_stocks",
+];
+
+interface ScreenerQuote {
+  symbol: string;
+  marketCap?: number;
+  averageDailyVolume3Month?: number;
+  regularMarketVolume?: number;
+  quoteType?: string;
+  shortName?: string;
+}
+
+async function fetchScreenerTickers(screenerId: string): Promise<ScreenerQuote[]> {
+  try {
+    const url = `https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved?scrIds=${screenerId}&count=50`;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000);
+    const resp = await fetch(url, {
+      headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+    if (!resp.ok) {
+      console.warn(`Screener ${screenerId} returned ${resp.status}`);
+      return [];
+    }
+    const data = await resp.json();
+    const quotes = data?.finance?.result?.[0]?.quotes || [];
+    return quotes.map((q: any) => ({
+      symbol: q.symbol,
+      marketCap: q.marketCap,
+      averageDailyVolume3Month: q.averageDailyVolume3Month,
+      regularMarketVolume: q.regularMarketVolume,
+      quoteType: q.quoteType,
+      shortName: q.shortName,
+    }));
+  } catch (e) {
+    console.warn(`Screener ${screenerId} fetch failed:`, e);
+    return [];
+  }
+}
+
+const TICKER_REGEX = /^[A-Z]{1,10}(-[A-Z]{2,4})?$/;
+
+function preFilterQuotes(quotes: ScreenerQuote[]): string[] {
+  const tickers: string[] = [];
+  for (const q of quotes) {
+    if (!q.symbol || !TICKER_REGEX.test(q.symbol)) continue;
+    // Skip non-equity types
+    if (q.quoteType && q.quoteType !== "EQUITY") continue;
+    // Skip penny stocks / illiquid
+    if (q.marketCap != null && q.marketCap < 1_000_000_000) continue; // < $1B
+    const vol = q.averageDailyVolume3Month || q.regularMarketVolume || 0;
+    if (vol < 500_000) continue; // < 500K avg volume
+    tickers.push(q.symbol);
+  }
+  return tickers;
+}
+
+async function discoverTickers(): Promise<string[]> {
+  console.log("Discovering tickers from Yahoo screeners...");
+  const allQuotes: ScreenerQuote[] = [];
+
+  // Fetch screeners in parallel
+  const results = await Promise.all(SCREENER_IDS.map(id => fetchScreenerTickers(id)));
+  for (const quotes of results) allQuotes.push(...quotes);
+
+  const screenerTickers = preFilterQuotes(allQuotes);
+  console.log(`Screeners returned ${allQuotes.length} raw quotes, pre-filtered to ${screenerTickers.length}`);
+
+  // Merge with hardcoded universe (deduplicate)
+  const merged = new Set([...HARDCODED_TICKERS, ...screenerTickers]);
+  const finalList = Array.from(merged);
+  console.log(`Final scan universe: ${finalList.length} tickers (${HARDCODED_TICKERS.length} hardcoded + ${screenerTickers.length} dynamic)`);
+  return finalList;
+}
 
 // ============================================================================
 // MAIN HANDLER
@@ -495,16 +581,30 @@ serve(async (req) => {
     const body = await req.json().catch(() => ({}));
     const { batch = 0, batchSize = 25 } = body;
 
+    // On first batch, discover full universe; subsequent batches receive tickerList
+    let allTickers: string[];
+    if (body.tickerList && Array.isArray(body.tickerList)) {
+      allTickers = body.tickerList;
+    } else if (batch === 0) {
+      // First batch: discover tickers dynamically
+      allTickers = await discoverTickers();
+    } else {
+      // Fallback if no tickerList passed (shouldn't happen)
+      allTickers = HARDCODED_TICKERS;
+    }
+
     // Determine which tickers to scan in this batch
     const start = batch * batchSize;
-    const end = Math.min(start + batchSize, ALL_TICKERS.length);
-    const tickersToScan = ALL_TICKERS.slice(start, end);
+    const end = Math.min(start + batchSize, allTickers.length);
+    const tickersToScan = allTickers.slice(start, end);
 
     if (tickersToScan.length === 0) {
       return new Response(JSON.stringify({ 
         signals: [], 
         batch, 
-        totalBatches: Math.ceil(ALL_TICKERS.length / batchSize),
+        totalBatches: Math.ceil(allTickers.length / batchSize),
+        tickerList: allTickers,
+        totalTickers: allTickers.length,
         done: true 
       }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -658,8 +758,10 @@ serve(async (req) => {
     return new Response(JSON.stringify({
       signals,
       batch,
-      totalBatches: Math.ceil(ALL_TICKERS.length / batchSize),
-      done: end >= ALL_TICKERS.length,
+      totalBatches: Math.ceil(allTickers.length / batchSize),
+      tickerList: allTickers,
+      totalTickers: allTickers.length,
+      done: end >= allTickers.length,
       scanned: tickersToScan.length,
       elapsed,
     }), {
