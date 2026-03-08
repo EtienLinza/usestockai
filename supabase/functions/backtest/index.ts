@@ -953,15 +953,62 @@ function runWalkForwardBacktest(
     }
   }
 
-  // --- Stock Classification (initial + rolling re-eval every 500 bars) ---
-  // Uses expanding window (up to 1000 bars) + EMA smoothing to prevent profile whiplash
-  const CLASSIFY_INTERVAL = 500; // Reclassify every ~2 years instead of ~1 year
-  const MAX_CLASSIFY_WINDOW = 1000; // Cap at ~4 years of history
-  const PROFILE_SMOOTH_FACTOR = 0.3; // 0.3 new + 0.7 old for EMA smoothing
+  // --- Stock Classification (adaptive window + interval + smoothing) ---
+  // Metric stability (CV) drives how large the classification window is,
+  // how often we reclassify, and how much we smooth new profiles.
+  const DEFAULT_CLASSIFY_INTERVAL = 500;
+  const DEFAULT_MAX_WINDOW = 1000;
+  const DEFAULT_SMOOTH_FACTOR = 0.3;
+
+  // Adaptive state
+  let adaptiveClassifyInterval = DEFAULT_CLASSIFY_INTERVAL;
+  let adaptiveMaxWindow = DEFAULT_MAX_WINDOW;
+  let adaptiveSmoothFactor = DEFAULT_SMOOTH_FACTOR;
+
+  // Ring buffer for metric history (last 4 classifications)
+  const metricHistory: { trendScore: number; meanReversionRate: number; atrPctAvg: number }[] = [];
+  const METRIC_HISTORY_SIZE = 4;
+
+  function computeMetricStability(): number {
+    if (metricHistory.length < 2) return -1; // not enough data
+    // Coefficient of Variation for each metric, then average
+    const cvOf = (vals: number[]): number => {
+      const mean = vals.reduce((a, b) => a + b, 0) / vals.length;
+      if (mean === 0) return 0;
+      const std = Math.sqrt(vals.reduce((a, b) => a + (b - mean) ** 2, 0) / vals.length);
+      return std / Math.abs(mean);
+    };
+    const cvTrend = cvOf(metricHistory.map(m => m.trendScore));
+    const cvMR = cvOf(metricHistory.map(m => m.meanReversionRate));
+    const cvATR = cvOf(metricHistory.map(m => m.atrPctAvg));
+    return (cvTrend + cvMR + cvATR) / 3;
+  }
+
+  function updateAdaptiveParams(stabilityCV: number) {
+    if (stabilityCV < 0) return; // not enough history, keep defaults
+    if (stabilityCV < 0.15) {
+      // Stable stock — large window, infrequent reclassification, trust new data
+      adaptiveMaxWindow = 1500;
+      adaptiveClassifyInterval = 750;
+      adaptiveSmoothFactor = 0.4;
+    } else if (stabilityCV > 0.40) {
+      // Unstable stock — shorter window, frequent reclassification, heavy smoothing
+      adaptiveMaxWindow = 600;
+      adaptiveClassifyInterval = 250;
+      adaptiveSmoothFactor = 0.15;
+    } else {
+      // Moderate — interpolate linearly between stable and unstable
+      const t = (stabilityCV - 0.15) / 0.25; // 0 at CV=0.15, 1 at CV=0.40
+      adaptiveMaxWindow = Math.round(1500 - 900 * t);   // 1500 → 600
+      adaptiveClassifyInterval = Math.round(750 - 500 * t); // 750 → 250
+      adaptiveSmoothFactor = 0.4 - 0.25 * t;             // 0.4 → 0.15
+    }
+  }
+
   let currentClassification: StockClassification | null = null;
   let activeProfile: ProfileParams = PROFILE_PARAMS["index"]; // default
   let smoothedProfile: ProfileParams | null = null; // Running EMA of profile params
-  let lastClassifyBar = -CLASSIFY_INTERVAL; // force initial classification
+  let lastClassifyBar = -DEFAULT_CLASSIFY_INTERVAL; // force initial classification
 
   // Strategy Mode: only override profile params when mode is "custom" with explicit user changes
   const isCustomMode = (config as any).strategyMode === "custom" && (config as any).explicitOverride === true;
@@ -1009,10 +1056,10 @@ function runWalkForwardBacktest(
   for (let i = TRAIN_WINDOW; i < close.length - 1; i += STEP) {
     totalBars += STEP;
 
-    // --- Rolling stock classification every 500 bars with expanding window ---
-    if (i - lastClassifyBar >= CLASSIFY_INTERVAL && i >= 250) {
-      // Expanding window: use all available history up to current bar, capped at 1000
-      const classWindow = Math.min(i, MAX_CLASSIFY_WINDOW);
+    // --- Rolling stock classification with adaptive window/interval/smoothing ---
+    if (i - lastClassifyBar >= adaptiveClassifyInterval && i >= 250) {
+      // Expanding window: use all available history up to current bar, capped adaptively
+      const classWindow = Math.min(i, adaptiveMaxWindow);
       const cClose = close.slice(i - classWindow, i);
       const cHigh = high.slice(i - classWindow, i);
       const cLow = low.slice(i - classWindow, i);
@@ -1020,19 +1067,30 @@ function runWalkForwardBacktest(
         currentClassification = classifyStock(cClose, cHigh, cLow, ticker);
         const rawProfile = currentClassification.blendedParams || PROFILE_PARAMS[currentClassification.classification];
         
-        // EMA smoothing: blend new profile into running average
+        // Track metric history for stability computation
+        metricHistory.push({
+          trendScore: currentClassification.trendPersistence,
+          meanReversionRate: currentClassification.meanReversionRate,
+          atrPctAvg: currentClassification.atrPctAvg,
+        });
+        if (metricHistory.length > METRIC_HISTORY_SIZE) metricHistory.shift();
+        
+        // Compute stability and update adaptive params for NEXT reclassification
+        const stabilityCV = computeMetricStability();
+        updateAdaptiveParams(stabilityCV);
+        
+        // EMA smoothing with adaptive factor
         if (smoothedProfile === null) {
-          // First classification — use raw profile directly
           smoothedProfile = { ...rawProfile };
         } else {
-          // Subsequent: 0.3 new + 0.7 old
-          smoothedProfile = blendProfiles(smoothedProfile, rawProfile, PROFILE_SMOOTH_FACTOR);
+          smoothedProfile = blendProfiles(smoothedProfile, rawProfile, adaptiveSmoothFactor);
         }
         
         activeProfile = applyModeToProfile(smoothedProfile);
         lastClassifyBar = i;
         
-        console.log(`[Profile Smoothed] ${ticker} bar=${i} raw=${currentClassification.classification} | adxT=${activeProfile.adxThreshold} rsiOS=${activeProfile.rsiOversold} rsiOB=${activeProfile.rsiOverbought} maxHoldT=${activeProfile.maxHoldTrend} maxHoldMR=${activeProfile.maxHoldMR} TP=${activeProfile.takeProfitPct.toFixed(1)} TSMult=${activeProfile.trailingStopATRMult.toFixed(2)}`);
+        const stabilityLabel = stabilityCV < 0 ? "init" : stabilityCV < 0.15 ? "stable" : stabilityCV > 0.40 ? "unstable" : "moderate";
+        console.log(`[Profile Adaptive] ${ticker} bar=${i} raw=${currentClassification.classification} stability=${stabilityCV < 0 ? "N/A" : stabilityCV.toFixed(3)}(${stabilityLabel}) window=${adaptiveMaxWindow} interval=${adaptiveClassifyInterval} smooth=${adaptiveSmoothFactor.toFixed(2)} | adxT=${activeProfile.adxThreshold} rsiOS=${activeProfile.rsiOversold} rsiOB=${activeProfile.rsiOverbought} maxHoldT=${activeProfile.maxHoldTrend} maxHoldMR=${activeProfile.maxHoldMR} TP=${activeProfile.takeProfitPct.toFixed(1)} TSMult=${activeProfile.trailingStopATRMult.toFixed(2)}`);
       }
     }
 
