@@ -496,11 +496,30 @@ function computeStrategySignal(
   const CONV_BUY_THRESH = SP.buyThreshold ?? 65;
   const CONV_SHORT_THRESH = SP.shortThreshold ?? 65;
 
+  // --- OBV (On-Balance Volume) for trend confirmation ---
+  let obvRising = true; // default: no block
+  if (volume.length >= 30) {
+    let obv = 0;
+    const obvArr: number[] = [0];
+    for (let oi = 1; oi < close.length; oi++) {
+      if (close[oi] > close[oi - 1]) obv += volume[oi];
+      else if (close[oi] < close[oi - 1]) obv -= volume[oi];
+      obvArr.push(obv);
+    }
+    // 20-bar OBV trend
+    if (obvArr.length >= 20) {
+      const obvNow = obvArr[obvArr.length - 1];
+      const obv20Ago = obvArr[obvArr.length - 20];
+      obvRising = obvNow >= obv20Ago; // OBV rising = volume confirms trend
+    }
+  }
+
   // --- Strategy A: Trend Following (ADX > threshold) ---
   // Conviction on TRUE 0-100 scale: no hardcoded floor
+  const forceValueMR = SP.forceValueMR === true;
   let trendSignal: "BUY" | "SHORT" | "HOLD" = "HOLD";
   let trendConviction = 0;
-  if (adxVal > ADX_THRESH) {
+  if (adxVal > ADX_THRESH && !forceValueMR) {
     const trendBuyConditions = [
       e12 > e26,
       currentPrice > s50,
@@ -518,7 +537,8 @@ function computeStrategySignal(
     const trendShortScore = trendShortConditions.filter(Boolean).length;
 
     // Dual-Regime Layer 1: Block trend BUYs only when BOTH stock AND SPY 200 SMA are declining
-    if (trendBuyScore >= 3 && above200 && !dualSMADeclining) {
+    // Fix 10: Also block trend BUY if OBV is declining (distribution)
+    if (trendBuyScore >= 3 && above200 && !dualSMADeclining && obvRising) {
       trendSignal = "BUY";
       let conv = trendBuyScore * 15;
       conv += Math.min((adxVal - ADX_THRESH) * 0.5, 10);
