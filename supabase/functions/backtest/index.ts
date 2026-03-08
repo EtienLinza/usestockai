@@ -563,7 +563,7 @@ function computeStrategySignal(
     // Dual-Regime Layer 1: Block MR buys only when BOTH stock below 200 AND SPY bearish
     if (mrBuyScore >= 3 && !dualRegimeBearBlock) {
       mrSignal = "BUY";
-      let conv = mrBuyScore * 18;
+      let conv = mrBuyScore * 16;
       conv += Math.min(Math.abs(rsiVal - 50) * 0.3, 10);
       conv += Math.min(Math.abs(smaDeviation) * 100, 10);
       mrConviction = Math.min(100, conv);
