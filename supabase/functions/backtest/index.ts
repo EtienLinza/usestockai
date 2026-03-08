@@ -1479,6 +1479,12 @@ function runWalkForwardBacktest(
       }
     }
 
+    // Risk-free rate accrual on idle (non-deployed) capital
+    // 4% annualized / 252 trading days
+    if (!position) {
+      capital *= (1 + 0.04 / 252);
+    }
+
     // Record equity periodically
     if (i % 5 === 0 || i === close.length - 2) {
       const openMTM = position && position.blocks.length > 0
