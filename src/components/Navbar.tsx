@@ -19,7 +19,7 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
-import { User, LogOut, LayoutDashboard, BookOpen, Heart, History, Menu, BarChart3, Zap } from "lucide-react";
+import { User, LogOut, LayoutDashboard, BookOpen, Heart, History, Menu, BarChart3 } from "lucide-react";
 
 export const Navbar = () => {
   const location = useLocation();
@@ -33,7 +33,7 @@ export const Navbar = () => {
     { href: "/watchlist", label: "Watchlist", icon: Heart },
     { href: "/history", label: "History", icon: History },
     { href: "/backtest", label: "Backtest", icon: BarChart3 },
-    { href: "/signals", label: "Signals", icon: Zap },
+    
   ];
 
   const handleSignOut = async () => {
