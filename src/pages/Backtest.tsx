@@ -665,7 +665,7 @@ const Backtest = () => {
                         <div className="text-[10px] text-muted-foreground mb-4">
                           Max duration: {report.maxDrawdownDuration} bars · Avg duration: {report.avgDrawdownDuration} bars
                         </div>
-                        <div className="h-48">
+                        <div className="h-36 sm:h-48">
                           <ResponsiveContainer width="100%" height="100%">
                             <AreaChart data={report.drawdownCurve}>
                               <defs>
