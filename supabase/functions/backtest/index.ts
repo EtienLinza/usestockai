@@ -220,7 +220,8 @@ interface WeeklyBias {
 function computeWeeklyBias(
   weeklyClose: number[], weeklyHigh: number[], weeklyLow: number[],
   idx: number,
-  params: { fastMA: number; slowMA: number; rsiLong: number }
+  params: { fastMA: number; slowMA: number; rsiLong: number },
+  isLowVol: boolean = false,
 ): WeeklyBias {
   if (idx < params.slowMA + 10) return { bias: "flat", targetAllocation: 0 };
 
@@ -237,6 +238,26 @@ function computeWeeklyBias(
   const slow = safeGet(slowEMA, c);
   const rsiVal = safeGet(rsi, 50);
   const adxVal = safeGet(adxData.adx, 0);
+
+  // ============================================================
+  // DEFENSIVE MEAN-REVERSION MODE for low-volatility stocks
+  // Only trades at extreme weekly RSI levels (oversold/overbought)
+  // ============================================================
+  if (isLowVol) {
+    // Only enter long at deeply oversold extremes
+    if (rsiVal < 30 && c > slow) return { bias: "long", targetAllocation: 0.75 };
+    if (rsiVal < 35 && c > slow && adxVal < 25) return { bias: "long", targetAllocation: 0.5 };
+    // Only go flat/exit at overbought
+    if (rsiVal > 70) return { bias: "flat", targetAllocation: 0 };
+    // If already positioned and RSI normalizing (40-65), hold at reduced allocation
+    if (rsiVal >= 35 && rsiVal <= 65 && c > slow) return { bias: "long", targetAllocation: 0.25 };
+    // No shorts for low-vol stocks
+    return { bias: "flat", targetAllocation: 0 };
+  }
+
+  // ============================================================
+  // STANDARD TREND-FOLLOWING MODE
+  // ============================================================
 
   // LONG: price > fast EMA AND fast > slow EMA
   if (c > fast && fast > slow) {
