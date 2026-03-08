@@ -1,12 +1,56 @@
+import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { useNavigate } from "react-router-dom";
 import { Navbar } from "@/components/Navbar";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Card } from "@/components/ui/card";
 import { Logo } from "@/components/Logo";
-import { ArrowRight, TrendingUp, Brain, Zap } from "lucide-react";
+import {
+  ArrowRight, TrendingUp, Brain, Zap, BarChart3, Shield,
+  Target, Activity, LineChart, PieChart, Bell, Eye,
+} from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
 
 const Landing = () => {
   const navigate = useNavigate();
+  const [signalCount, setSignalCount] = useState<number | null>(null);
+
+  useEffect(() => {
+    const fetchCount = async () => {
+      const { count } = await supabase
+        .from("live_signals")
+        .select("*", { count: "exact", head: true })
+        .gte("expires_at", new Date().toISOString());
+      if (count !== null) setSignalCount(count);
+    };
+    fetchCount();
+  }, []);
+
+  const features = [
+    {
+      icon: Brain,
+      title: "AI Market Scanner",
+      description: "Quantitative analysis of 75+ stocks using 10+ technical indicators, regime detection, and weighted signal consensus.",
+    },
+    {
+      icon: Target,
+      title: "Portfolio Tracking",
+      description: "Register trades, track P&L in real-time, monitor win rate, profit factor, and equity curves with drawdown analysis.",
+    },
+    {
+      icon: BarChart3,
+      title: "Strategy Backtesting",
+      description: "Test strategies against historical data with Monte Carlo simulations, Sharpe ratios, and benchmark comparisons.",
+    },
+  ];
+
+  const stats = [
+    { label: "Technical Indicators", value: "10+" },
+    { label: "Stocks Scanned", value: "75+" },
+    { label: "Conviction Range", value: "35–92%" },
+    { label: "Regime Detection", value: "Active" },
+  ];
 
   return (
     <div className="min-h-screen bg-background">
@@ -14,7 +58,6 @@ const Landing = () => {
       
       {/* Hero Section */}
       <section className="relative min-h-screen flex items-center justify-center overflow-hidden">
-        {/* Subtle background glow */}
         <div className="absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-primary/3 rounded-full blur-[120px]" />
         
         <div className="container mx-auto px-6 relative z-10">
@@ -32,6 +75,21 @@ const Landing = () => {
             >
               <Logo size="lg" />
             </motion.div>
+            
+            {/* Live Signal Badge */}
+            {signalCount !== null && signalCount > 0 && (
+              <motion.div
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.2 }}
+                className="flex justify-center mb-6"
+              >
+                <Badge variant="outline" className="gap-1.5 px-3 py-1 text-xs border-success/30 text-success">
+                  <span className="w-1.5 h-1.5 rounded-full bg-success animate-pulse" />
+                  {signalCount} active signal{signalCount !== 1 ? "s" : ""} right now
+                </Badge>
+              </motion.div>
+            )}
             
             <h1 className="text-4xl md:text-5xl lg:text-6xl font-medium mb-6 leading-tight tracking-tight">
               AI-Powered
@@ -58,30 +116,124 @@ const Landing = () => {
             </div>
           </motion.div>
 
-          {/* Minimal features */}
+          {/* Stats Bar */}
           <motion.div
-            initial={{ opacity: 0, y: 30 }}
+            initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.4, duration: 0.6 }}
-            className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-24 max-w-3xl mx-auto"
+            transition={{ delay: 0.3, duration: 0.6 }}
+            className="flex flex-wrap justify-center gap-6 sm:gap-10 mt-16"
           >
-            {[
-              { icon: Brain, label: "AI Analysis", desc: "Real-time predictions" },
-              { icon: Zap, label: "Live Data", desc: "Up-to-date market info" },
-              { icon: TrendingUp, label: "Confidence", desc: "Uncertainty quantified" },
-            ].map((item, index) => (
+            {stats.map((stat, i) => (
               <motion.div
-                key={item.label}
-                initial={{ opacity: 0, y: 20 }}
+                key={stat.label}
+                initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.5 + index * 0.1 }}
-                className="text-center p-6"
+                transition={{ delay: 0.35 + i * 0.05 }}
+                className="text-center"
               >
+                <div className="text-lg sm:text-xl font-bold font-mono text-primary">{stat.value}</div>
+                <div className="text-[10px] sm:text-xs text-muted-foreground uppercase tracking-wider">{stat.label}</div>
+              </motion.div>
+            ))}
+          </motion.div>
+        </div>
+      </section>
+
+      {/* Features Section */}
+      <section className="py-24 relative">
+        <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-border to-transparent" />
+        <div className="container mx-auto px-6">
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            className="text-center mb-16"
+          >
+            <h2 className="text-2xl sm:text-3xl font-medium mb-3">Everything You Need</h2>
+            <p className="text-sm text-muted-foreground max-w-lg mx-auto">
+              A complete trading intelligence platform — from signal discovery to portfolio performance tracking.
+            </p>
+          </motion.div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-5xl mx-auto">
+            {features.map((feature, index) => (
+              <motion.div
+                key={feature.title}
+                initial={{ opacity: 0, y: 20 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true }}
+                transition={{ delay: index * 0.1 }}
+              >
+                <Card className="glass-card p-6 h-full hover:border-primary/20 transition-colors">
+                  <feature.icon className="w-8 h-8 text-primary mb-4" />
+                  <h3 className="text-base font-medium mb-2">{feature.title}</h3>
+                  <p className="text-xs text-muted-foreground leading-relaxed">{feature.description}</p>
+                </Card>
+              </motion.div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* How It Works */}
+      <section className="py-24 bg-secondary/20">
+        <div className="container mx-auto px-6">
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            className="text-center mb-16"
+          >
+            <h2 className="text-2xl sm:text-3xl font-medium mb-3">How It Works</h2>
+          </motion.div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-4 gap-8 max-w-4xl mx-auto">
+            {[
+              { step: "01", icon: Eye, title: "Scan", desc: "AI scans 75+ stocks across all market sectors" },
+              { step: "02", icon: Zap, title: "Signal", desc: "High-conviction buy/sell signals with reasoning" },
+              { step: "03", icon: LineChart, title: "Track", desc: "Register trades and monitor real-time P&L" },
+              { step: "04", icon: PieChart, title: "Optimize", desc: "Backtest strategies and improve over time" },
+            ].map((item, i) => (
+              <motion.div
+                key={item.step}
+                initial={{ opacity: 0, y: 16 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true }}
+                transition={{ delay: i * 0.1 }}
+                className="text-center"
+              >
+                <div className="text-[10px] font-mono text-primary/60 mb-2">{item.step}</div>
                 <item.icon className="w-6 h-6 text-primary mx-auto mb-3" />
-                <h3 className="text-sm font-medium mb-1">{item.label}</h3>
+                <h3 className="text-sm font-medium mb-1">{item.title}</h3>
                 <p className="text-xs text-muted-foreground">{item.desc}</p>
               </motion.div>
             ))}
+          </div>
+        </div>
+      </section>
+
+      {/* CTA */}
+      <section className="py-24">
+        <div className="container mx-auto px-6 text-center">
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+          >
+            <h2 className="text-2xl sm:text-3xl font-medium mb-4">Ready to Trade Smarter?</h2>
+            <p className="text-sm text-muted-foreground mb-8 max-w-md mx-auto">
+              Join StockAI and start making data-driven trading decisions with AI-powered market intelligence.
+            </p>
+            <div className="flex flex-col sm:flex-row gap-4 justify-center">
+              <Button variant="glow" size="xl" onClick={() => navigate("/auth?mode=signup")} className="group">
+                Get Started Free
+                <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-1" />
+              </Button>
+              <Button variant="outline" size="xl" onClick={() => navigate("/dashboard")}>
+                <Activity className="w-4 h-4" />
+                View Dashboard
+              </Button>
+            </div>
           </motion.div>
         </div>
       </section>
