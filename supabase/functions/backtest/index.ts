@@ -922,7 +922,9 @@ interface Trade {
   mfe: number;
   volumeAtEntry: number;
   strategy: "trend" | "mean_reversion" | "breakout" | "none";
-  exitReason: "stop_loss" | "take_profit" | "trailing_stop" | "time_exit";
+  exitReason: "stop_loss" | "take_profit" | "trailing_stop" | "time_exit" | "weekly_reversal" | "hard_stop" | "scale_down";
+  scaleLevel?: number;
+  allocationAtEntry?: number;
 }
 
 function applyTradingCosts(price: number, isBuy: boolean, config: TradeConfig): number {
