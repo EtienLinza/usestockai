@@ -536,11 +536,14 @@ function computeStrategySignal(
     }
   }
 
-  // --- Strategy B: Mean Reversion (ADX < threshold) ---
-  // Conviction 0-100: base = score*18 (3/5=54, 4/5=72, 5/5=90)
+  // --- Strategy B: Mean Reversion (ADX < threshold OR RSI extremes) ---
+  // Conviction 0-100: base = score*16 (3/5=48, 4/5=64, 5/5=80)
   let mrSignal: "BUY" | "SHORT" | "HOLD" = "HOLD";
   let mrConviction = 0;
-  if (adxVal < ADX_THRESH) {
+  const mrRsiOverride = rsiVal < RSI_OS || rsiVal > RSI_OB;
+  if (adxVal < ADX_THRESH || mrRsiOverride) {
+    // Apply conviction penalty when ADX is high (trending) but RSI is extreme
+    const mrConvictionMultiplier = (adxVal >= ADX_THRESH && mrRsiOverride) ? 0.8 : 1.0;
     const atrDevThreshold = currentPrice > 0 ? (1.5 * currentATR) / currentPrice : 0.02;
     const mrBuyConditions = [
       rsiVal < RSI_OS,
@@ -566,13 +569,13 @@ function computeStrategySignal(
       let conv = mrBuyScore * 16;
       conv += Math.min(Math.abs(rsiVal - 50) * 0.3, 10);
       conv += Math.min(Math.abs(smaDeviation) * 100, 10);
-      mrConviction = Math.min(100, conv);
+      mrConviction = Math.min(100, Math.round(conv * mrConvictionMultiplier));
     } else if (mrShortScore >= 3 && !(above200 && ctx.spyBearish === false)) {
       mrSignal = "SHORT";
       let conv = mrShortScore * 16;
       conv += Math.min(Math.abs(rsiVal - 50) * 0.3, 10);
       conv += Math.min(Math.abs(smaDeviation) * 100, 10);
-      mrConviction = Math.min(100, conv);
+      mrConviction = Math.min(100, Math.round(conv * mrConvictionMultiplier));
     }
   }
 
@@ -657,11 +660,11 @@ function computeStrategySignal(
   // --- Adaptive Layer 3: Conviction Bonus for stocks in their own strong trend ---
   // If stock is in its own strong uptrend, boost BUY conviction
   if (above200 && sma200Slope > 0.02 && rsiVal > 40 && rsiVal < 70) {
-    if (bestSignal === "BUY") adjustedConviction += 15;
+    if (bestSignal === "BUY") adjustedConviction += 8;
   }
   // If stock is in its own strong downtrend, boost SHORT conviction
   if (below200 && sma200Slope < -0.02 && rsiVal > 30 && rsiVal < 60) {
-    if (bestSignal === "SHORT") adjustedConviction += 15;
+    if (bestSignal === "SHORT") adjustedConviction += 8;
   }
 
   // --- Conviction threshold filter ---
