@@ -1771,24 +1771,30 @@ function computeMetrics(
     }
   }
 
-  // Rolling Sharpe (20-trade window)
+  // Rolling Sharpe & Volatility (20-point equity curve window)
   const rollingSharpe: { index: number; value: number }[] = [];
-  const ROLLING_WINDOW = 20;
-  for (let i = ROLLING_WINDOW; i <= returns.length; i++) {
-    const window = returns.slice(i - ROLLING_WINDOW, i).map(r => r / 100);
-    const wMean = window.reduce((a, b) => a + b, 0) / window.length;
-    const wStd = Math.sqrt(window.reduce((a, b) => a + (b - wMean) ** 2, 0) / window.length);
-    const rSharpe = wStd > 0 ? (wMean / wStd) * Math.sqrt(252 / 5) : 0;
-    rollingSharpe.push({ index: i, value: parseFloat(rSharpe.toFixed(2)) });
-  }
-
-  // Rolling Volatility (20-trade window)
   const rollingVolatility: { index: number; value: number }[] = [];
-  for (let i = ROLLING_WINDOW; i <= returns.length; i++) {
-    const window = returns.slice(i - ROLLING_WINDOW, i).map(r => r / 100);
-    const wMean = window.reduce((a, b) => a + b, 0) / window.length;
-    const wStd = Math.sqrt(window.reduce((a, b) => a + (b - wMean) ** 2, 0) / window.length);
-    rollingVolatility.push({ index: i, value: parseFloat((wStd * Math.sqrt(252 / 5) * 100).toFixed(2)) });
+  const ROLLING_WINDOW = 20;
+  if (dailyEqReturns.length >= ROLLING_WINDOW) {
+    const periodsPerYear2 = Math.min(252, Math.max(52, dailyEqReturns.length / Math.max(years, 1)));
+    const annFactor2 = Math.sqrt(periodsPerYear2);
+    for (let i = ROLLING_WINDOW; i <= dailyEqReturns.length; i++) {
+      const window = dailyEqReturns.slice(i - ROLLING_WINDOW, i);
+      const wMean = window.reduce((a, b) => a + b, 0) / window.length;
+      const wStd = Math.sqrt(window.reduce((a, b) => a + (b - wMean) ** 2, 0) / window.length);
+      const rSharpe = wStd > 0 ? (wMean / wStd) * annFactor2 : 0;
+      rollingSharpe.push({ index: i, value: parseFloat(rSharpe.toFixed(2)) });
+      rollingVolatility.push({ index: i, value: parseFloat((wStd * annFactor2 * 100).toFixed(2)) });
+    }
+  } else {
+    // Fallback to per-trade rolling if equity curve too short
+    for (let i = ROLLING_WINDOW; i <= returns.length; i++) {
+      const window = returns.slice(i - ROLLING_WINDOW, i).map(r => r / 100);
+      const wMean = window.reduce((a, b) => a + b, 0) / window.length;
+      const wStd = Math.sqrt(window.reduce((a, b) => a + (b - wMean) ** 2, 0) / window.length);
+      rollingSharpe.push({ index: i, value: parseFloat((wStd > 0 ? wMean / wStd : 0).toFixed(2)) });
+      rollingVolatility.push({ index: i, value: parseFloat((wStd * 100).toFixed(2)) });
+    }
   }
 
   // Trade Distribution
