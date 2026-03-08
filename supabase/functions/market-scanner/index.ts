@@ -602,7 +602,9 @@ serve(async (req) => {
       return new Response(JSON.stringify({ 
         signals: [], 
         batch, 
-        totalBatches: Math.ceil(ALL_TICKERS.length / batchSize),
+        totalBatches: Math.ceil(allTickers.length / batchSize),
+        tickerList: allTickers,
+        totalTickers: allTickers.length,
         done: true 
       }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
