@@ -319,6 +319,11 @@ interface ProfileParams {
   trendConvictionBonus: number;
   mrConvictionBonus: number;
   breakoutConvictionBonus: number;
+  // Weekly dual-timeframe params
+  weeklyFastMA: number;
+  weeklySlowMA: number;
+  weeklyRSILong: number;
+  hardStopATRMult: number;
 }
 
 const PROFILE_PARAMS: Record<StockProfile, ProfileParams> = {
@@ -328,6 +333,7 @@ const PROFILE_PARAMS: Record<StockProfile, ProfileParams> = {
     takeProfitPct: 16, trailingStopATRMult: 3.0,
     buyThreshold: 68, shortThreshold: 66,
     trendConvictionBonus: 5, mrConvictionBonus: 0, breakoutConvictionBonus: 0,
+    weeklyFastMA: 10, weeklySlowMA: 40, weeklyRSILong: 45, hardStopATRMult: 3.0,
   },
   value: {
     adxThreshold: 32, rsiOversold: 22, rsiOverbought: 78,
@@ -335,6 +341,7 @@ const PROFILE_PARAMS: Record<StockProfile, ProfileParams> = {
     takeProfitPct: 8, trailingStopATRMult: 2.5,
     buyThreshold: 68, shortThreshold: 66,
     trendConvictionBonus: 0, mrConvictionBonus: 12, breakoutConvictionBonus: 0,
+    weeklyFastMA: 13, weeklySlowMA: 50, weeklyRSILong: 35, hardStopATRMult: 2.5,
   },
   index: {
     adxThreshold: 26, rsiOversold: 28, rsiOverbought: 72,
@@ -342,6 +349,7 @@ const PROFILE_PARAMS: Record<StockProfile, ProfileParams> = {
     takeProfitPct: 12, trailingStopATRMult: 2.8,
     buyThreshold: 68, shortThreshold: 66,
     trendConvictionBonus: 5, mrConvictionBonus: 5, breakoutConvictionBonus: 0,
+    weeklyFastMA: 10, weeklySlowMA: 40, weeklyRSILong: 40, hardStopATRMult: 2.8,
   },
   volatile: {
     adxThreshold: 18, rsiOversold: 22, rsiOverbought: 78,
@@ -349,13 +357,13 @@ const PROFILE_PARAMS: Record<StockProfile, ProfileParams> = {
     takeProfitPct: 14, trailingStopATRMult: 3.5,
     buyThreshold: 68, shortThreshold: 66,
     trendConvictionBonus: 0, mrConvictionBonus: 0, breakoutConvictionBonus: 5,
+    weeklyFastMA: 8, weeklySlowMA: 30, weeklyRSILong: 50, hardStopATRMult: 3.5,
   },
 };
 
 const INDEX_TICKERS = new Set(["SPY", "QQQ", "DIA", "IWM", "VOO", "VTI", "IVV", "RSP"]);
 
 function blendProfiles(a: ProfileParams, b: ProfileParams, weight: number): ProfileParams {
-  // weight=0 → all a, weight=1 → all b
   const lerp = (x: number, y: number) => x + (y - x) * weight;
   return {
     adxThreshold: Math.round(lerp(a.adxThreshold, b.adxThreshold)),
@@ -371,6 +379,10 @@ function blendProfiles(a: ProfileParams, b: ProfileParams, weight: number): Prof
     trendConvictionBonus: Math.round(lerp(a.trendConvictionBonus, b.trendConvictionBonus)),
     mrConvictionBonus: Math.round(lerp(a.mrConvictionBonus, b.mrConvictionBonus)),
     breakoutConvictionBonus: Math.round(lerp(a.breakoutConvictionBonus, b.breakoutConvictionBonus)),
+    weeklyFastMA: Math.round(lerp(a.weeklyFastMA, b.weeklyFastMA)),
+    weeklySlowMA: Math.round(lerp(a.weeklySlowMA, b.weeklySlowMA)),
+    weeklyRSILong: Math.round(lerp(a.weeklyRSILong, b.weeklyRSILong)),
+    hardStopATRMult: lerp(a.hardStopATRMult, b.hardStopATRMult),
   };
 }
 
