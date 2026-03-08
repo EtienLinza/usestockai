@@ -615,8 +615,8 @@ const Dashboard = () => {
                     </CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-2">
-                    {sellAlerts.map((alert, i) => (
-                      <div key={`${alert.ticker}-${i}`} className="flex items-center justify-between p-3 rounded-lg bg-warning/10 border border-warning/20">
+                    {sellAlerts.map((alert) => (
+                      <div key={alert.id} className="flex items-center justify-between p-3 rounded-lg bg-warning/10 border border-warning/20 flex-wrap gap-2">
                         <div className="flex items-center gap-3">
                           <AlertTriangle className="w-4 h-4 text-warning shrink-0" />
                           <div>
@@ -624,8 +624,9 @@ const Dashboard = () => {
                             <span className="text-sm text-muted-foreground ml-2">{alert.reason}</span>
                           </div>
                         </div>
-                        <div className="flex items-center gap-3">
+                        <div className="flex items-center gap-2">
                           <span className="font-mono text-sm">${alert.currentPrice.toFixed(2)}</span>
+                          <Button size="sm" variant="ghost" onClick={() => handleDismissAlert(alert)} className="text-xs h-7">Dismiss</Button>
                           <Button size="sm" variant="destructive" onClick={() => handleSellAlertClose(alert)}>Close Position</Button>
                         </div>
                       </div>
