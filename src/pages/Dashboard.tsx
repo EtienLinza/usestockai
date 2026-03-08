@@ -105,9 +105,13 @@ interface Position {
 }
 
 interface SellAlert {
+  id: string;
   ticker: string;
   reason: string;
+  current_price: number;
   currentPrice: number;
+  position_id: string | null;
+  is_dismissed: boolean;
 }
 
 interface PortfolioSnapshot {
@@ -244,12 +248,14 @@ const Dashboard = () => {
       }
 
       if (user) {
-        const [{ data: posData }, { data: histData }] = await Promise.all([
+        const [{ data: posData }, { data: histData }, { data: alertData }] = await Promise.all([
           supabase.from("virtual_positions").select("*").eq("user_id", user.id).order("created_at", { ascending: false }),
           supabase.from("virtual_portfolio_log").select("*").eq("user_id", user.id).order("date", { ascending: true }),
+          supabase.from("sell_alerts").select("*").eq("user_id", user.id).eq("is_dismissed", false).order("created_at", { ascending: false }),
         ]);
         if (posData) setPositions(posData as Position[]);
         if (histData) setPortfolioHistory(histData as PortfolioSnapshot[]);
+        if (alertData) setSellAlerts(alertData.map((a: any) => ({ ...a, currentPrice: Number(a.current_price) })) as SellAlert[]);
       }
     } catch (err) {
       console.error("Failed to load signal data:", err);
@@ -267,12 +273,21 @@ const Dashboard = () => {
   }, []);
 
   useEffect(() => {
-    const channel = supabase
+    const signalChannel = supabase
       .channel("live-signals")
       .on("postgres_changes", { event: "*", schema: "public", table: "live_signals" }, () => loadSignalData())
       .subscribe();
-    return () => { supabase.removeChannel(channel); };
-  }, [loadSignalData]);
+
+    const alertChannel = user ? supabase
+      .channel("sell-alerts-realtime")
+      .on("postgres_changes", { event: "*", schema: "public", table: "sell_alerts", filter: `user_id=eq.${user.id}` }, () => loadSignalData())
+      .subscribe() : null;
+
+    return () => {
+      supabase.removeChannel(signalChannel);
+      if (alertChannel) supabase.removeChannel(alertChannel);
+    };
+  }, [loadSignalData, user]);
 
   const fetchCurrentPrices = useCallback(async () => {
     const tickers = [...new Set(openPositions.map(p => p.ticker))];
@@ -428,7 +443,6 @@ const Dashboard = () => {
     if (!user) { toast.error("Please sign in to scan the market"); return; }
     setScanning(true);
     setScanProgress({ batch: 0, total: 3 });
-    const collectedSellAlerts: SellAlert[] = [];
 
     try {
       let batch = 0;
@@ -438,19 +452,16 @@ const Dashboard = () => {
       while (!done) {
         setScanProgress({ batch: batch + 1, total: 3 });
         const { data, error } = await supabase.functions.invoke("market-scanner", {
-          body: { batch, batchSize: 25, checkSells: batch === 0, userId: user.id },
+          body: { batch, batchSize: 25 },
         });
         if (error) throw error;
         totalSignals += data.signals?.length || 0;
-        if (data.sellSignals?.length > 0) collectedSellAlerts.push(...data.sellSignals);
         done = data.done;
         batch++;
         if (!done) await new Promise(r => setTimeout(r, 500));
       }
 
-      setSellAlerts(collectedSellAlerts);
       setLastScanTime(new Date().toISOString());
-      if (collectedSellAlerts.length > 0) toast.warning(`${collectedSellAlerts.length} sell alert(s) for your positions!`, { duration: 8000 });
       toast.success(`Scan complete! Found ${totalSignals} signals across ${batch} batches`);
       await loadSignalData();
       if (openPositions.length > 0) fetchCurrentPrices();
@@ -500,7 +511,11 @@ const Dashboard = () => {
       toast.success(`Closed ${selectedPosition.ticker} at $${price.toFixed(2)} | P&L: $${pnl.toFixed(2)}`);
       setSellDialogOpen(false);
       setSellPrice("");
-      setSellAlerts(prev => prev.filter(a => a.ticker !== selectedPosition.ticker));
+      // Dismiss any sell alerts for this position
+      const alertsForPos = sellAlerts.filter(a => a.ticker === selectedPosition.ticker);
+      for (const alert of alertsForPos) {
+        if (alert.id) await supabase.from("sell_alerts").update({ is_dismissed: true }).eq("id", alert.id);
+      }
       await loadSignalData();
     }
   };
@@ -511,6 +526,14 @@ const Dashboard = () => {
     setSelectedPosition(pos);
     setSellPrice(alert.currentPrice.toFixed(2));
     setSellDialogOpen(true);
+  };
+
+  const handleDismissAlert = async (alert: SellAlert) => {
+    if (alert.id) {
+      await supabase.from("sell_alerts").update({ is_dismissed: true }).eq("id", alert.id);
+      setSellAlerts(prev => prev.filter(a => a.id !== alert.id));
+      toast.success(`Dismissed alert for ${alert.ticker}`);
+    }
   };
 
   // ── Render ───────────────────────────────────────────────────────────────────
@@ -538,13 +561,19 @@ const Dashboard = () => {
                   )}
                 </p>
               </div>
-              <Button variant="glow" onClick={runScan} disabled={scanning || !user} className="gap-2">
-                {scanning ? (
-                  <><Loader2 className="w-4 h-4 animate-spin" />Scanning {scanProgress.batch}/{scanProgress.total}...</>
-                ) : (
-                  <><RefreshCw className="w-4 h-4" />Scan Market</>
-                )}
-              </Button>
+              <div className="flex items-center gap-3">
+                <div className="hidden sm:flex items-center gap-1.5 text-[10px] text-muted-foreground bg-muted/50 px-2.5 py-1 rounded-full">
+                  <span className="w-1.5 h-1.5 rounded-full bg-success animate-pulse" />
+                  Auto-scanning active
+                </div>
+                <Button variant="glow" onClick={runScan} disabled={scanning || !user} className="gap-2">
+                  {scanning ? (
+                    <><Loader2 className="w-4 h-4 animate-spin" />Scanning {scanProgress.batch}/{scanProgress.total}...</>
+                  ) : (
+                    <><RefreshCw className="w-4 h-4" />Scan Now</>
+                  )}
+                </Button>
+              </div>
             </div>
 
             {/* Stats Row — MetricCard style */}
@@ -586,8 +615,8 @@ const Dashboard = () => {
                     </CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-2">
-                    {sellAlerts.map((alert, i) => (
-                      <div key={`${alert.ticker}-${i}`} className="flex items-center justify-between p-3 rounded-lg bg-warning/10 border border-warning/20">
+                    {sellAlerts.map((alert) => (
+                      <div key={alert.id} className="flex items-center justify-between p-3 rounded-lg bg-warning/10 border border-warning/20 flex-wrap gap-2">
                         <div className="flex items-center gap-3">
                           <AlertTriangle className="w-4 h-4 text-warning shrink-0" />
                           <div>
@@ -595,8 +624,9 @@ const Dashboard = () => {
                             <span className="text-sm text-muted-foreground ml-2">{alert.reason}</span>
                           </div>
                         </div>
-                        <div className="flex items-center gap-3">
+                        <div className="flex items-center gap-2">
                           <span className="font-mono text-sm">${alert.currentPrice.toFixed(2)}</span>
+                          <Button size="sm" variant="ghost" onClick={() => handleDismissAlert(alert)} className="text-xs h-7">Dismiss</Button>
                           <Button size="sm" variant="destructive" onClick={() => handleSellAlertClose(alert)}>Close Position</Button>
                         </div>
                       </div>

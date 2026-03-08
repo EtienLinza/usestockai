@@ -493,7 +493,7 @@ serve(async (req) => {
   try {
     const startTime = Date.now();
     const body = await req.json().catch(() => ({}));
-    const { batch = 0, batchSize = 25, checkSells = false, userId = null } = body;
+    const { batch = 0, batchSize = 25 } = body;
 
     // Determine which tickers to scan in this batch
     const start = batch * batchSize;
@@ -656,83 +656,11 @@ serve(async (req) => {
       if (error) console.error("Failed to insert signals:", error);
     }
 
-    // Check sell signals for user positions if requested
-    let sellSignals: { ticker: string; reason: string; currentPrice: number }[] = [];
-    if (checkSells && userId) {
-      const { data: openPositions } = await supabase
-        .from("virtual_positions")
-        .select("*")
-        .eq("user_id", userId)
-        .eq("status", "open");
-
-      if (openPositions && openPositions.length > 0) {
-        let totalPositionsValue = 0;
-
-        for (const pos of openPositions) {
-          // Try to get data from current batch, otherwise fetch individually
-          let posData = allData[tickersToScan.indexOf(pos.ticker)];
-          if (!posData) {
-            posData = await fetchYahooData(pos.ticker, "1y");
-          }
-          if (!posData) continue;
-
-          const currentPrice = posData.close[posData.close.length - 1];
-          totalPositionsValue += currentPrice * Number(pos.shares);
-
-          const pnlPct = pos.position_type === "long"
-            ? ((currentPrice - Number(pos.entry_price)) / Number(pos.entry_price)) * 100
-            : ((Number(pos.entry_price) - currentPrice) / Number(pos.entry_price)) * 100;
-
-          // Hard stop: -8%
-          if (pnlPct < -8) {
-            sellSignals.push({ ticker: pos.ticker, reason: `Hard stop triggered (${pnlPct.toFixed(1)}% loss)`, currentPrice });
-          }
-          // Take profit: +15%
-          else if (pnlPct > 15) {
-            sellSignals.push({ ticker: pos.ticker, reason: `Take profit target reached (+${pnlPct.toFixed(1)}%)`, currentPrice });
-          }
-          // Weekly reversal check
-          else if (posData.close.length >= 200) {
-            const profile = classifyStockSimple(posData.close, posData.high, posData.low, pos.ticker);
-            const weeklyData = aggregateToWeekly(posData);
-            const wIdx = weeklyData.close.length - 1;
-            const weeklyParams = PROFILE_WEEKLY_PARAMS[profile];
-            const weeklyBias = computeWeeklyBias(weeklyData.close, weeklyData.high, weeklyData.low, wIdx, weeklyParams);
-
-            if ((pos.position_type === "long" && weeklyBias.bias !== "long") ||
-                (pos.position_type === "short" && weeklyBias.bias !== "short")) {
-              sellSignals.push({ ticker: pos.ticker, reason: `Weekly trend reversed to ${weeklyBias.bias}`, currentPrice });
-            }
-          }
-        }
-
-        // Log portfolio snapshot
-        const STARTING_CASH = 100000;
-        const totalInvested = openPositions.reduce((sum, p) => sum + Number(p.entry_price) * Number(p.shares), 0);
-        const cash = STARTING_CASH - totalInvested;
-        const totalValue = cash + totalPositionsValue;
-        const today = new Date().toISOString().split("T")[0];
-
-        const { error: logError } = await supabase.from("virtual_portfolio_log").upsert(
-          {
-            user_id: userId,
-            date: today,
-            total_value: totalValue,
-            cash,
-            positions_value: totalPositionsValue,
-          },
-          { onConflict: "user_id,date", ignoreDuplicates: false }
-        );
-        if (logError) console.error("Portfolio log error:", logError);
-      }
-    }
-
     const elapsed = Date.now() - startTime;
     console.log(`Scan complete: ${signals.length} signals from ${tickersToScan.length} tickers in ${elapsed}ms`);
 
     return new Response(JSON.stringify({
       signals,
-      sellSignals,
       batch,
       totalBatches: Math.ceil(ALL_TICKERS.length / batchSize),
       done: end >= ALL_TICKERS.length,

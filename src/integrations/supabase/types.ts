@@ -259,6 +259,47 @@ export type Database = {
         }
         Relationships: []
       }
+      sell_alerts: {
+        Row: {
+          created_at: string | null
+          current_price: number
+          id: string
+          is_dismissed: boolean | null
+          position_id: string | null
+          reason: string
+          ticker: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          current_price: number
+          id?: string
+          is_dismissed?: boolean | null
+          position_id?: string | null
+          reason: string
+          ticker: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string | null
+          current_price?: number
+          id?: string
+          is_dismissed?: boolean | null
+          position_id?: string | null
+          reason?: string
+          ticker?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sell_alerts_position_id_fkey"
+            columns: ["position_id"]
+            isOneToOne: false
+            referencedRelation: "virtual_positions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       virtual_portfolio_log: {
         Row: {
           cash: number
