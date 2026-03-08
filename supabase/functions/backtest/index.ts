@@ -556,14 +556,16 @@ function computeStrategySignal(
     }
   }
 
-  // --- Strategy B: Mean Reversion (ADX < threshold OR RSI extremes) ---
+  // --- Strategy B: Mean Reversion (ADX < threshold OR RSI extremes OR forceValueMR) ---
   // Conviction 0-100: base = score*16 (3/5=48, 4/5=64, 5/5=80)
   let mrSignal: "BUY" | "SHORT" | "HOLD" = "HOLD";
   let mrConviction = 0;
   const mrRsiOverride = rsiVal < RSI_OS || rsiVal > RSI_OB;
-  if (adxVal < ADX_THRESH || mrRsiOverride) {
+  // Fix 9: Value profile forces MR evaluation even in high-ADX environments
+  if (adxVal < ADX_THRESH || mrRsiOverride || forceValueMR) {
     // Apply conviction penalty when ADX is high (trending) but RSI is extreme
-    const mrConvictionMultiplier = (adxVal >= ADX_THRESH && mrRsiOverride) ? 0.8 : 1.0;
+    const mrConvictionMultiplier = (adxVal >= ADX_THRESH && !forceValueMR && mrRsiOverride) ? 0.8 
+      : (forceValueMR && adxVal >= ADX_THRESH) ? 0.9 : 1.0;
     const atrDevThreshold = currentPrice > 0 ? (1.5 * currentATR) / currentPrice : 0.02;
     const mrBuyConditions = [
       rsiVal < RSI_OS,
@@ -583,14 +585,17 @@ function computeStrategySignal(
     ];
     const mrShortScore = mrShortConditions.filter(Boolean).length;
 
+    // For value profile: lower the MR entry bar from 3 to 2 conditions when forceValueMR
+    const mrMinScore = forceValueMR ? 2 : 3;
+
     // Dual-Regime Layer 1: Block MR buys only when BOTH stock below 200 AND SPY bearish
-    if (mrBuyScore >= 3 && !dualRegimeBearBlock) {
+    if (mrBuyScore >= mrMinScore && !dualRegimeBearBlock) {
       mrSignal = "BUY";
       let conv = mrBuyScore * 16;
       conv += Math.min(Math.abs(rsiVal - 50) * 0.3, 10);
       conv += Math.min(Math.abs(smaDeviation) * 100, 10);
       mrConviction = Math.min(100, Math.round(conv * mrConvictionMultiplier));
-    } else if (mrShortScore >= 3 && !(above200 && ctx.spyBearish === false)) {
+    } else if (mrShortScore >= mrMinScore && !(above200 && ctx.spyBearish === false)) {
       mrSignal = "SHORT";
       let conv = mrShortScore * 16;
       conv += Math.min(Math.abs(rsiVal - 50) * 0.3, 10);
