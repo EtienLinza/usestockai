@@ -2340,9 +2340,9 @@ serve(async (req) => {
       positionSizePct,
       stopLossPct,
       takeProfitPct,
-      commissionPct: 0.1,
-      spreadPct: 0.05,
-      slippagePct: 0.1,
+      commissionPct: 0.02,
+      spreadPct: 0.01,
+      slippagePct: 0.02,
     };
 
     const startDate = Math.floor(new Date(`${startYear}-01-01`).getTime() / 1000);
