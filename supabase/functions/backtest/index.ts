@@ -958,7 +958,8 @@ function runWalkForwardBacktest(
   const equityCurve: { date: string; value: number }[] = [{ date: timestamps[0], value: capital }];
 
   const TRAIN_WINDOW = 250;
-  const STEP = stepOverride || 3;
+  // Fix 6: STEP=1 for single-ticker, STEP=3 for multi-ticker portfolios
+  const STEP = stepOverride || (config.tickers.length <= 1 ? 1 : 3);
   let totalBars = 0;
   let barsInTrade = 0;
   const COOLDOWN_BARS = 5;
