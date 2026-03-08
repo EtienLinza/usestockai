@@ -974,7 +974,8 @@ interface Trade {
 function applyTradingCosts(price: number, isBuy: boolean, config: TradeConfig): number {
   let adjusted = price;
   adjusted *= isBuy ? (1 + config.spreadPct / 100) : (1 - config.spreadPct / 100);
-  const slippage = 1 + (Math.random() - 0.5) * 2 * (config.slippagePct / 100);
+  // Deterministic worst-case slippage (no random noise)
+  const slippage = 1 + (isBuy ? 1 : -1) * (config.slippagePct / 100);
   adjusted *= slippage;
   return adjusted;
 }
