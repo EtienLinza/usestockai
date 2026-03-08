@@ -8,7 +8,6 @@ import { AuthProvider } from "@/hooks/useAuth";
 import Landing from "./pages/Landing";
 import Auth from "./pages/Auth";
 import Dashboard from "./pages/Dashboard";
-import Guide from "./pages/Guide";
 import Watchlist from "./pages/Watchlist";
 
 import Backtest from "./pages/Backtest";
