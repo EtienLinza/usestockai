@@ -1139,7 +1139,7 @@ const Backtest = () => {
                           <Shuffle className="w-4 h-4 text-primary" />
                           <span className="text-sm font-medium">Monte Carlo Simulation (200 runs)</span>
                         </div>
-                        <div className="grid grid-cols-5 gap-3">
+                        <div className="grid grid-cols-3 sm:grid-cols-5 gap-2 sm:gap-3">
                           {[
                             { label: "5th %ile", value: report.monteCarlo.percentile5, worst: true },
                             { label: "25th %ile", value: report.monteCarlo.percentile25 },
