@@ -14,6 +14,54 @@ export type Database = {
   }
   public: {
     Tables: {
+      live_signals: {
+        Row: {
+          confidence: number
+          created_at: string
+          entry_price: number
+          expires_at: string | null
+          id: string
+          reasoning: string | null
+          regime: string | null
+          signal_type: string
+          stock_profile: string | null
+          strategy: string | null
+          target_allocation: number | null
+          ticker: string
+          weekly_bias: string | null
+        }
+        Insert: {
+          confidence?: number
+          created_at?: string
+          entry_price: number
+          expires_at?: string | null
+          id?: string
+          reasoning?: string | null
+          regime?: string | null
+          signal_type: string
+          stock_profile?: string | null
+          strategy?: string | null
+          target_allocation?: number | null
+          ticker: string
+          weekly_bias?: string | null
+        }
+        Update: {
+          confidence?: number
+          created_at?: string
+          entry_price?: number
+          expires_at?: string | null
+          id?: string
+          reasoning?: string | null
+          regime?: string | null
+          signal_type?: string
+          stock_profile?: string | null
+          strategy?: string | null
+          target_allocation?: number | null
+          ticker?: string
+          weekly_bias?: string | null
+        }
+        Relationships: []
+      }
       market_sentiment: {
         Row: {
           dow_change: number | null
@@ -210,6 +258,95 @@ export type Database = {
           weekly_change?: number | null
         }
         Relationships: []
+      }
+      virtual_portfolio_log: {
+        Row: {
+          cash: number
+          created_at: string
+          date: string
+          id: string
+          positions_value: number
+          total_value: number
+          user_id: string
+        }
+        Insert: {
+          cash?: number
+          created_at?: string
+          date: string
+          id?: string
+          positions_value?: number
+          total_value?: number
+          user_id: string
+        }
+        Update: {
+          cash?: number
+          created_at?: string
+          date?: string
+          id?: string
+          positions_value?: number
+          total_value?: number
+          user_id?: string
+        }
+        Relationships: []
+      }
+      virtual_positions: {
+        Row: {
+          closed_at: string | null
+          created_at: string
+          entry_price: number
+          exit_date: string | null
+          exit_price: number | null
+          exit_reason: string | null
+          id: string
+          pnl: number | null
+          position_type: string
+          shares: number
+          signal_id: string | null
+          status: string
+          ticker: string
+          user_id: string
+        }
+        Insert: {
+          closed_at?: string | null
+          created_at?: string
+          entry_price: number
+          exit_date?: string | null
+          exit_price?: number | null
+          exit_reason?: string | null
+          id?: string
+          pnl?: number | null
+          position_type?: string
+          shares: number
+          signal_id?: string | null
+          status?: string
+          ticker: string
+          user_id: string
+        }
+        Update: {
+          closed_at?: string | null
+          created_at?: string
+          entry_price?: number
+          exit_date?: string | null
+          exit_price?: number | null
+          exit_reason?: string | null
+          id?: string
+          pnl?: number | null
+          position_type?: string
+          shares?: number
+          signal_id?: string | null
+          status?: string
+          ticker?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "virtual_positions_signal_id_fkey"
+            columns: ["signal_id"]
+            isOneToOne: false
+            referencedRelation: "live_signals"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       watchlist: {
         Row: {
