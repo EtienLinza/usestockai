@@ -329,7 +329,7 @@ function hasDailyMeanReversionEntry(
   }
 }
 
-
+function safeGet(arr: number[], defaultVal: number): number {
   if (!arr || arr.length === 0) return defaultVal;
   const v = arr[arr.length - 1];
   return (v == null || isNaN(v)) ? defaultVal : v;
