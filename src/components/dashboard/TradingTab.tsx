@@ -416,6 +416,12 @@ export function TradingTab({
                   {scanning ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
                   Scan
                 </Button>
+                {signals.length > 0 && (
+                  <Button variant="ghost" size="sm" onClick={onClearSignals} disabled={!user} className="gap-1.5 text-xs h-7 text-destructive hover:text-destructive">
+                    <Trash2 className="w-3 h-3" />
+                    Clear
+                  </Button>
+                )}
               </div>
             </div>
 
