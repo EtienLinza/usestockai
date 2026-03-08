@@ -33,7 +33,6 @@ import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine,
 } from "recharts";
 import { MarketTab } from "@/components/dashboard/MarketTab";
-import { SectorsTab } from "@/components/dashboard/SectorsTab";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -596,7 +595,7 @@ const Dashboard = () => {
                 <TabsList className="bg-secondary/30 mb-6">
                   <TabsTrigger value="trading" className="text-xs sm:text-sm gap-1.5"><Zap className="w-3.5 h-3.5" />Trading</TabsTrigger>
                   <TabsTrigger value="market" className="text-xs sm:text-sm gap-1.5"><Globe className="w-3.5 h-3.5" />Market</TabsTrigger>
-                  <TabsTrigger value="sectors" className="text-xs sm:text-sm gap-1.5"><PieChart className="w-3.5 h-3.5" />Sectors</TabsTrigger>
+                  
                 </TabsList>
 
                 <TabsContent value="trading">
@@ -1034,9 +1033,6 @@ const Dashboard = () => {
                   <MarketTab />
                 </TabsContent>
 
-                <TabsContent value="sectors">
-                  <SectorsTab />
-                </TabsContent>
               </Tabs>
             </motion.div>
           </div>
