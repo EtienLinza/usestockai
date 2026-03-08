@@ -1349,18 +1349,26 @@ function runWalkForwardBacktest(
     else if (signal.consensusScore < 0) action = "SHORT";
     if (action === "HOLD") continue;
 
-    // Adaptive short filter: Disable shorts when SPY > 200 SMA, UNLESS stock is a leader or an index
-    if (action === "SHORT" && spy200SMAMap.size > 0 && !isLeader && !isIndexTicker) {
-      const spyAbove200 = spy200SMAMap.get(currentDate);
-      if (spyAbove200 === true) continue;
+    // Fix 4: Aggressive short suppression
+    // Block ALL shorts unless both SPY AND stock are below 200 SMA AND stock has negative 50-bar momentum
+    if (action === "SHORT" && !isIndexTicker) {
+      if (spy200SMAMap.size > 0 && !isLeader) {
+        const spyAbove200 = spy200SMAMap.get(currentDate);
+        if (spyAbove200 === true) continue; // SPY bullish = no shorts
+      }
+      // Additional momentum check: stock must have negative 50-bar momentum
+      if (i >= 50) {
+        const mom50 = (close[i] - close[i - 50]) / close[i - 50];
+        if (mom50 > 0) continue; // Stock still has positive momentum = no shorts
+      }
     }
 
-    // Minimum profitability filter: expected move must exceed trading costs
+    // Fix 3: Minimum profitability filter for ALL strategies (not just MR)
     const roundTripCost = (tradeConfig.commissionPct + tradeConfig.spreadPct + tradeConfig.slippagePct) / 100 * 2;
-    const minExpectedMove = roundTripCost * 3; // Need 3× costs to justify the trade
+    const minExpectedMove = roundTripCost * 4; // Need 4× costs to justify the trade (was 3×)
     const atrPctForFilter = signal.atr / close[i];
-    if (atrPctForFilter < minExpectedMove && signal.strategy === "mean_reversion") {
-      continue; // Skip MR trades where expected move is too small relative to costs
+    if (atrPctForFilter < minExpectedMove) {
+      continue; // Skip ALL trades where expected move is too small relative to costs
     }
 
     // Block duplicate-direction trades on same ticker
