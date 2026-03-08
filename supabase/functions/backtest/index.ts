@@ -1435,6 +1435,8 @@ function runWalkForwardBacktest(
       predictedReturn: signal.predictedReturn, signal_atr: signal.atr,
       positionSizeMultiplier: signal.positionSizeMultiplier,
       peakReturn: 0, breakEvenActivated: false, maxAdverse: 0, maxFavorable: 0,
+      partialExitDone: false, originalShares: shares,
+      profitLockLevel: -1, // -1 = no lock yet
     });
 
     cooldownPerTicker.set(ticker, i + COOLDOWN_BARS * STEP);
