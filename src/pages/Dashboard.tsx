@@ -443,7 +443,6 @@ const Dashboard = () => {
     if (!user) { toast.error("Please sign in to scan the market"); return; }
     setScanning(true);
     setScanProgress({ batch: 0, total: 3 });
-    const collectedSellAlerts: SellAlert[] = [];
 
     try {
       let batch = 0;
@@ -453,19 +452,16 @@ const Dashboard = () => {
       while (!done) {
         setScanProgress({ batch: batch + 1, total: 3 });
         const { data, error } = await supabase.functions.invoke("market-scanner", {
-          body: { batch, batchSize: 25, checkSells: batch === 0, userId: user.id },
+          body: { batch, batchSize: 25 },
         });
         if (error) throw error;
         totalSignals += data.signals?.length || 0;
-        if (data.sellSignals?.length > 0) collectedSellAlerts.push(...data.sellSignals);
         done = data.done;
         batch++;
         if (!done) await new Promise(r => setTimeout(r, 500));
       }
 
-      setSellAlerts(collectedSellAlerts);
       setLastScanTime(new Date().toISOString());
-      if (collectedSellAlerts.length > 0) toast.warning(`${collectedSellAlerts.length} sell alert(s) for your positions!`, { duration: 8000 });
       toast.success(`Scan complete! Found ${totalSignals} signals across ${batch} batches`);
       await loadSignalData();
       if (openPositions.length > 0) fetchCurrentPrices();
