@@ -1056,10 +1056,10 @@ function runWalkForwardBacktest(
   for (let i = TRAIN_WINDOW; i < close.length - 1; i += STEP) {
     totalBars += STEP;
 
-    // --- Rolling stock classification every 500 bars with expanding window ---
-    if (i - lastClassifyBar >= CLASSIFY_INTERVAL && i >= 250) {
-      // Expanding window: use all available history up to current bar, capped at 1000
-      const classWindow = Math.min(i, MAX_CLASSIFY_WINDOW);
+    // --- Rolling stock classification with adaptive window/interval/smoothing ---
+    if (i - lastClassifyBar >= adaptiveClassifyInterval && i >= 250) {
+      // Expanding window: use all available history up to current bar, capped adaptively
+      const classWindow = Math.min(i, adaptiveMaxWindow);
       const cClose = close.slice(i - classWindow, i);
       const cHigh = high.slice(i - classWindow, i);
       const cLow = low.slice(i - classWindow, i);
@@ -1067,19 +1067,30 @@ function runWalkForwardBacktest(
         currentClassification = classifyStock(cClose, cHigh, cLow, ticker);
         const rawProfile = currentClassification.blendedParams || PROFILE_PARAMS[currentClassification.classification];
         
-        // EMA smoothing: blend new profile into running average
+        // Track metric history for stability computation
+        metricHistory.push({
+          trendScore: currentClassification.trendPersistence,
+          meanReversionRate: currentClassification.meanReversionRate,
+          atrPctAvg: currentClassification.atrPctAvg,
+        });
+        if (metricHistory.length > METRIC_HISTORY_SIZE) metricHistory.shift();
+        
+        // Compute stability and update adaptive params for NEXT reclassification
+        const stabilityCV = computeMetricStability();
+        updateAdaptiveParams(stabilityCV);
+        
+        // EMA smoothing with adaptive factor
         if (smoothedProfile === null) {
-          // First classification — use raw profile directly
           smoothedProfile = { ...rawProfile };
         } else {
-          // Subsequent: 0.3 new + 0.7 old
-          smoothedProfile = blendProfiles(smoothedProfile, rawProfile, PROFILE_SMOOTH_FACTOR);
+          smoothedProfile = blendProfiles(smoothedProfile, rawProfile, adaptiveSmoothFactor);
         }
         
         activeProfile = applyModeToProfile(smoothedProfile);
         lastClassifyBar = i;
         
-        console.log(`[Profile Smoothed] ${ticker} bar=${i} raw=${currentClassification.classification} | adxT=${activeProfile.adxThreshold} rsiOS=${activeProfile.rsiOversold} rsiOB=${activeProfile.rsiOverbought} maxHoldT=${activeProfile.maxHoldTrend} maxHoldMR=${activeProfile.maxHoldMR} TP=${activeProfile.takeProfitPct.toFixed(1)} TSMult=${activeProfile.trailingStopATRMult.toFixed(2)}`);
+        const stabilityLabel = stabilityCV < 0 ? "init" : stabilityCV < 0.15 ? "stable" : stabilityCV > 0.40 ? "unstable" : "moderate";
+        console.log(`[Profile Adaptive] ${ticker} bar=${i} raw=${currentClassification.classification} stability=${stabilityCV < 0 ? "N/A" : stabilityCV.toFixed(3)}(${stabilityLabel}) window=${adaptiveMaxWindow} interval=${adaptiveClassifyInterval} smooth=${adaptiveSmoothFactor.toFixed(2)} | adxT=${activeProfile.adxThreshold} rsiOS=${activeProfile.rsiOversold} rsiOB=${activeProfile.rsiOverbought} maxHoldT=${activeProfile.maxHoldTrend} maxHoldMR=${activeProfile.maxHoldMR} TP=${activeProfile.takeProfitPct.toFixed(1)} TSMult=${activeProfile.trailingStopATRMult.toFixed(2)}`);
       }
     }
 
