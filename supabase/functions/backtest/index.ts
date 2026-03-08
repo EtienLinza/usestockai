@@ -1320,12 +1320,16 @@ function runWalkForwardBacktest(
     const effectiveBuyThresh = userExplicitBuyThresh ? config.buyThreshold : activeProfile.buyThreshold;
     const effectiveShortThresh = userExplicitShortThresh ? Math.abs(config.shortThreshold) : activeProfile.shortThreshold;
 
+    // Fix 9: Value profile forces MR evaluation
+    const isValueProfile = currentClassification?.classification === "value";
+
     const signal = computeStrategySignal(trainClose, trainHigh, trainLow, trainVol, signalState, STEP, {
       adxThreshold: effectiveADX,
       rsiOversold: effectiveRSIOS,
       rsiOverbought: effectiveRSIOB,
       buyThreshold: effectiveBuyThresh,
       shortThreshold: effectiveShortThresh,
+      forceValueMR: isValueProfile,
     }, {
       trendConvictionBonus: activeProfile.trendConvictionBonus,
       mrConvictionBonus: activeProfile.mrConvictionBonus,
