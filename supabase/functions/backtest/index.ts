@@ -1398,23 +1398,13 @@ function runWalkForwardBacktest(
           currentTargetAllocation = absTarget;
         }
 
-        // Handle position adjustments
+        // Binary trend: full exit on any direction change or flat signal
         if (position) {
-          // Direction mismatch → full exit
           if ((position.direction === "long" && currentBias !== "long") ||
-              (position.direction === "short" && currentBias !== "short")) {
+              (position.direction === "short" && currentBias !== "short") ||
+              currentTargetAllocation <= 0.01) {
             closeFullPosition(position, i, "weekly_reversal");
             position = null;
-          }
-          // Target decreased → scale down
-          else if (position && currentTargetAllocation < position.currentAllocation - 0.01) {
-            if (currentTargetAllocation <= 0.01) {
-              closeFullPosition(position, i, "weekly_reversal");
-              position = null;
-            } else {
-              scaleDownPosition(position, i, currentTargetAllocation);
-              if (position.blocks.length === 0) position = null;
-            }
           }
         }
       }
@@ -1447,57 +1437,43 @@ function runWalkForwardBacktest(
       }
     }
 
-    // --- Daily entry signal for scaling up ---
+    // --- Binary trend entry: single position per trend cycle (half-Kelly sizing) ---
     if (i < cooldownUntil) continue; // respect cooldown after exits
-    if (currentBias !== "flat" && currentTargetAllocation > 0) {
-      const currentAlloc = position?.currentAllocation || 0;
+    if (currentBias !== "flat" && currentTargetAllocation > 0 && !position) {
       const targetDir: "long" | "short" = currentBias === "long" ? "long" : "short";
 
-      if (currentAlloc < currentTargetAllocation - 0.01) {
-        // Low-vol stocks use relaxed entry (RSI pullback only), standard stocks use 2/3 confirm
-        const hasEntry = isLowVolStock
-          ? hasDailyMeanReversionEntry(close, i, targetDir)
-          : hasDailyEntrySignal(close, high, low, volume, i, targetDir);
-        if (hasEntry) {
-          const entryIdx = Math.min(i + executionDelay, close.length - 1);
-          if (entryIdx < close.length) {
-            const entryPrice = applyTradingCosts(open[entryIdx], targetDir === "long", tradeConfig);
-            const allocDelta = 0.25;
-            // Capital-proportional sizing: scales with equity, prevents compounding destruction
-            const maxAllocForLowVol = isLowVolStock ? 0.50 : 1.0;
-            const effectiveAllocDelta = Math.min(allocDelta, maxAllocForLowVol - (position?.currentAllocation || 0));
-            const positionSize = effectiveAllocDelta > 0 ? capital * effectiveAllocDelta * 0.90 : 0;
+      // Only enter once per trend cycle — no scaling blocks
+      const hasEntry = isLowVolStock
+        ? hasDailyMeanReversionEntry(close, i, targetDir)
+        : hasDailyEntrySignal(close, high, low, volume, i, targetDir);
+      if (hasEntry) {
+        const entryIdx = Math.min(i + executionDelay, close.length - 1);
+        if (entryIdx < close.length) {
+          const entryPrice = applyTradingCosts(open[entryIdx], targetDir === "long", tradeConfig);
+          // Half-Kelly sizing: ~15% of current capital per trade
+          const kellyFraction = 0.15;
+          const positionSize = capital * kellyFraction;
 
-            if (positionSize > 10 && entryPrice > 0) {
-              const shares = positionSize / entryPrice;
-              const commission = positionSize * (tradeConfig.commissionPct / 100) * 2;
-              capital -= positionSize;
+          if (positionSize > 10 && entryPrice > 0) {
+            const shares = positionSize / entryPrice;
+            const commission = positionSize * (tradeConfig.commissionPct / 100) * 2;
+            capital -= positionSize;
 
-              let regime = "neutral";
-              if (currentBias === "long") regime = "bullish";
-              else if (currentBias === "short") regime = "bearish";
+            let regime = "neutral";
+            if (currentBias === "long") regime = "bullish";
+            else if (currentBias === "short") regime = "bearish";
 
-              if (!position) {
-                position = {
-                  direction: targetDir, blocks: [],
-                  avgEntryPrice: entryPrice,
-                  totalShares: 0, totalPositionSize: 0,
-                  currentAllocation: 0,
-                  peakPrice: close[i], troughPrice: close[i],
-                  maxFavorable: 0, maxAdverse: 0,
-                  firstEntryIdx: entryIdx, regime,
-                };
-              }
+            position = {
+              direction: targetDir, blocks: [],
+              avgEntryPrice: entryPrice,
+              totalShares: shares, totalPositionSize: positionSize,
+              currentAllocation: kellyFraction,
+              peakPrice: close[i], troughPrice: close[i],
+              maxFavorable: 0, maxAdverse: 0,
+              firstEntryIdx: entryIdx, regime,
+            };
 
-              position.blocks.push({ entryIdx, entryPrice, shares, positionSize, commission, scaleLevel: position.blocks.length + 1 });
-
-              // Update aggregate position metrics
-              const totalCost = position.blocks.reduce((sum, b) => sum + b.entryPrice * b.shares, 0);
-              position.totalShares = position.blocks.reduce((sum, b) => sum + b.shares, 0);
-              position.totalPositionSize = position.blocks.reduce((sum, b) => sum + b.positionSize, 0);
-              position.avgEntryPrice = position.totalShares > 0 ? totalCost / position.totalShares : entryPrice;
-              position.currentAllocation = Math.min(currentAlloc + allocDelta, 1.0);
-            }
+            position.blocks.push({ entryIdx, entryPrice, shares, positionSize, commission, scaleLevel: 1 });
           }
         }
       }
@@ -2340,9 +2316,9 @@ serve(async (req) => {
       positionSizePct,
       stopLossPct,
       takeProfitPct,
-      commissionPct: 0.1,
-      spreadPct: 0.05,
-      slippagePct: 0.1,
+      commissionPct: 0.02,
+      spreadPct: 0.01,
+      slippagePct: 0.02,
     };
 
     const startDate = Math.floor(new Date(`${startYear}-01-01`).getTime() / 1000);
