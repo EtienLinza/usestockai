@@ -19,7 +19,7 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
-import { User, LogOut, LayoutDashboard, BookOpen, Heart, Menu, BarChart3 } from "lucide-react";
+import { User, LogOut, LayoutDashboard, Heart, Menu, BarChart3 } from "lucide-react";
 
 export const Navbar = () => {
   const location = useLocation();
