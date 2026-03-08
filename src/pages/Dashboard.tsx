@@ -1028,6 +1028,16 @@ const Dashboard = () => {
                   </motion.div>
                 )}
               </AnimatePresence>
+                </TabsContent>
+
+                <TabsContent value="market">
+                  <MarketTab />
+                </TabsContent>
+
+                <TabsContent value="sectors">
+                  <SectorsTab />
+                </TabsContent>
+              </Tabs>
             </motion.div>
           </div>
         </div>
