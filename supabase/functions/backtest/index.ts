@@ -936,6 +936,11 @@ interface OpenPosition {
   breakEvenActivated: boolean;
   maxAdverse: number;
   maxFavorable: number;
+  // Partial exit state
+  partialExitDone: boolean;
+  originalShares: number;
+  // Profit lock tiers
+  profitLockLevel: number; // The minimum return % locked in (0 = breakeven)
 }
 
 function runWalkForwardBacktest(
