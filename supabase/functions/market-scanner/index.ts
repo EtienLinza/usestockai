@@ -493,7 +493,7 @@ serve(async (req) => {
   try {
     const startTime = Date.now();
     const body = await req.json().catch(() => ({}));
-    const { batch = 0, batchSize = 25, checkSells = false, userId = null } = body;
+    const { batch = 0, batchSize = 25 } = body;
 
     // Determine which tickers to scan in this batch
     const start = batch * batchSize;
