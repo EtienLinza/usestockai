@@ -213,31 +213,31 @@ interface ProfileParams {
 
 const PROFILE_PARAMS: Record<StockProfile, ProfileParams> = {
   momentum: {
-    adxThreshold: 23, rsiOversold: 28, rsiOverbought: 70,
-    maxHoldTrend: 28, maxHoldMR: 8, maxHoldBreakout: 20,
-    takeProfitPct: 14, trailingStopATRMult: 2.5,
-    buyThreshold: 62, shortThreshold: 60,
+    adxThreshold: 20, rsiOversold: 28, rsiOverbought: 72,
+    maxHoldTrend: 50, maxHoldMR: 8, maxHoldBreakout: 25,
+    takeProfitPct: 16, trailingStopATRMult: 3.0,
+    buyThreshold: 68, shortThreshold: 66,
     trendConvictionBonus: 5, mrConvictionBonus: 0, breakoutConvictionBonus: 0,
   },
   value: {
-    adxThreshold: 28, rsiOversold: 26, rsiOverbought: 74,
-    maxHoldTrend: 16, maxHoldMR: 14, maxHoldBreakout: 12,
-    takeProfitPct: 8, trailingStopATRMult: 1.8,
-    buyThreshold: 62, shortThreshold: 60,
-    trendConvictionBonus: 0, mrConvictionBonus: 8, breakoutConvictionBonus: 0,
+    adxThreshold: 32, rsiOversold: 22, rsiOverbought: 78,
+    maxHoldTrend: 20, maxHoldMR: 18, maxHoldBreakout: 12,
+    takeProfitPct: 8, trailingStopATRMult: 2.5,
+    buyThreshold: 68, shortThreshold: 66,
+    trendConvictionBonus: 0, mrConvictionBonus: 12, breakoutConvictionBonus: 0,
   },
   index: {
     adxThreshold: 26, rsiOversold: 28, rsiOverbought: 72,
-    maxHoldTrend: 22, maxHoldMR: 12, maxHoldBreakout: 15,
-    takeProfitPct: 10, trailingStopATRMult: 2.0,
-    buyThreshold: 62, shortThreshold: 60,
+    maxHoldTrend: 40, maxHoldMR: 14, maxHoldBreakout: 18,
+    takeProfitPct: 12, trailingStopATRMult: 2.8,
+    buyThreshold: 68, shortThreshold: 66,
     trendConvictionBonus: 5, mrConvictionBonus: 5, breakoutConvictionBonus: 0,
   },
   volatile: {
-    adxThreshold: 21, rsiOversold: 24, rsiOverbought: 76,
-    maxHoldTrend: 12, maxHoldMR: 6, maxHoldBreakout: 9,
-    takeProfitPct: 12, trailingStopATRMult: 3.0,
-    buyThreshold: 62, shortThreshold: 60,
+    adxThreshold: 18, rsiOversold: 22, rsiOverbought: 78,
+    maxHoldTrend: 30, maxHoldMR: 6, maxHoldBreakout: 12,
+    takeProfitPct: 14, trailingStopATRMult: 3.5,
+    buyThreshold: 68, shortThreshold: 66,
     trendConvictionBonus: 0, mrConvictionBonus: 0, breakoutConvictionBonus: 5,
   },
 };
@@ -387,7 +387,7 @@ function createSignalTracker(): SignalState {
 function computeStrategySignal(
   close: number[], high: number[], low: number[], volume: number[],
   signalState: SignalState, step: number,
-  signalParams?: { adxThreshold?: number; rsiOversold?: number; rsiOverbought?: number; buyThreshold?: number; shortThreshold?: number },
+  signalParams?: { adxThreshold?: number; rsiOversold?: number; rsiOverbought?: number; buyThreshold?: number; shortThreshold?: number; forceValueMR?: boolean },
   profileBonuses?: { trendConvictionBonus?: number; mrConvictionBonus?: number; breakoutConvictionBonus?: number },
   adaptiveContext?: { spyBearish?: boolean; spySMADeclining?: boolean; isLeader?: boolean }
 ): {
@@ -496,11 +496,30 @@ function computeStrategySignal(
   const CONV_BUY_THRESH = SP.buyThreshold ?? 65;
   const CONV_SHORT_THRESH = SP.shortThreshold ?? 65;
 
+  // --- OBV (On-Balance Volume) for trend confirmation ---
+  let obvRising = true; // default: no block
+  if (volume.length >= 30) {
+    let obv = 0;
+    const obvArr: number[] = [0];
+    for (let oi = 1; oi < close.length; oi++) {
+      if (close[oi] > close[oi - 1]) obv += volume[oi];
+      else if (close[oi] < close[oi - 1]) obv -= volume[oi];
+      obvArr.push(obv);
+    }
+    // 20-bar OBV trend
+    if (obvArr.length >= 20) {
+      const obvNow = obvArr[obvArr.length - 1];
+      const obv20Ago = obvArr[obvArr.length - 20];
+      obvRising = obvNow >= obv20Ago; // OBV rising = volume confirms trend
+    }
+  }
+
   // --- Strategy A: Trend Following (ADX > threshold) ---
   // Conviction on TRUE 0-100 scale: no hardcoded floor
+  const forceValueMR = SP.forceValueMR === true;
   let trendSignal: "BUY" | "SHORT" | "HOLD" = "HOLD";
   let trendConviction = 0;
-  if (adxVal > ADX_THRESH) {
+  if (adxVal > ADX_THRESH && !forceValueMR) {
     const trendBuyConditions = [
       e12 > e26,
       currentPrice > s50,
@@ -518,7 +537,8 @@ function computeStrategySignal(
     const trendShortScore = trendShortConditions.filter(Boolean).length;
 
     // Dual-Regime Layer 1: Block trend BUYs only when BOTH stock AND SPY 200 SMA are declining
-    if (trendBuyScore >= 3 && above200 && !dualSMADeclining) {
+    // Fix 10: Also block trend BUY if OBV is declining (distribution)
+    if (trendBuyScore >= 3 && above200 && !dualSMADeclining && obvRising) {
       trendSignal = "BUY";
       let conv = trendBuyScore * 15;
       conv += Math.min((adxVal - ADX_THRESH) * 0.5, 10);
@@ -536,14 +556,16 @@ function computeStrategySignal(
     }
   }
 
-  // --- Strategy B: Mean Reversion (ADX < threshold OR RSI extremes) ---
+  // --- Strategy B: Mean Reversion (ADX < threshold OR RSI extremes OR forceValueMR) ---
   // Conviction 0-100: base = score*16 (3/5=48, 4/5=64, 5/5=80)
   let mrSignal: "BUY" | "SHORT" | "HOLD" = "HOLD";
   let mrConviction = 0;
   const mrRsiOverride = rsiVal < RSI_OS || rsiVal > RSI_OB;
-  if (adxVal < ADX_THRESH || mrRsiOverride) {
+  // Fix 9: Value profile forces MR evaluation even in high-ADX environments
+  if (adxVal < ADX_THRESH || mrRsiOverride || forceValueMR) {
     // Apply conviction penalty when ADX is high (trending) but RSI is extreme
-    const mrConvictionMultiplier = (adxVal >= ADX_THRESH && mrRsiOverride) ? 0.8 : 1.0;
+    const mrConvictionMultiplier = (adxVal >= ADX_THRESH && !forceValueMR && mrRsiOverride) ? 0.8 
+      : (forceValueMR && adxVal >= ADX_THRESH) ? 0.9 : 1.0;
     const atrDevThreshold = currentPrice > 0 ? (1.5 * currentATR) / currentPrice : 0.02;
     const mrBuyConditions = [
       rsiVal < RSI_OS,
@@ -563,14 +585,17 @@ function computeStrategySignal(
     ];
     const mrShortScore = mrShortConditions.filter(Boolean).length;
 
+    // For value profile: lower the MR entry bar from 3 to 2 conditions when forceValueMR
+    const mrMinScore = forceValueMR ? 2 : 3;
+
     // Dual-Regime Layer 1: Block MR buys only when BOTH stock below 200 AND SPY bearish
-    if (mrBuyScore >= 3 && !dualRegimeBearBlock) {
+    if (mrBuyScore >= mrMinScore && !dualRegimeBearBlock) {
       mrSignal = "BUY";
       let conv = mrBuyScore * 16;
       conv += Math.min(Math.abs(rsiVal - 50) * 0.3, 10);
       conv += Math.min(Math.abs(smaDeviation) * 100, 10);
       mrConviction = Math.min(100, Math.round(conv * mrConvictionMultiplier));
-    } else if (mrShortScore >= 3 && !(above200 && ctx.spyBearish === false)) {
+    } else if (mrShortScore >= mrMinScore && !(above200 && ctx.spyBearish === false)) {
       mrSignal = "SHORT";
       let conv = mrShortScore * 16;
       conv += Math.min(Math.abs(rsiVal - 50) * 0.3, 10);
@@ -911,6 +936,11 @@ interface OpenPosition {
   breakEvenActivated: boolean;
   maxAdverse: number;
   maxFavorable: number;
+  // Partial exit state
+  partialExitDone: boolean;
+  originalShares: number;
+  // Profit lock tiers
+  profitLockLevel: number; // The minimum return % locked in (0 = breakeven)
 }
 
 function runWalkForwardBacktest(
@@ -928,7 +958,8 @@ function runWalkForwardBacktest(
   const equityCurve: { date: string; value: number }[] = [{ date: timestamps[0], value: capital }];
 
   const TRAIN_WINDOW = 250;
-  const STEP = stepOverride || 3;
+  // Fix 6: STEP=1 for single-ticker, STEP=3 for multi-ticker portfolios
+  const STEP = stepOverride || (config.tickers.length <= 1 ? 1 : 3);
   let totalBars = 0;
   let barsInTrade = 0;
   const COOLDOWN_BARS = 5;
@@ -1120,6 +1151,34 @@ function runWalkForwardBacktest(
         if (priceChange > pos.peakReturn) pos.peakReturn = priceChange;
         if (priceChange >= pos.breakevenThreshold) pos.breakEvenActivated = true;
 
+        // Fix 1: Tiered profit locks
+        // Once trade reaches +3%, lock in breakeven (profitLockLevel = 0)
+        // Once trade reaches +5%, lock in +2%
+        // Once trade reaches +8%, lock in +4%
+        if (priceChange >= 0.08 && pos.profitLockLevel < 0.04) pos.profitLockLevel = 0.04;
+        else if (priceChange >= 0.05 && pos.profitLockLevel < 0.02) pos.profitLockLevel = 0.02;
+        else if (priceChange >= 0.03 && pos.profitLockLevel < 0) pos.profitLockLevel = 0;
+
+        // Fix 7: Partial exit at 50% of take-profit
+        if (!pos.partialExitDone && priceChange >= pos.takeProfitPct * 0.5) {
+          // Sell 50% of position
+          const partialShares = pos.shares * 0.5;
+          const partialExitPrice = applyTradingCosts(close[j], pos.action !== "BUY", tradeConfig);
+          let partialPnl: number;
+          if (pos.action === "BUY") {
+            partialPnl = (partialExitPrice - pos.entryPrice) * partialShares - pos.commission * 0.5;
+          } else {
+            partialPnl = (pos.entryPrice - partialExitPrice) * partialShares - pos.commission * 0.5;
+          }
+          capital += (pos.positionSize * 0.5) + partialPnl;
+          pos.shares -= partialShares;
+          pos.positionSize *= 0.5;
+          pos.commission *= 0.5;
+          pos.partialExitDone = true;
+          // Widen trailing stop for remaining 50% to let winners run
+          pos.trailingStopDist *= 1.5;
+        }
+
         // Hard stop-loss
         if (priceChange <= -pos.effectiveStopPct) {
           exitPrice = pos.action === "BUY"
@@ -1136,25 +1195,33 @@ function runWalkForwardBacktest(
           exitDate = timestamps[j]; exitIdx = j; exitReason = "take_profit"; exited = true; break;
         }
 
-        // Trailing stop
+        // Trailing stop with profit lock tiers
         if (pos.useTrailingStop && pos.peakReturn > pos.breakevenThreshold) {
           const trailLevel = pos.peakReturn - pos.trailingStopDist;
-          const stopLevel = pos.breakEvenActivated ? Math.max(0, trailLevel) : trailLevel;
-          if (priceChange <= stopLevel) {
+          // Use the higher of: trailing level, profit lock level, or 0 (if breakeven activated)
+          const minStop = pos.breakEvenActivated ? Math.max(pos.profitLockLevel, 0) : pos.profitLockLevel;
+          const stopLevel = Math.max(minStop, trailLevel);
+          if (priceChange <= stopLevel && stopLevel > -pos.effectiveStopPct) {
             exitPrice = close[j];
             exitDate = timestamps[j]; exitIdx = j; exitReason = "trailing_stop"; exited = true; break;
           }
         }
 
-        // Time exit
-        if (j - pos.entryIdx >= pos.maxHoldBars) {
+        // Fix 5: Time exit — skip for profitable trend trades (let trailing stop manage)
+        const isTrendAndProfitable = pos.strategy === "trend" && priceChange > 0;
+        if (j - pos.entryIdx >= pos.maxHoldBars && !isTrendAndProfitable) {
+          exitPrice = close[j];
+          exitDate = timestamps[j]; exitIdx = j; exitReason = "time_exit"; exited = true; break;
+        }
+        // Hard max hold for trend: 2× maxHoldBars even if profitable
+        if (j - pos.entryIdx >= pos.maxHoldBars * 2) {
           exitPrice = close[j];
           exitDate = timestamps[j]; exitIdx = j; exitReason = "time_exit"; exited = true; break;
         }
       }
 
       // Also check time exit at current bar
-      if (!exited && (i - pos.entryIdx >= pos.maxHoldBars)) {
+      if (!exited && (i - pos.entryIdx >= pos.maxHoldBars * 2)) {
         exitPrice = close[Math.min(i, close.length - 1)];
         exitDate = timestamps[Math.min(i, close.length - 1)];
         exitIdx = Math.min(i, close.length - 1);
@@ -1253,12 +1320,16 @@ function runWalkForwardBacktest(
     const effectiveBuyThresh = userExplicitBuyThresh ? config.buyThreshold : activeProfile.buyThreshold;
     const effectiveShortThresh = userExplicitShortThresh ? Math.abs(config.shortThreshold) : activeProfile.shortThreshold;
 
+    // Fix 9: Value profile forces MR evaluation
+    const isValueProfile = currentClassification?.classification === "value";
+
     const signal = computeStrategySignal(trainClose, trainHigh, trainLow, trainVol, signalState, STEP, {
       adxThreshold: effectiveADX,
       rsiOversold: effectiveRSIOS,
       rsiOverbought: effectiveRSIOB,
       buyThreshold: effectiveBuyThresh,
       shortThreshold: effectiveShortThresh,
+      forceValueMR: isValueProfile,
     }, {
       trendConvictionBonus: activeProfile.trendConvictionBonus,
       mrConvictionBonus: activeProfile.mrConvictionBonus,
@@ -1278,18 +1349,26 @@ function runWalkForwardBacktest(
     else if (signal.consensusScore < 0) action = "SHORT";
     if (action === "HOLD") continue;
 
-    // Adaptive short filter: Disable shorts when SPY > 200 SMA, UNLESS stock is a leader or an index
-    if (action === "SHORT" && spy200SMAMap.size > 0 && !isLeader && !isIndexTicker) {
-      const spyAbove200 = spy200SMAMap.get(currentDate);
-      if (spyAbove200 === true) continue;
+    // Fix 4: Aggressive short suppression
+    // Block ALL shorts unless both SPY AND stock are below 200 SMA AND stock has negative 50-bar momentum
+    if (action === "SHORT" && !isIndexTicker) {
+      if (spy200SMAMap.size > 0 && !isLeader) {
+        const spyAbove200 = spy200SMAMap.get(currentDate);
+        if (spyAbove200 === true) continue; // SPY bullish = no shorts
+      }
+      // Additional momentum check: stock must have negative 50-bar momentum
+      if (i >= 50) {
+        const mom50 = (close[i] - close[i - 50]) / close[i - 50];
+        if (mom50 > 0) continue; // Stock still has positive momentum = no shorts
+      }
     }
 
-    // Minimum profitability filter: expected move must exceed trading costs
+    // Fix 3: Minimum profitability filter for ALL strategies (not just MR)
     const roundTripCost = (tradeConfig.commissionPct + tradeConfig.spreadPct + tradeConfig.slippagePct) / 100 * 2;
-    const minExpectedMove = roundTripCost * 3; // Need 3× costs to justify the trade
+    const minExpectedMove = roundTripCost * 4; // Need 4× costs to justify the trade (was 3×)
     const atrPctForFilter = signal.atr / close[i];
-    if (atrPctForFilter < minExpectedMove && signal.strategy === "mean_reversion") {
-      continue; // Skip MR trades where expected move is too small relative to costs
+    if (atrPctForFilter < minExpectedMove) {
+      continue; // Skip ALL trades where expected move is too small relative to costs
     }
 
     // Block duplicate-direction trades on same ticker
@@ -1321,16 +1400,18 @@ function runWalkForwardBacktest(
     const trailingStopDist = effectiveTrailingMult * atrPct;
     const breakevenThreshold = atrPct;
 
-    // Fix 5: Use 2 ATR for trend stops (was 3)
+    // Fix 8: Wider ATR-proportional stops: 2.5× ATR (was 2×), min 3%, cap 10%
     let effectiveStopPct = signal.strategy === "trend"
-      ? Math.max(config.stopLossPct / 100, 2 * atrPct)
-      : config.stopLossPct / 100;
+      ? Math.max(config.stopLossPct / 100, 2.5 * atrPct)
+      : Math.max(config.stopLossPct / 100, 2 * atrPct);
+    // Minimum 3% stop for low-vol stocks
+    effectiveStopPct = Math.max(effectiveStopPct, 0.03);
     // Widen hard stop by 1.5× for SHORTs in bear regimes
     if (action === "SHORT" && isBearRegime) {
       effectiveStopPct *= 1.5;
     }
-    // Fix 1: Hard 8% loss cap — no trade ever risks more than 8%
-    effectiveStopPct = Math.min(effectiveStopPct, 0.08);
+    // Hard 10% loss cap (was 8%)
+    effectiveStopPct = Math.min(effectiveStopPct, 0.10);
 
     // Fix 3: Risk-based position sizing
     // Risk riskPerTrade fraction of capital per trade, capped at 25% of capital
@@ -1354,6 +1435,8 @@ function runWalkForwardBacktest(
       predictedReturn: signal.predictedReturn, signal_atr: signal.atr,
       positionSizeMultiplier: signal.positionSizeMultiplier,
       peakReturn: 0, breakEvenActivated: false, maxAdverse: 0, maxFavorable: 0,
+      partialExitDone: false, originalShares: shares,
+      profitLockLevel: -1, // -1 = no lock yet
     });
 
     cooldownPerTicker.set(ticker, i + COOLDOWN_BARS * STEP);
