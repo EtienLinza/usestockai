@@ -1,10 +1,10 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Navbar } from "@/components/Navbar";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -16,11 +16,14 @@ import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 import {
-  Radio, Loader2, TrendingUp, TrendingDown, AlertTriangle,
+  Loader2, TrendingUp, TrendingDown, AlertTriangle,
   RefreshCw, Zap, DollarSign, Target, ArrowUpRight, ArrowDownRight,
-  Package, BarChart3, Clock, CheckCircle2,
+  Package, BarChart3, Clock, CheckCircle2, Bell,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import {
+  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+} from "recharts";
 
 interface Signal {
   id: string;
@@ -53,6 +56,19 @@ interface Position {
   exit_reason: string | null;
 }
 
+interface SellAlert {
+  ticker: string;
+  reason: string;
+  currentPrice: number;
+}
+
+interface PortfolioSnapshot {
+  date: string;
+  total_value: number;
+  cash: number;
+  positions_value: number;
+}
+
 const Signals = () => {
   const { user } = useAuth();
   const [signals, setSignals] = useState<Signal[]>([]);
@@ -68,7 +84,19 @@ const Signals = () => {
   const [sellPrice, setSellPrice] = useState("");
   const [activeTab, setActiveTab] = useState("signals");
 
-  // Load signals and positions
+  // Live P&L state
+  const [currentPrices, setCurrentPrices] = useState<Record<string, number>>({});
+  const [pricesLoading, setPricesLoading] = useState(false);
+
+  // Sell alerts state
+  const [sellAlerts, setSellAlerts] = useState<SellAlert[]>([]);
+
+  // Portfolio snapshots
+  const [portfolioHistory, setPortfolioHistory] = useState<PortfolioSnapshot[]>([]);
+
+  // Last scan time
+  const [lastScanTime, setLastScanTime] = useState<string | null>(null);
+
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
@@ -78,7 +106,13 @@ const Signals = () => {
         .gte("expires_at", new Date().toISOString())
         .order("confidence", { ascending: false });
 
-      if (signalData) setSignals(signalData as Signal[]);
+      if (signalData) {
+        setSignals(signalData as Signal[]);
+        // Use latest signal's created_at as proxy for last scan time
+        if (signalData.length > 0) {
+          setLastScanTime(signalData[0].created_at);
+        }
+      }
 
       if (user) {
         const { data: posData } = await supabase
@@ -88,6 +122,15 @@ const Signals = () => {
           .order("created_at", { ascending: false });
 
         if (posData) setPositions(posData as Position[]);
+
+        // Load portfolio history
+        const { data: histData } = await supabase
+          .from("virtual_portfolio_log")
+          .select("*")
+          .eq("user_id", user.id)
+          .order("date", { ascending: true });
+
+        if (histData) setPortfolioHistory(histData as PortfolioSnapshot[]);
       }
     } catch (err) {
       console.error("Failed to load data:", err);
@@ -97,7 +140,7 @@ const Signals = () => {
 
   useEffect(() => { loadData(); }, [loadData]);
 
-  // Realtime subscription for new signals
+  // Realtime subscription
   useEffect(() => {
     const channel = supabase
       .channel("live-signals")
@@ -109,6 +152,67 @@ const Signals = () => {
     return () => { supabase.removeChannel(channel); };
   }, [loadData]);
 
+  // Fetch current prices for open positions
+  const openPositions = useMemo(() => positions.filter(p => p.status === "open"), [positions]);
+  const closedPositions = useMemo(() => positions.filter(p => p.status === "closed"), [positions]);
+
+  const fetchCurrentPrices = useCallback(async () => {
+    const tickers = [...new Set(openPositions.map(p => p.ticker))];
+    if (tickers.length === 0) return;
+
+    setPricesLoading(true);
+    const prices: Record<string, number> = {};
+
+    await Promise.all(
+      tickers.map(async (ticker) => {
+        try {
+          const { data } = await supabase.functions.invoke("fetch-stock-price", {
+            body: { ticker },
+          });
+          if (data?.latestPrice) prices[ticker] = data.latestPrice;
+        } catch (e) {
+          console.error(`Price fetch failed for ${ticker}:`, e);
+        }
+      })
+    );
+
+    setCurrentPrices(prices);
+    setPricesLoading(false);
+  }, [openPositions]);
+
+  // Auto-fetch prices when switching to portfolio tab
+  useEffect(() => {
+    if (activeTab === "portfolio" && openPositions.length > 0) {
+      fetchCurrentPrices();
+    }
+  }, [activeTab, openPositions.length, fetchCurrentPrices]);
+
+  // Compute unrealized P&L for a position
+  const getUnrealizedPnL = (pos: Position) => {
+    const price = currentPrices[pos.ticker];
+    if (!price) return null;
+    return pos.position_type === "long"
+      ? (price - Number(pos.entry_price)) * Number(pos.shares)
+      : (Number(pos.entry_price) - price) * Number(pos.shares);
+  };
+
+  const getUnrealizedPnLPct = (pos: Position) => {
+    const price = currentPrices[pos.ticker];
+    if (!price) return null;
+    return pos.position_type === "long"
+      ? ((price - Number(pos.entry_price)) / Number(pos.entry_price)) * 100
+      : ((Number(pos.entry_price) - price) / Number(pos.entry_price)) * 100;
+  };
+
+  const totalUnrealizedPnL = useMemo(() => {
+    return openPositions.reduce((sum, pos) => {
+      const pnl = getUnrealizedPnL(pos);
+      return sum + (pnl || 0);
+    }, 0);
+  }, [openPositions, currentPrices]);
+
+  const totalRealizedPnL = closedPositions.reduce((sum, p) => sum + (Number(p.pnl) || 0), 0);
+
   // Run market scan
   const runScan = async () => {
     if (!user) {
@@ -117,6 +221,7 @@ const Signals = () => {
     }
     setScanning(true);
     setScanProgress({ batch: 0, total: 3 });
+    const collectedSellAlerts: SellAlert[] = [];
 
     try {
       let batch = 0;
@@ -131,14 +236,31 @@ const Signals = () => {
 
         if (error) throw error;
         totalSignals += data.signals?.length || 0;
+
+        // Collect sell alerts from scanner
+        if (data.sellSignals && data.sellSignals.length > 0) {
+          collectedSellAlerts.push(...data.sellSignals);
+        }
+
         done = data.done;
         batch++;
 
         if (!done) await new Promise(r => setTimeout(r, 500));
       }
 
+      setSellAlerts(collectedSellAlerts);
+      setLastScanTime(new Date().toISOString());
+
+      if (collectedSellAlerts.length > 0) {
+        toast.warning(`${collectedSellAlerts.length} sell alert(s) for your positions!`, {
+          duration: 8000,
+        });
+      }
+
       toast.success(`Scan complete! Found ${totalSignals} signals across ${batch} batches`);
       await loadData();
+      // Refresh prices after scan
+      if (openPositions.length > 0) fetchCurrentPrices();
     } catch (err: any) {
       toast.error(err.message || "Scan failed");
     }
@@ -204,15 +326,22 @@ const Signals = () => {
       toast.success(`Closed ${selectedPosition.ticker} at $${price.toFixed(2)} | P&L: $${pnl.toFixed(2)}`);
       setSellDialogOpen(false);
       setSellPrice("");
+      // Remove from sell alerts
+      setSellAlerts(prev => prev.filter(a => a.ticker !== selectedPosition.ticker));
       await loadData();
     }
   };
 
-  const openPositions = positions.filter(p => p.status === "open");
-  const closedPositions = positions.filter(p => p.status === "closed");
-  const totalPnL = closedPositions.reduce((sum, p) => sum + (Number(p.pnl) || 0), 0);
+  // Close position from sell alert (auto-fill current price)
+  const handleSellAlertClose = (alert: SellAlert) => {
+    const pos = openPositions.find(p => p.ticker === alert.ticker);
+    if (!pos) return;
+    setSelectedPosition(pos);
+    setSellPrice(alert.currentPrice.toFixed(2));
+    setSellDialogOpen(true);
+  };
+
   const buySignals = signals.filter(s => s.signal_type === "BUY");
-  const sellSignals = signals.filter(s => s.signal_type === "SELL");
 
   const getConfidenceColor = (c: number) => {
     if (c >= 80) return "text-success";
@@ -233,6 +362,13 @@ const Signals = () => {
     return colors[regime] || colors.neutral;
   };
 
+  const totalPortfolioValue = useMemo(() => {
+    return openPositions.reduce((sum, pos) => {
+      const price = currentPrices[pos.ticker] || Number(pos.entry_price);
+      return sum + price * Number(pos.shares);
+    }, 0);
+  }, [openPositions, currentPrices]);
+
   return (
     <div className="min-h-screen bg-background">
       <Navbar />
@@ -251,6 +387,11 @@ const Signals = () => {
               </h1>
               <p className="text-muted-foreground mt-1">
                 AI-powered market scanner • {signals.length} active signals • {openPositions.length} open positions
+                {lastScanTime && (
+                  <span className="ml-2 text-xs">
+                    • Last scan: {new Date(lastScanTime).toLocaleTimeString()}
+                  </span>
+                )}
               </p>
             </div>
             <Button
@@ -275,7 +416,7 @@ const Signals = () => {
           </div>
 
           {/* Quick Stats */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-6">
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mt-6">
             <Card variant="stat">
               <CardContent className="p-4">
                 <div className="flex items-center gap-2 text-muted-foreground text-sm">
@@ -297,25 +438,85 @@ const Signals = () => {
             <Card variant="stat">
               <CardContent className="p-4">
                 <div className="flex items-center gap-2 text-muted-foreground text-sm">
-                  <BarChart3 className="w-4 h-4 text-primary" />
-                  Closed Trades
+                  <Target className="w-4 h-4 text-primary" />
+                  Portfolio Value
                 </div>
-                <div className="text-2xl font-bold mt-1">{closedPositions.length}</div>
+                <div className="text-2xl font-bold mt-1 font-mono">
+                  ${totalPortfolioValue.toFixed(0)}
+                </div>
+              </CardContent>
+            </Card>
+            <Card variant="stat">
+              <CardContent className="p-4">
+                <div className="flex items-center gap-2 text-muted-foreground text-sm">
+                  <TrendingUp className="w-4 h-4" />
+                  Unrealized P&L
+                </div>
+                <div className={cn("text-2xl font-bold mt-1 font-mono", totalUnrealizedPnL >= 0 ? "text-success" : "text-destructive")}>
+                  {totalUnrealizedPnL >= 0 ? "+" : ""}${totalUnrealizedPnL.toFixed(2)}
+                </div>
               </CardContent>
             </Card>
             <Card variant="stat">
               <CardContent className="p-4">
                 <div className="flex items-center gap-2 text-muted-foreground text-sm">
                   <DollarSign className="w-4 h-4" />
-                  Total P&L
+                  Realized P&L
                 </div>
-                <div className={cn("text-2xl font-bold mt-1", totalPnL >= 0 ? "text-success" : "text-destructive")}>
-                  {totalPnL >= 0 ? "+" : ""}${totalPnL.toFixed(2)}
+                <div className={cn("text-2xl font-bold mt-1 font-mono", totalRealizedPnL >= 0 ? "text-success" : "text-destructive")}>
+                  {totalRealizedPnL >= 0 ? "+" : ""}${totalRealizedPnL.toFixed(2)}
                 </div>
               </CardContent>
             </Card>
           </div>
         </motion.div>
+
+        {/* Sell Alerts Banner */}
+        <AnimatePresence>
+          {sellAlerts.length > 0 && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: "auto" }}
+              exit={{ opacity: 0, height: 0 }}
+              className="mb-6"
+            >
+              <Card className="border-warning/50 bg-warning/5">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-lg flex items-center gap-2 text-warning">
+                    <Bell className="w-5 h-5" />
+                    Sell Alerts ({sellAlerts.length})
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  {sellAlerts.map((alert, i) => (
+                    <div
+                      key={`${alert.ticker}-${i}`}
+                      className="flex items-center justify-between p-3 rounded-lg bg-warning/10 border border-warning/20"
+                    >
+                      <div className="flex items-center gap-3">
+                        <AlertTriangle className="w-4 h-4 text-warning shrink-0" />
+                        <div>
+                          <span className="font-mono font-bold">{alert.ticker}</span>
+                          <span className="text-sm text-muted-foreground ml-2">{alert.reason}</span>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <span className="font-mono text-sm">${alert.currentPrice.toFixed(2)}</span>
+                        <Button
+                          size="sm"
+                          variant="destructive"
+                          onClick={() => handleSellAlertClose(alert)}
+                        >
+                          Close Position
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </CardContent>
+              </Card>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Tabs */}
         <Tabs value={activeTab} onValueChange={setActiveTab}>
@@ -327,10 +528,15 @@ const Signals = () => {
             <TabsTrigger value="portfolio" className="gap-2">
               <Package className="w-4 h-4" />
               Portfolio ({openPositions.length})
+              {sellAlerts.length > 0 && (
+                <span className="ml-1 w-5 h-5 rounded-full bg-warning text-warning-foreground text-xs flex items-center justify-center">
+                  {sellAlerts.length}
+                </span>
+              )}
             </TabsTrigger>
             <TabsTrigger value="history" className="gap-2">
               <Clock className="w-4 h-4" />
-              Trade History ({closedPositions.length})
+              History ({closedPositions.length})
             </TabsTrigger>
           </TabsList>
 
@@ -390,7 +596,7 @@ const Signals = () => {
 
                               <div className="hidden sm:flex items-center gap-2">
                                 <Badge variant="outline" className={getRegimeBadge(signal.regime)}>
-                                  {signal.regime.replace("_", " ")}
+                                  {signal.regime?.replace("_", " ")}
                                 </Badge>
                                 <Badge variant="outline" className="text-xs">
                                   {signal.stock_profile}
@@ -442,6 +648,52 @@ const Signals = () => {
 
           {/* Portfolio Tab */}
           <TabsContent value="portfolio">
+            {/* Equity Curve Chart */}
+            {portfolioHistory.length > 1 && (
+              <Card variant="glass" className="mb-6">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <BarChart3 className="w-4 h-4 text-primary" />
+                    Portfolio Performance
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="h-48">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={portfolioHistory}>
+                        <CartesianGrid strokeDasharray="3 3" className="stroke-border/30" />
+                        <XAxis
+                          dataKey="date"
+                          tick={{ fontSize: 11 }}
+                          className="fill-muted-foreground"
+                        />
+                        <YAxis
+                          tick={{ fontSize: 11 }}
+                          className="fill-muted-foreground"
+                          tickFormatter={(v) => `$${v.toLocaleString()}`}
+                        />
+                        <Tooltip
+                          contentStyle={{
+                            backgroundColor: "hsl(var(--card))",
+                            border: "1px solid hsl(var(--border))",
+                            borderRadius: "8px",
+                          }}
+                          formatter={(value: number) => [`$${value.toFixed(2)}`, "Portfolio Value"]}
+                        />
+                        <Line
+                          type="monotone"
+                          dataKey="total_value"
+                          stroke="hsl(var(--primary))"
+                          strokeWidth={2}
+                          dot={false}
+                        />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
             {openPositions.length === 0 ? (
               <Card variant="glass" className="p-12 text-center">
                 <Package className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
@@ -452,50 +704,104 @@ const Signals = () => {
               </Card>
             ) : (
               <Card variant="glass">
+                <div className="p-4 border-b border-border/30 flex items-center justify-between">
+                  <span className="text-sm text-muted-foreground">
+                    {pricesLoading ? (
+                      <span className="flex items-center gap-2">
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                        Fetching live prices...
+                      </span>
+                    ) : Object.keys(currentPrices).length > 0 ? (
+                      "Live prices loaded"
+                    ) : (
+                      "Prices not yet loaded"
+                    )}
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={fetchCurrentPrices}
+                    disabled={pricesLoading}
+                  >
+                    <RefreshCw className={cn("w-3 h-3 mr-1", pricesLoading && "animate-spin")} />
+                    Refresh Prices
+                  </Button>
+                </div>
                 <Table>
                   <TableHeader>
                     <TableRow>
                       <TableHead>Ticker</TableHead>
                       <TableHead>Type</TableHead>
-                      <TableHead>Entry Price</TableHead>
+                      <TableHead>Entry</TableHead>
+                      <TableHead>Current</TableHead>
                       <TableHead>Shares</TableHead>
-                      <TableHead>Position Value</TableHead>
+                      <TableHead>Unrealized P&L</TableHead>
+                      <TableHead>P&L %</TableHead>
                       <TableHead>Opened</TableHead>
                       <TableHead></TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {openPositions.map((pos) => (
-                      <TableRow key={pos.id}>
-                        <TableCell className="font-mono font-bold">{pos.ticker}</TableCell>
-                        <TableCell>
-                          <Badge variant="outline" className={pos.position_type === "long" ? "text-success" : "text-destructive"}>
-                            {pos.position_type}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="font-mono">${Number(pos.entry_price).toFixed(2)}</TableCell>
-                        <TableCell className="font-mono">{Number(pos.shares).toFixed(2)}</TableCell>
-                        <TableCell className="font-mono">
-                          ${(Number(pos.entry_price) * Number(pos.shares)).toFixed(2)}
-                        </TableCell>
-                        <TableCell className="text-sm text-muted-foreground">
-                          {new Date(pos.created_at).toLocaleDateString()}
-                        </TableCell>
-                        <TableCell>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => {
-                              setSelectedPosition(pos);
-                              setSellPrice("");
-                              setSellDialogOpen(true);
-                            }}
-                          >
-                            Close Position
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    ))}
+                    {openPositions.map((pos) => {
+                      const unrealizedPnL = getUnrealizedPnL(pos);
+                      const unrealizedPnLPct = getUnrealizedPnLPct(pos);
+                      const curPrice = currentPrices[pos.ticker];
+                      const hasSellAlert = sellAlerts.some(a => a.ticker === pos.ticker);
+
+                      return (
+                        <TableRow key={pos.id} className={hasSellAlert ? "bg-warning/5" : ""}>
+                          <TableCell className="font-mono font-bold">
+                            <div className="flex items-center gap-2">
+                              {pos.ticker}
+                              {hasSellAlert && <AlertTriangle className="w-3 h-3 text-warning" />}
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant="outline" className={pos.position_type === "long" ? "text-success" : "text-destructive"}>
+                              {pos.position_type}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="font-mono">${Number(pos.entry_price).toFixed(2)}</TableCell>
+                          <TableCell className="font-mono">
+                            {curPrice ? `$${curPrice.toFixed(2)}` : (
+                              pricesLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : "—"
+                            )}
+                          </TableCell>
+                          <TableCell className="font-mono">{Number(pos.shares).toFixed(2)}</TableCell>
+                          <TableCell>
+                            {unrealizedPnL !== null ? (
+                              <span className={cn("font-mono font-bold", unrealizedPnL >= 0 ? "text-success" : "text-destructive")}>
+                                {unrealizedPnL >= 0 ? "+" : ""}${unrealizedPnL.toFixed(2)}
+                              </span>
+                            ) : "—"}
+                          </TableCell>
+                          <TableCell>
+                            {unrealizedPnLPct !== null ? (
+                              <span className={cn("font-mono font-bold", unrealizedPnLPct >= 0 ? "text-success" : "text-destructive")}>
+                                {unrealizedPnLPct >= 0 ? "+" : ""}{unrealizedPnLPct.toFixed(2)}%
+                              </span>
+                            ) : "—"}
+                          </TableCell>
+                          <TableCell className="text-sm text-muted-foreground">
+                            {new Date(pos.created_at).toLocaleDateString()}
+                          </TableCell>
+                          <TableCell>
+                            <Button
+                              size="sm"
+                              variant={hasSellAlert ? "destructive" : "outline"}
+                              onClick={() => {
+                                setSelectedPosition(pos);
+                                const alert = sellAlerts.find(a => a.ticker === pos.ticker);
+                                setSellPrice(alert ? alert.currentPrice.toFixed(2) : curPrice ? curPrice.toFixed(2) : "");
+                                setSellDialogOpen(true);
+                              }}
+                            >
+                              Close Position
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
                   </TableBody>
                 </Table>
               </Card>
@@ -636,7 +942,7 @@ const Signals = () => {
                   variant="glow"
                 />
                 {sellPrice && selectedPosition && (
-                  <p className={cn("text-sm mt-2 font-mono", 
+                  <p className={cn("text-sm mt-2 font-mono",
                     (() => {
                       const pnl = selectedPosition.position_type === "long"
                         ? (parseFloat(sellPrice) - Number(selectedPosition.entry_price)) * Number(selectedPosition.shares)
