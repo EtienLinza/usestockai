@@ -1151,6 +1151,34 @@ function runWalkForwardBacktest(
         if (priceChange > pos.peakReturn) pos.peakReturn = priceChange;
         if (priceChange >= pos.breakevenThreshold) pos.breakEvenActivated = true;
 
+        // Fix 1: Tiered profit locks
+        // Once trade reaches +3%, lock in breakeven (profitLockLevel = 0)
+        // Once trade reaches +5%, lock in +2%
+        // Once trade reaches +8%, lock in +4%
+        if (priceChange >= 0.08 && pos.profitLockLevel < 0.04) pos.profitLockLevel = 0.04;
+        else if (priceChange >= 0.05 && pos.profitLockLevel < 0.02) pos.profitLockLevel = 0.02;
+        else if (priceChange >= 0.03 && pos.profitLockLevel < 0) pos.profitLockLevel = 0;
+
+        // Fix 7: Partial exit at 50% of take-profit
+        if (!pos.partialExitDone && priceChange >= pos.takeProfitPct * 0.5) {
+          // Sell 50% of position
+          const partialShares = pos.shares * 0.5;
+          const partialExitPrice = applyTradingCosts(close[j], pos.action !== "BUY", tradeConfig);
+          let partialPnl: number;
+          if (pos.action === "BUY") {
+            partialPnl = (partialExitPrice - pos.entryPrice) * partialShares - pos.commission * 0.5;
+          } else {
+            partialPnl = (pos.entryPrice - partialExitPrice) * partialShares - pos.commission * 0.5;
+          }
+          capital += (pos.positionSize * 0.5) + partialPnl;
+          pos.shares -= partialShares;
+          pos.positionSize *= 0.5;
+          pos.commission *= 0.5;
+          pos.partialExitDone = true;
+          // Widen trailing stop for remaining 50% to let winners run
+          pos.trailingStopDist *= 1.5;
+        }
+
         // Hard stop-loss
         if (priceChange <= -pos.effectiveStopPct) {
           exitPrice = pos.action === "BUY"
@@ -1167,25 +1195,33 @@ function runWalkForwardBacktest(
           exitDate = timestamps[j]; exitIdx = j; exitReason = "take_profit"; exited = true; break;
         }
 
-        // Trailing stop
+        // Trailing stop with profit lock tiers
         if (pos.useTrailingStop && pos.peakReturn > pos.breakevenThreshold) {
           const trailLevel = pos.peakReturn - pos.trailingStopDist;
-          const stopLevel = pos.breakEvenActivated ? Math.max(0, trailLevel) : trailLevel;
-          if (priceChange <= stopLevel) {
+          // Use the higher of: trailing level, profit lock level, or 0 (if breakeven activated)
+          const minStop = pos.breakEvenActivated ? Math.max(pos.profitLockLevel, 0) : pos.profitLockLevel;
+          const stopLevel = Math.max(minStop, trailLevel);
+          if (priceChange <= stopLevel && stopLevel > -pos.effectiveStopPct) {
             exitPrice = close[j];
             exitDate = timestamps[j]; exitIdx = j; exitReason = "trailing_stop"; exited = true; break;
           }
         }
 
-        // Time exit
-        if (j - pos.entryIdx >= pos.maxHoldBars) {
+        // Fix 5: Time exit — skip for profitable trend trades (let trailing stop manage)
+        const isTrendAndProfitable = pos.strategy === "trend" && priceChange > 0;
+        if (j - pos.entryIdx >= pos.maxHoldBars && !isTrendAndProfitable) {
+          exitPrice = close[j];
+          exitDate = timestamps[j]; exitIdx = j; exitReason = "time_exit"; exited = true; break;
+        }
+        // Hard max hold for trend: 2× maxHoldBars even if profitable
+        if (j - pos.entryIdx >= pos.maxHoldBars * 2) {
           exitPrice = close[j];
           exitDate = timestamps[j]; exitIdx = j; exitReason = "time_exit"; exited = true; break;
         }
       }
 
       // Also check time exit at current bar
-      if (!exited && (i - pos.entryIdx >= pos.maxHoldBars)) {
+      if (!exited && (i - pos.entryIdx >= pos.maxHoldBars * 2)) {
         exitPrice = close[Math.min(i, close.length - 1)];
         exitDate = timestamps[Math.min(i, close.length - 1)];
         exitIdx = Math.min(i, close.length - 1);
