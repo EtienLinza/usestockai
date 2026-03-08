@@ -974,7 +974,8 @@ interface Trade {
 function applyTradingCosts(price: number, isBuy: boolean, config: TradeConfig): number {
   let adjusted = price;
   adjusted *= isBuy ? (1 + config.spreadPct / 100) : (1 - config.spreadPct / 100);
-  const slippage = 1 + (Math.random() - 0.5) * 2 * (config.slippagePct / 100);
+  // Deterministic worst-case slippage (no random noise)
+  const slippage = 1 + (isBuy ? 1 : -1) * (config.slippagePct / 100);
   adjusted *= slippage;
   return adjusted;
 }
@@ -1462,7 +1463,10 @@ function runWalkForwardBacktest(
           if (entryIdx < close.length) {
             const entryPrice = applyTradingCosts(open[entryIdx], targetDir === "long", tradeConfig);
             const allocDelta = 0.25;
-            const positionSize = Math.min(config.initialCapital * allocDelta, capital * 0.90);
+            // Capital-proportional sizing: scales with equity, prevents compounding destruction
+            const maxAllocForLowVol = isLowVolStock ? 0.50 : 1.0;
+            const effectiveAllocDelta = Math.min(allocDelta, maxAllocForLowVol - (position?.currentAllocation || 0));
+            const positionSize = effectiveAllocDelta > 0 ? capital * effectiveAllocDelta * 0.90 : 0;
 
             if (positionSize > 10 && entryPrice > 0) {
               const shares = positionSize / entryPrice;
