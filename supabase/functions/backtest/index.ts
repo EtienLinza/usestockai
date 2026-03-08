@@ -1613,18 +1613,39 @@ function computeMetrics(
   // Ulcer Index
   const ulcerIndex = Math.sqrt(drawdowns.reduce((a, b) => a + b * b, 0) / drawdowns.length);
 
-  // Sharpe Ratio
+  // Sharpe & Sortino from DAILY EQUITY CURVE RETURNS (not per-trade returns)
   const riskFreeDaily = 0.04 / 252;
-  const meanReturn = returns.reduce((a, b) => a + b / 100, 0) / returns.length;
-  const stdReturn = Math.sqrt(returns.reduce((a, b) => a + Math.pow(b / 100 - meanReturn, 2), 0) / returns.length);
-  const sharpeRatio = stdReturn > 0 ? ((meanReturn - riskFreeDaily) / stdReturn) * Math.sqrt(252 / 5) : 0;
+  let sharpeRatio = 0;
+  let sortinoRatio = 0;
 
-  // Sortino Ratio
-  const downsideReturns = returns.filter(r => r < 0).map(r => r / 100);
-  const downsideStd = downsideReturns.length > 0
-    ? Math.sqrt(downsideReturns.reduce((a, b) => a + b * b, 0) / downsideReturns.length)
-    : 0.001;
-  const sortinoRatio = downsideStd > 0 ? ((meanReturn - riskFreeDaily) / downsideStd) * Math.sqrt(252 / 5) : 0;
+  // Build daily returns from equity curve
+  const dailyEqReturns: number[] = [];
+  const sortedEqCurve = [...equityCurve].sort((a, b) => a.date.localeCompare(b.date));
+  for (let i = 1; i < sortedEqCurve.length; i++) {
+    if (sortedEqCurve[i - 1].value > 0) {
+      dailyEqReturns.push((sortedEqCurve[i].value - sortedEqCurve[i - 1].value) / sortedEqCurve[i - 1].value);
+    }
+  }
+
+  if (dailyEqReturns.length > 10) {
+    // Determine annualization factor based on actual sampling frequency
+    // Equity curve records every 5 bars, so each "step" ≈ 5 trading days
+    const totalDays = dailyEqReturns.length;
+    const periodsPerYear = Math.min(252, Math.max(52, totalDays / Math.max(years, 1)));
+    const annFactor = Math.sqrt(periodsPerYear);
+
+    const eqMean = dailyEqReturns.reduce((a, b) => a + b, 0) / dailyEqReturns.length;
+    const eqStd = Math.sqrt(dailyEqReturns.reduce((a, b) => a + (b - eqMean) ** 2, 0) / dailyEqReturns.length);
+    const rfPerPeriod = riskFreeDaily * (252 / periodsPerYear);
+    sharpeRatio = eqStd > 0 ? ((eqMean - rfPerPeriod) / eqStd) * annFactor : 0;
+
+    // Sortino: only downside deviation
+    const eqDownside = dailyEqReturns.filter(r => r < rfPerPeriod);
+    const downsideStd = eqDownside.length > 0
+      ? Math.sqrt(eqDownside.reduce((a, b) => a + (b - rfPerPeriod) ** 2, 0) / dailyEqReturns.length)
+      : 0.001;
+    sortinoRatio = downsideStd > 0 ? ((eqMean - rfPerPeriod) / downsideStd) * annFactor : 0;
+  }
 
   // Calmar Ratio
   const calmarRatio = maxDrawdown > 0 ? annualizedReturn / maxDrawdown : 0;
