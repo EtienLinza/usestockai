@@ -174,6 +174,116 @@ function calculateATR(high: number[], low: number[], close: number[], period: nu
   }
   return atr;
 }
+// ============================================================================
+// WEEKLY BAR AGGREGATION
+// ============================================================================
+
+function aggregateToWeekly(data: DataSet): DataSet {
+  const weeks: { open: number; high: number; low: number; close: number; volume: number; date: string }[] = [];
+  let weekOpen = data.open[0], weekHigh = data.high[0], weekLow = data.low[0];
+  let weekVolume = data.volume[0];
+  let weekStartDate = data.timestamps[0];
+
+  for (let i = 1; i < data.close.length; i++) {
+    const prevDay = new Date(data.timestamps[i - 1]);
+    const currDay = new Date(data.timestamps[i]);
+    const isNewWeek = currDay.getUTCDay() < prevDay.getUTCDay() || (currDay.getTime() - prevDay.getTime() > 4 * 86400000);
+
+    if (isNewWeek) {
+      weeks.push({ open: weekOpen, high: weekHigh, low: weekLow, close: data.close[i - 1], volume: weekVolume, date: weekStartDate });
+      weekOpen = data.open[i]; weekHigh = data.high[i]; weekLow = data.low[i];
+      weekVolume = data.volume[i]; weekStartDate = data.timestamps[i];
+    } else {
+      weekHigh = Math.max(weekHigh, data.high[i]);
+      weekLow = Math.min(weekLow, data.low[i]);
+      weekVolume += data.volume[i];
+    }
+  }
+  weeks.push({ open: weekOpen, high: weekHigh, low: weekLow, close: data.close[data.close.length - 1], volume: weekVolume, date: weekStartDate });
+
+  return {
+    timestamps: weeks.map(w => w.date), open: weeks.map(w => w.open),
+    high: weeks.map(w => w.high), low: weeks.map(w => w.low),
+    close: weeks.map(w => w.close), volume: weeks.map(w => w.volume),
+  };
+}
+
+// ============================================================================
+// WEEKLY BIAS COMPUTATION
+// ============================================================================
+
+interface WeeklyBias {
+  bias: "long" | "flat" | "short";
+  targetAllocation: number; // -1.0 to 1.0
+}
+
+function computeWeeklyBias(
+  weeklyClose: number[], weeklyHigh: number[], weeklyLow: number[],
+  idx: number,
+  params: { fastMA: number; slowMA: number; rsiLong: number }
+): WeeklyBias {
+  if (idx < params.slowMA + 10) return { bias: "flat", targetAllocation: 0 };
+
+  const slice = weeklyClose.slice(0, idx + 1);
+  const hSlice = weeklyHigh.slice(0, idx + 1);
+  const lSlice = weeklyLow.slice(0, idx + 1);
+  const fastEMA = calculateEMA(slice, params.fastMA);
+  const slowEMA = calculateEMA(slice, params.slowMA);
+  const rsi = calculateRSI(slice, 14);
+  const adxData = calculateADX(hSlice, lSlice, slice, 14);
+
+  const c = slice[slice.length - 1];
+  const fast = safeGet(fastEMA, c);
+  const slow = safeGet(slowEMA, c);
+  const rsiVal = safeGet(rsi, 50);
+  const adxVal = safeGet(adxData.adx, 0);
+
+  // LONG: price > fast EMA AND fast > slow EMA
+  if (c > fast && fast > slow) {
+    if (rsiVal >= params.rsiLong && rsiVal <= 75 && adxVal > 20) return { bias: "long", targetAllocation: 1.0 };
+    if (rsiVal > 75) return { bias: "long", targetAllocation: 0.25 }; // overbought caution
+    if (adxVal <= 20 || rsiVal < params.rsiLong) return { bias: "long", targetAllocation: 0.5 };
+    return { bias: "long", targetAllocation: 0.5 };
+  }
+
+  // TRANSITION: price pulling back but fast still above slow
+  if (fast > slow && c <= fast && c > slow) return { bias: "long", targetAllocation: 0.25 };
+
+  // SHORT: confirmed downtrend with momentum
+  if (c < fast && fast < slow && rsiVal < 40 && adxVal > 20) return { bias: "short", targetAllocation: -0.5 };
+
+  return { bias: "flat", targetAllocation: 0 };
+}
+
+// ============================================================================
+// DAILY ENTRY SIGNAL (timing within weekly trend)
+// ============================================================================
+
+function hasDailyEntrySignal(
+  close: number[], high: number[], low: number[], volume: number[],
+  idx: number, direction: "long" | "short"
+): boolean {
+  if (idx < 30) return false;
+  const n = Math.min(idx + 1, close.length);
+  const slice = close.slice(Math.max(0, n - 60), n);
+  if (slice.length < 26) return false;
+
+  const ema12 = calculateEMA(slice, 12);
+  const ema26 = calculateEMA(slice, 26);
+  const rsi = calculateRSI(slice, 14);
+  const macdData = calculateMACD(slice);
+
+  const e12 = safeGet(ema12, 0);
+  const e26 = safeGet(ema26, 0);
+  const rsiVal = safeGet(rsi, 50);
+  const macdH = safeGet(macdData.histogram, 0);
+
+  if (direction === "long") {
+    return [e12 > e26, rsiVal >= 35 && rsiVal <= 60, macdH > 0].filter(Boolean).length >= 2;
+  } else {
+    return [e12 < e26, rsiVal >= 40 && rsiVal <= 65, macdH < 0].filter(Boolean).length >= 2;
+  }
+}
 
 function safeGet(arr: number[], defaultVal: number): number {
   if (!arr || arr.length === 0) return defaultVal;
