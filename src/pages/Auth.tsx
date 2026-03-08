@@ -91,7 +91,7 @@ const Auth = () => {
               <Logo size="md" />
             </div>
             <p className="text-muted-foreground">
-              {isSignUp ? "Create an account to save your predictions" : "Sign in to access your prediction history"}
+              {isSignUp ? "Create an account to start tracking the market" : "Sign in to access your dashboard"}
             </p>
           </div>
 
@@ -140,7 +140,7 @@ const Auth = () => {
                     />
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    {isSignUp ? "Password must be at least 6 characters" : ""}
+                    {isSignUp ? "Must include uppercase, lowercase, number, and special character" : ""}
                   </p>
                 </div>
 
