@@ -569,7 +569,7 @@ function computeStrategySignal(
       mrConviction = Math.min(100, conv);
     } else if (mrShortScore >= 3 && !(above200 && ctx.spyBearish === false)) {
       mrSignal = "SHORT";
-      let conv = mrShortScore * 18;
+      let conv = mrShortScore * 16;
       conv += Math.min(Math.abs(rsiVal - 50) * 0.3, 10);
       conv += Math.min(Math.abs(smaDeviation) * 100, 10);
       mrConviction = Math.min(100, conv);
