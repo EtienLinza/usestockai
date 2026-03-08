@@ -100,19 +100,7 @@ interface BacktestReport {
   strategyPerformance?: { strategy: string; trades: number; winRate: number; avgReturn: number }[];
 }
 
-const MetricCard = ({ label, value, suffix = "", icon: Icon, color = "text-foreground" }: {
-  label: string; value: string | number; suffix?: string; icon: any; color?: string;
-}) => (
-  <Card className="glass-card p-4">
-    <div className="text-[10px] text-muted-foreground uppercase tracking-wide mb-1 flex items-center gap-1">
-      <Icon className="w-2.5 h-2.5" />
-      {label}
-    </div>
-    <div className={`text-lg font-mono font-medium ${color}`}>
-      {value}{suffix}
-    </div>
-  </Card>
-);
+import { MetricCard } from "@/components/MetricCard";
 
 const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 
