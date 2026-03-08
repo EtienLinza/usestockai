@@ -217,17 +217,17 @@ const PROFILE_PARAMS: Record<StockProfile, ProfileParams> = {
     maxHoldTrend: 28, maxHoldMR: 8, maxHoldBreakout: 20,
     takeProfitPct: 14, trailingStopATRMult: 2.5,
     buyThreshold: 62, shortThreshold: 60,
-    trendConvictionBonus: 10, mrConvictionBonus: 0, breakoutConvictionBonus: 0,
+    trendConvictionBonus: 5, mrConvictionBonus: 0, breakoutConvictionBonus: 0,
   },
   value: {
-    adxThreshold: 24, rsiOversold: 26, rsiOverbought: 74,
+    adxThreshold: 28, rsiOversold: 26, rsiOverbought: 74,
     maxHoldTrend: 16, maxHoldMR: 14, maxHoldBreakout: 12,
     takeProfitPct: 8, trailingStopATRMult: 1.8,
     buyThreshold: 62, shortThreshold: 60,
-    trendConvictionBonus: 0, mrConvictionBonus: 12, breakoutConvictionBonus: 0,
+    trendConvictionBonus: 0, mrConvictionBonus: 8, breakoutConvictionBonus: 0,
   },
   index: {
-    adxThreshold: 23, rsiOversold: 28, rsiOverbought: 72,
+    adxThreshold: 26, rsiOversold: 28, rsiOverbought: 72,
     maxHoldTrend: 22, maxHoldMR: 12, maxHoldBreakout: 15,
     takeProfitPct: 10, trailingStopATRMult: 2.0,
     buyThreshold: 62, shortThreshold: 60,
@@ -342,21 +342,21 @@ function classifyStock(close: number[], high: number[], low: number[], ticker?: 
   } else if (atrPctAvg > 0.025 && trendScore < 0.4) {
     // High ATR%, weak trend → volatile
     classification = "volatile";
-  } else if (trendScore > 0.5) {
-    // Spends >50% of time in bullish MA alignment → momentum
+  } else if (trendScore > 0.6) {
+    // Strong persistent trend → pure momentum
     classification = "momentum";
-    // Blend if borderline (0.5-0.55)
-    if (trendScore < 0.55) {
-      const secondProfile = meanReversionRate > 0.45 ? "value" : "index";
-      const blendWeight = (0.55 - trendScore) / 0.05; // 1 at 0.5, 0 at 0.55
-      blendedParams = blendProfiles(PROFILE_PARAMS["momentum"], PROFILE_PARAMS[secondProfile], blendWeight * 0.4);
-    }
-  } else if (meanReversionRate > 0.45 && trendScore < 0.4) {
+  } else if (trendScore > 0.5) {
+    // Blend zone (0.5-0.6): mix momentum with value/index based on meanReversionRate
+    classification = "momentum";
+    const secondProfile = meanReversionRate > 0.40 ? "value" : "index";
+    const blendWeight = (0.6 - trendScore) / 0.1; // 1 at 0.5, 0 at 0.6
+    blendedParams = blendProfiles(PROFILE_PARAMS["momentum"], PROFILE_PARAMS[secondProfile], blendWeight * 0.6);
+  } else if (meanReversionRate > 0.40 && trendScore < 0.4) {
     // High mean reversion, weak trend → value
     classification = "value";
-    // Blend if borderline meanRev (0.45-0.5)
-    if (meanReversionRate < 0.5) {
-      const blendWeight = (0.5 - meanReversionRate) / 0.05;
+    // Blend if borderline meanRev (0.40-0.50)
+    if (meanReversionRate < 0.50) {
+      const blendWeight = (0.50 - meanReversionRate) / 0.10;
       blendedParams = blendProfiles(PROFILE_PARAMS["value"], PROFILE_PARAMS["index"], blendWeight * 0.4);
     }
   } else {
@@ -520,17 +520,17 @@ function computeStrategySignal(
     // Dual-Regime Layer 1: Block trend BUYs only when BOTH stock AND SPY 200 SMA are declining
     if (trendBuyScore >= 3 && above200 && !dualSMADeclining) {
       trendSignal = "BUY";
-      let conv = trendBuyScore * 20;
-      conv += Math.min((adxVal - ADX_THRESH) * 0.5, 15);
-      conv += Math.min(Math.abs(macdH) * 5, 10);
+      let conv = trendBuyScore * 15;
+      conv += Math.min((adxVal - ADX_THRESH) * 0.5, 10);
+      conv += Math.min(Math.abs(macdH) * 5, 8);
       if (rsiVal >= 40 && rsiVal <= 60) conv += 5;
       trendConviction = Math.min(100, conv);
     // Dual-Regime Layer 1: Block trend SHORTs only when BOTH stock AND SPY 200 SMA are rising
     } else if (trendShortScore >= 3 && below200 && !(sma200Rising && ctx.spyBearish === false)) {
       trendSignal = "SHORT";
-      let conv = trendShortScore * 20;
-      conv += Math.min((adxVal - ADX_THRESH) * 0.5, 15);
-      conv += Math.min(Math.abs(macdH) * 5, 10);
+      let conv = trendShortScore * 15;
+      conv += Math.min((adxVal - ADX_THRESH) * 0.5, 10);
+      conv += Math.min(Math.abs(macdH) * 5, 8);
       if (rsiVal >= 40 && rsiVal <= 55) conv += 5;
       trendConviction = Math.min(100, conv);
     }
@@ -563,13 +563,13 @@ function computeStrategySignal(
     // Dual-Regime Layer 1: Block MR buys only when BOTH stock below 200 AND SPY bearish
     if (mrBuyScore >= 3 && !dualRegimeBearBlock) {
       mrSignal = "BUY";
-      let conv = mrBuyScore * 18;
+      let conv = mrBuyScore * 16;
       conv += Math.min(Math.abs(rsiVal - 50) * 0.3, 10);
       conv += Math.min(Math.abs(smaDeviation) * 100, 10);
       mrConviction = Math.min(100, conv);
     } else if (mrShortScore >= 3 && !(above200 && ctx.spyBearish === false)) {
       mrSignal = "SHORT";
-      let conv = mrShortScore * 18;
+      let conv = mrShortScore * 16;
       conv += Math.min(Math.abs(rsiVal - 50) * 0.3, 10);
       conv += Math.min(Math.abs(smaDeviation) * 100, 10);
       mrConviction = Math.min(100, conv);
