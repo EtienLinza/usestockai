@@ -376,6 +376,20 @@ const Dashboard = () => {
                 </p>
               </div>
               <div className="flex items-center gap-3">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5 text-xs h-8"
+                  disabled={signalsLoading}
+                  onClick={async () => {
+                    await loadSignalData();
+                    if (openPositions.length > 0) fetchCurrentPrices();
+                    toast.success("Dashboard refreshed");
+                  }}
+                >
+                  <RefreshCw className={cn("w-3.5 h-3.5", signalsLoading && "animate-spin")} />
+                  Refresh
+                </Button>
                 <div className="hidden sm:flex items-center gap-1.5 text-[10px] text-muted-foreground bg-muted/50 px-2.5 py-1 rounded-full">
                   <span className="w-1.5 h-1.5 rounded-full bg-success animate-pulse" />
                   Auto-scanning active
