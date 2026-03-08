@@ -33,7 +33,6 @@ import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine,
 } from "recharts";
 import { MarketTab } from "@/components/dashboard/MarketTab";
-import { SectorsTab } from "@/components/dashboard/SectorsTab";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
