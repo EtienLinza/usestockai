@@ -623,12 +623,12 @@ const Dashboard = () => {
 
                     {/* Equity Curve */}
                     {portfolioHistory.length > 1 && (
-                      <Card className="glass-card p-6">
+                      <Card className="glass-card p-4 sm:p-6">
                         <div className="flex items-center gap-2 mb-4">
                           <BarChart3 className="w-4 h-4 text-primary" />
                           <span className="text-sm font-medium">Equity Curve</span>
                         </div>
-                        <div className="h-48">
+                        <div className="h-36 sm:h-48">
                           <ResponsiveContainer width="100%" height="100%">
                             <AreaChart data={portfolioHistory}>
                               <defs>
