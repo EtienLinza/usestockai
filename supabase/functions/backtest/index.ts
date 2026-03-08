@@ -1398,23 +1398,13 @@ function runWalkForwardBacktest(
           currentTargetAllocation = absTarget;
         }
 
-        // Handle position adjustments
+        // Binary trend: full exit on any direction change or flat signal
         if (position) {
-          // Direction mismatch → full exit
           if ((position.direction === "long" && currentBias !== "long") ||
-              (position.direction === "short" && currentBias !== "short")) {
+              (position.direction === "short" && currentBias !== "short") ||
+              currentTargetAllocation <= 0.01) {
             closeFullPosition(position, i, "weekly_reversal");
             position = null;
-          }
-          // Target decreased → scale down
-          else if (position && currentTargetAllocation < position.currentAllocation - 0.01) {
-            if (currentTargetAllocation <= 0.01) {
-              closeFullPosition(position, i, "weekly_reversal");
-              position = null;
-            } else {
-              scaleDownPosition(position, i, currentTargetAllocation);
-              if (position.blocks.length === 0) position = null;
-            }
           }
         }
       }
