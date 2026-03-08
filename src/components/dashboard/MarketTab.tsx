@@ -49,8 +49,11 @@ function getMarketStatus() {
 
 export function MarketTab() {
   const [marketData, setMarketData] = useState<MarketData | null>(null);
+  const [sectors, setSectors] = useState<SectorData[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [fetched, setFetched] = useState(false);
+  const [viewMode, setViewMode] = useState<"market" | "sectors">("market");
+  const [sortBy, setSortBy] = useState<"name" | "daily" | "weekly" | "monthly">("daily");
   const marketStatus = getMarketStatus();
 
   const fetchMarketData = async (showToast = false) => {
@@ -69,10 +72,32 @@ export function MarketTab() {
     }
   };
 
+  const fetchSectorData = async (showToast = false) => {
+    setIsLoading(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("sector-analysis");
+      if (error) throw error;
+      setSectors(data.sectors || []);
+      setFetched(true);
+      if (showToast) toast.success("Sector data refreshed");
+    } catch (error) {
+      console.error("Failed to fetch sector data:", error);
+      toast.error("Failed to fetch sector data");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   useEffect(() => {
-    if (!fetched && !isLoading) fetchMarketData();
+    if (!fetched && !isLoading) {
+      if (viewMode === "market") {
+        fetchMarketData();
+      } else {
+        fetchSectorData();
+      }
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [viewMode]);
 
   return (
     <div>
