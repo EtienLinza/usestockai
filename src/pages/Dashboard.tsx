@@ -712,69 +712,65 @@ const Dashboard = () => {
                       ) : (
                         <div className="divide-y divide-border/20">
                           {signals.map((signal, idx) => (
-                            <motion.div key={signal.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: idx * 0.02 }} className="p-4 hover:bg-muted/5 transition-colors">
-                              <div className="flex items-center justify-between flex-wrap gap-3">
-                                <div className="flex items-center gap-4 flex-1 min-w-0">
-                                  <div className="flex items-center gap-2">
-                                    {signal.signal_type === "BUY" ? <ArrowUpRight className="w-5 h-5 text-success" /> : <ArrowDownRight className="w-5 h-5 text-destructive" />}
-                                    <span className="text-lg font-bold font-mono">{signal.ticker}</span>
-                                    <Badge variant="outline" className={signal.signal_type === "BUY" ? "bg-success/10 text-success border-success/30" : "bg-destructive/10 text-destructive border-destructive/30"}>
-                                      {signal.signal_type}
-                                    </Badge>
-                                  </div>
-                                  <div className="hidden sm:flex items-center gap-2">
-                                    <Badge variant="outline" className={getRegimeBadge(signal.regime)}>{signal.regime?.replace("_", " ")}</Badge>
-                                    <Badge variant="outline" className="text-xs">{signal.stock_profile}</Badge>
-                                    <Badge variant="outline" className="text-xs">{signal.strategy}</Badge>
-                                  </div>
+                            <motion.div key={signal.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: idx * 0.02 }} className="p-3 sm:p-4 hover:bg-muted/5 transition-colors">
+                              {/* Mobile: stacked layout */}
+                              <div className="flex items-start sm:items-center justify-between gap-2">
+                                <div className="flex items-center gap-2 min-w-0">
+                                  {signal.signal_type === "BUY" ? <ArrowUpRight className="w-4 h-4 sm:w-5 sm:h-5 text-success shrink-0" /> : <ArrowDownRight className="w-4 h-4 sm:w-5 sm:h-5 text-destructive shrink-0" />}
+                                  <span className="text-base sm:text-lg font-bold font-mono">{signal.ticker}</span>
+                                  <Badge variant="outline" className={cn("text-[10px]", signal.signal_type === "BUY" ? "bg-success/10 text-success border-success/30" : "bg-destructive/10 text-destructive border-destructive/30")}>
+                                    {signal.signal_type}
+                                  </Badge>
                                 </div>
-                                <div className="flex items-center gap-4">
-                                  <div className="text-right">
-                                    <div className="text-[10px] text-muted-foreground uppercase">Entry</div>
-                                    <div className="font-mono font-semibold text-sm">${Number(signal.entry_price).toFixed(2)}</div>
-                                  </div>
-                                  <div className="text-right min-w-[60px]">
-                                    <div className="text-[10px] text-muted-foreground uppercase">Conviction</div>
-                                    <div className={cn("font-mono font-bold text-sm", getConfidenceColor(signal.confidence))}>{signal.confidence}%</div>
-                                  </div>
-                                  <Button
-                                    size="sm"
-                                    variant={signal.signal_type === "BUY" ? "success" : "destructive"}
-                                    onClick={() => {
-                                      if (!user) { toast.error("Please sign in first"); return; }
-                                      setSelectedSignal(signal);
-                                      setBuyDialogOpen(true);
-                                    }}
-                                  >
-                                    Register
-                                  </Button>
+                                <Button
+                                  size="sm"
+                                  variant={signal.signal_type === "BUY" ? "success" : "destructive"}
+                                  className="text-xs h-7 shrink-0"
+                                  onClick={() => {
+                                    if (!user) { toast.error("Please sign in first"); return; }
+                                    setSelectedSignal(signal);
+                                    setBuyDialogOpen(true);
+                                  }}
+                                >
+                                  Register
+                                </Button>
+                              </div>
+
+                              {/* Stats row */}
+                              <div className="flex items-center gap-3 sm:gap-4 mt-2 ml-6 sm:ml-0">
+                                <div className="hidden sm:flex items-center gap-2">
+                                  <Badge variant="outline" className={cn("text-[10px]", getRegimeBadge(signal.regime))}>{signal.regime?.replace("_", " ")}</Badge>
+                                  <Badge variant="outline" className="text-[10px]">{signal.stock_profile}</Badge>
+                                  <Badge variant="outline" className="text-[10px]">{signal.strategy}</Badge>
+                                </div>
+                                <div className="flex items-center gap-3 text-xs sm:ml-auto">
+                                  <span className="text-muted-foreground">Entry: <span className="font-mono font-medium text-foreground">${Number(signal.entry_price).toFixed(2)}</span></span>
+                                  <span className="text-muted-foreground">Conv: <span className={cn("font-mono font-bold", getConfidenceColor(signal.confidence))}>{signal.confidence}%</span></span>
+                                  {signal.target_allocation > 0 && (
+                                    <span className="text-muted-foreground hidden sm:inline">Alloc: <span className="font-mono">{signal.target_allocation}%</span></span>
+                                  )}
                                 </div>
                               </div>
 
-                              <div className="mt-3 flex items-center gap-4">
-                                <div className="flex-1">
-                                  <div className="h-1.5 rounded-full bg-muted overflow-hidden">
-                                    <div
-                                      className={cn("h-full rounded-full transition-all", getConfidenceBg(signal.confidence))}
-                                      style={{ width: `${signal.confidence}%` }}
-                                    />
-                                  </div>
+                              {/* Conviction bar */}
+                              <div className="mt-2 ml-6 sm:ml-0">
+                                <div className="h-1 sm:h-1.5 rounded-full bg-muted overflow-hidden">
+                                  <div
+                                    className={cn("h-full rounded-full transition-all", getConfidenceBg(signal.confidence))}
+                                    style={{ width: `${signal.confidence}%` }}
+                                  />
                                 </div>
-                                {signal.target_allocation > 0 && (
-                                  <span className="text-[10px] text-muted-foreground font-mono shrink-0">
-                                    Alloc: {signal.target_allocation}%
-                                  </span>
-                                )}
                               </div>
 
-                              <div className="flex sm:hidden items-center gap-2 mt-2 flex-wrap">
-                                <Badge variant="outline" className={cn("text-[10px]", getRegimeBadge(signal.regime))}>{signal.regime?.replace("_", " ")}</Badge>
-                                <Badge variant="outline" className="text-[10px]">{signal.stock_profile}</Badge>
-                                <Badge variant="outline" className="text-[10px]">{signal.strategy}</Badge>
+                              {/* Mobile badges */}
+                              <div className="flex sm:hidden items-center gap-1.5 mt-2 ml-6 flex-wrap">
+                                <Badge variant="outline" className={cn("text-[9px] px-1.5 py-0", getRegimeBadge(signal.regime))}>{signal.regime?.replace("_", " ")}</Badge>
+                                <Badge variant="outline" className="text-[9px] px-1.5 py-0">{signal.stock_profile}</Badge>
+                                <Badge variant="outline" className="text-[9px] px-1.5 py-0">{signal.strategy}</Badge>
                               </div>
 
                               {signal.reasoning && (
-                                <p className="text-xs text-muted-foreground mt-2 border-t border-border/10 pt-2">{signal.reasoning}</p>
+                                <p className="text-[11px] sm:text-xs text-muted-foreground mt-2 border-t border-border/10 pt-2 ml-6 sm:ml-0 line-clamp-2 sm:line-clamp-none">{signal.reasoning}</p>
                               )}
                             </motion.div>
                           ))}
