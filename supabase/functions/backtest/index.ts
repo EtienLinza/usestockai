@@ -342,21 +342,21 @@ function classifyStock(close: number[], high: number[], low: number[], ticker?: 
   } else if (atrPctAvg > 0.025 && trendScore < 0.4) {
     // High ATR%, weak trend → volatile
     classification = "volatile";
-  } else if (trendScore > 0.5) {
-    // Spends >50% of time in bullish MA alignment → momentum
+  } else if (trendScore > 0.6) {
+    // Strong persistent trend → pure momentum
     classification = "momentum";
-    // Blend if borderline (0.5-0.55)
-    if (trendScore < 0.55) {
-      const secondProfile = meanReversionRate > 0.45 ? "value" : "index";
-      const blendWeight = (0.55 - trendScore) / 0.05; // 1 at 0.5, 0 at 0.55
-      blendedParams = blendProfiles(PROFILE_PARAMS["momentum"], PROFILE_PARAMS[secondProfile], blendWeight * 0.4);
-    }
-  } else if (meanReversionRate > 0.45 && trendScore < 0.4) {
+  } else if (trendScore > 0.5) {
+    // Blend zone (0.5-0.6): mix momentum with value/index based on meanReversionRate
+    classification = "momentum";
+    const secondProfile = meanReversionRate > 0.40 ? "value" : "index";
+    const blendWeight = (0.6 - trendScore) / 0.1; // 1 at 0.5, 0 at 0.6
+    blendedParams = blendProfiles(PROFILE_PARAMS["momentum"], PROFILE_PARAMS[secondProfile], blendWeight * 0.6);
+  } else if (meanReversionRate > 0.40 && trendScore < 0.4) {
     // High mean reversion, weak trend → value
     classification = "value";
-    // Blend if borderline meanRev (0.45-0.5)
-    if (meanReversionRate < 0.5) {
-      const blendWeight = (0.5 - meanReversionRate) / 0.05;
+    // Blend if borderline meanRev (0.40-0.50)
+    if (meanReversionRate < 0.50) {
+      const blendWeight = (0.50 - meanReversionRate) / 0.10;
       blendedParams = blendProfiles(PROFILE_PARAMS["value"], PROFILE_PARAMS["index"], blendWeight * 0.4);
     }
   } else {
