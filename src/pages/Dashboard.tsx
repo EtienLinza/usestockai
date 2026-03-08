@@ -456,25 +456,25 @@ const Dashboard = () => {
             {sellAlerts.length > 0 && (
               <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="mb-6">
                 <Card className="border-warning/50 bg-warning/5">
-                  <CardHeader className="pb-3">
-                    <CardTitle className="text-base flex items-center gap-2 text-warning">
+                  <CardHeader className="pb-3 px-4 sm:px-6">
+                    <CardTitle className="text-sm sm:text-base flex items-center gap-2 text-warning">
                       <Bell className="w-4 h-4" />Sell Alerts ({sellAlerts.length})
                     </CardTitle>
                   </CardHeader>
-                  <CardContent className="space-y-2">
+                  <CardContent className="space-y-2 px-4 sm:px-6">
                     {sellAlerts.map((alert) => (
-                      <div key={alert.id} className="flex items-center justify-between p-3 rounded-lg bg-warning/10 border border-warning/20 flex-wrap gap-2">
-                        <div className="flex items-center gap-3">
+                      <div key={alert.id} className="flex flex-col sm:flex-row sm:items-center justify-between p-3 rounded-lg bg-warning/10 border border-warning/20 gap-2">
+                        <div className="flex items-center gap-3 min-w-0">
                           <AlertTriangle className="w-4 h-4 text-warning shrink-0" />
-                          <div>
-                            <span className="font-mono font-bold">{alert.ticker}</span>
-                            <span className="text-sm text-muted-foreground ml-2">{alert.reason}</span>
+                          <div className="min-w-0">
+                            <span className="font-mono font-bold text-sm">{alert.ticker}</span>
+                            <span className="text-xs sm:text-sm text-muted-foreground ml-2 line-clamp-1">{alert.reason}</span>
                           </div>
                         </div>
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 shrink-0 ml-7 sm:ml-0">
                           <span className="font-mono text-sm">${alert.currentPrice.toFixed(2)}</span>
                           <Button size="sm" variant="ghost" onClick={() => handleDismissAlert(alert)} className="text-xs h-7">Dismiss</Button>
-                          <Button size="sm" variant="destructive" onClick={() => handleSellAlertClose(alert)}>Close Position</Button>
+                          <Button size="sm" variant="destructive" onClick={() => handleSellAlertClose(alert)} className="text-xs h-7">Close</Button>
                         </div>
                       </div>
                     ))}
