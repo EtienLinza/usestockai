@@ -31,7 +31,7 @@ export const Navbar = () => {
     { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
     { href: "/guide", label: "Guide", icon: BookOpen },
     { href: "/watchlist", label: "Watchlist", icon: Heart },
-    { href: "/history", label: "History", icon: History },
+    
     { href: "/backtest", label: "Backtest", icon: BarChart3 },
     
   ];
