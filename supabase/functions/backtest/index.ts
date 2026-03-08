@@ -1430,7 +1430,11 @@ function runWalkForwardBacktest(
       const targetDir: "long" | "short" = currentBias === "long" ? "long" : "short";
 
       if (currentAlloc < currentTargetAllocation - 0.01) {
-        if (hasDailyEntrySignal(close, high, low, volume, i, targetDir)) {
+        // Low-vol stocks use relaxed entry (RSI pullback only), standard stocks use 2/3 confirm
+        const hasEntry = isLowVolStock
+          ? hasDailyMeanReversionEntry(close, idx_i, targetDir)
+          : hasDailyEntrySignal(close, high, low, volume, idx_i, targetDir);
+        if (hasEntry) {
           const entryIdx = Math.min(i + executionDelay, close.length - 1);
           if (entryIdx < close.length) {
             const entryPrice = applyTradingCosts(open[entryIdx], targetDir === "long", tradeConfig);
