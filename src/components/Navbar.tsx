@@ -29,11 +29,8 @@ export const Navbar = () => {
 
   const navLinks = [
     { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-    { href: "/guide", label: "Guide", icon: BookOpen },
     { href: "/watchlist", label: "Watchlist", icon: Heart },
-    
     { href: "/backtest", label: "Backtest", icon: BarChart3 },
-    
   ];
 
   const handleSignOut = async () => {
