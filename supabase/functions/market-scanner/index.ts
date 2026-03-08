@@ -631,11 +631,10 @@ serve(async (req) => {
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    if (signals.length > 0) {
-      // Clear old signals from this batch's tickers
-      const tickerList = tickersToScan;
-      await supabase.from("live_signals").delete().in("ticker", tickerList);
+    // Always clear old signals from this batch's tickers to prevent duplicates
+    await supabase.from("live_signals").delete().in("ticker", tickersToScan);
 
+    if (signals.length > 0) {
       // Insert new signals with 24h expiry
       const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
       const rows = signals.map(s => ({
