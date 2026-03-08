@@ -1033,9 +1033,6 @@ const Dashboard = () => {
                   <MarketTab />
                 </TabsContent>
 
-                <TabsContent value="sectors">
-                  <SectorsTab />
-                </TabsContent>
               </Tabs>
             </motion.div>
           </div>
