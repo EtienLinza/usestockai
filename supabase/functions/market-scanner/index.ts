@@ -758,8 +758,10 @@ serve(async (req) => {
     return new Response(JSON.stringify({
       signals,
       batch,
-      totalBatches: Math.ceil(ALL_TICKERS.length / batchSize),
-      done: end >= ALL_TICKERS.length,
+      totalBatches: Math.ceil(allTickers.length / batchSize),
+      tickerList: allTickers,
+      totalTickers: allTickers.length,
+      done: end >= allTickers.length,
       scanned: tickersToScan.length,
       elapsed,
     }), {
