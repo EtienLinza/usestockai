@@ -15,7 +15,7 @@ import {
   Brain, TrendingUp, TrendingDown, Shield,
   Loader2, AlertTriangle, RefreshCw, Zap, DollarSign, Target,
   ArrowUpRight, ArrowDownRight, Package, BarChart3, Clock, Bell,
-  Trophy, ChevronDown, Activity, Sparkles,
+  Trophy, ChevronDown, Activity, Sparkles, Trash2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
