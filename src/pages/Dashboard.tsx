@@ -595,7 +595,7 @@ const Dashboard = () => {
                 <TabsList className="bg-secondary/30 mb-6">
                   <TabsTrigger value="trading" className="text-xs sm:text-sm gap-1.5"><Zap className="w-3.5 h-3.5" />Trading</TabsTrigger>
                   <TabsTrigger value="market" className="text-xs sm:text-sm gap-1.5"><Globe className="w-3.5 h-3.5" />Market</TabsTrigger>
-                  <TabsTrigger value="sectors" className="text-xs sm:text-sm gap-1.5"><PieChart className="w-3.5 h-3.5" />Sectors</TabsTrigger>
+                  
                 </TabsList>
 
                 <TabsContent value="trading">
