@@ -1875,14 +1875,28 @@ function computeMetrics(
     else { curLosses++; curWins = 0; maxConsLosses = Math.max(maxConsLosses, curLosses); }
   }
 
-  // Capacity Estimation
-  const capacities = trades
-    .filter(t => t.volumeAtEntry > 0)
-    .map(t => t.volumeAtEntry * t.entryPrice * 0.02);
-  capacities.sort((a, b) => a - b);
-  const strategyCapacity = capacities.length > 0
-    ? capacities[Math.floor(capacities.length / 2)]
-    : 0;
+  // Capacity Estimation — use average daily dollar volume × 2% participation rate
+  // Group by ticker and take median ADV per ticker, then sum across tickers
+  const tickerVolMap = new Map<string, number[]>();
+  for (const t of trades) {
+    if (t.volumeAtEntry > 0 && t.entryPrice > 0) {
+      const ticker = t.ticker || "unknown";
+      if (!tickerVolMap.has(ticker)) tickerVolMap.set(ticker, []);
+      tickerVolMap.get(ticker)!.push(t.volumeAtEntry * t.entryPrice);
+    }
+  }
+  let strategyCapacity = 0;
+  for (const [, vols] of tickerVolMap) {
+    vols.sort((a, b) => a - b);
+    const medianADV = vols[Math.floor(vols.length / 2)] || 0;
+    strategyCapacity += medianADV * 0.02; // 2% participation rate per ticker
+  }
+  if (strategyCapacity === 0) {
+    // Fallback: old method
+    const capacities = trades.filter(t => t.volumeAtEntry > 0).map(t => t.volumeAtEntry * t.entryPrice * 0.02);
+    capacities.sort((a, b) => a - b);
+    strategyCapacity = capacities.length > 0 ? capacities[Math.floor(capacities.length / 2)] : 0;
+  }
 
   const p = (v: number) => parseFloat(v.toFixed(2));
 
