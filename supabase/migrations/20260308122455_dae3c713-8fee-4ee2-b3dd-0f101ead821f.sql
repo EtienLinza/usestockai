@@ -1,0 +1,1 @@
+CREATE POLICY "Anyone can view signals anon" ON public.live_signals FOR SELECT TO anon USING (true);
