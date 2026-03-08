@@ -1450,8 +1450,8 @@ function runWalkForwardBacktest(
         const entryIdx = Math.min(i + executionDelay, close.length - 1);
         if (entryIdx < close.length) {
           const entryPrice = applyTradingCosts(open[entryIdx], targetDir === "long", tradeConfig);
-          // Half-Kelly sizing: ~15% of current capital per trade
-          const kellyFraction = 0.15;
+          // Adaptive Kelly sizing: 25% for high-conviction, 15% base
+          const kellyFraction = (currentTargetAllocation >= 0.7) ? 0.25 : 0.15;
           const positionSize = capital * kellyFraction;
 
           if (positionSize > 10 && entryPrice > 0) {
@@ -1477,6 +1477,12 @@ function runWalkForwardBacktest(
           }
         }
       }
+    }
+
+    // Risk-free rate accrual on idle (non-deployed) capital
+    // 4% annualized / 252 trading days
+    if (!position) {
+      capital *= (1 + 0.04 / 252);
     }
 
     // Record equity periodically
@@ -1613,18 +1619,39 @@ function computeMetrics(
   // Ulcer Index
   const ulcerIndex = Math.sqrt(drawdowns.reduce((a, b) => a + b * b, 0) / drawdowns.length);
 
-  // Sharpe Ratio
+  // Sharpe & Sortino from DAILY EQUITY CURVE RETURNS (not per-trade returns)
   const riskFreeDaily = 0.04 / 252;
-  const meanReturn = returns.reduce((a, b) => a + b / 100, 0) / returns.length;
-  const stdReturn = Math.sqrt(returns.reduce((a, b) => a + Math.pow(b / 100 - meanReturn, 2), 0) / returns.length);
-  const sharpeRatio = stdReturn > 0 ? ((meanReturn - riskFreeDaily) / stdReturn) * Math.sqrt(252 / 5) : 0;
+  let sharpeRatio = 0;
+  let sortinoRatio = 0;
 
-  // Sortino Ratio
-  const downsideReturns = returns.filter(r => r < 0).map(r => r / 100);
-  const downsideStd = downsideReturns.length > 0
-    ? Math.sqrt(downsideReturns.reduce((a, b) => a + b * b, 0) / downsideReturns.length)
-    : 0.001;
-  const sortinoRatio = downsideStd > 0 ? ((meanReturn - riskFreeDaily) / downsideStd) * Math.sqrt(252 / 5) : 0;
+  // Build daily returns from equity curve
+  const dailyEqReturns: number[] = [];
+  const sortedEqCurve = [...equityCurve].sort((a, b) => a.date.localeCompare(b.date));
+  for (let i = 1; i < sortedEqCurve.length; i++) {
+    if (sortedEqCurve[i - 1].value > 0) {
+      dailyEqReturns.push((sortedEqCurve[i].value - sortedEqCurve[i - 1].value) / sortedEqCurve[i - 1].value);
+    }
+  }
+
+  if (dailyEqReturns.length > 10) {
+    // Determine annualization factor based on actual sampling frequency
+    // Equity curve records every 5 bars, so each "step" ≈ 5 trading days
+    const totalDays = dailyEqReturns.length;
+    const periodsPerYear = Math.min(252, Math.max(52, totalDays / Math.max(years, 1)));
+    const annFactor = Math.sqrt(periodsPerYear);
+
+    const eqMean = dailyEqReturns.reduce((a, b) => a + b, 0) / dailyEqReturns.length;
+    const eqStd = Math.sqrt(dailyEqReturns.reduce((a, b) => a + (b - eqMean) ** 2, 0) / dailyEqReturns.length);
+    const rfPerPeriod = riskFreeDaily * (252 / periodsPerYear);
+    sharpeRatio = eqStd > 0 ? ((eqMean - rfPerPeriod) / eqStd) * annFactor : 0;
+
+    // Sortino: only downside deviation
+    const eqDownside = dailyEqReturns.filter(r => r < rfPerPeriod);
+    const downsideStd = eqDownside.length > 0
+      ? Math.sqrt(eqDownside.reduce((a, b) => a + (b - rfPerPeriod) ** 2, 0) / dailyEqReturns.length)
+      : 0.001;
+    sortinoRatio = downsideStd > 0 ? ((eqMean - rfPerPeriod) / downsideStd) * annFactor : 0;
+  }
 
   // Calmar Ratio
   const calmarRatio = maxDrawdown > 0 ? annualizedReturn / maxDrawdown : 0;
@@ -1744,24 +1771,30 @@ function computeMetrics(
     }
   }
 
-  // Rolling Sharpe (20-trade window)
+  // Rolling Sharpe & Volatility (20-point equity curve window)
   const rollingSharpe: { index: number; value: number }[] = [];
-  const ROLLING_WINDOW = 20;
-  for (let i = ROLLING_WINDOW; i <= returns.length; i++) {
-    const window = returns.slice(i - ROLLING_WINDOW, i).map(r => r / 100);
-    const wMean = window.reduce((a, b) => a + b, 0) / window.length;
-    const wStd = Math.sqrt(window.reduce((a, b) => a + (b - wMean) ** 2, 0) / window.length);
-    const rSharpe = wStd > 0 ? (wMean / wStd) * Math.sqrt(252 / 5) : 0;
-    rollingSharpe.push({ index: i, value: parseFloat(rSharpe.toFixed(2)) });
-  }
-
-  // Rolling Volatility (20-trade window)
   const rollingVolatility: { index: number; value: number }[] = [];
-  for (let i = ROLLING_WINDOW; i <= returns.length; i++) {
-    const window = returns.slice(i - ROLLING_WINDOW, i).map(r => r / 100);
-    const wMean = window.reduce((a, b) => a + b, 0) / window.length;
-    const wStd = Math.sqrt(window.reduce((a, b) => a + (b - wMean) ** 2, 0) / window.length);
-    rollingVolatility.push({ index: i, value: parseFloat((wStd * Math.sqrt(252 / 5) * 100).toFixed(2)) });
+  const ROLLING_WINDOW = 20;
+  if (dailyEqReturns.length >= ROLLING_WINDOW) {
+    const periodsPerYear2 = Math.min(252, Math.max(52, dailyEqReturns.length / Math.max(years, 1)));
+    const annFactor2 = Math.sqrt(periodsPerYear2);
+    for (let i = ROLLING_WINDOW; i <= dailyEqReturns.length; i++) {
+      const window = dailyEqReturns.slice(i - ROLLING_WINDOW, i);
+      const wMean = window.reduce((a, b) => a + b, 0) / window.length;
+      const wStd = Math.sqrt(window.reduce((a, b) => a + (b - wMean) ** 2, 0) / window.length);
+      const rSharpe = wStd > 0 ? (wMean / wStd) * annFactor2 : 0;
+      rollingSharpe.push({ index: i, value: parseFloat(rSharpe.toFixed(2)) });
+      rollingVolatility.push({ index: i, value: parseFloat((wStd * annFactor2 * 100).toFixed(2)) });
+    }
+  } else {
+    // Fallback to per-trade rolling if equity curve too short
+    for (let i = ROLLING_WINDOW; i <= returns.length; i++) {
+      const window = returns.slice(i - ROLLING_WINDOW, i).map(r => r / 100);
+      const wMean = window.reduce((a, b) => a + b, 0) / window.length;
+      const wStd = Math.sqrt(window.reduce((a, b) => a + (b - wMean) ** 2, 0) / window.length);
+      rollingSharpe.push({ index: i, value: parseFloat((wStd > 0 ? wMean / wStd : 0).toFixed(2)) });
+      rollingVolatility.push({ index: i, value: parseFloat((wStd * 100).toFixed(2)) });
+    }
   }
 
   // Trade Distribution
@@ -1854,14 +1887,28 @@ function computeMetrics(
     else { curLosses++; curWins = 0; maxConsLosses = Math.max(maxConsLosses, curLosses); }
   }
 
-  // Capacity Estimation
-  const capacities = trades
-    .filter(t => t.volumeAtEntry > 0)
-    .map(t => t.volumeAtEntry * t.entryPrice * 0.02);
-  capacities.sort((a, b) => a - b);
-  const strategyCapacity = capacities.length > 0
-    ? capacities[Math.floor(capacities.length / 2)]
-    : 0;
+  // Capacity Estimation — use average daily dollar volume × 2% participation rate
+  // Group by ticker and take median ADV per ticker, then sum across tickers
+  const tickerVolMap = new Map<string, number[]>();
+  for (const t of trades) {
+    if (t.volumeAtEntry > 0 && t.entryPrice > 0) {
+      const ticker = t.ticker || "unknown";
+      if (!tickerVolMap.has(ticker)) tickerVolMap.set(ticker, []);
+      tickerVolMap.get(ticker)!.push(t.volumeAtEntry * t.entryPrice);
+    }
+  }
+  let strategyCapacity = 0;
+  for (const [, vols] of tickerVolMap) {
+    vols.sort((a, b) => a - b);
+    const medianADV = vols[Math.floor(vols.length / 2)] || 0;
+    strategyCapacity += medianADV * 0.02; // 2% participation rate per ticker
+  }
+  if (strategyCapacity === 0) {
+    // Fallback: old method
+    const capacities = trades.filter(t => t.volumeAtEntry > 0).map(t => t.volumeAtEntry * t.entryPrice * 0.02);
+    capacities.sort((a, b) => a - b);
+    strategyCapacity = capacities.length > 0 ? capacities[Math.floor(capacities.length / 2)] : 0;
+  }
 
   const p = (v: number) => parseFloat(v.toFixed(2));
 
