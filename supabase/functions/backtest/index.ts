@@ -1450,8 +1450,8 @@ function runWalkForwardBacktest(
         const entryIdx = Math.min(i + executionDelay, close.length - 1);
         if (entryIdx < close.length) {
           const entryPrice = applyTradingCosts(open[entryIdx], targetDir === "long", tradeConfig);
-          // Half-Kelly sizing: ~15% of current capital per trade
-          const kellyFraction = 0.15;
+          // Adaptive Kelly sizing: 25% for high-conviction, 15% base
+          const kellyFraction = (currentTargetAllocation >= 0.7) ? 0.25 : 0.15;
           const positionSize = capital * kellyFraction;
 
           if (positionSize > 10 && entryPrice > 0) {
