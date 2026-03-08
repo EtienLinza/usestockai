@@ -24,7 +24,7 @@ import {
   Brain, TrendingUp, TrendingDown, Shield,
   Loader2, AlertTriangle, RefreshCw, Zap, DollarSign, Target,
   ArrowUpRight, ArrowDownRight, Package, BarChart3, Clock, CheckCircle2, Bell,
-  Trophy, Percent, ChevronDown, Activity, Sparkles,
+  Trophy, Percent, ChevronDown, Activity, Sparkles, Globe, PieChart,
 } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
