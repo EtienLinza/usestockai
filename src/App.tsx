@@ -33,6 +33,7 @@ const App = () => (
               <Route path="/watchlist" element={<Watchlist />} />
               <Route path="/history" element={<History />} />
               <Route path="/backtest" element={<Backtest />} />
+              <Route path="/signals" element={<Signals />} />
               <Route path="*" element={<NotFound />} />
             </Routes>
           </BrowserRouter>

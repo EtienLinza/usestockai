@@ -33,6 +33,7 @@ export const Navbar = () => {
     { href: "/watchlist", label: "Watchlist", icon: Heart },
     { href: "/history", label: "History", icon: History },
     { href: "/backtest", label: "Backtest", icon: BarChart3 },
+    { href: "/signals", label: "Signals", icon: Zap },
   ];
 
   const handleSignOut = async () => {
