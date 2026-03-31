@@ -299,6 +299,7 @@ const Dashboard = () => {
       toast.success(`Registered ${shares} shares of ${selectedSignal.ticker} at $${Number(selectedSignal.entry_price).toFixed(2)}`);
       setBuyDialogOpen(false);
       setShareAmount("");
+      setTargetProfitPct("");
       await loadSignalData();
     }
   };
