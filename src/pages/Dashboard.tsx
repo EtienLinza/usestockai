@@ -285,10 +285,14 @@ const Dashboard = () => {
     const shares = parseFloat(shareAmount);
     if (isNaN(shares) || shares <= 0) { toast.error("Enter a valid number of shares"); return; }
 
+    const profitTarget = targetProfitPct ? parseFloat(targetProfitPct) : null;
+    if (profitTarget !== null && (isNaN(profitTarget) || profitTarget <= 0)) { toast.error("Enter a valid profit target percentage"); return; }
+
     const { error } = await supabase.from("virtual_positions").insert({
       user_id: user.id, ticker: selectedSignal.ticker, entry_price: selectedSignal.entry_price,
       shares, position_type: selectedSignal.signal_type === "BUY" ? "long" : "short", signal_id: selectedSignal.id,
-    });
+      target_profit_pct: profitTarget,
+    } as any);
 
     if (error) { toast.error("Failed to register position"); }
     else {
