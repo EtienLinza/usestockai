@@ -121,6 +121,7 @@ const Dashboard = () => {
   const [buyDialogOpen, setBuyDialogOpen] = useState(false);
   const [selectedSignal, setSelectedSignal] = useState<Signal | null>(null);
   const [shareAmount, setShareAmount] = useState("");
+  const [targetProfitPct, setTargetProfitPct] = useState("");
   const [sellDialogOpen, setSellDialogOpen] = useState(false);
   const [selectedPosition, setSelectedPosition] = useState<Position | null>(null);
   const [sellPrice, setSellPrice] = useState("");
