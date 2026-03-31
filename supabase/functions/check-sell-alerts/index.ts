@@ -243,13 +243,15 @@ serve(async (req) => {
           ? ((currentPrice - Number(pos.entry_price)) / Number(pos.entry_price)) * 100
           : ((Number(pos.entry_price) - currentPrice) / Number(pos.entry_price)) * 100;
 
+        const takeProfitThreshold = pos.target_profit_pct != null ? Number(pos.target_profit_pct) : 15;
+
         // Hard stop: -8%
         if (pnlPct < -8) {
           alerts.push({ ticker: pos.ticker, reason: `Hard stop triggered (${pnlPct.toFixed(1)}% loss)`, current_price: currentPrice, position_id: pos.id });
         }
-        // Take profit: +15%
-        else if (pnlPct > 15) {
-          alerts.push({ ticker: pos.ticker, reason: `Take profit target reached (+${pnlPct.toFixed(1)}%)`, current_price: currentPrice, position_id: pos.id });
+        // Take profit: custom or default 15%
+        else if (pnlPct > takeProfitThreshold) {
+          alerts.push({ ticker: pos.ticker, reason: `🎯 Profit target reached (+${pnlPct.toFixed(1)}% vs ${takeProfitThreshold}% goal)`, current_price: currentPrice, position_id: pos.id });
         }
         // Weekly reversal
         else if (data.close.length >= 200) {

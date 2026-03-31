@@ -610,6 +610,15 @@ const Dashboard = () => {
                 <p className="text-sm text-muted-foreground mt-2">Total: ${(parseFloat(shareAmount) * Number(selectedSignal.entry_price)).toFixed(2)}</p>
               )}
             </div>
+            <div>
+              <label className="text-sm font-medium mb-2 block">Desired Profit Target %</label>
+              <Input type="number" placeholder="e.g. 10 (for 10%)" value={targetProfitPct} onChange={(e) => setTargetProfitPct(e.target.value)} variant="glow" />
+              <p className="text-xs text-muted-foreground mt-1">
+                {targetProfitPct && shareAmount && selectedSignal
+                  ? `You'll be notified when profit reaches $${((parseFloat(targetProfitPct) / 100) * parseFloat(shareAmount) * Number(selectedSignal.entry_price)).toFixed(2)}`
+                  : "Optional — defaults to 15% if not set"}
+              </p>
+            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setBuyDialogOpen(false)}>Cancel</Button>
