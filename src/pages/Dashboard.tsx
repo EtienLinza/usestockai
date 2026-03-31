@@ -121,6 +121,7 @@ const Dashboard = () => {
   const [buyDialogOpen, setBuyDialogOpen] = useState(false);
   const [selectedSignal, setSelectedSignal] = useState<Signal | null>(null);
   const [shareAmount, setShareAmount] = useState("");
+  const [targetProfitPct, setTargetProfitPct] = useState("");
   const [sellDialogOpen, setSellDialogOpen] = useState(false);
   const [selectedPosition, setSelectedPosition] = useState<Position | null>(null);
   const [sellPrice, setSellPrice] = useState("");
@@ -284,16 +285,21 @@ const Dashboard = () => {
     const shares = parseFloat(shareAmount);
     if (isNaN(shares) || shares <= 0) { toast.error("Enter a valid number of shares"); return; }
 
+    const profitTarget = targetProfitPct ? parseFloat(targetProfitPct) : null;
+    if (profitTarget !== null && (isNaN(profitTarget) || profitTarget <= 0)) { toast.error("Enter a valid profit target percentage"); return; }
+
     const { error } = await supabase.from("virtual_positions").insert({
       user_id: user.id, ticker: selectedSignal.ticker, entry_price: selectedSignal.entry_price,
       shares, position_type: selectedSignal.signal_type === "BUY" ? "long" : "short", signal_id: selectedSignal.id,
-    });
+      target_profit_pct: profitTarget,
+    } as any);
 
     if (error) { toast.error("Failed to register position"); }
     else {
       toast.success(`Registered ${shares} shares of ${selectedSignal.ticker} at $${Number(selectedSignal.entry_price).toFixed(2)}`);
       setBuyDialogOpen(false);
       setShareAmount("");
+      setTargetProfitPct("");
       await loadSignalData();
     }
   };
@@ -603,6 +609,15 @@ const Dashboard = () => {
               {shareAmount && selectedSignal && (
                 <p className="text-sm text-muted-foreground mt-2">Total: ${(parseFloat(shareAmount) * Number(selectedSignal.entry_price)).toFixed(2)}</p>
               )}
+            </div>
+            <div>
+              <label className="text-sm font-medium mb-2 block">Desired Profit Target %</label>
+              <Input type="number" placeholder="e.g. 10 (for 10%)" value={targetProfitPct} onChange={(e) => setTargetProfitPct(e.target.value)} variant="glow" />
+              <p className="text-xs text-muted-foreground mt-1">
+                {targetProfitPct && shareAmount && selectedSignal
+                  ? `You'll be notified when profit reaches $${((parseFloat(targetProfitPct) / 100) * parseFloat(shareAmount) * Number(selectedSignal.entry_price)).toFixed(2)}`
+                  : "Optional — defaults to 15% if not set"}
+              </p>
             </div>
           </div>
           <DialogFooter>

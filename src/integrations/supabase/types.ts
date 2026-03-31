@@ -344,6 +344,7 @@ export type Database = {
           shares: number
           signal_id: string | null
           status: string
+          target_profit_pct: number | null
           ticker: string
           user_id: string
         }
@@ -360,6 +361,7 @@ export type Database = {
           shares: number
           signal_id?: string | null
           status?: string
+          target_profit_pct?: number | null
           ticker: string
           user_id: string
         }
@@ -376,6 +378,7 @@ export type Database = {
           shares?: number
           signal_id?: string | null
           status?: string
+          target_profit_pct?: number | null
           ticker?: string
           user_id?: string
         }
