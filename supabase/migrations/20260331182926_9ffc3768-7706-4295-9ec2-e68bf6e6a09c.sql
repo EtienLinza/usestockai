@@ -1,0 +1,1 @@
+ALTER TABLE public.virtual_positions ADD COLUMN target_profit_pct numeric DEFAULT NULL;
