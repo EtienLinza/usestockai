@@ -992,8 +992,18 @@ serve(async (req) => {
       done: end >= allTickers.length,
       scanned: tickersToScan.length,
       elapsed,
-      // [FIX #10] Pass cached context to next batch
-      spyContext: spyContext ? { spyBearish: spyContext.spyBearish, spyClose: spyContext.spyClose.slice(-30) } : null,
+      macro: macro ? {
+        score: macro.score, label: macro.label,
+        trend: macro.trend, volatility: macro.volatility,
+        breadth: macro.breadth, credit: macro.credit,
+        vixLevel: macro.vixLevel, notes: macro.notes,
+      } : null,
+      // Pass cached context to next batch (truncate spyClose to keep payload small)
+      spyContext: spyContext ? {
+        spyBearish: spyContext.spyBearish,
+        spyClose: spyContext.spyClose.slice(-30),
+        macro: spyContext.macro,
+      } : null,
       sectorMomentum,
     }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
