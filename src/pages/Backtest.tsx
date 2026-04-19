@@ -35,9 +35,9 @@ interface BacktestReport {
   calmarRatio: number;
   profitFactor: number;
   directionalAccuracy: number;
-  mae: number;
-  rmse: number;
-  mape: number;
+  // Conviction-bucket hit rate (replaced the old MAE/RMSE/MAPE prediction-error metrics,
+  // which were measured against a dummy linearly-rescaled "predictedReturn").
+  convictionBuckets: { bucket: string; avgConviction: number; hitRate: number; avgReturn: number; count: number }[];
   avgWin: number;
   avgLoss: number;
   winLossRatio: number;
@@ -608,14 +608,41 @@ const Backtest = () => {
                       </div>
                     </Card>
 
-                    {/* Prediction Accuracy */}
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                      <MetricCard label="Dir. Accuracy" value={report.directionalAccuracy} suffix="%" icon={Target}
-                        color={report.directionalAccuracy > 50 ? "text-success" : "text-destructive"} />
-                      <MetricCard label="MAE" value={report.mae} suffix="%" icon={Activity} />
-                      <MetricCard label="RMSE" value={report.rmse} suffix="%" icon={BarChart3} />
-                      <MetricCard label="MAPE" value={report.mape} suffix="%" icon={Percent} />
-                    </div>
+                    {/* Signal Quality by Conviction Bucket */}
+                    <Card className="glass-card p-4 sm:p-6">
+                      <div className="flex items-center gap-2 mb-4">
+                        <Target className="w-4 h-4 text-primary" />
+                        <h3 className="text-sm font-semibold">Signal Quality by Conviction</h3>
+                        <span className="text-xs text-muted-foreground ml-auto">
+                          Higher conviction should yield higher hit rate
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                        <MetricCard
+                          label="Dir. Accuracy"
+                          value={report.directionalAccuracy}
+                          suffix="%"
+                          icon={Target}
+                          color={report.directionalAccuracy > 50 ? "text-success" : "text-destructive"}
+                        />
+                        {(report.convictionBuckets || []).map((b) => (
+                          <MetricCard
+                            key={b.bucket}
+                            label={`Conv ${b.bucket} (n=${b.count})`}
+                            value={b.count > 0 ? b.hitRate : 0}
+                            suffix="%"
+                            icon={Activity}
+                            color={
+                              b.count === 0
+                                ? "text-muted-foreground"
+                                : b.hitRate >= 50
+                                ? "text-success"
+                                : "text-destructive"
+                            }
+                          />
+                        ))}
+                      </div>
+                    </Card>
 
                     {/* Equity vs Benchmark Overlay */}
                     {equityVsBenchmark && equityVsBenchmark.length > 0 && (
