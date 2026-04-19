@@ -815,7 +815,7 @@ interface Trade {
   mfe: number;
   volumeAtEntry: number;
   strategy: "trend" | "mean_reversion" | "breakout" | "none";
-  exitReason: "stop_loss" | "take_profit" | "trailing_stop" | "time_exit" | "weekly_reversal" | "hard_stop" | "scale_down";
+  exitReason: "stop_loss" | "take_profit" | "trailing_stop" | "time_exit" | "weekly_reversal" | "hard_stop" | "scale_down" | "tp1_partial" | "breakeven_stop";
   scaleLevel?: number;
   allocationAtEntry?: number;
 }
@@ -956,6 +956,11 @@ interface AllocationPosition {
   maxAdverse: number;
   firstEntryIdx: number;
   regime: string;
+  // --- Phase 2: tiered take-profit state ---
+  riskDistance: number;       // % distance from avg entry to hard stop (1R)
+  firstTargetHit: boolean;    // true once +1R partial taken
+  breakevenStopActive: boolean; // true once stop is raised to breakeven on remainder
+  convictionAtEntry: number;  // 0-1, target allocation that sized the trade
 }
 
 // ============================================================================
