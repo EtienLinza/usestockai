@@ -180,24 +180,8 @@ import {
   calculateATR,
   calculateStochastic,
   calculateADX,
+  calculateOBV,
 } from "../_shared/indicators.ts";
-
-// On Balance Volume (OBV)
-function calculateOBV(close: number[], volume: number[]): number[] {
-  const obv: number[] = [volume[0] || 0];
-
-  for (let i = 1; i < close.length; i++) {
-    const vol = volume[i] || 0;
-    if (close[i] > close[i - 1]) {
-      obv.push(obv[i - 1] + vol);
-    } else if (close[i] < close[i - 1]) {
-      obv.push(obv[i - 1] - vol);
-    } else {
-      obv.push(obv[i - 1]);
-    }
-  }
-  return obv;
-}
 
 // OBV Trend (rising, falling, neutral)
 function getOBVTrend(obv: number[], period: number = 20): string {

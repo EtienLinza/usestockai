@@ -405,15 +405,13 @@ function computeStrategySignal(
 ): {
   consensusScore: number;
   regime: string;
-  predictedReturn: number;  // DEPRECATED: kept for internal type compat, no longer reported
-  regime: string;
   confidence: number;
   strategy: "trend" | "mean_reversion" | "breakout" | "none";
   positionSizeMultiplier: number;
   atr: number;
 } {
   const HOLD_RESULT = (regime: string) => ({
-    consensusScore: 0, regime, predictedReturn: 0, confidence: 0,
+    consensusScore: 0, regime, confidence: 0,
     strategy: "none" as const, positionSizeMultiplier: 1, atr: 0,
   });
 
@@ -746,16 +744,13 @@ function computeStrategySignal(
   positionSizeMultiplier = Math.max(0.25, Math.min(2.0, positionSizeMultiplier));
 
   const consensusScore = bestSignal === "BUY" ? cappedConviction : -cappedConviction;
-  // predictedReturn was a linear rescaling of conviction (consensusScore × 0.05) — meaningless as a forecast.
-  // Kept at 0 internally for type compatibility; the report now uses conviction-bucket hit rate instead.
-  const predictedReturn = 0;
 
   // Confidence = raw conviction score (already 0-100, gated at ~62 for entry)
   let confidence = cappedConviction;
   if (regime.includes("strong")) confidence += 3;
   confidence = Math.max(0, Math.min(100, Math.round(confidence)));
 
-  return { consensusScore, regime, predictedReturn, confidence, strategy: bestStrategy, positionSizeMultiplier, atr: currentATR };
+  return { consensusScore, regime, confidence, strategy: bestStrategy, positionSizeMultiplier, atr: currentATR };
 }
 
 // ============================================================================
