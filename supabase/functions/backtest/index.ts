@@ -1786,7 +1786,7 @@ function computeMetrics(
     winRate: p(winRate), avgReturn: p(avgReturn), totalReturn: p(totalReturn),
     maxDrawdown: p(maxDrawdown), sharpeRatio: p(sharpeRatio), sortinoRatio: p(sortinoRatio),
     calmarRatio: p(calmarRatio), profitFactor: p(profitFactor),
-    directionalAccuracy: p(directionalAccuracy), mae: p(maeVal), rmse: p(rmse), mape: p(mape),
+    directionalAccuracy: p(directionalAccuracy), convictionBuckets,
     avgWin: p(avgWin), avgLoss: p(avgLoss), winLossRatio: p(winLossRatio),
     avgTradeDuration: p(avgTradeDuration), medianTradeDuration, maxTradeDuration,
     avgMAE: p(avgMAE), avgMFE: p(avgMFE),
