@@ -11,7 +11,7 @@ import Dashboard from "./pages/Dashboard";
 import Watchlist from "./pages/Watchlist";
 
 import Backtest from "./pages/Backtest";
-
+import Calibration from "./pages/Calibration";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -32,6 +32,7 @@ const App = () => (
               <Route path="/watchlist" element={<Watchlist />} />
               
               <Route path="/backtest" element={<Backtest />} />
+              <Route path="/calibration" element={<Calibration />} />
               
               <Route path="*" element={<NotFound />} />
             </Routes>
