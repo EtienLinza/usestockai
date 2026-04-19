@@ -288,6 +288,27 @@ const Dashboard = () => {
     const profitTarget = targetProfitPct ? parseFloat(targetProfitPct) : null;
     if (profitTarget !== null && (isNaN(profitTarget) || profitTarget <= 0)) { toast.error("Enter a valid profit target percentage"); return; }
 
+    // ── Portfolio gate ──────────────────────────────────────────────────────
+    try {
+      const { data: gate, error: gateErr } = await supabase.functions.invoke("portfolio-gate", {
+        body: {
+          ticker: selectedSignal.ticker,
+          shares,
+          entry_price: Number(selectedSignal.entry_price),
+        },
+      });
+      if (gateErr) {
+        console.warn("Portfolio gate failed, continuing:", gateErr.message);
+      } else if (gate?.decision === "block") {
+        toast.error(`Blocked by risk cap: ${gate.violations.map((v: any) => v.message).join(" • ")}`, { duration: 8000 });
+        return;
+      } else if (gate?.decision === "warn" && gate.violations?.length) {
+        toast.warning(`Risk cap warning: ${gate.violations.map((v: any) => v.message).join(" • ")}`, { duration: 6000 });
+      }
+    } catch (e) {
+      console.warn("Portfolio gate exception, continuing:", e);
+    }
+
     const { error } = await supabase.from("virtual_positions").insert({
       user_id: user.id, ticker: selectedSignal.ticker, entry_price: selectedSignal.entry_price,
       shares, position_type: selectedSignal.signal_type === "BUY" ? "long" : "short", signal_id: selectedSignal.id,
