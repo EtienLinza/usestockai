@@ -405,7 +405,8 @@ function computeStrategySignal(
 ): {
   consensusScore: number;
   regime: string;
-  predictedReturn: number;
+  predictedReturn: number;  // DEPRECATED: kept for internal type compat, no longer reported
+  regime: string;
   confidence: number;
   strategy: "trend" | "mean_reversion" | "breakout" | "none";
   positionSizeMultiplier: number;
@@ -724,7 +725,9 @@ function computeStrategySignal(
   positionSizeMultiplier = Math.max(0.25, Math.min(2.0, positionSizeMultiplier));
 
   const consensusScore = bestSignal === "BUY" ? cappedConviction : -cappedConviction;
-  const predictedReturn = (consensusScore / 100) * 5;
+  // predictedReturn was a linear rescaling of conviction (consensusScore × 0.05) — meaningless as a forecast.
+  // Kept at 0 internally for type compatibility; the report now uses conviction-bucket hit rate instead.
+  const predictedReturn = 0;
 
   // Confidence = raw conviction score (already 0-100, gated at ~62 for entry)
   let confidence = cappedConviction;
@@ -862,9 +865,9 @@ interface BacktestReport {
   calmarRatio: number;
   profitFactor: number;
   directionalAccuracy: number;
-  mae: number;
-  rmse: number;
-  mape: number;
+  // Conviction-bucket hit rate replaces the old MAE/RMSE/MAPE metrics, which
+  // were computed from a dummy linearly-rescaled predictedReturn and meaningless.
+  convictionBuckets: { bucket: string; avgConviction: number; hitRate: number; avgReturn: number; count: number }[];
   avgWin: number;
   avgLoss: number;
   winLossRatio: number;
