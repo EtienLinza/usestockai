@@ -718,22 +718,28 @@ serve(async (req) => {
 
     console.log(`Scanning batch ${batch}: ${tickersToScan.join(", ")}`);
 
-    // [FIX #10] Fetch SPY once; pass context between batches
+    // [PHASE D] Composite macro regime (replaces binary SPY-200SMA filter).
+    // Reused across batches via body.spyContext.
     let spyContext: SpyContext | null = null;
     let spyBearish = false;
+    let macro: MacroRegime | null = null;
+
     if (body.spyContext) {
-      // Reuse SPY context from previous batch
       spyContext = body.spyContext;
       spyBearish = spyContext!.spyBearish;
+      macro = spyContext!.macro ?? null;
     } else {
-      const spyData = await fetchYahooData("SPY", "1y");
-      if (spyData && spyData.close.length >= 200) {
-        const spySMA200 = calculateSMA(spyData.close, 200);
-        const lastSMA200 = safeGet(spySMA200, 0);
-        spyBearish = spyData.close[spyData.close.length - 1] < lastSMA200;
-        spyContext = { spyBearish, spyClose: spyData.close };
-      }
+      macro = await computeMacroRegime();
+      // Bearish gate now driven by composite score, not just price < 200SMA.
+      // Allow shorts only when macro is meaningfully risk-off.
+      spyBearish = macro.score <= 40;
+      spyContext = { spyBearish, spyClose: macro.spyClose, macro };
+      console.log(
+        `Macro regime: score=${macro.score} (${macro.label}) | trend=${macro.trend} vol=${macro.volatility} ` +
+        `breadth=${macro.breadth} credit=${macro.credit} | ${macro.notes}`,
+      );
     }
+
 
     // [FIX #6] Fetch sector momentum once; pass between batches
     let sectorMomentum: SectorMomentum = {};
