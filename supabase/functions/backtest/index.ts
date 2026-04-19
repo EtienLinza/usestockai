@@ -1352,16 +1352,9 @@ function runWalkForwardBacktest(
         position.troughPrice = Math.min(position.troughPrice, close[i]);
       }
 
-      // Tiered take-profit: at +1R, scale 50% off and arm breakeven stop on remainder
+      // Tiered take-profit: at +1R, close 50% of remaining position, arm breakeven stop on rest
       if (!position.firstTargetHit && priceChange >= position.riskDistance && position.currentAllocation > 0) {
-        const targetAlloc = position.currentAllocation * 0.5;
-        scaleDownPosition(position, i, targetAlloc);
-        // Tag the just-pushed scale_down trades as tp1_partial for attribution
-        for (let t = trades.length - 1; t >= 0 && trades[t].exitReason === "scale_down"; t--) {
-          if (trades[t].ticker === ticker && trades[t].exitDate === timestamps[Math.min(i, close.length - 1)]) {
-            trades[t].exitReason = "tp1_partial";
-          } else break;
-        }
+        partialClosePosition(position, i, 0.5, "tp1_partial");
         position.firstTargetHit = true;
         position.breakevenStopActive = true;
       }
