@@ -407,7 +407,23 @@ function computeSignalConviction(
   else if (rsiVal > 70) regime = "overbought";
   else if (rsiVal < 30) regime = "oversold";
 
+  // ============================================================
+  // Phase 3b (#7): SEPARATE base conviction from bonus pool
+  // Base = strategy condition score (0-80 ish).
+  // Bonuses (positive) accumulated into bonusPool, then folded into
+  // remaining headroom with diminishing returns (max 65% of headroom).
+  // Penalties applied directly (they should bite full strength).
+  // ============================================================
   let conviction = 0;
+  let bonusPool = 0;
+  const MAX_BONUS_POOL = 35; // tuned: trend(3) + RS(8) + momentum(4) + ATR(3) + sector(±) + RSIdiv(8) + MACDdiv(5) ≈ 31-35
+  const applyBonusPool = (base: number) => {
+    if (bonusPool <= 0) return base;
+    const headroom = Math.max(0, 100 - base);
+    const fillRatio = Math.min(1, bonusPool / MAX_BONUS_POOL);
+    return Math.min(100, base + headroom * fillRatio * 0.65);
+  };
+
   let strategy = "none";
   const reasons: string[] = [];
 
@@ -446,7 +462,6 @@ function computeSignalConviction(
   }
 
   // ── [NEW] Strategy 4: Momentum Pullback ──
-  // Stock in uptrend pulling back to 20 EMA with RSI 40-55 — institutional entry pattern
   if (conviction < 50 && currentPrice > s200 && currentPrice > s50) {
     const priceTo20EMA = Math.abs(currentPrice - e20) / e20;
     if (priceTo20EMA < 0.015 && rsiVal >= 40 && rsiVal <= 55 && e12 > e26 && adxVal > 20) {
@@ -456,25 +471,20 @@ function computeSignalConviction(
     }
   }
 
-  // ── [FIX #1] Volume Confirmation ──
+  // ── [FIX #1] Volume Confirmation (penalties direct, bonuses pooled) ──
   if (conviction > 0) {
     if (strategy === "breakout" && volumeRatio < 1.0) {
-      // Breakout on thin volume — penalize heavily
-      conviction -= 12;
+      conviction -= 12;                              // direct penalty
       reasons.push("⚠ Low volume breakout");
     } else if (strategy === "trend" && volumeRatio > 1.3) {
-      // Above-average volume confirms trend
-      conviction += 5;
+      bonusPool += 5;                                // pooled bonus
       reasons.push("Volume confirms trend");
     } else if (volumeRatio < 0.6) {
-      // Very low volume on any signal — penalize
-      conviction -= 5;
+      conviction -= 5;                               // direct penalty
       reasons.push("Below-avg volume");
     }
-
-    // OBV trend bonus
     if (obvTrendUp && (strategy === "trend" || strategy === "momentum_pullback")) {
-      conviction += 3;
+      bonusPool += 3;
       reasons.push("OBV trending up");
     }
   }
@@ -483,39 +493,39 @@ function computeSignalConviction(
   if (conviction > 0 && spyContext && spyContext.spyClose.length > 0) {
     const rs = calculateRelativeStrength(close, spyContext.spyClose, 20);
     if (rs > 2) {
-      conviction += Math.min(rs * 1.5, 8);
+      bonusPool += Math.min(rs * 1.5, 8);
       reasons.push(`Outperforming SPY by ${rs.toFixed(1)}%`);
     } else if (rs < -3) {
-      conviction -= Math.min(Math.abs(rs), 6);
+      conviction -= Math.min(Math.abs(rs), 6);       // direct penalty
       reasons.push(`Underperforming SPY by ${Math.abs(rs).toFixed(1)}%`);
     }
   }
 
-  // ── [FIX #4] Multi-Timeframe Confluence (simulated) ──
+  // ── [FIX #4] Multi-Timeframe Confluence ──
   if (conviction > 0 && n >= 6) {
     const last5 = close.slice(-5);
     const upCloses = last5.filter((c, i) => i === 0 ? c > close[n - 6] : c > last5[i - 1]).length;
-    if (strategy !== "mean_reversion") {
-      if (upCloses >= 4) {
-        conviction += 4;
-        reasons.push("Strong directional momentum (4+/5 up closes)");
-      }
+    if (strategy !== "mean_reversion" && upCloses >= 4) {
+      bonusPool += 4;
+      reasons.push("Strong directional momentum (4+/5 up closes)");
     }
-    // ATR expansion check (trend acceleration)
     const atr = calculateATR(high, low, close, 14);
     const currentATR = safeGet(atr, 0);
     const atrSlice = atr.filter(v => !isNaN(v));
     const atr20Avg = atrSlice.length >= 20 ? atrSlice.slice(-20).reduce((a, b) => a + b, 0) / 20 : currentATR;
     if (currentATR > atr20Avg * 1.15 && (strategy === "trend" || strategy === "breakout")) {
-      conviction += 3;
+      bonusPool += 3;
       reasons.push("ATR expanding (trend accelerating)");
     }
   }
 
   // ── [FIX #6] Sector Rotation Awareness ──
   const sectorMod = getSectorConvictionModifier(ticker, sectorMomentum);
-  if (sectorMod.bonus !== 0) {
-    conviction += sectorMod.bonus;
+  if (sectorMod.bonus > 0) {
+    bonusPool += sectorMod.bonus;
+    if (sectorMod.label) reasons.push(sectorMod.label);
+  } else if (sectorMod.bonus < 0) {
+    conviction += sectorMod.bonus;                   // direct (negative)
     if (sectorMod.label) reasons.push(sectorMod.label);
   }
 
@@ -523,18 +533,21 @@ function computeSignalConviction(
   const rsiDivergence = detectDivergence(close, rsi, 25);
   const macdDivergence = detectDivergence(close, macdData.histogram, 25);
   if (rsiDivergence.bullish) {
-    conviction += 8;
+    bonusPool += 8;
     reasons.push("Bullish RSI divergence");
     if (strategy === "none" || strategy === "mean_reversion") strategy = "divergence";
   }
   if (macdDivergence.bullish) {
-    conviction += 5;
+    bonusPool += 5;
     reasons.push("Bullish MACD divergence");
   }
   if (rsiDivergence.bearish && strategy === "trend") {
-    conviction -= 6;
+    conviction -= 6;                                 // direct penalty
     reasons.push("⚠ Bearish RSI divergence");
   }
+
+  // Apply the pooled bonuses to whatever base conviction emerged.
+  conviction = applyBonusPool(Math.max(0, conviction));
 
   return {
     conviction: Math.min(100, Math.max(0, Math.round(conviction))),
