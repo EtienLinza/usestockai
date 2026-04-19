@@ -527,6 +527,23 @@ function computeStrategySignal(
     }
   }
 
+  // ============================================================
+  // Phase 3b: BONUS STACK NORMALIZATION
+  // ----------------------------------------------------------
+  // Problem: previous additive stacks routinely exceeded 100,
+  // saturating ALL strong signals at 100 and erasing the
+  // differentiation between "good" and "exceptional" setups.
+  // Fix: split conviction into BASE (condition score) + BONUS POOL,
+  // then apply the pool with diminishing returns into remaining headroom.
+  // ============================================================
+  const applyBonusPool = (base: number, bonusPool: number, maxPool: number) => {
+    if (maxPool <= 0) return base;
+    const headroom = Math.max(0, 100 - base);
+    const fillRatio = Math.min(1, bonusPool / maxPool);
+    // Use 0.65 of headroom max — keeps top decile reserved for truly stacked setups
+    return Math.min(100, base + headroom * fillRatio * 0.65);
+  };
+
   // --- Strategy A: Trend Following (ADX > threshold) ---
   // Conviction on TRUE 0-100 scale: no hardcoded floor
   const forceValueMR = SP.forceValueMR === true;
@@ -553,24 +570,24 @@ function computeStrategySignal(
     // Fix 10: Also block trend BUY if OBV is declining (distribution)
     if (trendBuyScore >= 3 && above200 && !dualSMADeclining && obvRising) {
       trendSignal = "BUY";
-      let conv = trendBuyScore * 15;
-      conv += Math.min((adxVal - ADX_THRESH) * 0.5, 10);
-      conv += Math.min(Math.abs(macdH) * 5, 8);
-      if (rsiVal >= 40 && rsiVal <= 60) conv += 5;
-      trendConviction = Math.min(100, conv);
+      const base = trendBuyScore * 15;                                   // max 60 at 4/4
+      const adxBonus = Math.min((adxVal - ADX_THRESH) * 0.5, 10);
+      const macdBonus = Math.min(Math.abs(macdH) * 5, 8);
+      const rsiSweet = (rsiVal >= 40 && rsiVal <= 60) ? 5 : 0;
+      trendConviction = applyBonusPool(base, adxBonus + macdBonus + rsiSweet, 23);
     // Dual-Regime Layer 1: Block trend SHORTs only when BOTH stock AND SPY 200 SMA are rising
     } else if (trendShortScore >= 3 && below200 && !(sma200Rising && ctx.spyBearish === false)) {
       trendSignal = "SHORT";
-      let conv = trendShortScore * 15;
-      conv += Math.min((adxVal - ADX_THRESH) * 0.5, 10);
-      conv += Math.min(Math.abs(macdH) * 5, 8);
-      if (rsiVal >= 40 && rsiVal <= 55) conv += 5;
-      trendConviction = Math.min(100, conv);
+      const base = trendShortScore * 15;
+      const adxBonus = Math.min((adxVal - ADX_THRESH) * 0.5, 10);
+      const macdBonus = Math.min(Math.abs(macdH) * 5, 8);
+      const rsiSweet = (rsiVal >= 40 && rsiVal <= 55) ? 5 : 0;
+      trendConviction = applyBonusPool(base, adxBonus + macdBonus + rsiSweet, 23);
     }
   }
 
   // --- Strategy B: Mean Reversion (ADX < threshold OR RSI extremes OR forceValueMR) ---
-  // Conviction 0-100: base = score*16 (3/5=48, 4/5=64, 5/5=80)
+  // Conviction 0-100 with normalized bonus pool
   let mrSignal: "BUY" | "SHORT" | "HOLD" = "HOLD";
   let mrConviction = 0;
   const mrRsiOverride = rsiVal < RSI_OS || rsiVal > RSI_OB;
@@ -604,21 +621,23 @@ function computeStrategySignal(
     // Dual-Regime Layer 1: Block MR buys only when BOTH stock below 200 AND SPY bearish
     if (mrBuyScore >= mrMinScore && !dualRegimeBearBlock) {
       mrSignal = "BUY";
-      let conv = mrBuyScore * 16;
-      conv += Math.min(Math.abs(rsiVal - 50) * 0.3, 10);
-      conv += Math.min(Math.abs(smaDeviation) * 100, 10);
-      mrConviction = Math.min(100, Math.round(conv * mrConvictionMultiplier));
+      const base = mrBuyScore * 16;                                      // max 80 at 5/5
+      const rsiBonus = Math.min(Math.abs(rsiVal - 50) * 0.3, 10);
+      const smaBonus = Math.min(Math.abs(smaDeviation) * 100, 10);
+      const pooled = applyBonusPool(base, rsiBonus + smaBonus, 20);
+      mrConviction = Math.round(pooled * mrConvictionMultiplier);
     } else if (mrShortScore >= mrMinScore && !(above200 && ctx.spyBearish === false)) {
       mrSignal = "SHORT";
-      let conv = mrShortScore * 16;
-      conv += Math.min(Math.abs(rsiVal - 50) * 0.3, 10);
-      conv += Math.min(Math.abs(smaDeviation) * 100, 10);
-      mrConviction = Math.min(100, Math.round(conv * mrConvictionMultiplier));
+      const base = mrShortScore * 16;
+      const rsiBonus = Math.min(Math.abs(rsiVal - 50) * 0.3, 10);
+      const smaBonus = Math.min(Math.abs(smaDeviation) * 100, 10);
+      const pooled = applyBonusPool(base, rsiBonus + smaBonus, 20);
+      mrConviction = Math.round(pooled * mrConvictionMultiplier);
     }
   }
 
   // --- Strategy C: Breakout (Bollinger squeeze + range expansion filter) ---
-  // Conviction 0-100: base=50, volume bonus up to 25, range bonus up to 25
+  // Conviction 0-100: base=50, bonuses normalized via pool
   let boSignal: "BUY" | "SHORT" | "HOLD" = "HOLD";
   let boConviction = 0;
   const isSqueeze = bbBW < bwAvg50 * 0.7;
@@ -635,17 +654,17 @@ function computeStrategySignal(
 
     if (currentPrice > bbU && adxRising && hasBreakoutFilter) {
       boSignal = "BUY";
-      let conv = 50;
-      conv += Math.min((volRatio - 1) * 20, 25);                              // Volume bonus
-      conv += Math.min((currentRange / currentATR - 1) * 20, 25);             // Range expansion bonus
-      boConviction = Math.min(100, conv);
+      const base = 50;
+      const volBonus = Math.min((volRatio - 1) * 20, 25);
+      const rngBonus = Math.min((currentRange / currentATR - 1) * 20, 25);
+      boConviction = applyBonusPool(base, volBonus + rngBonus, 50);
     }
     else if (currentPrice < bbL && adxRising && hasBreakoutFilter) {
       boSignal = "SHORT";
-      let conv = 50;
-      conv += Math.min((volRatio - 1) * 20, 25);
-      conv += Math.min((currentRange / currentATR - 1) * 20, 25);
-      boConviction = Math.min(100, conv);
+      const base = 50;
+      const volBonus = Math.min((volRatio - 1) * 20, 25);
+      const rngBonus = Math.min((currentRange / currentATR - 1) * 20, 25);
+      boConviction = applyBonusPool(base, volBonus + rngBonus, 50);
     }
   }
 
