@@ -95,6 +95,42 @@ export type Database = {
         }
         Relationships: []
       }
+      portfolio_caps: {
+        Row: {
+          created_at: string
+          enabled: boolean
+          enforcement_mode: string
+          id: string
+          max_correlated_positions: number
+          portfolio_beta_max: number
+          sector_max_pct: number
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          enabled?: boolean
+          enforcement_mode?: string
+          id?: string
+          max_correlated_positions?: number
+          portfolio_beta_max?: number
+          sector_max_pct?: number
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          enabled?: boolean
+          enforcement_mode?: string
+          id?: string
+          max_correlated_positions?: number
+          portfolio_beta_max?: number
+          sector_max_pct?: number
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       prediction_runs: {
         Row: {
           confidence: number
