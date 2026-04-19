@@ -1267,13 +1267,13 @@ function runWalkForwardBacktest(
   for (let i = TRAIN_WINDOW; i < close.length - 1; i++) {
     totalBars++;
 
-    // --- Rolling stock classification (adaptive) ---
-    if (i - lastClassifyBar >= adaptiveClassifyInterval && i >= 250) {
-      const classWindow = Math.min(i, adaptiveMaxWindow);
+    // --- Rolling stock classification (Phase 3a: strict 252-bar window, monthly cadence) ---
+    if (i - lastClassifyBar >= adaptiveClassifyInterval && i >= 252) {
+      const classWindow = Math.min(i, adaptiveMaxWindow); // capped at 252
       const cClose = close.slice(i - classWindow, i);
       const cHigh = high.slice(i - classWindow, i);
       const cLow = low.slice(i - classWindow, i);
-      if (cClose.length >= 50) {
+      if (cClose.length >= 200) {
         currentClassification = classifyStock(cClose, cHigh, cLow, ticker);
         const rawProfile = currentClassification.blendedParams || PROFILE_PARAMS[currentClassification.classification];
         metricHistory.push({
