@@ -815,7 +815,7 @@ interface Trade {
   mfe: number;
   volumeAtEntry: number;
   strategy: "trend" | "mean_reversion" | "breakout" | "none";
-  exitReason: "stop_loss" | "take_profit" | "trailing_stop" | "time_exit" | "weekly_reversal" | "hard_stop" | "scale_down";
+  exitReason: "stop_loss" | "take_profit" | "trailing_stop" | "time_exit" | "weekly_reversal" | "hard_stop" | "scale_down" | "tp1_partial" | "breakeven_stop";
   scaleLevel?: number;
   allocationAtEntry?: number;
 }
@@ -956,6 +956,11 @@ interface AllocationPosition {
   maxAdverse: number;
   firstEntryIdx: number;
   regime: string;
+  // --- Phase 2: tiered take-profit state ---
+  riskDistance: number;       // % distance from avg entry to hard stop (1R)
+  firstTargetHit: boolean;    // true once +1R partial taken
+  breakevenStopActive: boolean; // true once stop is raised to breakeven on remainder
+  convictionAtEntry: number;  // 0-1, target allocation that sized the trade
 }
 
 // ============================================================================
@@ -1125,7 +1130,7 @@ function runWalkForwardBacktest(
         date: timestamps[block.entryIdx], exitDate: timestamps[exitIdx], ticker,
         action: pos.direction === "long" ? "BUY" : "SHORT",
         entryPrice: block.entryPrice, exitPrice, returnPct, pnl,
-        regime: pos.regime, confidence: 70,
+        regime: pos.regime, confidence: Math.round(pos.convictionAtEntry * 100),
         predictedReturn: pos.direction === "long" ? 5 : -5,
         actualReturn, duration,
         mae: parseFloat((pos.maxAdverse * 100).toFixed(2)),
@@ -1184,6 +1189,72 @@ function runWalkForwardBacktest(
       pos.avgEntryPrice = pos.totalShares > 0 ? totalCost / pos.totalShares : 0;
     }
   };
+
+  // ============================================================
+  // PHASE 2: Partial close that splits a single block into
+  // a "sold" portion (booked as a trade) and a "remaining" portion
+  // (kept open). Used by tiered take-profit at +1R.
+  // ============================================================
+  const partialClosePosition = (pos: AllocationPosition, barIdx: number, fractionToClose: number, reason: Trade["exitReason"]) => {
+    if (pos.blocks.length === 0 || fractionToClose <= 0 || fractionToClose >= 1) return;
+    const exitIdx = Math.min(barIdx, close.length - 1);
+    const exitPriceRaw = close[exitIdx];
+    const exitPrice = applyTradingCosts(exitPriceRaw, pos.direction !== "long", tradeConfig);
+
+    // Split each block proportionally
+    const updatedBlocks: AllocationBlock[] = [];
+    for (const block of pos.blocks) {
+      const sharesSold = block.shares * fractionToClose;
+      const sharesKept = block.shares - sharesSold;
+      const sizeSold = block.positionSize * fractionToClose;
+      const sizeKept = block.positionSize - sizeSold;
+      const commSold = block.commission * fractionToClose;
+      const commKept = block.commission - commSold;
+
+      let pnl: number;
+      if (pos.direction === "long") {
+        pnl = (exitPrice - block.entryPrice) * sharesSold - commSold;
+      } else {
+        pnl = (block.entryPrice - exitPrice) * sharesSold - commSold;
+      }
+      const returnPct = sizeSold > 0 ? (pnl / sizeSold) * 100 : 0;
+      const duration = exitIdx - block.entryIdx;
+      const actualReturn = close[block.entryIdx] > 0 ? (close[exitIdx] - close[block.entryIdx]) / close[block.entryIdx] * 100 : 0;
+
+      capital += sizeSold + pnl;
+      barsInTrade += duration;
+
+      trades.push({
+        date: timestamps[block.entryIdx], exitDate: timestamps[exitIdx], ticker,
+        action: pos.direction === "long" ? "BUY" : "SHORT",
+        entryPrice: block.entryPrice, exitPrice, returnPct, pnl,
+        regime: pos.regime, confidence: Math.round(pos.convictionAtEntry * 100),
+        predictedReturn: pos.direction === "long" ? 5 : -5,
+        actualReturn, duration,
+        mae: parseFloat((pos.maxAdverse * 100).toFixed(2)),
+        mfe: parseFloat((pos.maxFavorable * 100).toFixed(2)),
+        volumeAtEntry: volume[block.entryIdx] || 0,
+        strategy: "trend", exitReason: reason,
+        scaleLevel: block.scaleLevel,
+        allocationAtEntry: pos.currentAllocation,
+      });
+
+      if (sharesKept > 0 && sizeKept > 0) {
+        updatedBlocks.push({
+          entryIdx: block.entryIdx, entryPrice: block.entryPrice,
+          shares: sharesKept, positionSize: sizeKept,
+          commission: commKept, scaleLevel: block.scaleLevel,
+        });
+      }
+    }
+
+    pos.blocks = updatedBlocks;
+    pos.currentAllocation *= (1 - fractionToClose);
+    pos.totalShares = pos.blocks.reduce((s, b) => s + b.shares, 0);
+    pos.totalPositionSize = pos.blocks.reduce((s, b) => s + b.positionSize, 0);
+    // avgEntryPrice unchanged (proportional split)
+  };
+
 
   // ========================= MAIN DAILY LOOP =========================
 
@@ -1259,11 +1330,14 @@ function runWalkForwardBacktest(
       }
     }
 
-    // --- Hard stop check ---
+    // --- Hard stop / breakeven stop / +1R tiered take-profit ---
     if (position && position.blocks.length > 0) {
       const wIdx = dailyToWeeklyIdx[i];
       const wATR = (!isNaN(weeklyATR[wIdx]) && weeklyATR[wIdx] > 0) ? weeklyATR[wIdx] : close[i] * 0.05;
       const hardStopDist = activeProfile.hardStopATRMult * wATR / position.avgEntryPrice;
+
+      // Lock the 1R risk distance the first time we see it (entry context)
+      if (position.riskDistance <= 0) position.riskDistance = hardStopDist;
 
       const priceChange = position.direction === "long"
         ? (close[i] - position.avgEntryPrice) / position.avgEntryPrice
@@ -1278,15 +1352,29 @@ function runWalkForwardBacktest(
         position.troughPrice = Math.min(position.troughPrice, close[i]);
       }
 
-      // Hard stop: drawdown from avg entry exceeds threshold
-      if (priceChange < -hardStopDist) {
-        closeFullPosition(position, i, "hard_stop");
+      // Tiered take-profit: at +1R, close 50% of remaining position, arm breakeven stop on rest
+      if (!position.firstTargetHit && priceChange >= position.riskDistance && position.currentAllocation > 0) {
+        partialClosePosition(position, i, 0.5, "tp1_partial");
+        position.firstTargetHit = true;
+        position.breakevenStopActive = true;
+      }
+
+      // Breakeven stop: once TP1 hit, exit remainder if price retraces back through entry
+      if (position.breakevenStopActive && priceChange <= 0) {
+        closeFullPosition(position, i, "breakeven_stop");
+        position = null;
+        continue;
+      }
+
+      // Hard stop: drawdown from avg entry exceeds threshold (skip if breakeven stop already armed)
+      if (!position?.breakevenStopActive && priceChange < -hardStopDist) {
+        closeFullPosition(position!, i, "hard_stop");
         position = null;
         continue;
       }
     }
 
-    // --- Binary trend entry: single position per trend cycle (half-Kelly sizing) ---
+    // --- Binary trend entry: single position per trend cycle (dynamic Kelly sizing) ---
     if (i < cooldownUntil) continue; // respect cooldown after exits
     if (currentBias !== "flat" && currentTargetAllocation > 0 && !position) {
       const targetDir: "long" | "short" = currentBias === "long" ? "long" : "short";
@@ -1299,8 +1387,18 @@ function runWalkForwardBacktest(
         const entryIdx = Math.min(i + executionDelay, close.length - 1);
         if (entryIdx < close.length) {
           const entryPrice = applyTradingCosts(open[entryIdx], targetDir === "long", tradeConfig);
-          // Adaptive Kelly sizing: 25% for high-conviction, 15% base
-          const kellyFraction = (currentTargetAllocation >= 0.7) ? 0.25 : 0.15;
+
+          // ============================================================
+          // PHASE 2: Dynamic Kelly sizing tied to conviction (#2)
+          // currentTargetAllocation (0-1) is the weekly bias conviction.
+          // Map it continuously to a Kelly fraction in [10%, 30%].
+          // Low-vol mean-reversion stocks get a 0.75x size penalty
+          // (smaller edge per trade, defensive mode).
+          // ============================================================
+          const convictionScalar = Math.max(0, Math.min(1, currentTargetAllocation));
+          let kellyFraction = 0.10 + 0.20 * convictionScalar; // 10% .. 30%
+          if (isLowVolStock) kellyFraction *= 0.75;
+          kellyFraction = Math.max(0.05, Math.min(0.30, kellyFraction));
           const positionSize = capital * kellyFraction;
 
           if (positionSize > 10 && entryPrice > 0) {
@@ -1320,6 +1418,10 @@ function runWalkForwardBacktest(
               peakPrice: close[i], troughPrice: close[i],
               maxFavorable: 0, maxAdverse: 0,
               firstEntryIdx: entryIdx, regime,
+              riskDistance: 0, // initialized on next bar from ATR
+              firstTargetHit: false,
+              breakevenStopActive: false,
+              convictionAtEntry: convictionScalar,
             };
 
             position.blocks.push({ entryIdx, entryPrice, shares, positionSize, commission, scaleLevel: 1 });
