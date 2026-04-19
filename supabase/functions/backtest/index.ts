@@ -1038,10 +1038,12 @@ function runWalkForwardBacktest(
     }
   }
 
-  // --- Stock Classification (adaptive window/interval/smoothing) ---
-  const DEFAULT_CLASSIFY_INTERVAL = 500;
-  const DEFAULT_MAX_WINDOW = 1000;
-  const DEFAULT_SMOOTH_FACTOR = 0.3;
+  // --- Stock Classification (Phase 3a: strict 252-bar rolling window, no lookahead) ---
+  // Use a 1-year (252 trading days) rolling window so classification reflects RECENT regime,
+  // not a stale 4-year average. Reclassify every ~21 bars (monthly) for responsiveness.
+  const DEFAULT_CLASSIFY_INTERVAL = 21;   // monthly reclassification
+  const DEFAULT_MAX_WINDOW = 252;         // 1 trading year, no peeking beyond
+  const DEFAULT_SMOOTH_FACTOR = 0.25;     // smoother profile transitions to avoid whipsaw
   let adaptiveClassifyInterval = DEFAULT_CLASSIFY_INTERVAL;
   let adaptiveMaxWindow = DEFAULT_MAX_WINDOW;
   let adaptiveSmoothFactor = DEFAULT_SMOOTH_FACTOR;
@@ -1061,16 +1063,20 @@ function runWalkForwardBacktest(
   }
 
   function updateAdaptiveParams(stabilityCV: number) {
+    // Phase 3a: keep window strictly bounded to 252 bars (no lookahead, no stale long-window).
+    // Only modulate the *reclassification interval* and *smoothing*, not the window size.
     if (stabilityCV < 0) return;
     if (stabilityCV < 0.15) {
-      adaptiveMaxWindow = 1500; adaptiveClassifyInterval = 750; adaptiveSmoothFactor = 0.4;
+      // Stable regime → reclassify less often, smooth more
+      adaptiveMaxWindow = 252; adaptiveClassifyInterval = 42; adaptiveSmoothFactor = 0.35;
     } else if (stabilityCV > 0.40) {
-      adaptiveMaxWindow = 600; adaptiveClassifyInterval = 250; adaptiveSmoothFactor = 0.15;
+      // Unstable regime → reclassify more often, less smoothing
+      adaptiveMaxWindow = 252; adaptiveClassifyInterval = 10; adaptiveSmoothFactor = 0.15;
     } else {
       const t = (stabilityCV - 0.15) / 0.25;
-      adaptiveMaxWindow = Math.round(1500 - 900 * t);
-      adaptiveClassifyInterval = Math.round(750 - 500 * t);
-      adaptiveSmoothFactor = 0.4 - 0.25 * t;
+      adaptiveMaxWindow = 252;
+      adaptiveClassifyInterval = Math.round(42 - 32 * t);
+      adaptiveSmoothFactor = 0.35 - 0.20 * t;
     }
   }
 
