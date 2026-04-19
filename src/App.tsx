@@ -12,6 +12,7 @@ import Watchlist from "./pages/Watchlist";
 
 import Backtest from "./pages/Backtest";
 import Calibration from "./pages/Calibration";
+import Settings from "./pages/Settings";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -33,6 +34,7 @@ const App = () => (
               
               <Route path="/backtest" element={<Backtest />} />
               <Route path="/calibration" element={<Calibration />} />
+              <Route path="/settings" element={<Settings />} />
               
               <Route path="*" element={<NotFound />} />
             </Routes>
