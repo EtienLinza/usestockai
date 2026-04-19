@@ -136,13 +136,13 @@ export default function Calibration() {
                   label="Realized win rate"
                   value={`${data.summary.winRate.toFixed(1)}%`}
                   icon={Target}
-                  trend={data.summary.winRate >= 55 ? "up" : data.summary.winRate >= 45 ? "neutral" : "down"}
+                  color={data.summary.winRate >= 55 ? "text-primary" : data.summary.winRate >= 45 ? "text-foreground" : "text-destructive"}
                 />
                 <MetricCard
                   label="Avg return"
                   value={`${data.summary.avgReturnPct >= 0 ? "+" : ""}${data.summary.avgReturnPct.toFixed(2)}%`}
                   icon={TrendingUp}
-                  trend={data.summary.avgReturnPct > 0 ? "up" : "down"}
+                  color={data.summary.avgReturnPct > 0 ? "text-primary" : "text-destructive"}
                 />
                 <MetricCard
                   label="Open positions"
