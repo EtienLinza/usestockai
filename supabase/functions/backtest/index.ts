@@ -6,174 +6,20 @@ const corsHeaders = {
 };
 
 // ============================================================================
-// TECHNICAL INDICATOR FUNCTIONS
+// TECHNICAL INDICATORS — imported from canonical shared module
+// (See supabase/functions/_shared/indicators.ts)
 // ============================================================================
-
-function calculateEMA(prices: number[], period: number): number[] {
-  const multiplier = 2 / (period + 1);
-  const ema: number[] = [];
-  if (prices.length < period) {
-    ema[0] = prices[0];
-    for (let i = 1; i < prices.length; i++) {
-      ema[i] = (prices[i] - ema[i - 1]) * multiplier + ema[i - 1];
-    }
-    return ema;
-  }
-  const smaSum = prices.slice(0, period).reduce((a, b) => a + b, 0);
-  ema[0] = smaSum / period;
-  for (let i = 0; i < period - 1; i++) ema[i] = NaN;
-  ema[period - 1] = smaSum / period;
-  for (let i = period; i < prices.length; i++) {
-    ema[i] = (prices[i] - ema[i - 1]) * multiplier + ema[i - 1];
-  }
-  return ema;
-}
-
-function calculateSMA(prices: number[], period: number): number[] {
-  const sma: number[] = [];
-  for (let i = 0; i < prices.length; i++) {
-    if (i < period - 1) { sma[i] = NaN; }
-    else {
-      const sum = prices.slice(i - period + 1, i + 1).reduce((a, b) => a + b, 0);
-      sma[i] = sum / period;
-    }
-  }
-  return sma;
-}
-
-function calculateRSI(prices: number[], period: number = 14): number[] {
-  const rsi: number[] = [];
-  let avgGain = 0, avgLoss = 0;
-  for (let i = 0; i <= period; i++) rsi[i] = NaN;
-  for (let i = 1; i <= period; i++) {
-    const change = prices[i] - prices[i - 1];
-    avgGain += change > 0 ? change : 0;
-    avgLoss += change < 0 ? -change : 0;
-  }
-  avgGain /= period; avgLoss /= period;
-  rsi[period] = 100 - (100 / (1 + (avgGain / (avgLoss || 0.0001))));
-  for (let i = period + 1; i < prices.length; i++) {
-    const change = prices[i] - prices[i - 1];
-    avgGain = (avgGain * (period - 1) + (change > 0 ? change : 0)) / period;
-    avgLoss = (avgLoss * (period - 1) + (change < 0 ? -change : 0)) / period;
-    rsi[i] = 100 - (100 / (1 + (avgGain / (avgLoss || 0.0001))));
-  }
-  return rsi;
-}
-
-function calculateMACD(prices: number[]): { macd: number[]; signal: number[]; histogram: number[] } {
-  const ema12 = calculateEMA(prices, 12);
-  const ema26 = calculateEMA(prices, 26);
-  const macd = ema12.map((v, i) => v - ema26[i]);
-
-  const validIndices: number[] = [];
-  const validMacd: number[] = [];
-  for (let i = 0; i < macd.length; i++) {
-    if (!isNaN(macd[i])) {
-      validIndices.push(i);
-      validMacd.push(macd[i]);
-    }
-  }
-
-  const signalRaw = calculateEMA(validMacd, 9);
-  const paddedSignal: number[] = new Array(macd.length).fill(NaN);
-  for (let i = 0; i < signalRaw.length; i++) {
-    paddedSignal[validIndices[i]] = signalRaw[i];
-  }
-
-  const histogram = macd.map((v, i) => {
-    if (isNaN(v) || isNaN(paddedSignal[i])) return NaN;
-    return v - paddedSignal[i];
-  });
-  return { macd, signal: paddedSignal, histogram };
-}
-
-function calculateBollingerBands(prices: number[], period: number = 20, stdDev: number = 2) {
-  const sma = calculateSMA(prices, period);
-  const upper: number[] = [], lower: number[] = [], bandwidth: number[] = [];
-  for (let i = 0; i < prices.length; i++) {
-    if (i < period - 1) { upper[i] = NaN; lower[i] = NaN; bandwidth[i] = NaN; }
-    else {
-      const slice = prices.slice(i - period + 1, i + 1);
-      const mean = sma[i];
-      const variance = slice.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / period;
-      const std = Math.sqrt(variance) * stdDev;
-      upper[i] = mean + std; lower[i] = mean - std;
-      bandwidth[i] = (upper[i] - lower[i]) / mean;
-    }
-  }
-  return { upper, middle: sma, lower, bandwidth };
-}
-
-function calculateVolatility(prices: number[], period: number = 20): number[] {
-  const returns: number[] = [];
-  for (let i = 1; i < prices.length; i++) returns.push((prices[i] - prices[i - 1]) / prices[i - 1]);
-  const volatility: number[] = [NaN];
-  for (let i = 1; i < prices.length; i++) {
-    if (i < period) { volatility[i] = NaN; }
-    else {
-      const slice = returns.slice(i - period, i);
-      const mean = slice.reduce((a, b) => a + b, 0) / period;
-      const variance = slice.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / period;
-      volatility[i] = Math.sqrt(variance);
-    }
-  }
-  return volatility;
-}
-
-function calculateADX(high: number[], low: number[], close: number[], period: number = 14) {
-  if (close.length < 2) return { adx: [], plusDI: [], minusDI: [] };
-  const plusDM: number[] = [], minusDM: number[] = [], tr: number[] = [];
-  for (let i = 1; i < close.length; i++) {
-    const upMove = high[i] - high[i - 1];
-    const downMove = low[i - 1] - low[i];
-    plusDM.push(upMove > downMove && upMove > 0 ? upMove : 0);
-    minusDM.push(downMove > upMove && downMove > 0 ? downMove : 0);
-    tr.push(Math.max(high[i] - low[i], Math.abs(high[i] - close[i - 1]), Math.abs(low[i] - close[i - 1])));
-  }
-  const smoothedTR = calculateEMA(tr, period);
-  const smoothedPlusDM = calculateEMA(plusDM, period);
-  const smoothedMinusDM = calculateEMA(minusDM, period);
-  const plusDI = smoothedPlusDM.map((v, i) => smoothedTR[i] === 0 ? 0 : (v / smoothedTR[i]) * 100);
-  const minusDI = smoothedMinusDM.map((v, i) => smoothedTR[i] === 0 ? 0 : (v / smoothedTR[i]) * 100);
-  const dx = plusDI.map((v, i) => { const sum = v + minusDI[i]; return sum === 0 ? 0 : (Math.abs(v - minusDI[i]) / sum) * 100; });
-  const adxRaw = calculateEMA(dx.filter(v => !isNaN(v)), period);
-  const padLen = close.length - adxRaw.length;
-  return { adx: new Array(Math.max(0, padLen)).fill(NaN).concat(adxRaw), plusDI: new Array(1).fill(NaN).concat(plusDI), minusDI: new Array(1).fill(NaN).concat(minusDI) };
-}
-
-function calculateStochastic(close: number[], high: number[], low: number[], kPeriod: number = 14) {
-  const k: number[] = [];
-  for (let i = 0; i < close.length; i++) {
-    if (i < kPeriod - 1) { k.push(NaN); continue; }
-    const hSlice = high.slice(i - kPeriod + 1, i + 1);
-    const lSlice = low.slice(i - kPeriod + 1, i + 1);
-    const hh = Math.max(...hSlice), ll = Math.min(...lSlice), range = hh - ll;
-    k.push(range === 0 ? 50 : ((close[i] - ll) / range) * 100);
-  }
-  return k;
-}
-
-function calculateATR(high: number[], low: number[], close: number[], period: number = 14): number[] {
-  const atr: number[] = [NaN];
-  const tr: number[] = [high[0] - low[0]];
-  for (let i = 1; i < close.length; i++) {
-    tr.push(Math.max(
-      high[i] - low[i],
-      Math.abs(high[i] - close[i - 1]),
-      Math.abs(low[i] - close[i - 1])
-    ));
-  }
-  // Initial ATR = simple average of first `period` TRs
-  for (let i = 1; i < period; i++) atr[i] = NaN;
-  if (tr.length >= period) {
-    atr[period - 1] = tr.slice(0, period).reduce((a, b) => a + b, 0) / period;
-    for (let i = period; i < tr.length; i++) {
-      atr[i] = (atr[i - 1] * (period - 1) + tr[i]) / period;
-    }
-  }
-  return atr;
-}
+import {
+  calculateEMA,
+  calculateSMA,
+  calculateRSI,
+  calculateMACD,
+  calculateBollingerBands,
+  calculateVolatility,
+  calculateADX,
+  calculateStochastic,
+  calculateATR,
+} from "../_shared/indicators.ts";
 // ============================================================================
 // WEEKLY BAR AGGREGATION
 // ============================================================================
@@ -559,7 +405,8 @@ function computeStrategySignal(
 ): {
   consensusScore: number;
   regime: string;
-  predictedReturn: number;
+  predictedReturn: number;  // DEPRECATED: kept for internal type compat, no longer reported
+  regime: string;
   confidence: number;
   strategy: "trend" | "mean_reversion" | "breakout" | "none";
   positionSizeMultiplier: number;
@@ -878,7 +725,9 @@ function computeStrategySignal(
   positionSizeMultiplier = Math.max(0.25, Math.min(2.0, positionSizeMultiplier));
 
   const consensusScore = bestSignal === "BUY" ? cappedConviction : -cappedConviction;
-  const predictedReturn = (consensusScore / 100) * 5;
+  // predictedReturn was a linear rescaling of conviction (consensusScore × 0.05) — meaningless as a forecast.
+  // Kept at 0 internally for type compatibility; the report now uses conviction-bucket hit rate instead.
+  const predictedReturn = 0;
 
   // Confidence = raw conviction score (already 0-100, gated at ~62 for entry)
   let confidence = cappedConviction;
@@ -1016,9 +865,9 @@ interface BacktestReport {
   calmarRatio: number;
   profitFactor: number;
   directionalAccuracy: number;
-  mae: number;
-  rmse: number;
-  mape: number;
+  // Conviction-bucket hit rate replaces the old MAE/RMSE/MAPE metrics, which
+  // were computed from a dummy linearly-rescaled predictedReturn and meaningless.
+  convictionBuckets: { bucket: string; avgConviction: number; hitRate: number; avgReturn: number; count: number }[];
   avgWin: number;
   avgLoss: number;
   winLossRatio: number;
@@ -1524,7 +1373,7 @@ function computeMetrics(
     return {
       totalTrades: 0, winRate: 0, avgReturn: 0, totalReturn: 0, maxDrawdown: 0,
       sharpeRatio: 0, sortinoRatio: 0, calmarRatio: 0, profitFactor: 0,
-      directionalAccuracy: 0, mae: 0, rmse: 0, mape: 0,
+      directionalAccuracy: 0, convictionBuckets: [],
       avgWin: 0, avgLoss: 0, winLossRatio: 0,
       avgTradeDuration: 0, medianTradeDuration: 0, maxTradeDuration: 0,
       avgMAE: 0, avgMFE: 0, valueAtRisk: 0, conditionalVaR: 0,
@@ -1701,11 +1550,31 @@ function computeMetrics(
   const signalRecall = (truePositives + falseNegatives) > 0 ? (truePositives / (truePositives + falseNegatives)) * 100 : 0;
   const signalF1 = (signalPrecision + signalRecall) > 0 ? 2 * (signalPrecision * signalRecall) / (signalPrecision + signalRecall) : 0;
 
-  // MAE, RMSE, MAPE
-  const errors = trades.map(t => t.predictedReturn - t.actualReturn);
-  const maeVal = errors.reduce((a, b) => a + Math.abs(b), 0) / errors.length;
-  const rmse = Math.sqrt(errors.reduce((a, b) => a + b * b, 0) / errors.length);
-  const mape = trades.reduce((a, t) => a + (t.actualReturn !== 0 ? Math.abs((t.predictedReturn - t.actualReturn) / t.actualReturn) : 0), 0) / trades.length * 100;
+  // Conviction-bucket hit rate (replaces meaningless MAE/RMSE/MAPE on dummy predictedReturn).
+  // Buckets the trades by their actual entry conviction and reports win rate + avg return per bucket.
+  // This is the metric that actually tells you whether higher-conviction signals deliver better outcomes.
+  const bucketDefs: { label: string; min: number; max: number }[] = [
+    { label: "60-69", min: 60, max: 69.999 },
+    { label: "70-79", min: 70, max: 79.999 },
+    { label: "80-89", min: 80, max: 89.999 },
+    { label: "90-100", min: 90, max: 100 },
+  ];
+  const convictionBuckets = bucketDefs.map(b => {
+    const inBucket = trades.filter(t => t.confidence >= b.min && t.confidence <= b.max);
+    const count = inBucket.length;
+    if (count === 0) return { bucket: b.label, avgConviction: 0, hitRate: 0, avgReturn: 0, count: 0 };
+    const avgConviction = inBucket.reduce((a, t) => a + t.confidence, 0) / count;
+    const winners = inBucket.filter(t => t.pnl > 0).length;
+    const hitRate = (winners / count) * 100;
+    const avgReturn = inBucket.reduce((a, t) => a + t.returnPct, 0) / count;
+    return {
+      bucket: b.label,
+      avgConviction: parseFloat(avgConviction.toFixed(1)),
+      hitRate: parseFloat(hitRate.toFixed(1)),
+      avgReturn: parseFloat(avgReturn.toFixed(2)),
+      count,
+    };
+  });
 
   // Alpha / Beta — computed from equity curve returns aligned with SPY returns by date
   let alpha = 0, beta = 0;
@@ -1917,7 +1786,7 @@ function computeMetrics(
     winRate: p(winRate), avgReturn: p(avgReturn), totalReturn: p(totalReturn),
     maxDrawdown: p(maxDrawdown), sharpeRatio: p(sharpeRatio), sortinoRatio: p(sortinoRatio),
     calmarRatio: p(calmarRatio), profitFactor: p(profitFactor),
-    directionalAccuracy: p(directionalAccuracy), mae: p(maeVal), rmse: p(rmse), mape: p(mape),
+    directionalAccuracy: p(directionalAccuracy), convictionBuckets,
     avgWin: p(avgWin), avgLoss: p(avgLoss), winLossRatio: p(winLossRatio),
     avgTradeDuration: p(avgTradeDuration), medianTradeDuration, maxTradeDuration,
     avgMAE: p(avgMAE), avgMFE: p(avgMFE),
