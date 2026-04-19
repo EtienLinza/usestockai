@@ -668,16 +668,18 @@ function computeStrategySignal(
     }
   }
 
-  // --- Apply profile-specific conviction bonuses ---
+  // --- Apply profile-specific conviction bonuses (Phase 3b: pooled, not raw additive) ---
+  // Profile bonuses go through the same diminishing-returns pool as in-strategy bonuses.
+  // Max profile bonus assumed to be 15; the pool gives at most 0.65 × headroom.
   const pb = profileBonuses || {};
   if (trendSignal !== "HOLD" && pb.trendConvictionBonus) {
-    trendConviction = Math.min(100, trendConviction + pb.trendConvictionBonus);
+    trendConviction = applyBonusPool(trendConviction, pb.trendConvictionBonus, 15);
   }
   if (mrSignal !== "HOLD" && pb.mrConvictionBonus) {
-    mrConviction = Math.min(100, mrConviction + pb.mrConvictionBonus);
+    mrConviction = applyBonusPool(mrConviction, pb.mrConvictionBonus, 15);
   }
   if (boSignal !== "HOLD" && pb.breakoutConvictionBonus) {
-    boConviction = Math.min(100, boConviction + pb.breakoutConvictionBonus);
+    boConviction = applyBonusPool(boConviction, pb.breakoutConvictionBonus, 15);
   }
 
   // --- Select best strategy by conviction ---
@@ -714,14 +716,14 @@ function computeStrategySignal(
     adjustedConviction *= 0.7; // Shorting in bull market needs much higher raw conviction (unless leader)
   }
 
-  // --- Adaptive Layer 3: Conviction Bonus for stocks in their own strong trend ---
-  // If stock is in its own strong uptrend, boost BUY conviction
-  if (above200 && sma200Slope > 0.02 && rsiVal > 40 && rsiVal < 70) {
-    if (bestSignal === "BUY") adjustedConviction += 8;
+  // --- Adaptive Layer 3 (Phase 3b): own-trend bonus pooled, not raw additive ---
+  // This bonus partly double-counts trend conditions (price > s50 already in score).
+  // Pool it through diminishing returns so it cannot push 80→100 by itself.
+  if (above200 && sma200Slope > 0.02 && rsiVal > 40 && rsiVal < 70 && bestSignal === "BUY") {
+    adjustedConviction = applyBonusPool(adjustedConviction, 8, 8);
   }
-  // If stock is in its own strong downtrend, boost SHORT conviction
-  if (below200 && sma200Slope < -0.02 && rsiVal > 30 && rsiVal < 60) {
-    if (bestSignal === "SHORT") adjustedConviction += 8;
+  if (below200 && sma200Slope < -0.02 && rsiVal > 30 && rsiVal < 60 && bestSignal === "SHORT") {
+    adjustedConviction = applyBonusPool(adjustedConviction, 8, 8);
   }
 
   // --- Conviction threshold filter ---
