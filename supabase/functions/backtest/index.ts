@@ -405,15 +405,13 @@ function computeStrategySignal(
 ): {
   consensusScore: number;
   regime: string;
-  predictedReturn: number;  // DEPRECATED: kept for internal type compat, no longer reported
-  regime: string;
   confidence: number;
   strategy: "trend" | "mean_reversion" | "breakout" | "none";
   positionSizeMultiplier: number;
   atr: number;
 } {
   const HOLD_RESULT = (regime: string) => ({
-    consensusScore: 0, regime, predictedReturn: 0, confidence: 0,
+    consensusScore: 0, regime, confidence: 0,
     strategy: "none" as const, positionSizeMultiplier: 1, atr: 0,
   });
 
