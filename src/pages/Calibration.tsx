@@ -36,9 +36,21 @@ interface CalibrationData {
   recentOpen: any[];
 }
 
+interface ActiveWeights {
+  id: string;
+  computed_at: string;
+  window_days: number;
+  sample_size: number;
+  calibration_curve: Record<string, { actualWinRate: number; expectedWinRate: number; adjust: number; count: number }>;
+  strategy_tilts: Record<string, { multiplier: number; winRate: number; avgReturn: number; count: number }>;
+  regime_floors: Record<string, { floor: number; sampleWinRate: number; count: number }>;
+}
+
 export default function Calibration() {
   const [data, setData] = useState<CalibrationData | null>(null);
+  const [weights, setWeights] = useState<ActiveWeights | null>(null);
   const [loading, setLoading] = useState(true);
+  const [recalibrating, setRecalibrating] = useState(false);
   const [windowDays, setWindowDays] = useState(90);
 
   const load = async (days: number) => {
@@ -46,13 +58,32 @@ export default function Calibration() {
     try {
       const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID;
       const url = `https://${projectId}.supabase.co/functions/v1/calibration-stats?days=${days}`;
-      const res = await fetchWithErrorHandling(url);
-      const json = await res.json();
+      const [statsRes, weightsRes] = await Promise.all([
+        fetchWithErrorHandling(url),
+        supabase.from("strategy_weights").select("*").eq("is_active", true).maybeSingle(),
+      ]);
+      const json = await statsRes.json();
       setData(json);
+      if (!weightsRes.error) setWeights(weightsRes.data as any);
     } catch (e) {
       showErrorToast(e, "Failed to load calibration data");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const runRecalibration = async () => {
+    setRecalibrating(true);
+    try {
+      const { data: res, error } = await supabase.functions.invoke("calibrate-weights");
+      if (error) throw error;
+      const { toast } = await import("sonner");
+      toast.success(`Recalibrated on ${res?.sampleSize ?? 0} closed signals`);
+      await load(windowDays);
+    } catch (e) {
+      showErrorToast(e, "Recalibration failed");
+    } finally {
+      setRecalibrating(false);
     }
   };
 
@@ -75,7 +106,7 @@ export default function Calibration() {
                 <div className="flex items-center gap-2 mb-1">
                   <Brain className="w-5 h-5 text-primary" />
                   <h1 className="text-2xl font-light tracking-tight">Calibration</h1>
-                  <Badge variant="outline" className="ml-2 text-xs">Phase A</Badge>
+                  <Badge variant="outline" className="ml-2 text-xs">Phase B · Adaptive</Badge>
                 </div>
                 <p className="text-sm text-muted-foreground max-w-2xl">
                   The real conviction → win-rate curve from live signals. If the algorithm says "80",
@@ -96,9 +127,95 @@ export default function Calibration() {
                 <Button size="sm" variant="ghost" onClick={() => load(windowDays)} disabled={loading}>
                   {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
                 </Button>
+                <Button size="sm" variant="outline" onClick={runRecalibration} disabled={recalibrating}>
+                  {recalibrating ? <Loader2 className="w-4 h-4 mr-1.5 animate-spin" /> : <Brain className="w-4 h-4 mr-1.5" />}
+                  Recalibrate
+                </Button>
               </div>
             </div>
           </motion.div>
+
+          {/* Active adaptive weights — Phase B */}
+          <Card className="p-5 mb-6 bg-card/50 border-primary/30">
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <h2 className="text-sm font-medium tracking-wide uppercase text-muted-foreground">
+                  Active Adaptive Weights
+                </h2>
+                <p className="text-xs text-muted-foreground/70 mt-1">
+                  {weights
+                    ? `Computed ${new Date(weights.computed_at).toLocaleString()} · ${weights.sample_size} samples · ${weights.window_days}d window`
+                    : "No weights computed yet — click Recalibrate to bootstrap. Scanner uses defaults until then."}
+                </p>
+              </div>
+              {weights && <Badge variant="outline" className="text-primary border-primary/40">Live</Badge>}
+            </div>
+            {weights && (
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide mb-2">Strategy Tilts</p>
+                  <div className="space-y-1.5">
+                    {Object.entries(weights.strategy_tilts).length === 0 && (
+                      <p className="text-xs text-muted-foreground">All neutral (1.00×)</p>
+                    )}
+                    {Object.entries(weights.strategy_tilts).map(([k, v]) => (
+                      <div key={k} className="flex items-center justify-between text-xs">
+                        <span className="capitalize">{k.replace(/_/g, " ")}</span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-muted-foreground/70">n={v.count}</span>
+                          <Badge
+                            variant={v.multiplier > 1.02 ? "default" : v.multiplier < 0.98 ? "destructive" : "secondary"}
+                            className="text-[10px] py-0 h-5"
+                          >
+                            {v.multiplier.toFixed(2)}×
+                          </Badge>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide mb-2">Regime Floors</p>
+                  <div className="space-y-1.5">
+                    {Object.entries(weights.regime_floors).length === 0 && (
+                      <p className="text-xs text-muted-foreground">Default floor (65)</p>
+                    )}
+                    {Object.entries(weights.regime_floors).map(([k, v]) => (
+                      <div key={k} className="flex items-center justify-between text-xs">
+                        <span className="capitalize">{k}</span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-muted-foreground/70">n={v.count}</span>
+                          <Badge variant="outline" className="text-[10px] py-0 h-5">≥ {v.floor}</Badge>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide mb-2">Conviction Shifts</p>
+                  <div className="space-y-1.5">
+                    {Object.entries(weights.calibration_curve).length === 0 && (
+                      <p className="text-xs text-muted-foreground">No adjustments</p>
+                    )}
+                    {Object.entries(weights.calibration_curve).map(([k, v]) => (
+                      <div key={k} className="flex items-center justify-between text-xs">
+                        <span>{k}</span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-muted-foreground/70">{v.actualWinRate.toFixed(0)}% actual</span>
+                          <Badge
+                            variant={v.adjust > 0 ? "default" : v.adjust < 0 ? "destructive" : "secondary"}
+                            className="text-[10px] py-0 h-5"
+                          >
+                            {v.adjust > 0 ? "+" : ""}{v.adjust}
+                          </Badge>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+          </Card>
 
           {loading && !data && (
             <div className="flex items-center justify-center py-24 text-muted-foreground gap-2">
