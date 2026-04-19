@@ -349,6 +349,8 @@ export type Database = {
           exit_price: number | null
           exit_reason: string | null
           id: string
+          macro_label: string | null
+          macro_score: number | null
           max_adverse_excursion_pct: number | null
           max_favorable_excursion_pct: number | null
           realized_pnl_pct: number | null
@@ -363,6 +365,7 @@ export type Database = {
           updated_at: string
           vix_at_entry: number | null
           weekly_bias: string | null
+          weights_id: string | null
         }
         Insert: {
           bars_held?: number | null
@@ -376,6 +379,8 @@ export type Database = {
           exit_price?: number | null
           exit_reason?: string | null
           id?: string
+          macro_label?: string | null
+          macro_score?: number | null
           max_adverse_excursion_pct?: number | null
           max_favorable_excursion_pct?: number | null
           realized_pnl_pct?: number | null
@@ -390,6 +395,7 @@ export type Database = {
           updated_at?: string
           vix_at_entry?: number | null
           weekly_bias?: string | null
+          weights_id?: string | null
         }
         Update: {
           bars_held?: number | null
@@ -403,6 +409,8 @@ export type Database = {
           exit_price?: number | null
           exit_reason?: string | null
           id?: string
+          macro_label?: string | null
+          macro_score?: number | null
           max_adverse_excursion_pct?: number | null
           max_favorable_excursion_pct?: number | null
           realized_pnl_pct?: number | null
@@ -417,8 +425,17 @@ export type Database = {
           updated_at?: string
           vix_at_entry?: number | null
           weekly_bias?: string | null
+          weights_id?: string | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "signal_outcomes_weights_id_fkey"
+            columns: ["weights_id"]
+            isOneToOne: false
+            referencedRelation: "strategy_weights"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       strategy_weights: {
         Row: {

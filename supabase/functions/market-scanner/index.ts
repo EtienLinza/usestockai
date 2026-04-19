@@ -761,13 +761,15 @@ serve(async (req) => {
     let calibrationCurve: Record<string, { adjust: number }> = {};
     let strategyTilts: Record<string, { multiplier: number }> = {};
     let regimeFloors: Record<string, { floor: number }> = {};
+    let activeWeightsId: string | null = null;
     try {
       const { data: weights } = await supabasePre
         .from("strategy_weights")
-        .select("calibration_curve, strategy_tilts, regime_floors")
+        .select("id, calibration_curve, strategy_tilts, regime_floors")
         .eq("is_active", true)
         .maybeSingle();
       if (weights) {
+        activeWeightsId = (weights as any).id ?? null;
         calibrationCurve = (weights.calibration_curve as any) ?? {};
         strategyTilts = (weights.strategy_tilts as any) ?? {};
         regimeFloors = (weights.regime_floors as any) ?? {};
@@ -967,6 +969,9 @@ serve(async (req) => {
             contributing_rules: { reasoning: s.reasoning },
             entry_price: s.entry_price,
             spy_at_entry: spyContext?.spyClose?.[spyContext.spyClose.length - 1] ?? null,
+            macro_score: macro?.score ?? spyContext?.macro?.score ?? null,
+            macro_label: macro?.label ?? spyContext?.macro?.label ?? null,
+            weights_id: activeWeightsId,
             status: "open",
           }));
 
