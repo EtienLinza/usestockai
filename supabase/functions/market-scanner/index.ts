@@ -180,13 +180,156 @@ function getSectorConvictionModifier(ticker: string, sectorMomentum: SectorMomen
 }
 
 // ============================================================================
-// SIGNAL STRENGTH / CONVICTION COMPUTATION (ENHANCED)
+// MACRO REGIME — composite score replacing binary SPY-200SMA filter
+// Score 0-100 from four sub-components (each 0-100, equally weighted):
+//   1. Trend     — SPY vs its 50/200 SMAs and slope of 200-SMA
+//   2. Volatility — VIX level (low VIX = high score)
+//   3. Breadth   — RSP (equal-weight S&P) 60d return vs SPY 60d return
+//   4. Credit    — HYG/LQD ratio 60d trend (rising = risk-on)
 // ============================================================================
 
+interface MacroRegime {
+  score: number;        // 0-100 composite
+  label: string;        // "risk_off" | "neutral" | "risk_on"
+  trend: number;        // sub-score 0-100
+  volatility: number;   // sub-score 0-100
+  breadth: number;      // sub-score 0-100
+  credit: number;       // sub-score 0-100
+  spyClose: number[];   // kept for ticker-level use
+  vixLevel: number | null;
+  notes: string;
+}
+
+function clamp(v: number, lo = 0, hi = 100): number {
+  return Math.max(lo, Math.min(hi, v));
+}
+
+function pctChange(arr: number[], lookback: number): number | null {
+  if (arr.length <= lookback) return null;
+  const a = arr[arr.length - 1];
+  const b = arr[arr.length - 1 - lookback];
+  if (!b || b === 0) return null;
+  return ((a - b) / b) * 100;
+}
+
+async function computeMacroRegime(): Promise<MacroRegime> {
+  const [spy, vix, hyg, lqd, rsp] = await Promise.all([
+    fetchYahooData("SPY", "1y"),
+    fetchYahooData("^VIX", "3mo"),
+    fetchYahooData("HYG", "6mo"),
+    fetchYahooData("LQD", "6mo"),
+    fetchYahooData("RSP", "6mo"),
+  ]);
+
+  const notes: string[] = [];
+  const spyClose = spy?.close ?? [];
+
+  // ── 1. Trend (SPY price vs 50/200 SMA + slope) ───────────────────────────
+  let trend = 50;
+  if (spyClose.length >= 200) {
+    const sma50 = calculateSMA(spyClose, 50);
+    const sma200 = calculateSMA(spyClose, 200);
+    const px = spyClose[spyClose.length - 1];
+    const s50 = safeGet(sma50, px);
+    const s200 = safeGet(sma200, px);
+    const s200_20ago = sma200[sma200.length - 21] ?? s200;
+    const slopePct = s200_20ago > 0 ? ((s200 - s200_20ago) / s200_20ago) * 100 : 0;
+
+    let t = 50;
+    if (px > s50) t += 15;
+    if (px > s200) t += 20;
+    if (s50 > s200) t += 10;
+    // slope: ±5pts per ±1% over 20 bars, capped
+    t += Math.max(-15, Math.min(15, slopePct * 5));
+    trend = clamp(t);
+    notes.push(`trend px/${px > s200 ? ">" : "<"}200SMA slope=${slopePct.toFixed(2)}%`);
+  } else {
+    notes.push("trend insufficient SPY data");
+  }
+
+  // ── 2. Volatility (VIX) ─────────────────────────────────────────────────
+  let vol = 50;
+  let vixLevel: number | null = null;
+  if (vix && vix.close.length > 0) {
+    vixLevel = vix.close[vix.close.length - 1];
+    // Map VIX: 12 -> 100, 15 -> 85, 20 -> 60, 25 -> 35, 30 -> 15, 40+ -> 0
+    if (vixLevel <= 12) vol = 100;
+    else if (vixLevel >= 40) vol = 0;
+    else vol = clamp(100 - ((vixLevel - 12) / 28) * 100);
+    notes.push(`vix=${vixLevel.toFixed(1)}`);
+  } else {
+    notes.push("vix unavailable");
+  }
+
+  // ── 3. Breadth (RSP vs SPY 60d return) ──────────────────────────────────
+  let breadth = 50;
+  if (rsp && spyClose.length >= 61 && rsp.close.length >= 61) {
+    const rspRet = pctChange(rsp.close, 60);
+    const spyRet = pctChange(spyClose, 60);
+    if (rspRet !== null && spyRet !== null) {
+      const diff = rspRet - spyRet; // positive = breadth healthy
+      // ±5% diff -> ±50 from neutral
+      breadth = clamp(50 + diff * 10);
+      notes.push(`breadth rsp-spy=${diff.toFixed(2)}%`);
+    }
+  } else {
+    notes.push("breadth insufficient data");
+  }
+
+  // ── 4. Credit (HYG/LQD ratio 60d slope) ─────────────────────────────────
+  let credit = 50;
+  if (hyg && lqd && hyg.close.length >= 61 && lqd.close.length >= 61) {
+    const ratio: number[] = [];
+    const minLen = Math.min(hyg.close.length, lqd.close.length);
+    for (let i = 0; i < minLen; i++) {
+      if (lqd.close[i] > 0) ratio.push(hyg.close[i] / lqd.close[i]);
+    }
+    const ratioRet = pctChange(ratio, 60);
+    if (ratioRet !== null) {
+      // ±2% credit ratio change -> ±50 from neutral
+      credit = clamp(50 + ratioRet * 25);
+      notes.push(`credit hyg/lqd=${ratioRet.toFixed(2)}%`);
+    }
+  } else {
+    notes.push("credit insufficient data");
+  }
+
+  const score = Math.round((trend + vol + breadth + credit) / 4);
+  const label = score >= 65 ? "risk_on" : score <= 40 ? "risk_off" : "neutral";
+
+  return {
+    score,
+    label,
+    trend: Math.round(trend),
+    volatility: Math.round(vol),
+    breadth: Math.round(breadth),
+    credit: Math.round(credit),
+    spyClose,
+    vixLevel,
+    notes: notes.join(" | "),
+  };
+}
+
+// Map a macro score → an additive floor adjustment for conviction gates.
+//   risk_off (≤40) → +8 (require stronger setups)
+//   neutral        → 0
+//   risk_on (≥65)  → -3 (allow slightly more)
+function macroFloorAdjust(macroScore: number): number {
+  if (macroScore <= 30) return 12;
+  if (macroScore <= 40) return 8;
+  if (macroScore <= 55) return 3;
+  if (macroScore < 65) return 0;
+  if (macroScore < 80) return -3;
+  return -5;
+}
+
+// Legacy interface kept for cross-batch context plumbing (downstream code reads spyBearish/spyClose)
 interface SpyContext {
   spyBearish: boolean;
   spyClose: number[];
+  macro?: MacroRegime;
 }
+
 
 function computeSignalConviction(
   close: number[], high: number[], low: number[], volume: number[],
