@@ -601,6 +601,40 @@ serve(async (req) => {
       console.log("Sector momentum:", Object.entries(sectorMomentum).map(([k, v]) => `${k}:${(v as number).toFixed(1)}%`).join(", "));
     }
 
+    // ─────────────────────────────────────────────────────────────────────
+    // PHASE B — Load adaptive weights (calibration / tilts / floors).
+    // Falls back to neutral defaults if nothing has been computed yet.
+    // ─────────────────────────────────────────────────────────────────────
+    const supabasePre = createClient(
+      Deno.env.get("SUPABASE_URL")!,
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+    );
+    let calibrationCurve: Record<string, { adjust: number }> = {};
+    let strategyTilts: Record<string, { multiplier: number }> = {};
+    let regimeFloors: Record<string, { floor: number }> = {};
+    try {
+      const { data: weights } = await supabasePre
+        .from("strategy_weights")
+        .select("calibration_curve, strategy_tilts, regime_floors")
+        .eq("is_active", true)
+        .maybeSingle();
+      if (weights) {
+        calibrationCurve = (weights.calibration_curve as any) ?? {};
+        strategyTilts = (weights.strategy_tilts as any) ?? {};
+        regimeFloors = (weights.regime_floors as any) ?? {};
+      }
+    } catch (e) {
+      console.warn("Could not load adaptive weights, using defaults:", e);
+    }
+
+    function bucketKey(c: number): string {
+      if (c < 60) return "lt60";
+      if (c < 70) return "60-69";
+      if (c < 80) return "70-79";
+      if (c < 90) return "80-89";
+      return "90-100";
+    }
+
     // Fetch all tickers in parallel (batched to avoid rate limits)
     const FETCH_BATCH = 5;
     const allData: (DataSet | null)[] = [];
@@ -671,13 +705,24 @@ serve(async (req) => {
         if (!hasEntry) continue;
 
         // 5. Compute conviction (enhanced)
-        const { conviction, regime, strategy, reasoning, annualizedVol } = computeSignalConviction(
+        const raw = computeSignalConviction(
           data.close, data.high, data.low, data.volume,
           spyContext, sectorMomentum, ticker,
         );
+        const { regime, strategy, reasoning, annualizedVol } = raw;
+        let conviction = raw.conviction;
 
-        // [FIX #8] Raised conviction thresholds
-        const minConviction = strategy === "mean_reversion" || strategy === "divergence" ? 60 : 65;
+        // ─── PHASE B: apply adaptive weights ─────────────────────────────
+        // (a) Strategy tilt multiplier
+        const tilt = strategyTilts[strategy]?.multiplier ?? 1.0;
+        conviction = conviction * tilt;
+        // (b) Calibration curve adjust (signed)
+        const adj = calibrationCurve[bucketKey(conviction)]?.adjust ?? 0;
+        conviction = Math.max(0, Math.min(100, Math.round(conviction + adj)));
+
+        // ─── PHASE B: dynamic regime floor (with strategy-aware default) ─
+        const baselineFloor = strategy === "mean_reversion" || strategy === "divergence" ? 60 : 65;
+        const minConviction = regimeFloors[regime]?.floor ?? baselineFloor;
         if (conviction < minConviction) continue;
 
         // Find sector

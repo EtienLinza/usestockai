@@ -29,3 +29,6 @@ verify_jwt = false
 
 [functions.calibration-stats]
 verify_jwt = false
+
+[functions.calibrate-weights]
+verify_jwt = false
