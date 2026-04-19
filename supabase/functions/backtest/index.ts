@@ -1130,7 +1130,7 @@ function runWalkForwardBacktest(
         date: timestamps[block.entryIdx], exitDate: timestamps[exitIdx], ticker,
         action: pos.direction === "long" ? "BUY" : "SHORT",
         entryPrice: block.entryPrice, exitPrice, returnPct, pnl,
-        regime: pos.regime, confidence: 70,
+        regime: pos.regime, confidence: Math.round(pos.convictionAtEntry * 100),
         predictedReturn: pos.direction === "long" ? 5 : -5,
         actualReturn, duration,
         mae: parseFloat((pos.maxAdverse * 100).toFixed(2)),
