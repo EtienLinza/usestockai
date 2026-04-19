@@ -384,6 +384,45 @@ export type Database = {
         }
         Relationships: []
       }
+      strategy_weights: {
+        Row: {
+          calibration_curve: Json
+          computed_at: string
+          created_at: string
+          id: string
+          is_active: boolean
+          notes: Json
+          regime_floors: Json
+          sample_size: number
+          strategy_tilts: Json
+          window_days: number
+        }
+        Insert: {
+          calibration_curve?: Json
+          computed_at?: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          notes?: Json
+          regime_floors?: Json
+          sample_size?: number
+          strategy_tilts?: Json
+          window_days?: number
+        }
+        Update: {
+          calibration_curve?: Json
+          computed_at?: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          notes?: Json
+          regime_floors?: Json
+          sample_size?: number
+          strategy_tilts?: Json
+          window_days?: number
+        }
+        Relationships: []
+      }
       virtual_portfolio_log: {
         Row: {
           cash: number
