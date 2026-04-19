@@ -1,72 +1,51 @@
 
+You've correctly diagnosed that the current system is a static rule lookup table, not a decision-making system. The fix isn't more indicators — it's adding three architectural layers the system entirely lacks: outcome memory, adaptive weighting, and portfolio-level awareness.
 
-## Goal
+## Architecture sketch
 
-Verify that the entire algorithm pipeline works end-to-end after Phases 1–3, fix every bug uncovered, and unify all algorithm-using surfaces on the new logic. No surface should still be running stale duplicated code.
+```text
+CURRENT:  rule-table → conviction → trade  (no feedback, no memory, no portfolio view)
 
-## What I found
+PROPOSED:
+  rule-table → conviction
+       ↓
+  [adaptive weights]  ← nightly recalibration
+       ↓                  ↑
+  [portfolio gate]   [outcome memory]
+       ↓                  ↑
+     trade  ─────────  exit & log
+```
 
-### 🔴 Bugs to fix first
+## The phases
 
-1. **`backtest/index.ts` lines 405–414 — duplicate `regime: string` field in the return type of `computeStrategySignal`.** When `predictedReturn` was deprecated the cleanup left a stray duplicate field. Likely compiles in Deno (TS allows it with a warning) but it's broken and should be removed. The deprecated `predictedReturn` field can also leave the type entirely — nothing reads it.
+**Phase A — Outcome memory (foundation)**
+New `signal_outcomes` table. Every signal `market-scanner` emits gets logged with full context (regime, profile, conviction, which rules fired, entry thesis tag). Every exit from `check-sell-alerts` logs realized PnL, exit reason, bars held, max favorable/adverse excursion. New "Calibration" view showing the *real* conviction → win-rate curve from live signals — not just backtest. **This is the substrate. Nothing else can learn without it.**
 
-2. **`check-sell-alerts/index.ts` is fully out-of-date** (the entire file is its own private copy of EMA / RSI / ATR / ADX / `classifyStockSimple` / `computeWeeklyBias` from BEFORE the Phase 1 refactor). Specifically:
-   - Uses **EMA-smoothed ADX** (the bug we fixed — values 15-20% too low)
-   - `classifyStockSimple` uses the **full price history** (the lookahead bias we removed in Phase 3a)
-   - Asymmetric weekly-bias short logic (the bug in Phase 3c that's still pending)
-   - This is the function that **decides when to alert users to sell their virtual positions** — so live users are getting decisions from the OLD broken algo.
+**Phase B — Adaptive consensus (depends on A)**
+Nightly job reads last 90 days of outcomes. Three things it can do (you pick how aggressive):
+- Re-fit conviction calibration so "80" actually means 80%
+- Tilt strategy weights toward what's working in the current regime
+- Auto-tune the conviction floor based on current-regime hit rates
 
-3. **`market-scanner/index.ts` has a leftover local `calculateOBV`** at line that is now also exported from the shared module. Minor, but should use the shared one.
+**Phase C — Portfolio-aware gating (independent of A/B)**
+Before any new signal opens a virtual position, check it against current holdings: sector concentration, rolling correlation, total portfolio beta. Closes the "long 10 tech names = 1 leveraged tech bet" hole. Critical for "put money in and walk away."
 
-4. **`stock-predict/index.ts` still defines its own local `calculateOBV`** at line 186 instead of importing from `_shared/indicators.ts`.
+**Phase D — Macro regime layer**
+Replace the binary SPY-200SMA filter with a composite score: SPY trend + VIX level + breadth proxy + credit spread proxy (HYG/LQD ratio). Conviction floor moves with the regime score.
 
-### 🟡 Verification needed
+**Phase E (deferred) — Forward-looking data + thesis-aware exits**
+Earnings calendar, FOMC dates, options flow. And tagging entries with thesis IDs so a mean-reversion entry can exit when RSI normalizes (not just when an ATR stop fires). Larger surface area, possibly paid data — revisit after A-D.
 
-5. Run the deployed `backtest` edge function once (50 tickers, 3-year window) to confirm:
-   - The duplicate-regime fix didn't break compilation
-   - Conviction buckets actually populate now (last run had clustered confidence values)
-   - Tiered TP1 (`tp1_partial`) and `breakeven_stop` exit reasons appear in the trade log
-   - Win rate, profit factor, hit-rate-by-conviction-bucket vs Phase 2 baseline
-6. Trigger `market-scanner` once and inspect `live_signals` to confirm pooled-bonus conviction values spread across 60–100 (not saturated at 100).
-7. Open the Backtest page in preview to confirm UI still renders (no broken refs to dropped fields).
+## What's deliberately out
 
-## Plan
+- True ML models. Premature without outcome memory; Phase B is statistical adaptation, not ML.
+- Rebuilding the indicator engine. The rules aren't the problem — the lack of feedback around them is.
 
-### Step 1 — Fix the type bug in `backtest/index.ts`
-Remove the duplicate `regime: string;` line in the `computeStrategySignal` return type and drop the deprecated `predictedReturn` field. Leave the local variable named `predictedReturn = 0` if it simplifies callsite changes, but remove it from the return type.
+## Decisions I need before writing code
 
-### Step 2 — Migrate `check-sell-alerts` onto the shared algo
-Rewrite `check-sell-alerts/index.ts` to:
-- Import all indicators from `_shared/indicators.ts` (delete the 80+ lines of local copies)
-- Import or re-export `classifyStockSimple` + `computeWeeklyBias` + `aggregateToWeekly` + `PROFILE_WEEKLY_PARAMS` from a new `_shared/signal-engine.ts` module so it cannot drift again
-- Use the same lookahead-fixed 120-bar `classifyStockSimple` already in `market-scanner` and `stock-predict`
+1. **Sequencing.** Phase A is a hard prerequisite for B. C and D can run before or in parallel with A. Build A first (highest leverage, no immediate user-visible payoff)? Or C first (most immediate user impact)? Or all of A+C+D in one push?
+2. **How aggressive should Phase B's adaptation be?** Calibration only / + strategy reweighting / + auto-tuned thresholds. The aggressive option is the most "learning" but also the most surprising for users.
+3. **Phase C cap strictness.** Soft warnings, hard auto-blocks, or per-user configurable caps?
+4. **Phase E forward data.** Free sources only (Yahoo earnings + FOMC calendar), one paid feed (~$30-100/mo), or defer entirely until A-D prove out?
 
-### Step 3 — Create `_shared/signal-engine.ts`
-Move `aggregateToWeekly`, `computeWeeklyBias`, `classifyStockSimple`, `hasDailyEntrySignal`, and `PROFILE_WEEKLY_PARAMS` into one shared module. Update imports in `market-scanner`, `check-sell-alerts`, and `stock-predict`. The `backtest` engine has its own enriched `classifyStock` (with blending) so it stays separate, but it still imports indicators from `_shared/indicators.ts`.
-
-### Step 4 — Drop duplicate `calculateOBV` in `market-scanner` and `stock-predict`
-Use the shared one. Removes ~30 lines of duplicate code.
-
-### Step 5 — Deploy + run end-to-end validation
-1. Deploy `backtest`, `market-scanner`, `check-sell-alerts`, `stock-predict`
-2. Curl `backtest` with the 50-ticker / 3-year config — capture win rate, profit factor, conviction-bucket distribution, exit-reason mix
-3. Curl `market-scanner` once — verify signals get written to `live_signals` with conviction values spread across 60–100
-4. Open Backtest page in preview to confirm UI renders cleanly
-
-### Step 6 — Report deltas
-Compare against the Phase 2 baseline (78.1% WR, 47.13 PF on 5-tickers; 74.1% WR / 62.06 PF on 50-ticker Phase 3a run). Flag any regression and call out whether Phase 3c (symmetric weekly bias) and Phase 4 (ATR-scaled cooldown) should be the next steps.
-
-## Out of scope (kept for later phases)
-
-- **Phase 3c** (symmetric weekly bias / `computeWeeklyBias` short-side allocation ladder) — explicitly deferred per user's prior choice.
-- **Phase 4** (ATR-scaled cooldown) — deferred.
-- **Custom exit targets propagation** — `check-sell-alerts` already uses `target_profit_pct`; tiered TP1 partial exits in live trading are a separate "apply to virtual positions" feature.
-
-## Files to touch
-
-- `supabase/functions/backtest/index.ts` (1 small fix)
-- `supabase/functions/_shared/signal-engine.ts` (new)
-- `supabase/functions/check-sell-alerts/index.ts` (rewrite, ~70% smaller)
-- `supabase/functions/market-scanner/index.ts` (drop local OBV, import from shared engine)
-- `supabase/functions/stock-predict/index.ts` (drop local OBV, import from shared engine)
-
+Answer those four and I'll cut a concrete build plan with specific tables, edge functions, and validation steps for the chosen phase.
