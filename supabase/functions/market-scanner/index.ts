@@ -7,178 +7,22 @@ const corsHeaders = {
 };
 
 // ============================================================================
-// TECHNICAL INDICATOR FUNCTIONS
+// TECHNICAL INDICATORS — imported from canonical shared module
+// (See supabase/functions/_shared/indicators.ts)
 // ============================================================================
-
-function calculateEMA(prices: number[], period: number): number[] {
-  const multiplier = 2 / (period + 1);
-  const ema: number[] = [];
-  if (prices.length < period) {
-    ema[0] = prices[0];
-    for (let i = 1; i < prices.length; i++) {
-      ema[i] = (prices[i] - ema[i - 1]) * multiplier + ema[i - 1];
-    }
-    return ema;
-  }
-  const smaSum = prices.slice(0, period).reduce((a, b) => a + b, 0);
-  ema[0] = smaSum / period;
-  for (let i = 0; i < period - 1; i++) ema[i] = NaN;
-  ema[period - 1] = smaSum / period;
-  for (let i = period; i < prices.length; i++) {
-    ema[i] = (prices[i] - ema[i - 1]) * multiplier + ema[i - 1];
-  }
-  return ema;
-}
-
-function calculateSMA(prices: number[], period: number): number[] {
-  const sma: number[] = [];
-  for (let i = 0; i < prices.length; i++) {
-    if (i < period - 1) { sma[i] = NaN; }
-    else {
-      const sum = prices.slice(i - period + 1, i + 1).reduce((a, b) => a + b, 0);
-      sma[i] = sum / period;
-    }
-  }
-  return sma;
-}
-
-function calculateRSI(prices: number[], period: number = 14): number[] {
-  const rsi: number[] = [];
-  let avgGain = 0, avgLoss = 0;
-  for (let i = 0; i <= period; i++) rsi[i] = NaN;
-  for (let i = 1; i <= period; i++) {
-    const change = prices[i] - prices[i - 1];
-    avgGain += change > 0 ? change : 0;
-    avgLoss += change < 0 ? -change : 0;
-  }
-  avgGain /= period; avgLoss /= period;
-  rsi[period] = 100 - (100 / (1 + (avgGain / (avgLoss || 0.0001))));
-  for (let i = period + 1; i < prices.length; i++) {
-    const change = prices[i] - prices[i - 1];
-    avgGain = (avgGain * (period - 1) + (change > 0 ? change : 0)) / period;
-    avgLoss = (avgLoss * (period - 1) + (change < 0 ? -change : 0)) / period;
-    rsi[i] = 100 - (100 / (1 + (avgGain / (avgLoss || 0.0001))));
-  }
-  return rsi;
-}
-
-function calculateMACD(prices: number[]): { macd: number[]; signal: number[]; histogram: number[] } {
-  const ema12 = calculateEMA(prices, 12);
-  const ema26 = calculateEMA(prices, 26);
-  const macd = ema12.map((v, i) => v - ema26[i]);
-  const validIndices: number[] = [];
-  const validMacd: number[] = [];
-  for (let i = 0; i < macd.length; i++) {
-    if (!isNaN(macd[i])) { validIndices.push(i); validMacd.push(macd[i]); }
-  }
-  const signalRaw = calculateEMA(validMacd, 9);
-  const paddedSignal: number[] = new Array(macd.length).fill(NaN);
-  for (let i = 0; i < signalRaw.length; i++) { paddedSignal[validIndices[i]] = signalRaw[i]; }
-  const histogram = macd.map((v, i) => {
-    if (isNaN(v) || isNaN(paddedSignal[i])) return NaN;
-    return v - paddedSignal[i];
-  });
-  return { macd, signal: paddedSignal, histogram };
-}
-
-function calculateBollingerBands(prices: number[], period: number = 20, stdDev: number = 2) {
-  const sma = calculateSMA(prices, period);
-  const upper: number[] = [], lower: number[] = [], bandwidth: number[] = [];
-  for (let i = 0; i < prices.length; i++) {
-    if (i < period - 1) { upper[i] = NaN; lower[i] = NaN; bandwidth[i] = NaN; }
-    else {
-      const slice = prices.slice(i - period + 1, i + 1);
-      const mean = sma[i];
-      const variance = slice.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / period;
-      const std = Math.sqrt(variance) * stdDev;
-      upper[i] = mean + std; lower[i] = mean - std;
-      bandwidth[i] = (upper[i] - lower[i]) / mean;
-    }
-  }
-  return { upper, middle: sma, lower, bandwidth };
-}
-
-function calculateADX(high: number[], low: number[], close: number[], period: number = 14) {
-  if (close.length < 2) return { adx: [], plusDI: [], minusDI: [] };
-  const plusDM: number[] = [], minusDM: number[] = [], tr: number[] = [];
-  for (let i = 1; i < close.length; i++) {
-    const upMove = high[i] - high[i - 1];
-    const downMove = low[i - 1] - low[i];
-    plusDM.push(upMove > downMove && upMove > 0 ? upMove : 0);
-    minusDM.push(downMove > upMove && downMove > 0 ? downMove : 0);
-    tr.push(Math.max(high[i] - low[i], Math.abs(high[i] - close[i - 1]), Math.abs(low[i] - close[i - 1])));
-  }
-  const smoothedTR = calculateEMA(tr, period);
-  const smoothedPlusDM = calculateEMA(plusDM, period);
-  const smoothedMinusDM = calculateEMA(minusDM, period);
-  const plusDI = smoothedPlusDM.map((v, i) => smoothedTR[i] === 0 ? 0 : (v / smoothedTR[i]) * 100);
-  const minusDI = smoothedMinusDM.map((v, i) => smoothedTR[i] === 0 ? 0 : (v / smoothedTR[i]) * 100);
-  const dx = plusDI.map((v, i) => { const sum = v + minusDI[i]; return sum === 0 ? 0 : (Math.abs(v - minusDI[i]) / sum) * 100; });
-  const adxRaw = calculateEMA(dx.filter(v => !isNaN(v)), period);
-  const padLen = close.length - adxRaw.length;
-  return { adx: new Array(Math.max(0, padLen)).fill(NaN).concat(adxRaw), plusDI: new Array(1).fill(NaN).concat(plusDI), minusDI: new Array(1).fill(NaN).concat(minusDI) };
-}
-
-function calculateStochastic(close: number[], high: number[], low: number[], kPeriod: number = 14) {
-  const k: number[] = [];
-  for (let i = 0; i < close.length; i++) {
-    if (i < kPeriod - 1) { k.push(NaN); continue; }
-    const hSlice = high.slice(i - kPeriod + 1, i + 1);
-    const lSlice = low.slice(i - kPeriod + 1, i + 1);
-    const hh = Math.max(...hSlice), ll = Math.min(...lSlice), range = hh - ll;
-    k.push(range === 0 ? 50 : ((close[i] - ll) / range) * 100);
-  }
-  return k;
-}
-
-function calculateATR(high: number[], low: number[], close: number[], period: number = 14): number[] {
-  const atr: number[] = [NaN];
-  const tr: number[] = [high[0] - low[0]];
-  for (let i = 1; i < close.length; i++) {
-    tr.push(Math.max(high[i] - low[i], Math.abs(high[i] - close[i - 1]), Math.abs(low[i] - close[i - 1])));
-  }
-  for (let i = 1; i < period; i++) atr[i] = NaN;
-  if (tr.length >= period) {
-    atr[period - 1] = tr.slice(0, period).reduce((a, b) => a + b, 0) / period;
-    for (let i = period; i < tr.length; i++) {
-      atr[i] = (atr[i - 1] * (period - 1) + tr[i]) / period;
-    }
-  }
-  return atr;
-}
-
-function calculateVolatility(prices: number[], period: number = 20): number[] {
-  const returns: number[] = [];
-  for (let i = 1; i < prices.length; i++) returns.push((prices[i] - prices[i - 1]) / prices[i - 1]);
-  const volatility: number[] = [NaN];
-  for (let i = 1; i < prices.length; i++) {
-    if (i < period) { volatility[i] = NaN; }
-    else {
-      const slice = returns.slice(i - period, i);
-      const mean = slice.reduce((a, b) => a + b, 0) / period;
-      const variance = slice.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / period;
-      volatility[i] = Math.sqrt(variance);
-    }
-  }
-  return volatility;
-}
-
-// [NEW] On-Balance Volume
-function calculateOBV(close: number[], volume: number[]): number[] {
-  const obv: number[] = [volume[0] || 0];
-  for (let i = 1; i < close.length; i++) {
-    if (close[i] > close[i - 1]) obv[i] = obv[i - 1] + volume[i];
-    else if (close[i] < close[i - 1]) obv[i] = obv[i - 1] - volume[i];
-    else obv[i] = obv[i - 1];
-  }
-  return obv;
-}
-
-function safeGet(arr: number[], defaultVal: number): number {
-  if (!arr || arr.length === 0) return defaultVal;
-  const v = arr[arr.length - 1];
-  return (v == null || isNaN(v)) ? defaultVal : v;
-}
+import {
+  calculateEMA,
+  calculateSMA,
+  calculateRSI,
+  calculateMACD,
+  calculateBollingerBands,
+  calculateADX,
+  calculateStochastic,
+  calculateATR,
+  calculateVolatility,
+  calculateOBV,
+  safeGet,
+} from "../_shared/indicators.ts";
 
 // ============================================================================
 // [NEW] DIVERGENCE DETECTION (ported from stock-predict)
