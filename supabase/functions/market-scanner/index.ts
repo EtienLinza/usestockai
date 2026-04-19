@@ -869,9 +869,11 @@ serve(async (req) => {
         const adj = calibrationCurve[bucketKey(conviction)]?.adjust ?? 0;
         conviction = Math.max(0, Math.min(100, Math.round(conviction + adj)));
 
-        // ─── PHASE B: dynamic regime floor (with strategy-aware default) ─
+        // ─── PHASE B + D: dynamic floor (adaptive baseline + macro adjust) ─
         const baselineFloor = strategy === "mean_reversion" || strategy === "divergence" ? 60 : 65;
-        const minConviction = regimeFloors[regime]?.floor ?? baselineFloor;
+        const adaptiveFloor = regimeFloors[regime]?.floor ?? baselineFloor;
+        const macroAdj = macro ? macroFloorAdjust(macro.score) : 0;
+        const minConviction = Math.max(50, Math.min(90, adaptiveFloor + macroAdj));
         if (conviction < minConviction) continue;
 
         // Find sector
