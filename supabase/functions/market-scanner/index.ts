@@ -1002,7 +1002,7 @@ serve(async (req) => {
       spyContext: spyContext ? {
         spyBearish: spyContext.spyBearish,
         spyClose: spyContext.spyClose.slice(-30),
-        macro: spyContext.macro,
+        macro: spyContext.macro ? { ...spyContext.macro, spyClose: spyContext.macro.spyClose.slice(-30) } : undefined,
       } : null,
       sectorMomentum,
     }), {
