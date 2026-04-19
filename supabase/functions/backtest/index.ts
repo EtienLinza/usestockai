@@ -1190,6 +1190,72 @@ function runWalkForwardBacktest(
     }
   };
 
+  // ============================================================
+  // PHASE 2: Partial close that splits a single block into
+  // a "sold" portion (booked as a trade) and a "remaining" portion
+  // (kept open). Used by tiered take-profit at +1R.
+  // ============================================================
+  const partialClosePosition = (pos: AllocationPosition, barIdx: number, fractionToClose: number, reason: Trade["exitReason"]) => {
+    if (pos.blocks.length === 0 || fractionToClose <= 0 || fractionToClose >= 1) return;
+    const exitIdx = Math.min(barIdx, close.length - 1);
+    const exitPriceRaw = close[exitIdx];
+    const exitPrice = applyTradingCosts(exitPriceRaw, pos.direction !== "long", tradeConfig);
+
+    // Split each block proportionally
+    const updatedBlocks: AllocationBlock[] = [];
+    for (const block of pos.blocks) {
+      const sharesSold = block.shares * fractionToClose;
+      const sharesKept = block.shares - sharesSold;
+      const sizeSold = block.positionSize * fractionToClose;
+      const sizeKept = block.positionSize - sizeSold;
+      const commSold = block.commission * fractionToClose;
+      const commKept = block.commission - commSold;
+
+      let pnl: number;
+      if (pos.direction === "long") {
+        pnl = (exitPrice - block.entryPrice) * sharesSold - commSold;
+      } else {
+        pnl = (block.entryPrice - exitPrice) * sharesSold - commSold;
+      }
+      const returnPct = sizeSold > 0 ? (pnl / sizeSold) * 100 : 0;
+      const duration = exitIdx - block.entryIdx;
+      const actualReturn = close[block.entryIdx] > 0 ? (close[exitIdx] - close[block.entryIdx]) / close[block.entryIdx] * 100 : 0;
+
+      capital += sizeSold + pnl;
+      barsInTrade += duration;
+
+      trades.push({
+        date: timestamps[block.entryIdx], exitDate: timestamps[exitIdx], ticker,
+        action: pos.direction === "long" ? "BUY" : "SHORT",
+        entryPrice: block.entryPrice, exitPrice, returnPct, pnl,
+        regime: pos.regime, confidence: Math.round(pos.convictionAtEntry * 100),
+        predictedReturn: pos.direction === "long" ? 5 : -5,
+        actualReturn, duration,
+        mae: parseFloat((pos.maxAdverse * 100).toFixed(2)),
+        mfe: parseFloat((pos.maxFavorable * 100).toFixed(2)),
+        volumeAtEntry: volume[block.entryIdx] || 0,
+        strategy: "trend", exitReason: reason,
+        scaleLevel: block.scaleLevel,
+        allocationAtEntry: pos.currentAllocation,
+      });
+
+      if (sharesKept > 0 && sizeKept > 0) {
+        updatedBlocks.push({
+          entryIdx: block.entryIdx, entryPrice: block.entryPrice,
+          shares: sharesKept, positionSize: sizeKept,
+          commission: commKept, scaleLevel: block.scaleLevel,
+        });
+      }
+    }
+
+    pos.blocks = updatedBlocks;
+    pos.currentAllocation *= (1 - fractionToClose);
+    pos.totalShares = pos.blocks.reduce((s, b) => s + b.shares, 0);
+    pos.totalPositionSize = pos.blocks.reduce((s, b) => s + b.positionSize, 0);
+    // avgEntryPrice unchanged (proportional split)
+  };
+
+
   // ========================= MAIN DAILY LOOP =========================
 
   for (let i = TRAIN_WINDOW; i < close.length - 1; i++) {
