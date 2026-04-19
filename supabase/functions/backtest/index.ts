@@ -1373,7 +1373,7 @@ function computeMetrics(
     return {
       totalTrades: 0, winRate: 0, avgReturn: 0, totalReturn: 0, maxDrawdown: 0,
       sharpeRatio: 0, sortinoRatio: 0, calmarRatio: 0, profitFactor: 0,
-      directionalAccuracy: 0, mae: 0, rmse: 0, mape: 0,
+      directionalAccuracy: 0, convictionBuckets: [],
       avgWin: 0, avgLoss: 0, winLossRatio: 0,
       avgTradeDuration: 0, medianTradeDuration: 0, maxTradeDuration: 0,
       avgMAE: 0, avgMFE: 0, valueAtRisk: 0, conditionalVaR: 0,
@@ -1550,11 +1550,31 @@ function computeMetrics(
   const signalRecall = (truePositives + falseNegatives) > 0 ? (truePositives / (truePositives + falseNegatives)) * 100 : 0;
   const signalF1 = (signalPrecision + signalRecall) > 0 ? 2 * (signalPrecision * signalRecall) / (signalPrecision + signalRecall) : 0;
 
-  // MAE, RMSE, MAPE
-  const errors = trades.map(t => t.predictedReturn - t.actualReturn);
-  const maeVal = errors.reduce((a, b) => a + Math.abs(b), 0) / errors.length;
-  const rmse = Math.sqrt(errors.reduce((a, b) => a + b * b, 0) / errors.length);
-  const mape = trades.reduce((a, t) => a + (t.actualReturn !== 0 ? Math.abs((t.predictedReturn - t.actualReturn) / t.actualReturn) : 0), 0) / trades.length * 100;
+  // Conviction-bucket hit rate (replaces meaningless MAE/RMSE/MAPE on dummy predictedReturn).
+  // Buckets the trades by their actual entry conviction and reports win rate + avg return per bucket.
+  // This is the metric that actually tells you whether higher-conviction signals deliver better outcomes.
+  const bucketDefs: { label: string; min: number; max: number }[] = [
+    { label: "60-69", min: 60, max: 69.999 },
+    { label: "70-79", min: 70, max: 79.999 },
+    { label: "80-89", min: 80, max: 89.999 },
+    { label: "90-100", min: 90, max: 100 },
+  ];
+  const convictionBuckets = bucketDefs.map(b => {
+    const inBucket = trades.filter(t => t.confidence >= b.min && t.confidence <= b.max);
+    const count = inBucket.length;
+    if (count === 0) return { bucket: b.label, avgConviction: 0, hitRate: 0, avgReturn: 0, count: 0 };
+    const avgConviction = inBucket.reduce((a, t) => a + t.confidence, 0) / count;
+    const winners = inBucket.filter(t => t.pnl > 0).length;
+    const hitRate = (winners / count) * 100;
+    const avgReturn = inBucket.reduce((a, t) => a + t.returnPct, 0) / count;
+    return {
+      bucket: b.label,
+      avgConviction: parseFloat(avgConviction.toFixed(1)),
+      hitRate: parseFloat(hitRate.toFixed(1)),
+      avgReturn: parseFloat(avgReturn.toFixed(2)),
+      count,
+    };
+  });
 
   // Alpha / Beta — computed from equity curve returns aligned with SPY returns by date
   let alpha = 0, beta = 0;
