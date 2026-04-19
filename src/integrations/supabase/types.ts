@@ -300,6 +300,90 @@ export type Database = {
           },
         ]
       }
+      signal_outcomes: {
+        Row: {
+          bars_held: number | null
+          contributing_rules: Json | null
+          conviction: number
+          created_at: string
+          entry_date: string
+          entry_price: number
+          entry_thesis: string | null
+          exit_date: string | null
+          exit_price: number | null
+          exit_reason: string | null
+          id: string
+          max_adverse_excursion_pct: number | null
+          max_favorable_excursion_pct: number | null
+          realized_pnl_pct: number | null
+          regime: string | null
+          signal_id: string | null
+          signal_type: string
+          spy_at_entry: number | null
+          status: string
+          stock_profile: string | null
+          strategy: string | null
+          ticker: string
+          updated_at: string
+          vix_at_entry: number | null
+          weekly_bias: string | null
+        }
+        Insert: {
+          bars_held?: number | null
+          contributing_rules?: Json | null
+          conviction: number
+          created_at?: string
+          entry_date?: string
+          entry_price: number
+          entry_thesis?: string | null
+          exit_date?: string | null
+          exit_price?: number | null
+          exit_reason?: string | null
+          id?: string
+          max_adverse_excursion_pct?: number | null
+          max_favorable_excursion_pct?: number | null
+          realized_pnl_pct?: number | null
+          regime?: string | null
+          signal_id?: string | null
+          signal_type: string
+          spy_at_entry?: number | null
+          status?: string
+          stock_profile?: string | null
+          strategy?: string | null
+          ticker: string
+          updated_at?: string
+          vix_at_entry?: number | null
+          weekly_bias?: string | null
+        }
+        Update: {
+          bars_held?: number | null
+          contributing_rules?: Json | null
+          conviction?: number
+          created_at?: string
+          entry_date?: string
+          entry_price?: number
+          entry_thesis?: string | null
+          exit_date?: string | null
+          exit_price?: number | null
+          exit_reason?: string | null
+          id?: string
+          max_adverse_excursion_pct?: number | null
+          max_favorable_excursion_pct?: number | null
+          realized_pnl_pct?: number | null
+          regime?: string | null
+          signal_id?: string | null
+          signal_type?: string
+          spy_at_entry?: number | null
+          status?: string
+          stock_profile?: string | null
+          strategy?: string | null
+          ticker?: string
+          updated_at?: string
+          vix_at_entry?: number | null
+          weekly_bias?: string | null
+        }
+        Relationships: []
+      }
       virtual_portfolio_log: {
         Row: {
           cash: number

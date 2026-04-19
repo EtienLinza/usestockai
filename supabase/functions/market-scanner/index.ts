@@ -732,8 +732,56 @@ serve(async (req) => {
         expires_at: expiresAt,
       }));
 
-      const { error } = await supabase.from("live_signals").upsert(rows, { onConflict: "ticker" });
+      const { data: upserted, error } = await supabase
+        .from("live_signals")
+        .upsert(rows, { onConflict: "ticker" })
+        .select("id, ticker");
       if (error) console.error("Failed to upsert signals:", error);
+
+      // ─────────────────────────────────────────────────────────────────────
+      // PHASE A — Outcome memory: log every emitted signal as an open outcome
+      // so we can later measure realized win rate by conviction / regime / strategy.
+      // We only insert if there isn't already an *open* outcome for this ticker
+      // (avoids duplicates when scanner re-runs and emits the same signal).
+      // ─────────────────────────────────────────────────────────────────────
+      try {
+        const idByTicker = new Map<string, string>();
+        (upserted ?? []).forEach((r: any) => idByTicker.set(r.ticker, r.id));
+
+        const tickers = signals.map(s => s.ticker);
+        const { data: existingOpen } = await supabase
+          .from("signal_outcomes")
+          .select("ticker")
+          .eq("status", "open")
+          .in("ticker", tickers);
+        const openSet = new Set((existingOpen ?? []).map((r: any) => r.ticker));
+
+        const outcomeRows = signals
+          .filter(s => !openSet.has(s.ticker))
+          .map(s => ({
+            signal_id: idByTicker.get(s.ticker) ?? null,
+            ticker: s.ticker,
+            signal_type: s.signal_type === "BUY" ? "long" : "short",
+            regime: s.regime,
+            stock_profile: s.stock_profile,
+            weekly_bias: s.weekly_bias,
+            conviction: s.confidence,
+            strategy: s.strategy,
+            entry_thesis: s.strategy, // strategy doubles as thesis tag for now
+            contributing_rules: { reasoning: s.reasoning },
+            entry_price: s.entry_price,
+            spy_at_entry: spyContext?.spyClose?.[spyContext.spyClose.length - 1] ?? null,
+            status: "open",
+          }));
+
+        if (outcomeRows.length > 0) {
+          const { error: outErr } = await supabase.from("signal_outcomes").insert(outcomeRows);
+          if (outErr) console.error("Failed to log signal outcomes:", outErr);
+          else console.log(`Logged ${outcomeRows.length} new outcome rows`);
+        }
+      } catch (e) {
+        console.error("Outcome logging error (non-fatal):", e);
+      }
     }
 
     const elapsed = Date.now() - startTime;

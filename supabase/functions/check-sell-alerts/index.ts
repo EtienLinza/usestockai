@@ -83,6 +83,41 @@ serve(async (req) => {
 
     let totalAlerts = 0;
 
+    // ─────────────────────────────────────────────────────────────────────
+    // PHASE A — Outcome memory: update MFE/MAE for every open outcome on
+    // every check, and close outcomes when their position is closed or a
+    // sell alert fires (so the conviction→win-rate curve has real data).
+    // ─────────────────────────────────────────────────────────────────────
+    const { data: openOutcomes } = await supabase
+      .from("signal_outcomes")
+      .select("id, ticker, signal_type, entry_price, max_favorable_excursion_pct, max_adverse_excursion_pct, entry_date")
+      .eq("status", "open");
+    const outcomesByTicker = new Map<string, any[]>();
+    for (const o of openOutcomes ?? []) {
+      if (!outcomesByTicker.has(o.ticker)) outcomesByTicker.set(o.ticker, []);
+      outcomesByTicker.get(o.ticker)!.push(o);
+    }
+
+    // Update MFE/MAE for every open outcome that has fresh price data
+    for (const [ticker, outcomes] of outcomesByTicker.entries()) {
+      const data = priceData[ticker];
+      if (!data) continue;
+      const currentPrice = data.close[data.close.length - 1];
+      for (const o of outcomes) {
+        const entry = Number(o.entry_price);
+        if (!entry) continue;
+        const pnlPct = o.signal_type === "long"
+          ? ((currentPrice - entry) / entry) * 100
+          : ((entry - currentPrice) / entry) * 100;
+        const newMFE = Math.max(Number(o.max_favorable_excursion_pct ?? -Infinity), pnlPct);
+        const newMAE = Math.min(Number(o.max_adverse_excursion_pct ?? Infinity), pnlPct);
+        await supabase.from("signal_outcomes").update({
+          max_favorable_excursion_pct: isFinite(newMFE) ? newMFE : pnlPct,
+          max_adverse_excursion_pct: isFinite(newMAE) ? newMAE : pnlPct,
+        }).eq("id", o.id);
+      }
+    }
+
     for (const [userId, positions] of Object.entries(byUser)) {
       const alerts: { ticker: string; reason: string; current_price: number; position_id: string }[] = [];
       let totalPositionsValue = 0;
@@ -99,14 +134,17 @@ serve(async (req) => {
           : ((Number(pos.entry_price) - currentPrice) / Number(pos.entry_price)) * 100;
 
         const takeProfitThreshold = pos.target_profit_pct != null ? Number(pos.target_profit_pct) : 15;
+        let triggeredReason: string | null = null;
 
         // Hard stop: -8%
         if (pnlPct < -8) {
-          alerts.push({ ticker: pos.ticker, reason: `Hard stop triggered (${pnlPct.toFixed(1)}% loss)`, current_price: currentPrice, position_id: pos.id });
+          triggeredReason = `Hard stop triggered (${pnlPct.toFixed(1)}% loss)`;
+          alerts.push({ ticker: pos.ticker, reason: triggeredReason, current_price: currentPrice, position_id: pos.id });
         }
         // Take profit: custom or default 15%
         else if (pnlPct > takeProfitThreshold) {
-          alerts.push({ ticker: pos.ticker, reason: `🎯 Profit target reached (+${pnlPct.toFixed(1)}% vs ${takeProfitThreshold}% goal)`, current_price: currentPrice, position_id: pos.id });
+          triggeredReason = `🎯 Profit target reached (+${pnlPct.toFixed(1)}% vs ${takeProfitThreshold}% goal)`;
+          alerts.push({ ticker: pos.ticker, reason: triggeredReason, current_price: currentPrice, position_id: pos.id });
         }
         // Weekly reversal — uses canonical shared signal engine (Wilder's ADX, lookahead-fixed classifier)
         else if (data.close.length >= 200) {
@@ -125,8 +163,38 @@ serve(async (req) => {
             const wb = computeWeeklyBias(weeklyData.close, weeklyData.high, weeklyData.low, wIdx, params, isLowVol);
             if ((pos.position_type === "long" && wb.bias !== "long") ||
                 (pos.position_type === "short" && wb.bias !== "short")) {
-              alerts.push({ ticker: pos.ticker, reason: `Weekly trend reversed to ${wb.bias}`, current_price: currentPrice, position_id: pos.id });
+              triggeredReason = `Weekly trend reversed to ${wb.bias}`;
+              alerts.push({ ticker: pos.ticker, reason: triggeredReason, current_price: currentPrice, position_id: pos.id });
             }
+          }
+        }
+
+        // PHASE A — close any open outcome for this ticker when an alert fires
+        // (the user is being told to exit; treat that as the outcome).
+        if (triggeredReason) {
+          const matching = (outcomesByTicker.get(pos.ticker) ?? []).filter(
+            o => o.signal_type === pos.position_type
+          );
+          for (const o of matching) {
+            const entry = Number(o.entry_price);
+            const realizedPct = o.signal_type === "long"
+              ? ((currentPrice - entry) / entry) * 100
+              : ((entry - currentPrice) / entry) * 100;
+            const entryDate = new Date(o.entry_date).getTime();
+            const barsHeld = Math.max(1, Math.round((Date.now() - entryDate) / (24 * 3600 * 1000)));
+            const exitReason = triggeredReason.startsWith("Hard stop")
+              ? "stop_loss"
+              : triggeredReason.startsWith("🎯")
+              ? "take_profit"
+              : "weekly_reversal";
+            await supabase.from("signal_outcomes").update({
+              status: "closed",
+              exit_price: currentPrice,
+              exit_date: new Date().toISOString(),
+              exit_reason: exitReason,
+              bars_held: barsHeld,
+              realized_pnl_pct: realizedPct,
+            }).eq("id", o.id);
           }
         }
       }
