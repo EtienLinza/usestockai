@@ -2613,6 +2613,26 @@ serve(async (req) => {
       }).filter(s => s.trades > 0);
     })();
 
+    // Metrics health — flags suspect measurements so the UI can warn the user.
+    const healthNotes: string[] = [];
+    const beta = (metrics as any).beta ?? 0;
+    const betaInRange = beta >= 0.2 && beta <= 1.8;
+    if (!betaInRange) {
+      healthNotes.push(`Beta=${beta} is outside the plausible [0.2, 1.8] band for a long-biased strategy.`);
+    }
+    const psRets = robustness.parameterSensitivity.map(r => r.returnPct);
+    const psSpread = psRets.length >= 2 ? Math.max(...psRets) - Math.min(...psRets) : 0;
+    const parameterSensitivityVaried = robustness.parameterSensitivity.length === 0 || psSpread >= 0.5;
+    if (!parameterSensitivityVaried) {
+      healthNotes.push(`Parameter-sensitivity rows differ by only ${psSpread.toFixed(2)}% — threshold override may not be taking effect.`);
+    }
+    const stressReturnsPlausible = stressTests.every(s => s.strategyReturn > -90 && s.strategyReturn < 200);
+    if (!stressReturnsPlausible) {
+      const offenders = stressTests.filter(s => s.strategyReturn <= -90 || s.strategyReturn >= 200)
+        .map(s => `${s.period}=${s.strategyReturn}%`).join(', ');
+      healthNotes.push(`Implausible stress-period returns: ${offenders}.`);
+    }
+
     const report: BacktestReport = {
       ...metrics as any,
       periods,
@@ -2630,6 +2650,12 @@ serve(async (req) => {
       marketRegimePerformance,
       strategyPerformance,
       stockProfiles,
+      metricsHealth: {
+        betaInRange,
+        parameterSensitivityVaried,
+        stressReturnsPlausible,
+        notes: healthNotes,
+      },
     };
 
     const profileSummary = Object.entries(stockProfiles).map(([t, p]) => `${t}:${p.classification}`).join(', ');
