@@ -81,6 +81,12 @@ interface BacktestReport {
     tradeDependency: { baseReturn: number; reducedReturn: number; impact: number; passed: boolean } | null;
   };
   stressTests: { period: string; startDate: string; endDate: string; strategyReturn: number; benchmarkReturn: number; maxDrawdown: number }[];
+  metricsHealth?: {
+    betaInRange: boolean;
+    parameterSensitivityVaried: boolean;
+    stressReturnsPlausible: boolean;
+    notes: string[];
+  };
   liquidityWarnings: number;
   // New institutional metrics
   maxDrawdownDuration: number;
@@ -499,6 +505,22 @@ const Backtest = () => {
                         <Download className="w-3 h-3" /> Export CSV
                       </Button>
                     </div>
+
+                    {/* Metrics Health Warning */}
+                    {report.metricsHealth && report.metricsHealth.notes.length > 0 && (
+                      <div className="rounded-lg border border-warning/40 bg-warning/10 p-3 flex gap-2.5">
+                        <AlertTriangle className="w-4 h-4 text-warning shrink-0 mt-0.5" />
+                        <div className="space-y-1">
+                          <div className="text-xs font-semibold text-warning">Measurement health check failed</div>
+                          <ul className="text-[11px] text-muted-foreground space-y-0.5 list-disc list-inside">
+                            {report.metricsHealth.notes.map((n, i) => <li key={i}>{n}</li>)}
+                          </ul>
+                          <div className="text-[10px] text-muted-foreground/70 pt-1">
+                            Some metrics below may be unreliable. Treat affected numbers (Beta/Alpha, parameter sensitivity, or stress periods) with caution.
+                          </div>
+                        </div>
+                      </div>
+                    )}
 
                     {/* Primary Metrics */}
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
