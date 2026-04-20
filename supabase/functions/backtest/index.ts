@@ -1774,6 +1774,10 @@ function computeMetrics(
       const spyTotalReturn = (spyData.close[spyData.close.length - 1] - spyData.close[0]) / spyData.close[0];
       const spyAnnReturn = years > 0 ? (Math.pow(1 + spyTotalReturn, 1 / years) - 1) : spyTotalReturn;
       alpha = parseFloat(((annualizedReturn / 100) - beta * spyAnnReturn).toFixed(4));
+      // Sanity probe: a 70-90% deployed long-biased equity book should land roughly in [0.4, 1.2].
+      if (beta < 0.2 || beta > 1.8) {
+        console.warn(`[beta-sanity] Suspicious beta=${beta} (n=${n}, eqDays=${eqDates.length}). Expected [0.4, 1.2] for long-biased strategy.`);
+      }
     }
   }
 
