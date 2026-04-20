@@ -1458,8 +1458,9 @@ function runWalkForwardBacktest(
       capital *= (1 + 0.04 / 252);
     }
 
-    // Record equity periodically
-    if (i % 5 === 0 || i === close.length - 2) {
+    // Record equity EVERY bar (mark-to-market) — required for honest beta and stress-test attribution.
+    // Without daily sampling the strat-vs-SPY return series collapses and beta drifts toward 0.
+    {
       const openMTM = position && position.blocks.length > 0
         ? (position.direction === "long"
           ? position.totalShares * close[i]
