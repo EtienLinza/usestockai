@@ -1102,23 +1102,35 @@ function runWalkForwardBacktest(
   let lastClassifyBar = -DEFAULT_CLASSIFY_INTERVAL;
 
   const modeModifier = (config as any).strategyMode || "adaptive";
+  // Allow explicit config-level threshold overrides (used by parameter-sensitivity tests).
+  // These win over the adaptive profile + mode-modifier so perturbations actually take effect.
+  const cfgBuyOverride = typeof (config as any).buyThreshold === "number" ? (config as any).buyThreshold : undefined;
+  const cfgShortOverride = typeof (config as any).shortThreshold === "number" ? (config as any).shortThreshold : undefined;
   const applyModeToProfile = (profile: ProfileParams): ProfileParams => {
+    let p = profile;
     if (modeModifier === "conservative") {
-      return {
+      p = {
         ...profile,
         buyThreshold: Math.min(profile.buyThreshold + 10, 85),
         shortThreshold: Math.min(profile.shortThreshold + 10, 85),
         hardStopATRMult: Math.max(profile.hardStopATRMult - 0.3, 1.5),
       };
     } else if (modeModifier === "aggressive") {
-      return {
+      p = {
         ...profile,
         buyThreshold: Math.max(profile.buyThreshold - 5, 50),
         shortThreshold: Math.max(profile.shortThreshold - 5, 50),
         hardStopATRMult: profile.hardStopATRMult + 0.5,
       };
     }
-    return profile;
+    if (cfgBuyOverride !== undefined || cfgShortOverride !== undefined) {
+      p = {
+        ...p,
+        buyThreshold: cfgBuyOverride !== undefined ? cfgBuyOverride : p.buyThreshold,
+        shortThreshold: cfgShortOverride !== undefined ? Math.abs(cfgShortOverride) : p.shortThreshold,
+      };
+    }
+    return p;
   };
 
   // --- Allocation state ---
