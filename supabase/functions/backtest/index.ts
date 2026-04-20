@@ -2179,52 +2179,79 @@ function computeDrawdownCurve(equityCurve: { date: string; value: number }[]): {
 // ============================================================================
 function detectStressPeriods(
   spyData: DataSet | null,
-  allTrades: Trade[],
+  _allTrades: Trade[],
+  equityCurve?: { date: string; value: number }[],
 ): BacktestReport['stressTests'] {
-  if (!spyData || spyData.close.length < 60) return [];
+  if (!spyData || spyData.close.length < 20 || !equityCurve || equityCurve.length < 5) return [];
+
+  // Anchored historical stress windows (fixed dates — not pattern-matched).
+  // Strategy return is computed as the equity-curve delta over the window,
+  // which is the only correct portfolio-level attribution.
+  const PERIODS: { label: string; start: string; end: string }[] = [
+    { label: "Dot-Com Bust 2000-02", start: "2000-09-01", end: "2002-10-09" },
+    { label: "2008 Financial Crisis", start: "2008-09-01", end: "2009-03-31" },
+    { label: "Aug 2015 China Selloff", start: "2015-08-01", end: "2015-09-30" },
+    { label: "Q4 2018 Selloff",      start: "2018-10-01", end: "2018-12-31" },
+    { label: "COVID Crash",          start: "2020-02-19", end: "2020-04-07" },
+    { label: "2022 Bear Market",     start: "2022-01-01", end: "2022-10-15" },
+    { label: "Aug 2024 Yen Carry",   start: "2024-08-01", end: "2024-08-15" },
+  ];
+
+  // Build sorted lookups
+  const sortedEq = [...equityCurve].sort((a, b) => a.date.localeCompare(b.date));
+  const eqDates = sortedEq.map(e => e.date);
+  const spyByDate = new Map<string, number>();
+  for (let i = 0; i < spyData.close.length; i++) spyByDate.set(spyData.timestamps[i], spyData.close[i]);
+  const spyDates = spyData.timestamps;
+
+  // Helper: first index with date >= target, last index with date <= target
+  const firstOnOrAfter = (arr: string[], target: string): number => {
+    for (let i = 0; i < arr.length; i++) if (arr[i] >= target) return i;
+    return -1;
+  };
+  const lastOnOrBefore = (arr: string[], target: string): number => {
+    for (let i = arr.length - 1; i >= 0; i--) if (arr[i] <= target) return i;
+    return -1;
+  };
 
   const stressTests: BacktestReport['stressTests'] = [];
-  const { close, timestamps } = spyData;
+  for (const p of PERIODS) {
+    const eqStartIdx = firstOnOrAfter(eqDates, p.start);
+    const eqEndIdx = lastOnOrBefore(eqDates, p.end);
+    if (eqStartIdx < 0 || eqEndIdx <= eqStartIdx) continue; // window not in data
 
-  for (let i = 60; i < close.length; i += 30) {
-    const windowClose = close.slice(i - 60, i);
-    const windowPeak = Math.max(...windowClose);
-    const peakIdx = windowClose.indexOf(windowPeak);
-    const afterPeak = windowClose.slice(peakIdx + 1);
-    if (afterPeak.length === 0) continue;
-    const windowTrough = Math.min(...afterPeak);
-    const dd = ((windowPeak - windowTrough) / windowPeak) * 100;
+    const eqStart = sortedEq[eqStartIdx].value;
+    const eqEnd = sortedEq[eqEndIdx].value;
+    if (!(eqStart > 0)) continue;
+    const stratReturn = ((eqEnd - eqStart) / eqStart) * 100;
 
-    if (dd > 15) {
-      const startDate = timestamps[i - 60];
-      const endDate = timestamps[i];
-      const benchReturn = ((close[i] - close[i - 60]) / close[i - 60]) * 100;
+    const spyStartIdx = firstOnOrAfter(spyDates, p.start);
+    const spyEndIdx = lastOnOrBefore(spyDates, p.end);
+    if (spyStartIdx < 0 || spyEndIdx <= spyStartIdx) continue;
+    const spyStart = spyData.close[spyStartIdx];
+    const spyEnd = spyData.close[spyEndIdx];
+    const benchReturn = spyStart > 0 ? ((spyEnd - spyStart) / spyStart) * 100 : 0;
 
-      const windowTrades = allTrades.filter(t => t.date >= startDate && t.date <= endDate);
-      if (windowTrades.length === 0) continue;
-
-      const stratReturn = windowTrades.reduce((a, t) => a + t.returnPct, 0);
-
-      let label = "Market Stress";
-      if (startDate >= "2020-02" && startDate <= "2020-04") label = "COVID Crash";
-      else if (startDate >= "2022-01" && startDate <= "2022-10") label = "2022 Bear Market";
-      else if (startDate >= "2008-09" && startDate <= "2009-03") label = "2008 Financial Crisis";
-      else if (startDate >= "2018-10" && startDate <= "2019-01") label = "Q4 2018 Selloff";
-
-      if (!stressTests.find(s => s.period === label)) {
-        stressTests.push({
-          period: label,
-          startDate,
-          endDate,
-          strategyReturn: parseFloat(stratReturn.toFixed(2)),
-          benchmarkReturn: parseFloat(benchReturn.toFixed(2)),
-          maxDrawdown: parseFloat(dd.toFixed(2)),
-        });
-      }
+    // Max drawdown of equity inside the window
+    let peak = eqStart, maxDD = 0;
+    for (let i = eqStartIdx; i <= eqEndIdx; i++) {
+      const v = sortedEq[i].value;
+      if (v > peak) peak = v;
+      const dd = peak > 0 ? ((peak - v) / peak) * 100 : 0;
+      if (dd > maxDD) maxDD = dd;
     }
+
+    stressTests.push({
+      period: p.label,
+      startDate: sortedEq[eqStartIdx].date,
+      endDate: sortedEq[eqEndIdx].date,
+      strategyReturn: parseFloat(stratReturn.toFixed(2)),
+      benchmarkReturn: parseFloat(benchReturn.toFixed(2)),
+      maxDrawdown: parseFloat(maxDD.toFixed(2)),
+    });
   }
 
-  return stressTests.slice(0, 5);
+  return stressTests;
 }
 
 // ============================================================================
