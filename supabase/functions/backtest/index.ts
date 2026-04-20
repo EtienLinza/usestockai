@@ -2620,9 +2620,12 @@ serve(async (req) => {
     // Metrics health — flags suspect measurements so the UI can warn the user.
     const healthNotes: string[] = [];
     const beta = (metrics as any).beta ?? 0;
-    const betaInRange = beta >= 0.2 && beta <= 1.8;
+    // A defensive long/flat strategy that goes to cash in drawdowns can legitimately have beta as low
+    // as ~0.1. The previous 0.04 was caused by sampling-cadence collapse, not a real defensive posture.
+    // We flag only clearly nonsensical values.
+    const betaInRange = beta >= 0.1 && beta <= 1.8;
     if (!betaInRange) {
-      healthNotes.push(`Beta=${beta} is outside the plausible [0.2, 1.8] band for a long-biased strategy.`);
+      healthNotes.push(`Beta=${beta} is outside the plausible [0.1, 1.8] band — likely a measurement collapse.`);
     }
     const psRets = robustness.parameterSensitivity.map(r => r.returnPct);
     const psSpread = psRets.length >= 2 ? Math.max(...psRets) - Math.min(...psRets) : 0;
