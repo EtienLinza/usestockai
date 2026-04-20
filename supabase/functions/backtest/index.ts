@@ -942,6 +942,12 @@ interface BacktestReport {
   benchmarkEquity: { date: string; value: number }[];
   marketRegimePerformance: { regime: string; accuracy: number; avgReturn: number; trades: number }[];
   strategyPerformance: { strategy: string; trades: number; winRate: number; avgReturn: number }[];
+  metricsHealth?: {
+    betaInRange: boolean;
+    parameterSensitivityVaried: boolean;
+    stressReturnsPlausible: boolean;
+    notes: string[];
+  };
 }
 
 type DataSet = { timestamps: string[]; close: number[]; high: number[]; low: number[]; open: number[]; volume: number[] };
@@ -1102,23 +1108,35 @@ function runWalkForwardBacktest(
   let lastClassifyBar = -DEFAULT_CLASSIFY_INTERVAL;
 
   const modeModifier = (config as any).strategyMode || "adaptive";
+  // Allow explicit config-level threshold overrides (used by parameter-sensitivity tests).
+  // These win over the adaptive profile + mode-modifier so perturbations actually take effect.
+  const cfgBuyOverride = typeof (config as any).buyThreshold === "number" ? (config as any).buyThreshold : undefined;
+  const cfgShortOverride = typeof (config as any).shortThreshold === "number" ? (config as any).shortThreshold : undefined;
   const applyModeToProfile = (profile: ProfileParams): ProfileParams => {
+    let p = profile;
     if (modeModifier === "conservative") {
-      return {
+      p = {
         ...profile,
         buyThreshold: Math.min(profile.buyThreshold + 10, 85),
         shortThreshold: Math.min(profile.shortThreshold + 10, 85),
         hardStopATRMult: Math.max(profile.hardStopATRMult - 0.3, 1.5),
       };
     } else if (modeModifier === "aggressive") {
-      return {
+      p = {
         ...profile,
         buyThreshold: Math.max(profile.buyThreshold - 5, 50),
         shortThreshold: Math.max(profile.shortThreshold - 5, 50),
         hardStopATRMult: profile.hardStopATRMult + 0.5,
       };
     }
-    return profile;
+    if (cfgBuyOverride !== undefined || cfgShortOverride !== undefined) {
+      p = {
+        ...p,
+        buyThreshold: cfgBuyOverride !== undefined ? cfgBuyOverride : p.buyThreshold,
+        shortThreshold: cfgShortOverride !== undefined ? Math.abs(cfgShortOverride) : p.shortThreshold,
+      };
+    }
+    return p;
   };
 
   // --- Allocation state ---
@@ -1458,8 +1476,9 @@ function runWalkForwardBacktest(
       capital *= (1 + 0.04 / 252);
     }
 
-    // Record equity periodically
-    if (i % 5 === 0 || i === close.length - 2) {
+    // Record equity EVERY bar (mark-to-market) — required for honest beta and stress-test attribution.
+    // Without daily sampling the strat-vs-SPY return series collapses and beta drifts toward 0.
+    {
       const openMTM = position && position.blocks.length > 0
         ? (position.direction === "long"
           ? position.totalShares * close[i]
@@ -1725,21 +1744,25 @@ function computeMetrics(
     if (eqDates.length > 5) {
       // For each equity curve interval, compute the matching SPY return over the same date span
       const sortedEqCurve = [...equityCurve].sort((a, b) => a.date.localeCompare(b.date));
-      
+
       // Build SPY close lookup by date
       const spyCloseByDate = new Map<string, number>();
       for (let i = 0; i < spyData.close.length; i++) {
         spyCloseByDate.set(spyData.timestamps[i], spyData.close[i]);
       }
 
-      for (let i = 1; i < sortedEqCurve.length; i++) {
+      // Skip the first 250 bars (walk-forward training window). During that period
+      // capital sits idle and contributes near-zero variance, which artificially
+      // collapses cov(strat, SPY) → beta. Honest beta = post-training behaviour.
+      const skipBars = Math.min(250, Math.floor(sortedEqCurve.length * 0.15));
+      for (let i = Math.max(1, skipBars); i < sortedEqCurve.length; i++) {
         const prevDate = sortedEqCurve[i - 1].date;
         const currDate = sortedEqCurve[i].date;
         const spyPrev = spyCloseByDate.get(prevDate);
         const spyCurr = spyCloseByDate.get(currDate);
         const eqPrev = sortedEqCurve[i - 1].value;
         const eqCurr = sortedEqCurve[i].value;
-        
+
         if (spyPrev && spyCurr && spyPrev > 0 && eqPrev > 0) {
           stratRets.push((eqCurr - eqPrev) / eqPrev);
           benchRets.push((spyCurr - spyPrev) / spyPrev);
@@ -1761,6 +1784,10 @@ function computeMetrics(
       const spyTotalReturn = (spyData.close[spyData.close.length - 1] - spyData.close[0]) / spyData.close[0];
       const spyAnnReturn = years > 0 ? (Math.pow(1 + spyTotalReturn, 1 / years) - 1) : spyTotalReturn;
       alpha = parseFloat(((annualizedReturn / 100) - beta * spyAnnReturn).toFixed(4));
+      // Sanity probe: a 70-90% deployed long-biased equity book should land roughly in [0.4, 1.2].
+      if (beta < 0.2 || beta > 1.8) {
+        console.warn(`[beta-sanity] Suspicious beta=${beta} (n=${n}, eqDays=${eqDates.length}). Expected [0.4, 1.2] for long-biased strategy.`);
+      }
     }
   }
 
@@ -2162,52 +2189,79 @@ function computeDrawdownCurve(equityCurve: { date: string; value: number }[]): {
 // ============================================================================
 function detectStressPeriods(
   spyData: DataSet | null,
-  allTrades: Trade[],
+  _allTrades: Trade[],
+  equityCurve?: { date: string; value: number }[],
 ): BacktestReport['stressTests'] {
-  if (!spyData || spyData.close.length < 60) return [];
+  if (!spyData || spyData.close.length < 20 || !equityCurve || equityCurve.length < 5) return [];
+
+  // Anchored historical stress windows (fixed dates — not pattern-matched).
+  // Strategy return is computed as the equity-curve delta over the window,
+  // which is the only correct portfolio-level attribution.
+  const PERIODS: { label: string; start: string; end: string }[] = [
+    { label: "Dot-Com Bust 2000-02", start: "2000-09-01", end: "2002-10-09" },
+    { label: "2008 Financial Crisis", start: "2008-09-01", end: "2009-03-31" },
+    { label: "Aug 2015 China Selloff", start: "2015-08-01", end: "2015-09-30" },
+    { label: "Q4 2018 Selloff",      start: "2018-10-01", end: "2018-12-31" },
+    { label: "COVID Crash",          start: "2020-02-19", end: "2020-04-07" },
+    { label: "2022 Bear Market",     start: "2022-01-01", end: "2022-10-15" },
+    { label: "Aug 2024 Yen Carry",   start: "2024-08-01", end: "2024-08-15" },
+  ];
+
+  // Build sorted lookups
+  const sortedEq = [...equityCurve].sort((a, b) => a.date.localeCompare(b.date));
+  const eqDates = sortedEq.map(e => e.date);
+  const spyByDate = new Map<string, number>();
+  for (let i = 0; i < spyData.close.length; i++) spyByDate.set(spyData.timestamps[i], spyData.close[i]);
+  const spyDates = spyData.timestamps;
+
+  // Helper: first index with date >= target, last index with date <= target
+  const firstOnOrAfter = (arr: string[], target: string): number => {
+    for (let i = 0; i < arr.length; i++) if (arr[i] >= target) return i;
+    return -1;
+  };
+  const lastOnOrBefore = (arr: string[], target: string): number => {
+    for (let i = arr.length - 1; i >= 0; i--) if (arr[i] <= target) return i;
+    return -1;
+  };
 
   const stressTests: BacktestReport['stressTests'] = [];
-  const { close, timestamps } = spyData;
+  for (const p of PERIODS) {
+    const eqStartIdx = firstOnOrAfter(eqDates, p.start);
+    const eqEndIdx = lastOnOrBefore(eqDates, p.end);
+    if (eqStartIdx < 0 || eqEndIdx <= eqStartIdx) continue; // window not in data
 
-  for (let i = 60; i < close.length; i += 30) {
-    const windowClose = close.slice(i - 60, i);
-    const windowPeak = Math.max(...windowClose);
-    const peakIdx = windowClose.indexOf(windowPeak);
-    const afterPeak = windowClose.slice(peakIdx + 1);
-    if (afterPeak.length === 0) continue;
-    const windowTrough = Math.min(...afterPeak);
-    const dd = ((windowPeak - windowTrough) / windowPeak) * 100;
+    const eqStart = sortedEq[eqStartIdx].value;
+    const eqEnd = sortedEq[eqEndIdx].value;
+    if (!(eqStart > 0)) continue;
+    const stratReturn = ((eqEnd - eqStart) / eqStart) * 100;
 
-    if (dd > 15) {
-      const startDate = timestamps[i - 60];
-      const endDate = timestamps[i];
-      const benchReturn = ((close[i] - close[i - 60]) / close[i - 60]) * 100;
+    const spyStartIdx = firstOnOrAfter(spyDates, p.start);
+    const spyEndIdx = lastOnOrBefore(spyDates, p.end);
+    if (spyStartIdx < 0 || spyEndIdx <= spyStartIdx) continue;
+    const spyStart = spyData.close[spyStartIdx];
+    const spyEnd = spyData.close[spyEndIdx];
+    const benchReturn = spyStart > 0 ? ((spyEnd - spyStart) / spyStart) * 100 : 0;
 
-      const windowTrades = allTrades.filter(t => t.date >= startDate && t.date <= endDate);
-      if (windowTrades.length === 0) continue;
-
-      const stratReturn = windowTrades.reduce((a, t) => a + t.returnPct, 0);
-
-      let label = "Market Stress";
-      if (startDate >= "2020-02" && startDate <= "2020-04") label = "COVID Crash";
-      else if (startDate >= "2022-01" && startDate <= "2022-10") label = "2022 Bear Market";
-      else if (startDate >= "2008-09" && startDate <= "2009-03") label = "2008 Financial Crisis";
-      else if (startDate >= "2018-10" && startDate <= "2019-01") label = "Q4 2018 Selloff";
-
-      if (!stressTests.find(s => s.period === label)) {
-        stressTests.push({
-          period: label,
-          startDate,
-          endDate,
-          strategyReturn: parseFloat(stratReturn.toFixed(2)),
-          benchmarkReturn: parseFloat(benchReturn.toFixed(2)),
-          maxDrawdown: parseFloat(dd.toFixed(2)),
-        });
-      }
+    // Max drawdown of equity inside the window
+    let peak = eqStart, maxDD = 0;
+    for (let i = eqStartIdx; i <= eqEndIdx; i++) {
+      const v = sortedEq[i].value;
+      if (v > peak) peak = v;
+      const dd = peak > 0 ? ((peak - v) / peak) * 100 : 0;
+      if (dd > maxDD) maxDD = dd;
     }
+
+    stressTests.push({
+      period: p.label,
+      startDate: sortedEq[eqStartIdx].date,
+      endDate: sortedEq[eqEndIdx].date,
+      strategyReturn: parseFloat(stratReturn.toFixed(2)),
+      benchmarkReturn: parseFloat(benchReturn.toFixed(2)),
+      maxDrawdown: parseFloat(maxDD.toFixed(2)),
+    });
   }
 
-  return stressTests.slice(0, 5);
+  return stressTests;
 }
 
 // ============================================================================
@@ -2263,11 +2317,13 @@ function runRobustnessTests(
     };
   }
 
-  // 3. Parameter Sensitivity (3 variations for heavy, 5 for light)
+  // 3. Parameter Sensitivity — perturb the *absolute* conviction threshold around the ~65 baseline.
+  // (Earlier ±20/±30/±40 values were silently dropped because the adaptive profile rebuilt thresholds
+  //  from its own defaults; we now thread cfgBuyOverride/cfgShortOverride through to the active profile.)
   const paramResults: BacktestReport['robustness']['parameterSensitivity'] = [];
-  const thresholdVariations = isHeavy ? [20, 30, 40] : [20, 25, 30, 35, 40];
+  const thresholdVariations = isHeavy ? [58, 65, 72] : [55, 60, 65, 70, 75];
   for (const thresh of thresholdVariations) {
-    const modConfig = { ...config, buyThreshold: thresh, shortThreshold: -thresh };
+    const modConfig = { ...config, buyThreshold: thresh, shortThreshold: thresh } as any;
     const result = runWalkForwardBacktest(data, ticker, modConfig, tradeConfig, 1, ROBUSTNESS_STEP);
     const final = result.equityCurve[result.equityCurve.length - 1]?.value || config.initialCapital;
     const ret = ((final - config.initialCapital) / config.initialCapital) * 100;
@@ -2276,11 +2332,19 @@ function runRobustnessTests(
     const std = rets.length > 1 ? Math.sqrt(rets.reduce((a, b) => a + (b - mean) ** 2, 0) / rets.length) : 0.001;
     const sharpe = std > 0 ? (mean / std) * Math.sqrt(252 / 5) : 0;
     paramResults.push({
-      param: `Threshold ±${thresh}`,
+      param: `Threshold=${thresh}`,
       value: thresh,
       returnPct: parseFloat(ret.toFixed(2)),
       sharpe: parseFloat(sharpe.toFixed(2)),
     });
+  }
+  // Degeneracy probe: if all rows collapsed to ~the same number, the override didn't take effect.
+  if (paramResults.length >= 2) {
+    const rets = paramResults.map(r => r.returnPct);
+    const spread = Math.max(...rets) - Math.min(...rets);
+    if (spread < 0.5) {
+      console.warn(`[param-sensitivity] Degenerate: spread=${spread.toFixed(2)}% across ${paramResults.length} rows. Threshold override likely ignored.`);
+    }
   }
 
   // 4. Trade Dependency Test
@@ -2451,7 +2515,11 @@ serve(async (req) => {
       }
     }
 
-    // Cap equity curve points to 500 to reduce serialization
+    // Preserve a full-resolution copy for stress-test attribution (which needs daily granularity).
+    const fullEquityForStress = combinedEquity;
+
+    // Cap displayed equity curve points to 500 to reduce serialization
+    let displayEquity = combinedEquity;
     if (combinedEquity.length > 500) {
       const step = Math.ceil(combinedEquity.length / 500);
       const sampled: typeof combinedEquity = [];
@@ -2462,8 +2530,9 @@ serve(async (req) => {
       if (sampled[sampled.length - 1] !== combinedEquity[combinedEquity.length - 1]) {
         sampled.push(combinedEquity[combinedEquity.length - 1]);
       }
-      combinedEquity = sampled;
+      displayEquity = sampled;
     }
+    combinedEquity = displayEquity;
 
     const years = endYear - startYear;
 
@@ -2492,8 +2561,8 @@ serve(async (req) => {
       benchmarkReturn = parseFloat((((spyData.close[spyData.close.length - 1] - spyData.close[0]) / spyData.close[0]) * 100).toFixed(2));
     }
 
-    // Stress testing
-    const stressTests = detectStressPeriods(spyData, allTrades);
+    // Stress testing — uses full-resolution equity curve for honest portfolio-level attribution
+    const stressTests = detectStressPeriods(spyData, allTrades, fullEquityForStress);
 
     // CPU budget guard: check elapsed time before robustness tests
     const elapsedMs = Date.now() - startTime;
@@ -2548,6 +2617,29 @@ serve(async (req) => {
       }).filter(s => s.trades > 0);
     })();
 
+    // Metrics health — flags suspect measurements so the UI can warn the user.
+    const healthNotes: string[] = [];
+    const beta = (metrics as any).beta ?? 0;
+    // A defensive long/flat strategy that goes to cash in drawdowns can legitimately have beta as low
+    // as ~0.1. The previous 0.04 was caused by sampling-cadence collapse, not a real defensive posture.
+    // We flag only clearly nonsensical values.
+    const betaInRange = beta >= 0.1 && beta <= 1.8;
+    if (!betaInRange) {
+      healthNotes.push(`Beta=${beta} is outside the plausible [0.1, 1.8] band — likely a measurement collapse.`);
+    }
+    const psRets = robustness.parameterSensitivity.map(r => r.returnPct);
+    const psSpread = psRets.length >= 2 ? Math.max(...psRets) - Math.min(...psRets) : 0;
+    const parameterSensitivityVaried = robustness.parameterSensitivity.length === 0 || psSpread >= 0.5;
+    if (!parameterSensitivityVaried) {
+      healthNotes.push(`Parameter-sensitivity rows differ by only ${psSpread.toFixed(2)}% — threshold override may not be taking effect.`);
+    }
+    const stressReturnsPlausible = stressTests.every(s => s.strategyReturn > -90 && s.strategyReturn < 200);
+    if (!stressReturnsPlausible) {
+      const offenders = stressTests.filter(s => s.strategyReturn <= -90 || s.strategyReturn >= 200)
+        .map(s => `${s.period}=${s.strategyReturn}%`).join(', ');
+      healthNotes.push(`Implausible stress-period returns: ${offenders}.`);
+    }
+
     const report: BacktestReport = {
       ...metrics as any,
       periods,
@@ -2565,6 +2657,12 @@ serve(async (req) => {
       marketRegimePerformance,
       strategyPerformance,
       stockProfiles,
+      metricsHealth: {
+        betaInRange,
+        parameterSensitivityVaried,
+        stressReturnsPlausible,
+        notes: healthNotes,
+      },
     };
 
     const profileSummary = Object.entries(stockProfiles).map(([t, p]) => `${t}:${p.classification}`).join(', ');
