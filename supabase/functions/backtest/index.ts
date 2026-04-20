@@ -1744,21 +1744,25 @@ function computeMetrics(
     if (eqDates.length > 5) {
       // For each equity curve interval, compute the matching SPY return over the same date span
       const sortedEqCurve = [...equityCurve].sort((a, b) => a.date.localeCompare(b.date));
-      
+
       // Build SPY close lookup by date
       const spyCloseByDate = new Map<string, number>();
       for (let i = 0; i < spyData.close.length; i++) {
         spyCloseByDate.set(spyData.timestamps[i], spyData.close[i]);
       }
 
-      for (let i = 1; i < sortedEqCurve.length; i++) {
+      // Skip the first 250 bars (walk-forward training window). During that period
+      // capital sits idle and contributes near-zero variance, which artificially
+      // collapses cov(strat, SPY) → beta. Honest beta = post-training behaviour.
+      const skipBars = Math.min(250, Math.floor(sortedEqCurve.length * 0.15));
+      for (let i = Math.max(1, skipBars); i < sortedEqCurve.length; i++) {
         const prevDate = sortedEqCurve[i - 1].date;
         const currDate = sortedEqCurve[i].date;
         const spyPrev = spyCloseByDate.get(prevDate);
         const spyCurr = spyCloseByDate.get(currDate);
         const eqPrev = sortedEqCurve[i - 1].value;
         const eqCurr = sortedEqCurve[i].value;
-        
+
         if (spyPrev && spyCurr && spyPrev > 0 && eqPrev > 0) {
           stratRets.push((eqCurr - eqPrev) / eqPrev);
           benchRets.push((spyCurr - spyPrev) / spyPrev);
