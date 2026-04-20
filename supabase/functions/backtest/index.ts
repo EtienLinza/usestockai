@@ -2495,7 +2495,11 @@ serve(async (req) => {
       }
     }
 
-    // Cap equity curve points to 500 to reduce serialization
+    // Preserve a full-resolution copy for stress-test attribution (which needs daily granularity).
+    const fullEquityForStress = combinedEquity;
+
+    // Cap displayed equity curve points to 500 to reduce serialization
+    let displayEquity = combinedEquity;
     if (combinedEquity.length > 500) {
       const step = Math.ceil(combinedEquity.length / 500);
       const sampled: typeof combinedEquity = [];
@@ -2506,8 +2510,9 @@ serve(async (req) => {
       if (sampled[sampled.length - 1] !== combinedEquity[combinedEquity.length - 1]) {
         sampled.push(combinedEquity[combinedEquity.length - 1]);
       }
-      combinedEquity = sampled;
+      displayEquity = sampled;
     }
+    combinedEquity = displayEquity;
 
     const years = endYear - startYear;
 
@@ -2536,8 +2541,8 @@ serve(async (req) => {
       benchmarkReturn = parseFloat((((spyData.close[spyData.close.length - 1] - spyData.close[0]) / spyData.close[0]) * 100).toFixed(2));
     }
 
-    // Stress testing
-    const stressTests = detectStressPeriods(spyData, allTrades);
+    // Stress testing — uses full-resolution equity curve for honest portfolio-level attribution
+    const stressTests = detectStressPeriods(spyData, allTrades, fullEquityForStress);
 
     // CPU budget guard: check elapsed time before robustness tests
     const elapsedMs = Date.now() - startTime;
