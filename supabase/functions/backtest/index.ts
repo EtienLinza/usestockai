@@ -2307,11 +2307,13 @@ function runRobustnessTests(
     };
   }
 
-  // 3. Parameter Sensitivity (3 variations for heavy, 5 for light)
+  // 3. Parameter Sensitivity — perturb the *absolute* conviction threshold around the ~65 baseline.
+  // (Earlier ±20/±30/±40 values were silently dropped because the adaptive profile rebuilt thresholds
+  //  from its own defaults; we now thread cfgBuyOverride/cfgShortOverride through to the active profile.)
   const paramResults: BacktestReport['robustness']['parameterSensitivity'] = [];
-  const thresholdVariations = isHeavy ? [20, 30, 40] : [20, 25, 30, 35, 40];
+  const thresholdVariations = isHeavy ? [58, 65, 72] : [55, 60, 65, 70, 75];
   for (const thresh of thresholdVariations) {
-    const modConfig = { ...config, buyThreshold: thresh, shortThreshold: -thresh };
+    const modConfig = { ...config, buyThreshold: thresh, shortThreshold: thresh } as any;
     const result = runWalkForwardBacktest(data, ticker, modConfig, tradeConfig, 1, ROBUSTNESS_STEP);
     const final = result.equityCurve[result.equityCurve.length - 1]?.value || config.initialCapital;
     const ret = ((final - config.initialCapital) / config.initialCapital) * 100;
@@ -2320,11 +2322,19 @@ function runRobustnessTests(
     const std = rets.length > 1 ? Math.sqrt(rets.reduce((a, b) => a + (b - mean) ** 2, 0) / rets.length) : 0.001;
     const sharpe = std > 0 ? (mean / std) * Math.sqrt(252 / 5) : 0;
     paramResults.push({
-      param: `Threshold ±${thresh}`,
+      param: `Threshold=${thresh}`,
       value: thresh,
       returnPct: parseFloat(ret.toFixed(2)),
       sharpe: parseFloat(sharpe.toFixed(2)),
     });
+  }
+  // Degeneracy probe: if all rows collapsed to ~the same number, the override didn't take effect.
+  if (paramResults.length >= 2) {
+    const rets = paramResults.map(r => r.returnPct);
+    const spread = Math.max(...rets) - Math.min(...rets);
+    if (spread < 0.5) {
+      console.warn(`[param-sensitivity] Degenerate: spread=${spread.toFixed(2)}% across ${paramResults.length} rows. Threshold override likely ignored.`);
+    }
   }
 
   // 4. Trade Dependency Test
