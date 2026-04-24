@@ -702,4 +702,118 @@ function CapSlider({ label, hint, value, onChange, min, max, step, suffix = "", 
   );
 }
 
+// Sentinel value representing "no limit". Backend percentage caps still work
+// against this (they just become very large absolute amounts), which matches
+// the user's intent of "infinite capital, no cap".
+const INFINITE_NAV = 1e15;
+const isInfiniteNav = (v: number) => !Number.isFinite(v) || v >= 1e12;
+
+interface StartingCapitalCardProps {
+  value: number;
+  onChange: (v: number) => void;
+}
+
+function StartingCapitalCard({ value, onChange }: StartingCapitalCardProps) {
+  const infinite = isInfiniteNav(value);
+  // Local string state so the user can clear/type freely without React clobbering input
+  const [draft, setDraft] = useState<string>(infinite ? "" : String(Math.round(value)));
+
+  // Re-sync local draft if parent value changes (e.g. after data load)
+  useEffect(() => {
+    if (isInfiniteNav(value)) {
+      setDraft("");
+    } else {
+      setDraft(String(Math.round(value)));
+    }
+  }, [value]);
+
+  const handleAmountChange = (raw: string) => {
+    // Strip commas and any non-digit/decimal characters
+    const cleaned = raw.replace(/[^0-9.]/g, "");
+    setDraft(cleaned);
+    const parsed = parseFloat(cleaned);
+    if (!Number.isNaN(parsed) && parsed >= 0) {
+      onChange(parsed);
+    } else if (cleaned === "") {
+      onChange(0);
+    }
+  };
+
+  const toggleInfinite = (on: boolean) => {
+    if (on) {
+      onChange(INFINITE_NAV);
+    } else {
+      // Restore a sensible default when leaving infinite mode
+      onChange(100000);
+    }
+  };
+
+  const formatted = !infinite && Number.isFinite(value)
+    ? value.toLocaleString(undefined, { maximumFractionDigits: 0 })
+    : null;
+
+  return (
+    <Card className="glass-card p-5 space-y-5">
+      <div className="flex items-start gap-3">
+        <Wallet className="w-4 h-4 text-primary mt-0.5 flex-shrink-0" />
+        <div className="space-y-1 flex-1">
+          <Label className="text-sm">Starting capital</Label>
+          <p className="text-xs text-muted-foreground leading-relaxed">
+            How much money you have available. Position size and exposure caps are calculated from this amount.
+            Toggle <span className="text-foreground">No limit</span> if you don't want a cap.
+          </p>
+        </div>
+      </div>
+
+      <div className="flex items-center justify-between gap-3">
+        <div className="space-y-0.5">
+          <div className="flex items-center gap-2">
+            <Label className="text-sm">No limit (infinite)</Label>
+            <Badge variant="outline" className="text-[10px] px-1.5 py-0 gap-1">
+              <InfinityIcon className="w-2.5 h-2.5" /> unlimited
+            </Badge>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Treats your capital as effectively unbounded. % caps still apply proportionally.
+          </p>
+        </div>
+        <Switch checked={infinite} onCheckedChange={toggleInfinite} />
+      </div>
+
+      {!infinite && (
+        <div className="space-y-2">
+          <Label htmlFor="starting-nav-input" className="text-xs uppercase tracking-wider text-muted-foreground">
+            Amount (USD)
+          </Label>
+          <div className="relative">
+            <span className="absolute left-4 top-1/2 -translate-y-1/2 text-sm text-muted-foreground font-mono pointer-events-none">
+              $
+            </span>
+            <Input
+              id="starting-nav-input"
+              inputMode="decimal"
+              value={draft}
+              onChange={(e) => handleAmountChange(e.target.value)}
+              placeholder="100000"
+              className="pl-8 font-mono tabular-nums"
+            />
+          </div>
+          {formatted && (
+            <p className="text-[11px] text-muted-foreground font-mono">
+              ${formatted}
+            </p>
+          )}
+        </div>
+      )}
+
+      {infinite && (
+        <div className="flex items-center justify-center gap-2 py-3 rounded-lg bg-primary/5 border border-primary/20">
+          <InfinityIcon className="w-5 h-5 text-primary" />
+          <span className="text-sm text-primary font-medium">No capital limit</span>
+        </div>
+      )}
+    </Card>
+  );
+}
+
 export default Settings;
