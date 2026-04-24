@@ -78,7 +78,6 @@ export default function Calibration() {
     try {
       const { data: res, error } = await supabase.functions.invoke("calibrate-weights");
       if (error) throw error;
-      const { toast } = await import("sonner");
       toast.success(`Recalibrated on ${res?.sampleSize ?? 0} closed signals`);
       await load(windowDays);
     } catch (e) {
