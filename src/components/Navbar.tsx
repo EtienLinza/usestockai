@@ -33,8 +33,8 @@ export const Navbar = () => {
     { href: "/watchlist", label: "Watchlist", icon: Heart },
     { href: "/backtest", label: "Backtest", icon: BarChart3 },
     { href: "/calibration", label: "Calibration", icon: Brain },
-    { href: "/autotrader-log", label: "AutoTrader", icon: Bot },
-    { href: "/settings", label: "Risk Caps", icon: Shield },
+    { href: "/autotrader-log", label: "AutoTrader Log", icon: Bot },
+    { href: "/settings", label: "Settings", icon: Shield },
   ];
 
   const handleSignOut = async () => {

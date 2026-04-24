@@ -707,7 +707,19 @@ serve(async (req) => {
       }
 
       try {
-        await processUser(supabase, settings, macro, summary);
+        const userSummary = { entries: 0, exits: 0, partials: 0, holds: 0, blocked: 0, errors: 0, watchlistSize: 0, openPositions: 0, evaluated: 0 };
+        await processUser(supabase, settings, macro, summary, userSummary);
+
+        // Always write a per-scan rollup so users see the bot is alive even when
+        // no trades fire. This is the single source of "scan happened" visibility.
+        const rollupReason = buildScanRollupReason(userSummary, settings, adaptiveCtx);
+        await supabase.from("autotrade_log").insert({
+          user_id: rawSettings.user_id,
+          ticker: "SCAN",
+          action: "HOLD",
+          reason: rollupReason,
+          conviction: settings.min_conviction,
+        });
 
         // Update cadence timestamps
         const intervalMin = rawSettings.advanced_mode
@@ -736,11 +748,37 @@ serve(async (req) => {
 });
 
 // ── Per-user pipeline ─────────────────────────────────────────────────────
+type UserSummary = {
+  entries: number; exits: number; partials: number; holds: number;
+  blocked: number; errors: number;
+  watchlistSize: number; openPositions: number; evaluated: number;
+};
+
+function buildScanRollupReason(u: UserSummary, s: Settings, ctx: AdaptiveContext): string {
+  if (u.watchlistSize === 0 && u.openPositions === 0) {
+    return `Scan ran but watchlist is empty — add tickers to your Watchlist so AutoTrader has something to evaluate.`;
+  }
+  if (u.entries === 0 && u.exits === 0 && u.partials === 0 && u.blocked === 0) {
+    const regimeBits: string[] = [];
+    if (ctx.vix != null) regimeBits.push(`VIX ${ctx.vix.toFixed(1)} (${ctx.vixRegime})`);
+    if (ctx.spyTrend) regimeBits.push(`SPY ${ctx.spyTrend}`);
+    const regime = regimeBits.length ? ` | ${regimeBits.join(" · ")}` : "";
+    return `Evaluated ${u.evaluated}/${u.watchlistSize} watchlist tickers · ${u.openPositions} open. No signals cleared conviction floor of ${s.min_conviction}.${regime}`;
+  }
+  const parts: string[] = [];
+  if (u.entries) parts.push(`${u.entries} entry`);
+  if (u.exits) parts.push(`${u.exits} exit`);
+  if (u.partials) parts.push(`${u.partials} partial`);
+  if (u.blocked) parts.push(`${u.blocked} blocked`);
+  return `Scan complete: ${parts.join(" · ")} (${u.evaluated} tickers · ${u.openPositions} open).`;
+}
+
 async function processUser(
   supabase: ReturnType<typeof createClient>,
   settings: Settings,
   macro: MacroContext | null,
   summary: { entries: number; exits: number; partials: number; holds: number; blocked: number; errors: number },
+  userSummary: UserSummary,
 ) {
   const userId = settings.user_id;
 
@@ -751,6 +789,8 @@ async function processUser(
   ]);
   const positions = (posRes.data ?? []) as unknown as Position[];
   const watchlist = (watchRes.data ?? []).map((w: any) => String(w.ticker).toUpperCase());
+  userSummary.watchlistSize = watchlist.length;
+  userSummary.openPositions = positions.length;
 
   // Build deduped ticker list
   const allTickers = Array.from(new Set([
@@ -760,6 +800,10 @@ async function processUser(
   if (allTickers.length === 0) return;
 
   await batchFetch(allTickers);
+  userSummary.evaluated = allTickers.filter(t => {
+    const d = priceCache.get(t);
+    return d && d.close.length >= 200;
+  }).length;
 
   // Compute today's P&L (realized today + unrealized today vs entry)
   const today = new Date().toISOString().split("T")[0];
@@ -811,7 +855,11 @@ async function processUser(
     const lossAct = runLossExit(pos, data, currentPrice, profile, liveDecision, liveBias, liveRsi);
     const action: ExitAction = lossAct ?? runWinExit(pos, data, currentPrice, profile, liveWeeklyAlloc);
 
+    const beforeExits = summary.exits, beforePartials = summary.partials, beforeHolds = summary.holds;
     await executeExit(supabase, pos, action, profile, summary);
+    userSummary.exits += summary.exits - beforeExits;
+    userSummary.partials += summary.partials - beforePartials;
+    userSummary.holds += summary.holds - beforeHolds;
   }
 
   // ── ENTRIES ─────────────────────────────────────────────────────────────
@@ -847,12 +895,15 @@ async function processUser(
     );
 
     if (decision.kind === "ENTER") {
+      const beforeEntries = summary.entries;
       await executeEntry(supabase, settings, ticker, decision, summary);
+      userSummary.entries += summary.entries - beforeEntries;
       // Update local counters so the same scan doesn't blow past caps
       const dollars = decision.kellyFraction * settings.starting_nav;
       totalNavExposureDollars += dollars;
     } else if (decision.kind === "BLOCKED") {
       summary.blocked++;
+      userSummary.blocked++;
       await supabase.from("autotrade_log").insert({
         user_id: userId, ticker, action: "BLOCKED", reason: decision.reason,
         sentiment_score: decision.sentiment?.score ?? null,
@@ -861,6 +912,7 @@ async function processUser(
       });
     } else {
       summary.holds++;
+      userSummary.holds++;
     }
   }
 

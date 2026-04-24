@@ -4,7 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { Navbar } from "@/components/Navbar";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Bot, Loader2, ArrowDownRight, ArrowUpRight, Pause, Ban, Newspaper, ChevronDown, ExternalLink } from "lucide-react";
+import { Bot, Loader2, ArrowDownRight, ArrowUpRight, Pause, Ban, Newspaper, ChevronDown, ExternalLink, Radar } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
@@ -96,8 +96,8 @@ const AutotraderLog = () => {
             <h1 className="text-2xl font-medium tracking-tight">AutoTrader Activity</h1>
           </div>
           <p className="text-sm text-muted-foreground">
-            Every decision your automated trader makes — entries, exits, holds, and blocks.
-            Auto-runs every 10 minutes during U.S. market hours.
+            Every decision your automated trader makes — entries, exits, holds, and scan rollups.
+            Auto-runs every 5–15 minutes during U.S. market hours.
           </p>
 
           {loading ? (
@@ -105,14 +105,20 @@ const AutotraderLog = () => {
               <Loader2 className="w-5 h-5 animate-spin text-primary" />
             </Card>
           ) : rows.length === 0 ? (
-            <Card className="glass-card p-12 text-center text-sm text-muted-foreground">
-              No automated activity yet. Enable AutoTrader from <span className="text-foreground">Settings</span> to get started.
+            <Card className="glass-card p-12 text-center text-sm text-muted-foreground space-y-2">
+              <p>No automated activity yet.</p>
+              <p className="text-xs">
+                Enable AutoTrader from <span className="text-foreground">Settings</span> and add tickers to your <span className="text-foreground">Watchlist</span> so the scanner has something to evaluate.
+              </p>
             </Card>
           ) : (
             <Card className="glass-card overflow-hidden">
               <div className="divide-y divide-border/50">
                 {rows.map((r) => {
-                  const m = actionMeta[r.action];
+                  const isScanRollup = r.ticker === "SCAN" && r.action === "HOLD";
+                  const m = isScanRollup
+                    ? { label: "Scan", cls: "text-muted-foreground border-muted-foreground/20 bg-muted/30", Icon: Radar }
+                    : actionMeta[r.action];
                   const t = new Date(r.created_at);
                   const hasSentiment = r.sentiment_score != null;
                   const headlines = Array.isArray(r.sentiment_headlines) ? r.sentiment_headlines : [];
@@ -126,7 +132,7 @@ const AutotraderLog = () => {
                         </div>
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 flex-wrap">
-                            <span className="font-mono text-sm font-medium">{r.ticker}</span>
+                            <span className="font-mono text-sm font-medium">{isScanRollup ? "AutoTrader" : r.ticker}</span>
                             <Badge variant="outline" className={cn("text-[10px] uppercase tracking-wide", m.cls)}>
                               {m.label}
                             </Badge>
