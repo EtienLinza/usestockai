@@ -100,11 +100,13 @@ import {
   hasDailyEntrySignal,
   hasDailyMeanReversionEntry,
   classifyStock,
+  evaluateSignal,
   PROFILE_PARAMS,
   INDEX_TICKERS,
   type DataSet,
   type StockProfile,
   type WeeklyBias,
+  type MacroContext,
 } from "../_shared/signal-engine-v2.ts";
 
 
@@ -820,70 +822,37 @@ serve(async (req) => {
       if (!data || data.close.length < 200) continue;
 
       try {
-        // 1. Classify stock — full blended classifier (v2)
-        const cls = classifyStock(data.close, data.high, data.low, ticker);
-        const profile = cls.classification;
-        const activeProfile = cls.blendedParams || PROFILE_PARAMS[profile];
-        const weeklyParams = {
-          fastMA: activeProfile.weeklyFastMA,
-          slowMA: activeProfile.weeklySlowMA,
-          rsiLong: activeProfile.weeklyRSILong,
-        };
-
-        // 2. Build weekly data
-        const weeklyData = aggregateToWeekly(data);
-        const wIdx = weeklyData.close.length - 1;
-
-        // 3. Compute weekly bias
-        const weeklyATR = calculateATR(weeklyData.high, weeklyData.low, weeklyData.close, 14);
-        let isLowVol = false;
-        {
-          let wAtrPctSum = 0, wAtrPctCount = 0;
-          for (let wi = 14; wi < weeklyData.close.length; wi++) {
-            if (!isNaN(weeklyATR[wi]) && weeklyData.close[wi] > 0) {
-              wAtrPctSum += weeklyATR[wi] / weeklyData.close[wi]; wAtrPctCount++;
-            }
-          }
-          isLowVol = wAtrPctCount > 0 && (wAtrPctSum / wAtrPctCount) < 0.02;
-        }
-
-        if (wIdx < Math.max(weeklyParams.slowMA, 40) + 10) continue;
-
-        const weeklyBias = computeWeeklyBias(
-          weeklyData.close, weeklyData.high, weeklyData.low, wIdx,
-          weeklyParams, isLowVol,
+        // ─── SINGLE SOURCE OF TRUTH ────────────────────────────────────────
+        // Use the canonical evaluateSignal() — same code path the autotrader
+        // uses for entries and the backtester validates against. Eliminates
+        // scanner/autotrader divergence.
+        const sig = evaluateSignal(
+          data,
+          ticker,
+          { spyBearish },
+          (macro as MacroContext | null) ?? null,
         );
+        if (!sig || sig.decision === "HOLD") continue;
 
-        if (weeklyBias.bias === "flat") continue;
-        if (weeklyBias.bias === "short" && !spyBearish) continue;
+        const { regime, strategy, weeklyBias, profile, atrPct } = sig;
+        const reasoning = sig.reasoning;
+        const annualizedVol = atrPct * Math.sqrt(252) * 100; // approx
 
-        // 4. Check daily entry signal — low-vol stocks use mean-reversion timing,
-        //    everyone else uses the trend-confirmation gate (now uses high/low/volume).
-        const lastIdx = data.close.length - 1;
-        const targetDir: "long" | "short" = weeklyBias.bias === "long" ? "long" : "short";
-        const hasEntry = isLowVol
-          ? hasDailyMeanReversionEntry(data.close, lastIdx, targetDir)
-          : hasDailyEntrySignal(data.close, data.high, data.low, data.volume, lastIdx, targetDir);
-        if (!hasEntry) continue;
-
-        // 5. Compute conviction (enhanced)
-        const raw = computeSignalConviction(
-          data.close, data.high, data.low, data.volume,
-          spyContext, sectorMomentum, ticker,
-        );
-        const { regime, strategy, reasoning, annualizedVol } = raw;
-        let conviction = raw.conviction;
-
-        // ─── PHASE B: apply adaptive weights ─────────────────────────────
-        // (a) Strategy tilt multiplier
+        // ─── PHASE B: apply adaptive weights on top of the canonical conviction ─
+        let conviction = sig.conviction;
         const tilt = strategyTilts[strategy]?.multiplier ?? 1.0;
         conviction = conviction * tilt;
-        // (b) Calibration curve adjust (signed)
         const adj = calibrationCurve[bucketKey(conviction)]?.adjust ?? 0;
         conviction = Math.max(0, Math.min(100, Math.round(conviction + adj)));
 
+        // ─── Sector-momentum tilt (small, bounded) ─────────────────────────
+        const sectorMod = getSectorConvictionModifier(ticker, sectorMomentum);
+        if (sectorMod.bonus !== 0) {
+          conviction = Math.max(0, Math.min(100, Math.round(conviction + sectorMod.bonus)));
+        }
+
         // ─── PHASE B + D: dynamic floor (adaptive baseline + macro adjust) ─
-        const baselineFloor = strategy === "mean_reversion" || strategy === "divergence" ? 60 : 65;
+        const baselineFloor = strategy === "mean_reversion" ? 60 : 65;
         const adaptiveFloor = regimeFloors[regime]?.floor ?? baselineFloor;
         const macroAdj = macro ? macroFloorAdjust(macro.score) : 0;
         const minConviction = Math.max(50, Math.min(90, adaptiveFloor + macroAdj));
@@ -900,8 +869,8 @@ serve(async (req) => {
 
         signals.push({
           ticker,
-          signal_type: weeklyBias.bias === "long" ? "BUY" : "SELL",
-          entry_price: data.close[lastIdx],
+          signal_type: sig.decision === "BUY" ? "BUY" : "SELL",
+          entry_price: data.close[data.close.length - 1],
           confidence: conviction,
           regime,
           stock_profile: profile,

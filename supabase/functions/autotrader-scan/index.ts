@@ -333,6 +333,7 @@ type EntryAction =
   | { kind: "ENTER"; conviction: number; kellyFraction: number; price: number;
       strategy: string; profile: StockProfile; atr: number; hardStop: number;
       weeklyAlloc: number; reasoning: string;
+      decision: "BUY" | "SHORT";
       sentiment?: SentimentRead | null }
   | { kind: "HOLD" | "BLOCKED"; reason: string;
       sentiment?: SentimentRead | null };
@@ -607,6 +608,7 @@ async function runEntryDecision(
     atr,
     hardStop,
     weeklyAlloc: sig.weeklyBias.targetAllocation,
+    decision: sig.decision === "SHORT" ? "SHORT" : "BUY",
     reasoning: sentiment && sentiment.reasoning
       ? `${sig.reasoning} | news: ${sentiment.reasoning}`
       : sig.reasoning,
@@ -773,6 +775,25 @@ function buildScanRollupReason(u: UserSummary, s: Settings, ctx: AdaptiveContext
   if (u.exits) parts.push(`${u.exits} exit`);
   if (u.partials) parts.push(`${u.partials} partial`);
   if (u.blocked) parts.push(`${u.blocked} blocked`);
+  return `Scan complete · ${parts.join(", ")} · evaluated ${u.evaluated}/${u.watchlistSize} · ${u.openPositions} open`;
+}
+
+// ── NYSE market-hours gate ────────────────────────────────────────────────
+// Returns true Mon–Fri, 9:30–16:00 America/New_York. Does not check holidays;
+// this is a coarse safety filter, not a calendar.
+function isMarketOpen(now: Date = new Date()): boolean {
+  // Convert to NY wall-clock via locale string (handles DST automatically)
+  const nyStr = now.toLocaleString("en-US", { timeZone: "America/New_York", hour12: false });
+  // Format: "M/D/YYYY, HH:MM:SS"
+  const m = nyStr.match(/(\d{1,2})\/(\d{1,2})\/(\d{4}),\s*(\d{1,2}):(\d{2}):(\d{2})/);
+  if (!m) return false;
+  const yr = Number(m[3]), mo = Number(m[1]) - 1, day = Number(m[2]);
+  const hh = Number(m[4]), mm = Number(m[5]);
+  // Day-of-week using a UTC date with the NY components (close enough for weekday check)
+  const dow = new Date(Date.UTC(yr, mo, day)).getUTCDay(); // 0=Sun .. 6=Sat
+  if (dow === 0 || dow === 6) return false;
+  const minutes = hh * 60 + mm;
+  return minutes >= 9 * 60 + 30 && minutes < 16 * 60;
 }
 
 // ── AUTO-DISCOVERY: pull good live_signals into watchlist + prune stale auto-adds ──
@@ -981,7 +1002,9 @@ async function processUser(
   }
 
   // ── ENTRIES ─────────────────────────────────────────────────────────────
-  const refreshedOpenCount = positions.length - summary.exits; // approximate
+  // Per-user open count: positions that survived the exit pass above.
+  // (Was previously using global summary.exits which contaminated user B with user A's exits.)
+  const refreshedOpenCount = positions.length - userSummary.exits;
   const navExposurePct = (totalNavExposureDollars / settings.starting_nav) * 100;
   const todayPnlPct = ((realizedToday + unrealizedToday) / settings.starting_nav) * 100;
 
@@ -1155,11 +1178,22 @@ async function executeEntry(
     return;
   }
 
+  // Market-hours gate: never open new positions when the cash market is closed.
+  // Yahoo daily closes are stale outside RTH and would create fictional fills.
+  if (!isMarketOpen()) {
+    await supabase.from("autotrade_log").insert({
+      user_id: settings.user_id, ticker, action: "BLOCKED",
+      reason: "Market closed (NYSE 09:30–16:00 ET, Mon–Fri) — entry deferred",
+    });
+    return;
+  }
+
   const dollars = settings.starting_nav * e.kellyFraction;
   const shares = Math.floor(dollars / e.price);
   if (shares < 1) return;
 
-  const positionType = (e.reasoning.toLowerCase().includes("short") ? "short" : "long");
+  // Direction comes directly from the signal — never parse free-form reasoning.
+  const positionType: "long" | "short" = e.decision === "SHORT" ? "short" : "long";
 
   const { data: ins, error: insErr } = await supabase.from("virtual_positions").insert({
     user_id: settings.user_id, ticker, entry_price: e.price, shares,
