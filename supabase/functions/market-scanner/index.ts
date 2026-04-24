@@ -91,20 +91,21 @@ function calculateRelativeStrength(stockClose: number[], spyClose: number[], per
 }
 
 // ============================================================================
-// SIGNAL ENGINE — imported from canonical shared module
-// (See supabase/functions/_shared/signal-engine.ts)
+// SIGNAL ENGINE — imported from canonical shared module (v2)
+// SINGLE SOURCE OF TRUTH — used by scanner, sell-alerts, predict, backtest
 // ============================================================================
 import {
   aggregateToWeekly,
   computeWeeklyBias,
   hasDailyEntrySignal,
-  classifyStockSimple,
-  PROFILE_WEEKLY_PARAMS,
+  hasDailyMeanReversionEntry,
+  classifyStock,
+  PROFILE_PARAMS,
   INDEX_TICKERS,
   type DataSet,
   type StockProfile,
   type WeeklyBias,
-} from "../_shared/signal-engine.ts";
+} from "../_shared/signal-engine-v2.ts";
 
 
 // ============================================================================
