@@ -1002,7 +1002,9 @@ async function processUser(
   }
 
   // ── ENTRIES ─────────────────────────────────────────────────────────────
-  const refreshedOpenCount = positions.length - summary.exits; // approximate
+  // Per-user open count: positions that survived the exit pass above.
+  // (Was previously using global summary.exits which contaminated user B with user A's exits.)
+  const refreshedOpenCount = positions.length - userSummary.exits;
   const navExposurePct = (totalNavExposureDollars / settings.starting_nav) * 100;
   const todayPnlPct = ((realizedToday + unrealizedToday) / settings.starting_nav) * 100;
 
