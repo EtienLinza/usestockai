@@ -3,11 +3,11 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import { calculateATR } from "../_shared/indicators.ts";
 import {
   aggregateToWeekly,
-  classifyStockSimple,
+  classifyStock,
   computeWeeklyBias,
-  PROFILE_WEEKLY_PARAMS,
+  PROFILE_PARAMS,
   type DataSet,
-} from "../_shared/signal-engine.ts";
+} from "../_shared/signal-engine-v2.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
