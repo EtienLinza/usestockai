@@ -364,7 +364,7 @@ function computeSignalConviction(
   const s50 = safeGet(sma50, currentPrice);
   const s200 = safeGet(sma200, currentPrice);
   const macdH = safeGet(macdData.histogram, 0);
-  const sk = safeGet(stochK, 50);
+  const sk = safeGet(stochK.k, 50);
   const dailyVol = safeGet(volatility, 0.02);
   const annualizedVol = dailyVol * Math.sqrt(252);
 
