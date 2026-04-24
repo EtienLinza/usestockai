@@ -1036,6 +1036,18 @@ async function processUser(
   const todayPnlPct = ((realizedToday + unrealizedToday) / settings.starting_nav) * 100;
 
   const heldTickers = new Set(positions.map(p => p.ticker.toUpperCase()));
+
+  // PASS 1 — gather decisions for every eligible ticker (no DB writes yet).
+  // This lets us rank ENTER candidates by conviction and stagger entries
+  // (cap at MAX_ENTRIES_PER_SCAN per run) so we don't open 4–8 positions in a
+  // single tick at correlated highs.
+  const MAX_ENTRIES_PER_SCAN = 2;
+  type Pending =
+    | { kind: "enter"; ticker: string; decision: Extract<EntryAction, { kind: "ENTER" }> }
+    | { kind: "blocked"; ticker: string; decision: Extract<EntryAction, { kind: "BLOCKED" }> }
+    | { kind: "hold" };
+  const pending: Pending[] = [];
+
   for (const ticker of watchlist) {
     if (heldTickers.has(ticker)) continue;
 
@@ -1048,9 +1060,7 @@ async function processUser(
       .order("closed_at", { ascending: false, nullsFirst: false })
       .limit(1);
     const cd = lastClose?.[0]?.cooldown_until;
-    if (cd && new Date(cd as string).getTime() > Date.now()) {
-      continue; // silent skip — cooldowns are noisy
-    }
+    if (cd && new Date(cd as string).getTime() > Date.now()) continue;
 
     const data = priceCache.get(ticker);
     if (!data || data.close.length < 200) continue;
@@ -1062,26 +1072,54 @@ async function processUser(
       todayPnlPct,
     );
 
-    if (decision.kind === "ENTER") {
-      const beforeEntries = summary.entries;
-      await executeEntry(supabase, settings, ticker, decision, summary);
-      userSummary.entries += summary.entries - beforeEntries;
-      // Update local counters so the same scan doesn't blow past caps
-      const dollars = decision.kellyFraction * settings.starting_nav;
+    if (decision.kind === "ENTER") pending.push({ kind: "enter", ticker, decision });
+    else if (decision.kind === "BLOCKED") pending.push({ kind: "blocked", ticker, decision });
+    else pending.push({ kind: "hold" });
+  }
+
+  // PASS 2 — sort ENTER candidates by conviction desc, take top N, defer the rest.
+  const enterCandidates = pending
+    .filter((p): p is Extract<Pending, { kind: "enter" }> => p.kind === "enter")
+    .sort((a, b) => b.decision.conviction - a.decision.conviction);
+  const toExecute = enterCandidates.slice(0, MAX_ENTRIES_PER_SCAN);
+  const deferred = enterCandidates.slice(MAX_ENTRIES_PER_SCAN);
+
+  for (const p of toExecute) {
+    const beforeEntries = summary.entries;
+    await executeEntry(supabase, settings, p.ticker, p.decision, summary);
+    userSummary.entries += summary.entries - beforeEntries;
+    if (summary.entries > beforeEntries) {
+      const dollars = p.decision.kellyFraction * settings.starting_nav;
       totalNavExposureDollars += dollars;
-    } else if (decision.kind === "BLOCKED") {
-      summary.blocked++;
-      userSummary.blocked++;
-      await supabase.from("autotrade_log").insert({
-        user_id: userId, ticker, action: "BLOCKED", reason: decision.reason,
-        sentiment_score: decision.sentiment?.score ?? null,
-        sentiment_confidence: decision.sentiment?.confidence ?? null,
-        sentiment_headlines: decision.sentiment?.headlines ?? null,
-      });
-    } else {
-      summary.holds++;
-      userSummary.holds++;
     }
+  }
+
+  for (const p of deferred) {
+    summary.holds++;
+    userSummary.holds++;
+    await supabase.from("autotrade_log").insert({
+      user_id: userId, ticker: p.ticker, action: "HOLD",
+      reason: `Deferred — entry stagger cap (${MAX_ENTRIES_PER_SCAN}/scan); will retry next cycle (conviction ${p.decision.conviction})`,
+      conviction: p.decision.conviction,
+      strategy: p.decision.strategy,
+      profile: p.decision.profile,
+    });
+  }
+
+  for (const p of pending) {
+    if (p.kind !== "blocked") continue;
+    summary.blocked++;
+    userSummary.blocked++;
+    await supabase.from("autotrade_log").insert({
+      user_id: userId, ticker: p.ticker, action: "BLOCKED", reason: p.decision.reason,
+      sentiment_score: p.decision.sentiment?.score ?? null,
+      sentiment_confidence: p.decision.sentiment?.confidence ?? null,
+      sentiment_headlines: p.decision.sentiment?.headlines ?? null,
+    });
+  }
+
+  for (const p of pending) {
+    if (p.kind === "hold") { summary.holds++; userSummary.holds++; }
   }
 
   // Portfolio snapshot
