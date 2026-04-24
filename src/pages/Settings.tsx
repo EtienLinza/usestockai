@@ -42,6 +42,9 @@ interface AutoTradeSettings {
   daily_loss_limit_pct: number;
   starting_nav: number;
   use_news_sentiment: boolean;
+  auto_add_watchlist: boolean;
+  auto_watchlist_consideration_floor: number;
+  auto_watchlist_stale_days: number;
 }
 
 interface AutotraderState {
@@ -82,6 +85,9 @@ const AUTOTRADE_DEFAULTS: AutoTradeSettings = {
   daily_loss_limit_pct: 3,
   starting_nav: 100000,
   use_news_sentiment: true,
+  auto_add_watchlist: true,
+  auto_watchlist_consideration_floor: 60,
+  auto_watchlist_stale_days: 14,
 };
 
 const RISK_PROFILE_LABEL: Record<RiskProfile, { label: string; hint: string }> = {
@@ -114,7 +120,7 @@ const Settings = () => {
           .select("sector_max_pct, portfolio_beta_max, max_correlated_positions, enforcement_mode, enabled")
           .eq("user_id", user.id).maybeSingle(),
         supabase.from("autotrade_settings")
-          .select("enabled, paper_mode, advanced_mode, adaptive_mode, risk_profile, scan_interval_minutes, min_conviction, max_positions, max_nav_exposure_pct, max_single_name_pct, daily_loss_limit_pct, starting_nav, last_scan_at, next_scan_at, use_news_sentiment")
+          .select("enabled, paper_mode, advanced_mode, adaptive_mode, risk_profile, scan_interval_minutes, min_conviction, max_positions, max_nav_exposure_pct, max_single_name_pct, daily_loss_limit_pct, starting_nav, last_scan_at, next_scan_at, use_news_sentiment, auto_add_watchlist, auto_watchlist_consideration_floor, auto_watchlist_stale_days")
           .eq("user_id", user.id).maybeSingle(),
         supabase.from("autotrader_state")
           .select("effective_min_conviction, effective_max_positions, effective_max_nav_exposure_pct, effective_max_single_name_pct, vix_value, vix_regime, spy_trend, recent_pnl_pct, adjustments, reason, computed_at")
@@ -144,6 +150,9 @@ const Settings = () => {
           daily_loss_limit_pct: Number(botRes.data.daily_loss_limit_pct),
           starting_nav: Number(botRes.data.starting_nav),
           use_news_sentiment: botRes.data.use_news_sentiment ?? true,
+          auto_add_watchlist: botRes.data.auto_add_watchlist ?? true,
+          auto_watchlist_consideration_floor: Number(botRes.data.auto_watchlist_consideration_floor ?? 60),
+          auto_watchlist_stale_days: Number(botRes.data.auto_watchlist_stale_days ?? 14),
         });
         setLastScanAt(botRes.data.last_scan_at as string | null);
         setNextScanAt(botRes.data.next_scan_at as string | null);
@@ -316,6 +325,54 @@ const Settings = () => {
                       </p>
                     </div>
                     <Switch checked={bot.use_news_sentiment} onCheckedChange={(v) => setBot({ ...bot, use_news_sentiment: v })} />
+                  </div>
+                  <div className="space-y-3 rounded-lg border border-border/50 p-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="space-y-0.5">
+                        <Label className="text-sm">Auto-discover tickers</Label>
+                        <p className="text-xs text-muted-foreground">
+                          Automatically add promising tickers from the live signal feed to your watchlist. Auto-added tickers are removed if no qualifying signal appears for {bot.auto_watchlist_stale_days} days (held positions are never removed).
+                        </p>
+                      </div>
+                      <Switch
+                        checked={bot.auto_add_watchlist}
+                        onCheckedChange={(v) => setBot({ ...bot, auto_add_watchlist: v })}
+                      />
+                    </div>
+                    {bot.auto_add_watchlist && (
+                      <div className="grid grid-cols-2 gap-3 pt-1">
+                        <div className="space-y-1">
+                          <Label className="text-xs text-muted-foreground">Consideration floor</Label>
+                          <Input
+                            type="number"
+                            min={50}
+                            max={95}
+                            value={bot.auto_watchlist_consideration_floor}
+                            onChange={(e) => setBot({
+                              ...bot,
+                              auto_watchlist_consideration_floor: Math.max(50, Math.min(95, Number(e.target.value) || 60)),
+                            })}
+                            className="h-8 text-sm"
+                          />
+                          <p className="text-[10px] text-muted-foreground">Min signal conviction (50–95)</p>
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-xs text-muted-foreground">Stale after (days)</Label>
+                          <Input
+                            type="number"
+                            min={1}
+                            max={90}
+                            value={bot.auto_watchlist_stale_days}
+                            onChange={(e) => setBot({
+                              ...bot,
+                              auto_watchlist_stale_days: Math.max(1, Math.min(90, Number(e.target.value) || 14)),
+                            })}
+                            className="h-8 text-sm"
+                          />
+                          <p className="text-[10px] text-muted-foreground">Auto-remove window (1–90)</p>
+                        </div>
+                      </div>
+                    )}
                   </div>
                   <div className="flex items-center gap-2 flex-wrap">
                     <Badge variant={bot.enabled ? "default" : "secondary"}>

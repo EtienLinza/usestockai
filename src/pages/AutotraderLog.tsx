@@ -4,7 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { Navbar } from "@/components/Navbar";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Bot, Loader2, ArrowDownRight, ArrowUpRight, Pause, Ban, Newspaper, ChevronDown, ExternalLink, Radar } from "lucide-react";
+import { Bot, Loader2, ArrowDownRight, ArrowUpRight, Pause, Ban, Newspaper, ChevronDown, ExternalLink, Radar, Eye, EyeOff } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
@@ -20,7 +20,7 @@ function sentimentTone(score: number): { cls: string; label: string } {
 interface LogRow {
   id: string;
   ticker: string;
-  action: "ENTRY" | "PARTIAL_EXIT" | "FULL_EXIT" | "HOLD" | "BLOCKED" | "ERROR";
+  action: "ENTRY" | "PARTIAL_EXIT" | "FULL_EXIT" | "HOLD" | "BLOCKED" | "ERROR" | "AUTO_ADD" | "AUTO_REMOVE";
   reason: string | null;
   price: number | null;
   shares: number | null;
@@ -41,6 +41,8 @@ const actionMeta: Record<LogRow["action"], { label: string; cls: string; Icon: t
   HOLD: { label: "Hold", cls: "text-muted-foreground border-muted-foreground/30 bg-muted/40", Icon: Pause },
   BLOCKED: { label: "Blocked", cls: "text-amber-500 border-amber-500/30 bg-amber-500/10", Icon: Ban },
   ERROR: { label: "Error", cls: "text-destructive border-destructive/30 bg-destructive/10", Icon: Ban },
+  AUTO_ADD: { label: "Watch+", cls: "text-primary border-primary/30 bg-primary/10", Icon: Eye },
+  AUTO_REMOVE: { label: "Watch−", cls: "text-muted-foreground border-muted-foreground/30 bg-muted/40", Icon: EyeOff },
 };
 
 const AutotraderLog = () => {

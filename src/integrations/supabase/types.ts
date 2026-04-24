@@ -75,6 +75,9 @@ export type Database = {
         Row: {
           adaptive_mode: boolean
           advanced_mode: boolean
+          auto_add_watchlist: boolean
+          auto_watchlist_consideration_floor: number
+          auto_watchlist_stale_days: number
           created_at: string
           daily_loss_limit_pct: number
           enabled: boolean
@@ -96,6 +99,9 @@ export type Database = {
         Insert: {
           adaptive_mode?: boolean
           advanced_mode?: boolean
+          auto_add_watchlist?: boolean
+          auto_watchlist_consideration_floor?: number
+          auto_watchlist_stale_days?: number
           created_at?: string
           daily_loss_limit_pct?: number
           enabled?: boolean
@@ -117,6 +123,9 @@ export type Database = {
         Update: {
           adaptive_mode?: boolean
           advanced_mode?: boolean
+          auto_add_watchlist?: boolean
+          auto_watchlist_consideration_floor?: number
+          auto_watchlist_stale_days?: number
           created_at?: string
           daily_loss_limit_pct?: number
           enabled?: boolean
@@ -808,7 +817,9 @@ export type Database = {
           created_at: string
           display_name: string | null
           id: string
+          last_signal_at: string | null
           notes: string | null
+          source: string
           ticker: string
           user_id: string
         }
@@ -817,7 +828,9 @@ export type Database = {
           created_at?: string
           display_name?: string | null
           id?: string
+          last_signal_at?: string | null
           notes?: string | null
+          source?: string
           ticker: string
           user_id: string
         }
@@ -826,7 +839,9 @@ export type Database = {
           created_at?: string
           display_name?: string | null
           id?: string
+          last_signal_at?: string | null
           notes?: string | null
+          source?: string
           ticker?: string
           user_id?: string
         }

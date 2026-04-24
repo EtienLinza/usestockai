@@ -113,6 +113,9 @@ interface Settings {
   use_news_sentiment: boolean;
   risk_profile: "conservative" | "balanced" | "aggressive";
   adaptive_mode: boolean;
+  auto_add_watchlist: boolean;
+  auto_watchlist_consideration_floor: number;
+  auto_watchlist_stale_days: number;
 }
 
 interface AdaptiveContext {
@@ -770,8 +773,112 @@ function buildScanRollupReason(u: UserSummary, s: Settings, ctx: AdaptiveContext
   if (u.exits) parts.push(`${u.exits} exit`);
   if (u.partials) parts.push(`${u.partials} partial`);
   if (u.blocked) parts.push(`${u.blocked} blocked`);
-  return `Scan complete: ${parts.join(" · ")} (${u.evaluated} tickers · ${u.openPositions} open).`;
 }
+
+// ── AUTO-DISCOVERY: pull good live_signals into watchlist + prune stale auto-adds ──
+async function syncAutoWatchlist(
+  supabase: ReturnType<typeof createClient>,
+  settings: Settings,
+  currentWatch: Array<{ ticker: string; source: string | null }>,
+  openPositionTickers: string[],
+): Promise<void> {
+  const userId = settings.user_id;
+  const floor = Math.max(50, Math.min(95, settings.auto_watchlist_consideration_floor ?? 60));
+  const staleDays = Math.max(1, Math.min(90, settings.auto_watchlist_stale_days ?? 14));
+
+  // Pull recent qualifying live signals (last 24h)
+  const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const { data: sigs, error: sErr } = await supabase
+    .from("live_signals")
+    .select("ticker, confidence, created_at")
+    .gte("confidence", floor)
+    .gte("created_at", since)
+    .order("confidence", { ascending: false });
+  if (sErr) {
+    console.warn("auto-add: live_signals fetch failed", sErr);
+    return;
+  }
+
+  // Best signal per ticker (already sorted by confidence desc)
+  const bestByTicker = new Map<string, { confidence: number; created_at: string }>();
+  for (const s of (sigs ?? []) as Array<{ ticker: string; confidence: number; created_at: string }>) {
+    const t = String(s.ticker).toUpperCase();
+    if (!bestByTicker.has(t)) {
+      bestByTicker.set(t, { confidence: Number(s.confidence), created_at: s.created_at });
+    }
+  }
+
+  const existingTickers = new Set(currentWatch.map(w => String(w.ticker).toUpperCase()));
+
+  // 1. INSERT new auto-added tickers
+  const toInsert: Array<Record<string, unknown>> = [];
+  for (const [ticker, info] of bestByTicker.entries()) {
+    if (existingTickers.has(ticker)) continue;
+    toInsert.push({
+      user_id: userId,
+      ticker,
+      asset_type: "stock",
+      source: "auto",
+      last_signal_at: info.created_at,
+      notes: `Auto-added by AutoTrader (signal conviction ${Math.round(info.confidence)})`,
+    });
+  }
+  if (toInsert.length > 0) {
+    const { error: insErr } = await supabase.from("watchlist").insert(toInsert);
+    if (insErr) {
+      console.warn("auto-add: watchlist insert failed", insErr);
+    } else {
+      // Log a single rollup row so users see what happened
+      await supabase.from("autotrade_log").insert({
+        user_id: userId,
+        ticker: "WATCHLIST",
+        action: "AUTO_ADD",
+        reason: `Added ${toInsert.length} ticker${toInsert.length === 1 ? "" : "s"}: ${toInsert.map(r => r.ticker).join(", ")}`,
+      });
+    }
+  }
+
+  // 2. TOUCH last_signal_at on existing auto rows that fired again today
+  for (const [ticker, info] of bestByTicker.entries()) {
+    if (!existingTickers.has(ticker)) continue;
+    await supabase.from("watchlist")
+      .update({ last_signal_at: info.created_at })
+      .eq("user_id", userId)
+      .eq("ticker", ticker)
+      .eq("source", "auto");
+  }
+
+  // 3. PRUNE stale auto-added tickers (no signal in N days, not currently held)
+  const heldSet = new Set(openPositionTickers.map(t => t.toUpperCase()));
+  const staleCutoff = new Date(Date.now() - staleDays * 86400000).toISOString();
+  const { data: staleRows } = await supabase
+    .from("watchlist")
+    .select("id, ticker, last_signal_at, created_at")
+    .eq("user_id", userId)
+    .eq("source", "auto");
+
+  const toDelete: string[] = [];
+  const deletedTickers: string[] = [];
+  for (const row of (staleRows ?? []) as Array<{ id: string; ticker: string; last_signal_at: string | null; created_at: string }>) {
+    const t = String(row.ticker).toUpperCase();
+    if (heldSet.has(t)) continue; // never prune something we own
+    const lastSeen = row.last_signal_at ?? row.created_at;
+    if (new Date(lastSeen).toISOString() < staleCutoff) {
+      toDelete.push(row.id);
+      deletedTickers.push(t);
+    }
+  }
+  if (toDelete.length > 0) {
+    await supabase.from("watchlist").delete().in("id", toDelete);
+    await supabase.from("autotrade_log").insert({
+      user_id: userId,
+      ticker: "WATCHLIST",
+      action: "AUTO_REMOVE",
+      reason: `Pruned ${toDelete.length} stale auto-added ticker${toDelete.length === 1 ? "" : "s"} (no signal in ${staleDays}d): ${deletedTickers.join(", ")}`,
+    });
+  }
+}
+
 
 async function processUser(
   supabase: ReturnType<typeof createClient>,
@@ -785,10 +892,21 @@ async function processUser(
   // Load open positions + watchlist
   const [posRes, watchRes] = await Promise.all([
     supabase.from("virtual_positions").select("*").eq("user_id", userId).eq("status", "open"),
-    supabase.from("watchlist").select("ticker").eq("user_id", userId).eq("asset_type", "stock"),
+    supabase.from("watchlist").select("ticker, source").eq("user_id", userId).eq("asset_type", "stock"),
   ]);
   const positions = (posRes.data ?? []) as unknown as Position[];
-  const watchlist = (watchRes.data ?? []).map((w: any) => String(w.ticker).toUpperCase());
+  let watchRows = (watchRes.data ?? []) as Array<{ ticker: string; source: string | null }>;
+
+  // ── AUTO-DISCOVERY: pull promising tickers from live_signals into watchlist ──
+  if (settings.auto_add_watchlist) {
+    await syncAutoWatchlist(supabase, settings, watchRows, positions.map(p => p.ticker.toUpperCase()));
+    // Re-read so the rest of the scan picks up newly-added rows
+    const refreshed = await supabase.from("watchlist")
+      .select("ticker, source").eq("user_id", userId).eq("asset_type", "stock");
+    watchRows = (refreshed.data ?? []) as Array<{ ticker: string; source: string | null }>;
+  }
+
+  const watchlist = watchRows.map(w => String(w.ticker).toUpperCase());
   userSummary.watchlistSize = watchlist.length;
   userSummary.openPositions = positions.length;
 
