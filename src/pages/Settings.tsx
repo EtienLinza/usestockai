@@ -193,6 +193,15 @@ const Settings = () => {
                     </div>
                     <Switch checked={bot.advanced_mode} onCheckedChange={(v) => setBot({ ...bot, advanced_mode: v })} />
                   </div>
+                  <div className="flex items-center justify-between">
+                    <div className="space-y-0.5">
+                      <Label className="text-sm">Use news sentiment</Label>
+                      <p className="text-xs text-muted-foreground">
+                        AI reads recent headlines before every entry. Vetoes trades on extreme negative news; nudges conviction otherwise.
+                      </p>
+                    </div>
+                    <Switch checked={bot.use_news_sentiment} onCheckedChange={(v) => setBot({ ...bot, use_news_sentiment: v })} />
+                  </div>
                   <div className="flex items-center gap-2">
                     <Badge variant={bot.enabled ? "default" : "secondary"}>
                       {bot.enabled ? "Active" : "Paused"}
