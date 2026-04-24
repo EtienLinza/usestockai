@@ -503,28 +503,123 @@ const Settings = () => {
   );
 };
 
-interface AutopilotStatusCardProps {
+interface AdaptiveStatusCardProps {
+  state: AutotraderState | null;
+  enabled: boolean;
+  adaptive: boolean;
   lastScanAt: string | null;
   nextScanAt: string | null;
-  enabled: boolean;
 }
 
-function AutopilotStatusCard({ lastScanAt, nextScanAt, enabled }: AutopilotStatusCardProps) {
+function AdaptiveStatusCard({ state, enabled, adaptive, lastScanAt, nextScanAt }: AdaptiveStatusCardProps) {
   const lastLabel = useMemo(() => formatRelative(lastScanAt, "past"), [lastScanAt]);
   const nextLabel = useMemo(() => formatRelative(nextScanAt, "future"), [nextScanAt]);
+
+  if (!adaptive) {
+    return (
+      <Card className="glass-card p-5 space-y-3 bg-muted/20 border-border/50">
+        <div className="flex items-start gap-3">
+          <Sparkles className="w-4 h-4 text-muted-foreground mt-0.5 flex-shrink-0" />
+          <div className="space-y-1">
+            <p className="text-sm text-foreground font-medium">Adaptive mode is off</p>
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              Limits stay fixed at your <span className="text-foreground capitalize">risk profile</span> baseline (or your manual values in advanced mode).
+              Turn on Adaptive mode to let the system tighten in volatile markets and ease up in calm ones.
+            </p>
+          </div>
+        </div>
+      </Card>
+    );
+  }
+
+  const TrendIcon =
+    state?.spy_trend === "up" ? TrendingUp :
+    state?.spy_trend === "down" ? TrendingDown : Minus;
+  const trendCls =
+    state?.spy_trend === "up" ? "text-success" :
+    state?.spy_trend === "down" ? "text-destructive" : "text-muted-foreground";
+
+  const vixCls =
+    state?.vix_regime === "calm" ? "text-success border-success/30 bg-success/10" :
+    state?.vix_regime === "elevated" ? "text-amber-500 border-amber-500/30 bg-amber-500/10" :
+    state?.vix_regime === "crisis" ? "text-destructive border-destructive/30 bg-destructive/10" :
+    "text-muted-foreground border-muted-foreground/30 bg-muted/40";
+
+  const pnlCls =
+    state?.recent_pnl_pct == null ? "text-muted-foreground" :
+    state.recent_pnl_pct >= 0 ? "text-success" : "text-destructive";
 
   return (
     <Card className="glass-card p-5 space-y-4 bg-primary/5 border-primary/20">
       <div className="flex items-start gap-3">
-        <Sparkles className="w-4 h-4 text-primary mt-0.5 flex-shrink-0" />
-        <div className="space-y-1">
-          <p className="text-sm text-foreground font-medium">Algorithm in control</p>
+        <Activity className="w-4 h-4 text-primary mt-0.5 flex-shrink-0" />
+        <div className="space-y-1 flex-1">
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <p className="text-sm text-foreground font-medium">Currently in effect</p>
+            <p className="text-[10px] text-muted-foreground font-mono">
+              {state ? `updated ${formatRelative(state.computed_at, "past")}` : "awaiting first scan"}
+            </p>
+          </div>
           <p className="text-xs text-muted-foreground leading-relaxed">
-            Conviction floor, exposure caps, position count, and scan cadence all adapt to live market conditions.
-            Tighter rules in bear regimes; faster scans around the open and during high volatility.
+            Live limits derived from your risk profile, market regime, and recent P&L. Daily loss kill-switch ({bot_daily_loss_label_helper(state)}) stays fixed as a hard floor.
           </p>
         </div>
       </div>
+
+      {/* Live regime context */}
+      <div className="grid grid-cols-3 gap-2 pt-2 border-t border-border/40">
+        <div className="space-y-0.5">
+          <p className="text-[10px] uppercase tracking-wider text-muted-foreground">VIX</p>
+          <div className="flex items-center gap-1.5">
+            <span className="text-sm font-mono">{state?.vix_value?.toFixed(1) ?? "—"}</span>
+            {state?.vix_regime && (
+              <Badge variant="outline" className={cn("text-[9px] capitalize px-1.5 py-0", vixCls)}>
+                {state.vix_regime}
+              </Badge>
+            )}
+          </div>
+        </div>
+        <div className="space-y-0.5">
+          <p className="text-[10px] uppercase tracking-wider text-muted-foreground">SPY trend</p>
+          <div className={cn("flex items-center gap-1 text-sm font-mono", trendCls)}>
+            <TrendIcon className="w-3.5 h-3.5" />
+            <span className="capitalize">{state?.spy_trend ?? "—"}</span>
+          </div>
+        </div>
+        <div className="space-y-0.5">
+          <p className="text-[10px] uppercase tracking-wider text-muted-foreground">7-day P&L</p>
+          <span className={cn("text-sm font-mono", pnlCls)}>
+            {state?.recent_pnl_pct != null
+              ? `${state.recent_pnl_pct >= 0 ? "+" : ""}${state.recent_pnl_pct.toFixed(2)}%`
+              : "—"}
+          </span>
+        </div>
+      </div>
+
+      {/* Effective limits */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-2 border-t border-border/40">
+        <EffectiveCell label="Conviction floor" value={state?.effective_min_conviction} />
+        <EffectiveCell label="Max positions" value={state?.effective_max_positions} />
+        <EffectiveCell label="Max NAV" value={state?.effective_max_nav_exposure_pct} suffix="%" />
+        <EffectiveCell label="Max single" value={state?.effective_max_single_name_pct} suffix="%" />
+      </div>
+
+      {/* Why */}
+      {state?.adjustments && state.adjustments.length > 0 && (
+        <div className="pt-2 border-t border-border/40 space-y-1.5">
+          <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Why these limits</p>
+          <ul className="space-y-1">
+            {state.adjustments.map((a, i) => (
+              <li key={i} className="text-xs text-muted-foreground/90 leading-snug flex gap-2">
+                <span className="text-primary/60 mt-0.5">•</span>
+                <span>{a}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* Cadence */}
       <div className="grid grid-cols-2 gap-3 pt-2 border-t border-border/40">
         <div className="space-y-0.5">
           <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Last scan</p>
@@ -536,6 +631,23 @@ function AutopilotStatusCard({ lastScanAt, nextScanAt, enabled }: AutopilotStatu
         </div>
       </div>
     </Card>
+  );
+}
+
+function bot_daily_loss_label_helper(_s: AutotraderState | null): string {
+  // Daily loss limit isn't on the state row — it's always the user's chosen value.
+  // Kept as a small helper so the JSX above stays readable.
+  return "user-controlled, default 3%";
+}
+
+function EffectiveCell({ label, value, suffix = "" }: { label: string; value: number | null | undefined; suffix?: string }) {
+  return (
+    <div className="space-y-0.5">
+      <p className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</p>
+      <p className="text-sm font-mono font-medium text-primary tabular-nums">
+        {value != null ? `${value}${suffix}` : "—"}
+      </p>
+    </div>
   );
 }
 
@@ -554,15 +666,22 @@ interface CapSliderProps {
   onChange: (v: number) => void;
   min: number; max: number; step: number;
   suffix?: string; decimals?: number;
+  effective?: number;
 }
 
-function CapSlider({ label, hint, value, onChange, min, max, step, suffix = "", decimals = 0 }: CapSliderProps) {
+function CapSlider({ label, hint, value, onChange, min, max, step, suffix = "", decimals = 0, effective }: CapSliderProps) {
+  const showEffective = effective != null && Math.abs(effective - value) > 0.01;
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <div>
           <Label className="text-sm">{label}</Label>
           <p className="text-xs text-muted-foreground mt-0.5">{hint}</p>
+          {showEffective && (
+            <p className="text-[10px] text-primary/80 font-mono mt-1">
+              Adaptive override → currently {Number(effective).toFixed(decimals)}{suffix}
+            </p>
+          )}
         </div>
         <div className="font-mono text-sm font-medium text-primary tabular-nums">
           {value.toFixed(decimals)}{suffix}
