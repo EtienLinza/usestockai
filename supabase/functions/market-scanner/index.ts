@@ -364,7 +364,7 @@ function computeSignalConviction(
   const s50 = safeGet(sma50, currentPrice);
   const s200 = safeGet(sma200, currentPrice);
   const macdH = safeGet(macdData.histogram, 0);
-  const sk = safeGet(stochK, 50);
+  const sk = safeGet(stochK.k, 50);
   const dailyVol = safeGet(volatility, 0.02);
   const annualizedVol = dailyVol * Math.sqrt(252);
 
@@ -1027,8 +1027,9 @@ serve(async (req) => {
 
   } catch (error) {
     console.error("Scanner error:", error);
+    const message = error instanceof Error ? error.message : "Scanner failed";
     return new Response(
-      JSON.stringify({ error: error.message || "Scanner failed" }),
+      JSON.stringify({ error: message }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   }

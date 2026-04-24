@@ -91,8 +91,9 @@ serve(async (req) => {
     );
   } catch (error) {
     console.error("Error:", error);
+    const message = error instanceof Error ? error.message : "Failed";
     return new Response(
-      JSON.stringify({ error: error.message }),
+      JSON.stringify({ error: message }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   }
