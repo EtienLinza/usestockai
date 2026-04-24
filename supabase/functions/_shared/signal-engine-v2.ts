@@ -823,10 +823,57 @@ export interface EvaluateSignalResult {
   reasoning: string;
 }
 
+// ============================================================================
+// POSITION SIZING — volatility-targeted Kelly
+// Optional alternative to the strategy engine's positionSizeMultiplier.
+// Returns a fraction of NAV (signed) suitable for a single-name allocation.
+// Maps conviction 60–100 → Kelly fraction 0.10–0.25, then scales by ATR%
+// to target a constant per-name daily vol contribution.
+// ============================================================================
+
+export function computePositionSize(
+  conviction: number,
+  atrPct: number,
+  direction: "long" | "short",
+  targetVol: number = 0.01,
+): number {
+  if (conviction < 60 || atrPct <= 0) return 0;
+  const kellyBase = 0.10 + ((conviction - 60) / 40) * 0.15;
+  const volScalar = Math.min(1.5, targetVol / atrPct);
+  const raw = kellyBase * volScalar;
+  const capped = Math.min(0.25, Math.max(0, raw));
+  return direction === "short" ? -capped : capped;
+}
+
+// ============================================================================
+// EVALUATE SIGNAL — top-level convenience function
+// Combines weekly bias (macro filter) + daily strategy signal (entry timing
+// with conviction) + adaptive context. The single function the scanner,
+// sell-alerts, predict and backtest can all call to get the canonical
+// trade decision for a ticker.
+// ============================================================================
+
+export interface EvaluateSignalResult {
+  decision: "BUY" | "SHORT" | "HOLD";
+  conviction: number;        // 0–100
+  weeklyBias: WeeklyBias;
+  profile: StockProfile;
+  blendedParams: ProfileParams;
+  strategy: "trend" | "mean_reversion" | "breakout" | "none";
+  regime: string;
+  positionSizeMultiplier: number;
+  /** Volatility-targeted Kelly fraction (0–0.25 for longs, 0 to −0.25 for shorts) */
+  kellyFraction: number;
+  atr: number;
+  atrPct: number;
+  reasoning: string;
+}
+
 export function evaluateSignal(
   data: DataSet,
   ticker: string,
   adaptiveContext?: { spyBearish?: boolean; spySMADeclining?: boolean; isLeader?: boolean },
+  macro?: MacroContext | null,
 ): EvaluateSignalResult | null {
   if (data.close.length < 200) return null;
 
