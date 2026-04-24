@@ -773,6 +773,25 @@ function buildScanRollupReason(u: UserSummary, s: Settings, ctx: AdaptiveContext
   if (u.exits) parts.push(`${u.exits} exit`);
   if (u.partials) parts.push(`${u.partials} partial`);
   if (u.blocked) parts.push(`${u.blocked} blocked`);
+  return `Scan complete · ${parts.join(", ")} · evaluated ${u.evaluated}/${u.watchlistSize} · ${u.openPositions} open`;
+}
+
+// ── NYSE market-hours gate ────────────────────────────────────────────────
+// Returns true Mon–Fri, 9:30–16:00 America/New_York. Does not check holidays;
+// this is a coarse safety filter, not a calendar.
+function isMarketOpen(now: Date = new Date()): boolean {
+  // Convert to NY wall-clock via locale string (handles DST automatically)
+  const nyStr = now.toLocaleString("en-US", { timeZone: "America/New_York", hour12: false });
+  // Format: "M/D/YYYY, HH:MM:SS"
+  const m = nyStr.match(/(\d{1,2})\/(\d{1,2})\/(\d{4}),\s*(\d{1,2}):(\d{2}):(\d{2})/);
+  if (!m) return false;
+  const yr = Number(m[3]), mo = Number(m[1]) - 1, day = Number(m[2]);
+  const hh = Number(m[4]), mm = Number(m[5]);
+  // Day-of-week using a UTC date with the NY components (close enough for weekday check)
+  const dow = new Date(Date.UTC(yr, mo, day)).getUTCDay(); // 0=Sun .. 6=Sat
+  if (dow === 0 || dow === 6) return false;
+  const minutes = hh * 60 + mm;
+  return minutes >= 9 * 60 + 30 && minutes < 16 * 60;
 }
 
 // ── AUTO-DISCOVERY: pull good live_signals into watchlist + prune stale auto-adds ──
