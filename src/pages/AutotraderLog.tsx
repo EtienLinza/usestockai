@@ -55,7 +55,7 @@ const AutotraderLog = () => {
         .eq("user_id", user.id)
         .order("created_at", { ascending: false })
         .limit(200);
-      setRows((data ?? []) as LogRow[]);
+      setRows((data ?? []) as unknown as LogRow[]);
       setLoading(false);
     })();
   }, [user]);
