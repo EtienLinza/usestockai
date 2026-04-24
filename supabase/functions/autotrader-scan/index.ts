@@ -111,6 +111,17 @@ interface Settings {
   last_scan_at: string | null;
   next_scan_at: string | null;
   use_news_sentiment: boolean;
+  risk_profile: "conservative" | "balanced" | "aggressive";
+  adaptive_mode: boolean;
+}
+
+interface AdaptiveContext {
+  vix: number | null;
+  vixRegime: "calm" | "normal" | "elevated" | "crisis";
+  spyTrend: "up" | "down" | "flat";
+  recentPnlPct: number;        // last 7-day realized P&L % vs starting NAV
+  windowDays: number;
+  adjustments: string[];       // human-readable reasons applied
 }
 
 interface SentimentRead {
