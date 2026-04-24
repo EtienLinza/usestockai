@@ -1253,15 +1253,51 @@ async function executeEntry(
     return;
   }
 
+  // ── LIVE QUOTE: replace stale daily close with a tradable intraday price ──
+  // The signal-engine's `e.price` is the last daily-bar close (or moving intraday last
+  // from the daily endpoint), which is noisy and prone to single-tick spikes. We refetch
+  // the live quote at execution time and use it as the actual fill.
+  const live = await fetchLiveQuote(ticker);
+  if (!live) {
+    await supabase.from("autotrade_log").insert({
+      user_id: settings.user_id, ticker, action: "BLOCKED",
+      reason: "Live quote unavailable — entry deferred to next scan",
+      conviction: e.conviction, strategy: e.strategy, profile: e.profile,
+    });
+    return;
+  }
+
+  // ── SANITY CHECK: reject obviously broken quotes (data glitch / halted / wide gap) ──
+  if (live.previousClose && live.previousClose > 0) {
+    const gapPct = Math.abs(live.price - live.previousClose) / live.previousClose;
+    if (gapPct > 0.08) {
+      await supabase.from("autotrade_log").insert({
+        user_id: settings.user_id, ticker, action: "BLOCKED",
+        reason: `Live quote diverges ${(gapPct * 100).toFixed(1)}% from prev close ($${live.price.toFixed(2)} vs $${live.previousClose.toFixed(2)}) — possible bad tick or halt`,
+        price: live.price,
+        conviction: e.conviction, strategy: e.strategy, profile: e.profile,
+      });
+      return;
+    }
+  }
+
+  // Recompute fill + stop against the live price (preserve the original ATR multiplier).
+  const fillPrice = live.price;
+  const isLong = e.decision !== "SHORT";
+  const stopATRMult = e.atr > 0 ? Math.abs(e.price - e.hardStop) / e.atr : 2;
+  const hardStop = isLong
+    ? fillPrice - e.atr * stopATRMult
+    : fillPrice + e.atr * stopATRMult;
+
   const dollars = settings.starting_nav * e.kellyFraction;
-  const shares = Math.floor(dollars / e.price);
+  const shares = Math.floor(dollars / fillPrice);
   if (shares < 1) return;
 
   // Direction comes directly from the signal — never parse free-form reasoning.
   const positionType: "long" | "short" = e.decision === "SHORT" ? "short" : "long";
 
   const { data: ins, error: insErr } = await supabase.from("virtual_positions").insert({
-    user_id: settings.user_id, ticker, entry_price: e.price, shares,
+    user_id: settings.user_id, ticker, entry_price: fillPrice, shares,
     position_type: positionType,
     status: "open",
     opened_by: "autotrader",
@@ -1270,16 +1306,19 @@ async function executeEntry(
     entry_strategy: e.strategy,
     entry_profile: e.profile,
     entry_weekly_alloc: e.weeklyAlloc,
-    hard_stop_price: e.hardStop,
-    trailing_stop_price: e.hardStop,
-    peak_price: e.price,
+    hard_stop_price: hardStop,
+    trailing_stop_price: hardStop,
+    peak_price: fillPrice,
   }).select("id").single();
   if (insErr) { console.error("entry insert failed", insErr); return; }
 
   summary.entries++;
+  const signalPrice = e.price;
+  const slipPct = ((fillPrice - signalPrice) / signalPrice) * 100;
   await supabase.from("autotrade_log").insert({
     user_id: settings.user_id, ticker, action: "ENTRY",
-    reason: e.reasoning, price: e.price, shares,
+    reason: `${e.reasoning} | live fill $${fillPrice.toFixed(2)} (signal $${signalPrice.toFixed(2)}, ${slipPct >= 0 ? "+" : ""}${slipPct.toFixed(2)}%)`,
+    price: fillPrice, shares,
     conviction: e.conviction, strategy: e.strategy, profile: e.profile,
     position_id: ins.id,
     sentiment_score: e.sentiment?.score ?? null,
