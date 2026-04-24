@@ -257,7 +257,8 @@ serve(async (req) => {
     });
   } catch (error) {
     console.error("Check sell alerts error:", error);
-    return new Response(JSON.stringify({ error: error.message || "Failed" }), {
+    const message = error instanceof Error ? error.message : "Failed";
+    return new Response(JSON.stringify({ error: message }), {
       status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
