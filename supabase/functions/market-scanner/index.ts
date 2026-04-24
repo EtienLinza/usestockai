@@ -1027,8 +1027,9 @@ serve(async (req) => {
 
   } catch (error) {
     console.error("Scanner error:", error);
+    const message = error instanceof Error ? error.message : "Scanner failed";
     return new Response(
-      JSON.stringify({ error: error.message || "Scanner failed" }),
+      JSON.stringify({ error: message }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   }
