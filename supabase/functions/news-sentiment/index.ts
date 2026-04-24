@@ -275,7 +275,7 @@ serve(async (req) => {
 });
 
 async function upsertCache(
-  supabase: ReturnType<typeof createClient>,
+  supabase: any,
   r: SentimentResult,
 ) {
   await supabase.from("news_sentiment_cache").upsert({
