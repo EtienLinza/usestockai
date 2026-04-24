@@ -96,8 +96,8 @@ const AutotraderLog = () => {
             <h1 className="text-2xl font-medium tracking-tight">AutoTrader Activity</h1>
           </div>
           <p className="text-sm text-muted-foreground">
-            Every decision your automated trader makes — entries, exits, holds, and blocks.
-            Auto-runs every 10 minutes during U.S. market hours.
+            Every decision your automated trader makes — entries, exits, holds, and scan rollups.
+            Auto-runs every 5–15 minutes during U.S. market hours.
           </p>
 
           {loading ? (
@@ -105,8 +105,11 @@ const AutotraderLog = () => {
               <Loader2 className="w-5 h-5 animate-spin text-primary" />
             </Card>
           ) : rows.length === 0 ? (
-            <Card className="glass-card p-12 text-center text-sm text-muted-foreground">
-              No automated activity yet. Enable AutoTrader from <span className="text-foreground">Settings</span> to get started.
+            <Card className="glass-card p-12 text-center text-sm text-muted-foreground space-y-2">
+              <p>No automated activity yet.</p>
+              <p className="text-xs">
+                Enable AutoTrader from <span className="text-foreground">Settings</span> and add tickers to your <span className="text-foreground">Watchlist</span> so the scanner has something to evaluate.
+              </p>
             </Card>
           ) : (
             <Card className="glass-card overflow-hidden">
