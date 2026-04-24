@@ -10,11 +10,12 @@ import { Badge } from "@/components/ui/badge";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { Shield, Loader2, Info, Bot, Sparkles, Clock } from "lucide-react";
+import { Shield, Loader2, Info, Bot, Sparkles, Clock, Activity, TrendingUp, TrendingDown, Minus } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { useNavigate } from "react-router-dom";
+import { cn } from "@/lib/utils";
 
 interface PortfolioCaps {
   sector_max_pct: number;
@@ -24,10 +25,14 @@ interface PortfolioCaps {
   enabled: boolean;
 }
 
+type RiskProfile = "conservative" | "balanced" | "aggressive";
+
 interface AutoTradeSettings {
   enabled: boolean;
   paper_mode: boolean;
   advanced_mode: boolean;
+  adaptive_mode: boolean;
+  risk_profile: RiskProfile;
   scan_interval_minutes: number;
   min_conviction: number;
   max_positions: number;
@@ -36,6 +41,20 @@ interface AutoTradeSettings {
   daily_loss_limit_pct: number;
   starting_nav: number;
   use_news_sentiment: boolean;
+}
+
+interface AutotraderState {
+  effective_min_conviction: number;
+  effective_max_positions: number;
+  effective_max_nav_exposure_pct: number;
+  effective_max_single_name_pct: number;
+  vix_value: number | null;
+  vix_regime: string | null;
+  spy_trend: string | null;
+  recent_pnl_pct: number | null;
+  adjustments: string[] | null;
+  reason: string | null;
+  computed_at: string;
 }
 
 const SCAN_INTERVAL_OPTIONS = [5, 10, 15, 30, 60] as const;
@@ -52,6 +71,8 @@ const AUTOTRADE_DEFAULTS: AutoTradeSettings = {
   enabled: false,
   paper_mode: true,
   advanced_mode: false,
+  adaptive_mode: true,
+  risk_profile: "balanced",
   scan_interval_minutes: 10,
   min_conviction: 70,
   max_positions: 8,
@@ -62,6 +83,12 @@ const AUTOTRADE_DEFAULTS: AutoTradeSettings = {
   use_news_sentiment: true,
 };
 
+const RISK_PROFILE_LABEL: Record<RiskProfile, { label: string; hint: string }> = {
+  conservative: { label: "Conservative", hint: "Higher conviction floor, fewer & smaller positions, lower exposure." },
+  balanced:     { label: "Balanced",     hint: "Default. Calibrated for steady risk-adjusted returns." },
+  aggressive:   { label: "Aggressive",   hint: "Lower floor, more positions, larger sizes. Higher variance." },
+};
+
 const Settings = () => {
   const { user, loading: authLoading } = useAuth();
   const navigate = useNavigate();
@@ -69,6 +96,7 @@ const Settings = () => {
   const [bot, setBot] = useState<AutoTradeSettings>(AUTOTRADE_DEFAULTS);
   const [lastScanAt, setLastScanAt] = useState<string | null>(null);
   const [nextScanAt, setNextScanAt] = useState<string | null>(null);
+  const [adaptiveState, setAdaptiveState] = useState<AutotraderState | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -80,12 +108,15 @@ const Settings = () => {
     if (!user) return;
     (async () => {
       setLoading(true);
-      const [capsRes, botRes] = await Promise.all([
+      const [capsRes, botRes, stateRes] = await Promise.all([
         supabase.from("portfolio_caps")
           .select("sector_max_pct, portfolio_beta_max, max_correlated_positions, enforcement_mode, enabled")
           .eq("user_id", user.id).maybeSingle(),
         supabase.from("autotrade_settings")
-          .select("enabled, paper_mode, advanced_mode, scan_interval_minutes, min_conviction, max_positions, max_nav_exposure_pct, max_single_name_pct, daily_loss_limit_pct, starting_nav, last_scan_at, next_scan_at, use_news_sentiment")
+          .select("enabled, paper_mode, advanced_mode, adaptive_mode, risk_profile, scan_interval_minutes, min_conviction, max_positions, max_nav_exposure_pct, max_single_name_pct, daily_loss_limit_pct, starting_nav, last_scan_at, next_scan_at, use_news_sentiment")
+          .eq("user_id", user.id).maybeSingle(),
+        supabase.from("autotrader_state")
+          .select("effective_min_conviction, effective_max_positions, effective_max_nav_exposure_pct, effective_max_single_name_pct, vix_value, vix_regime, spy_trend, recent_pnl_pct, adjustments, reason, computed_at")
           .eq("user_id", user.id).maybeSingle(),
       ]);
       if (capsRes.data) {
@@ -102,6 +133,8 @@ const Settings = () => {
           enabled: Boolean(botRes.data.enabled),
           paper_mode: Boolean(botRes.data.paper_mode),
           advanced_mode: Boolean(botRes.data.advanced_mode),
+          adaptive_mode: botRes.data.adaptive_mode ?? true,
+          risk_profile: (botRes.data.risk_profile as RiskProfile) ?? "balanced",
           scan_interval_minutes: Number(botRes.data.scan_interval_minutes ?? 10),
           min_conviction: Number(botRes.data.min_conviction),
           max_positions: Number(botRes.data.max_positions),
@@ -114,8 +147,54 @@ const Settings = () => {
         setLastScanAt(botRes.data.last_scan_at as string | null);
         setNextScanAt(botRes.data.next_scan_at as string | null);
       }
+      if (stateRes.data) {
+        setAdaptiveState({
+          effective_min_conviction: Number(stateRes.data.effective_min_conviction),
+          effective_max_positions: Number(stateRes.data.effective_max_positions),
+          effective_max_nav_exposure_pct: Number(stateRes.data.effective_max_nav_exposure_pct),
+          effective_max_single_name_pct: Number(stateRes.data.effective_max_single_name_pct),
+          vix_value: stateRes.data.vix_value != null ? Number(stateRes.data.vix_value) : null,
+          vix_regime: stateRes.data.vix_regime as string | null,
+          spy_trend: stateRes.data.spy_trend as string | null,
+          recent_pnl_pct: stateRes.data.recent_pnl_pct != null ? Number(stateRes.data.recent_pnl_pct) : null,
+          adjustments: (stateRes.data.adjustments as string[] | null) ?? null,
+          reason: stateRes.data.reason as string | null,
+          computed_at: stateRes.data.computed_at as string,
+        });
+      }
       setLoading(false);
     })();
+  }, [user]);
+
+  // Realtime: refresh adaptive state whenever the autotrader scan updates it
+  useEffect(() => {
+    if (!user) return;
+    const channel = supabase
+      .channel(`autotrader_state:${user.id}`)
+      .on("postgres_changes", {
+        event: "*",
+        schema: "public",
+        table: "autotrader_state",
+        filter: `user_id=eq.${user.id}`,
+      }, (payload) => {
+        const r = payload.new as Record<string, unknown>;
+        if (!r) return;
+        setAdaptiveState({
+          effective_min_conviction: Number(r.effective_min_conviction),
+          effective_max_positions: Number(r.effective_max_positions),
+          effective_max_nav_exposure_pct: Number(r.effective_max_nav_exposure_pct),
+          effective_max_single_name_pct: Number(r.effective_max_single_name_pct),
+          vix_value: r.vix_value != null ? Number(r.vix_value) : null,
+          vix_regime: (r.vix_regime as string | null) ?? null,
+          spy_trend: (r.spy_trend as string | null) ?? null,
+          recent_pnl_pct: r.recent_pnl_pct != null ? Number(r.recent_pnl_pct) : null,
+          adjustments: (r.adjustments as string[] | null) ?? null,
+          reason: (r.reason as string | null) ?? null,
+          computed_at: r.computed_at as string,
+        });
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
   }, [user]);
 
   const save = async () => {
@@ -181,6 +260,41 @@ const Settings = () => {
                     </div>
                     <Switch checked={bot.paper_mode} onCheckedChange={(v) => setBot({ ...bot, paper_mode: v })} />
                   </div>
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div className="space-y-0.5">
+                        <Label className="text-sm">Risk profile</Label>
+                        <p className="text-xs text-muted-foreground">
+                          {RISK_PROFILE_LABEL[bot.risk_profile].hint}
+                        </p>
+                      </div>
+                      <Select
+                        value={bot.risk_profile}
+                        onValueChange={(v: RiskProfile) => setBot({ ...bot, risk_profile: v })}
+                      >
+                        <SelectTrigger className="w-36"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          {(Object.keys(RISK_PROFILE_LABEL) as RiskProfile[]).map((k) => (
+                            <SelectItem key={k} value={k}>{RISK_PROFILE_LABEL[k].label}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <div className="space-y-0.5">
+                      <div className="flex items-center gap-2">
+                        <Label className="text-sm">Adaptive mode</Label>
+                        <Badge variant="outline" className="text-[10px] px-1.5 py-0 gap-1">
+                          <Activity className="w-2.5 h-2.5" /> live
+                        </Badge>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Auto-tune conviction floor, position cap, and exposure to live VIX, SPY trend, and your recent P&L.
+                      </p>
+                    </div>
+                    <Switch checked={bot.adaptive_mode} onCheckedChange={(v) => setBot({ ...bot, adaptive_mode: v })} />
+                  </div>
                   <div className="flex items-center justify-between">
                     <div className="space-y-0.5">
                       <div className="flex items-center gap-2">
@@ -188,7 +302,7 @@ const Settings = () => {
                         <Badge variant="outline" className="text-[10px] px-1.5 py-0">manual control</Badge>
                       </div>
                       <p className="text-xs text-muted-foreground">
-                        Reveal scan interval, conviction floor, exposure caps, and the daily kill-switch.
+                        Reveal scan interval and manual caps. Adaptive mode (when on) still layers on top.
                       </p>
                     </div>
                     <Switch checked={bot.advanced_mode} onCheckedChange={(v) => setBot({ ...bot, advanced_mode: v })} />
@@ -202,22 +316,31 @@ const Settings = () => {
                     </div>
                     <Switch checked={bot.use_news_sentiment} onCheckedChange={(v) => setBot({ ...bot, use_news_sentiment: v })} />
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <Badge variant={bot.enabled ? "default" : "secondary"}>
                       {bot.enabled ? "Active" : "Paused"}
                     </Badge>
                     {bot.paper_mode && <Badge variant="outline">Paper</Badge>}
-                    {!bot.advanced_mode && (
-                      <Badge variant="outline" className="gap-1">
-                        <Sparkles className="w-3 h-3" /> Autopilot
+                    <Badge variant="outline" className="gap-1 capitalize">
+                      <Sparkles className="w-3 h-3" /> {bot.risk_profile}
+                    </Badge>
+                    {bot.adaptive_mode && (
+                      <Badge variant="outline" className="gap-1 text-primary border-primary/30">
+                        <Activity className="w-3 h-3" /> Adaptive
                       </Badge>
                     )}
                   </div>
                 </Card>
 
-                {!bot.advanced_mode ? (
-                  <AutopilotStatusCard lastScanAt={lastScanAt} nextScanAt={nextScanAt} enabled={bot.enabled} />
-                ) : (
+                <AdaptiveStatusCard
+                  state={adaptiveState}
+                  enabled={bot.enabled}
+                  adaptive={bot.adaptive_mode}
+                  lastScanAt={lastScanAt}
+                  nextScanAt={nextScanAt}
+                />
+
+                {bot.advanced_mode && (
                   <Card className="glass-card p-5 space-y-6">
                     <div className="space-y-3">
                       <div className="flex items-center justify-between">
@@ -252,6 +375,7 @@ const Settings = () => {
                       value={bot.min_conviction}
                       onChange={(v) => setBot({ ...bot, min_conviction: Math.round(v) })}
                       min={50} max={95} step={1}
+                      effective={bot.adaptive_mode ? adaptiveState?.effective_min_conviction : undefined}
                     />
                     <CapSlider
                       label="Max open positions"
@@ -259,6 +383,7 @@ const Settings = () => {
                       value={bot.max_positions}
                       onChange={(v) => setBot({ ...bot, max_positions: Math.round(v) })}
                       min={1} max={20} step={1}
+                      effective={bot.adaptive_mode ? adaptiveState?.effective_max_positions : undefined}
                     />
                     <CapSlider
                       label="Max NAV exposure"
@@ -266,6 +391,7 @@ const Settings = () => {
                       value={bot.max_nav_exposure_pct}
                       onChange={(v) => setBot({ ...bot, max_nav_exposure_pct: v })}
                       min={20} max={100} step={5} suffix="%"
+                      effective={bot.adaptive_mode ? adaptiveState?.effective_max_nav_exposure_pct : undefined}
                     />
                     <CapSlider
                       label="Max per single name"
@@ -273,6 +399,7 @@ const Settings = () => {
                       value={bot.max_single_name_pct}
                       onChange={(v) => setBot({ ...bot, max_single_name_pct: v })}
                       min={5} max={50} step={1} suffix="%"
+                      effective={bot.adaptive_mode ? adaptiveState?.effective_max_single_name_pct : undefined}
                     />
                     <CapSlider
                       label="Daily loss kill-switch"
@@ -376,28 +503,123 @@ const Settings = () => {
   );
 };
 
-interface AutopilotStatusCardProps {
+interface AdaptiveStatusCardProps {
+  state: AutotraderState | null;
+  enabled: boolean;
+  adaptive: boolean;
   lastScanAt: string | null;
   nextScanAt: string | null;
-  enabled: boolean;
 }
 
-function AutopilotStatusCard({ lastScanAt, nextScanAt, enabled }: AutopilotStatusCardProps) {
+function AdaptiveStatusCard({ state, enabled, adaptive, lastScanAt, nextScanAt }: AdaptiveStatusCardProps) {
   const lastLabel = useMemo(() => formatRelative(lastScanAt, "past"), [lastScanAt]);
   const nextLabel = useMemo(() => formatRelative(nextScanAt, "future"), [nextScanAt]);
+
+  if (!adaptive) {
+    return (
+      <Card className="glass-card p-5 space-y-3 bg-muted/20 border-border/50">
+        <div className="flex items-start gap-3">
+          <Sparkles className="w-4 h-4 text-muted-foreground mt-0.5 flex-shrink-0" />
+          <div className="space-y-1">
+            <p className="text-sm text-foreground font-medium">Adaptive mode is off</p>
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              Limits stay fixed at your <span className="text-foreground capitalize">risk profile</span> baseline (or your manual values in advanced mode).
+              Turn on Adaptive mode to let the system tighten in volatile markets and ease up in calm ones.
+            </p>
+          </div>
+        </div>
+      </Card>
+    );
+  }
+
+  const TrendIcon =
+    state?.spy_trend === "up" ? TrendingUp :
+    state?.spy_trend === "down" ? TrendingDown : Minus;
+  const trendCls =
+    state?.spy_trend === "up" ? "text-success" :
+    state?.spy_trend === "down" ? "text-destructive" : "text-muted-foreground";
+
+  const vixCls =
+    state?.vix_regime === "calm" ? "text-success border-success/30 bg-success/10" :
+    state?.vix_regime === "elevated" ? "text-amber-500 border-amber-500/30 bg-amber-500/10" :
+    state?.vix_regime === "crisis" ? "text-destructive border-destructive/30 bg-destructive/10" :
+    "text-muted-foreground border-muted-foreground/30 bg-muted/40";
+
+  const pnlCls =
+    state?.recent_pnl_pct == null ? "text-muted-foreground" :
+    state.recent_pnl_pct >= 0 ? "text-success" : "text-destructive";
 
   return (
     <Card className="glass-card p-5 space-y-4 bg-primary/5 border-primary/20">
       <div className="flex items-start gap-3">
-        <Sparkles className="w-4 h-4 text-primary mt-0.5 flex-shrink-0" />
-        <div className="space-y-1">
-          <p className="text-sm text-foreground font-medium">Algorithm in control</p>
+        <Activity className="w-4 h-4 text-primary mt-0.5 flex-shrink-0" />
+        <div className="space-y-1 flex-1">
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <p className="text-sm text-foreground font-medium">Currently in effect</p>
+            <p className="text-[10px] text-muted-foreground font-mono">
+              {state ? `updated ${formatRelative(state.computed_at, "past")}` : "awaiting first scan"}
+            </p>
+          </div>
           <p className="text-xs text-muted-foreground leading-relaxed">
-            Conviction floor, exposure caps, position count, and scan cadence all adapt to live market conditions.
-            Tighter rules in bear regimes; faster scans around the open and during high volatility.
+            Live limits derived from your risk profile, market regime, and recent P&L. Daily loss kill-switch ({bot_daily_loss_label_helper(state)}) stays fixed as a hard floor.
           </p>
         </div>
       </div>
+
+      {/* Live regime context */}
+      <div className="grid grid-cols-3 gap-2 pt-2 border-t border-border/40">
+        <div className="space-y-0.5">
+          <p className="text-[10px] uppercase tracking-wider text-muted-foreground">VIX</p>
+          <div className="flex items-center gap-1.5">
+            <span className="text-sm font-mono">{state?.vix_value?.toFixed(1) ?? "—"}</span>
+            {state?.vix_regime && (
+              <Badge variant="outline" className={cn("text-[9px] capitalize px-1.5 py-0", vixCls)}>
+                {state.vix_regime}
+              </Badge>
+            )}
+          </div>
+        </div>
+        <div className="space-y-0.5">
+          <p className="text-[10px] uppercase tracking-wider text-muted-foreground">SPY trend</p>
+          <div className={cn("flex items-center gap-1 text-sm font-mono", trendCls)}>
+            <TrendIcon className="w-3.5 h-3.5" />
+            <span className="capitalize">{state?.spy_trend ?? "—"}</span>
+          </div>
+        </div>
+        <div className="space-y-0.5">
+          <p className="text-[10px] uppercase tracking-wider text-muted-foreground">7-day P&L</p>
+          <span className={cn("text-sm font-mono", pnlCls)}>
+            {state?.recent_pnl_pct != null
+              ? `${state.recent_pnl_pct >= 0 ? "+" : ""}${state.recent_pnl_pct.toFixed(2)}%`
+              : "—"}
+          </span>
+        </div>
+      </div>
+
+      {/* Effective limits */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-2 border-t border-border/40">
+        <EffectiveCell label="Conviction floor" value={state?.effective_min_conviction} />
+        <EffectiveCell label="Max positions" value={state?.effective_max_positions} />
+        <EffectiveCell label="Max NAV" value={state?.effective_max_nav_exposure_pct} suffix="%" />
+        <EffectiveCell label="Max single" value={state?.effective_max_single_name_pct} suffix="%" />
+      </div>
+
+      {/* Why */}
+      {state?.adjustments && state.adjustments.length > 0 && (
+        <div className="pt-2 border-t border-border/40 space-y-1.5">
+          <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Why these limits</p>
+          <ul className="space-y-1">
+            {state.adjustments.map((a, i) => (
+              <li key={i} className="text-xs text-muted-foreground/90 leading-snug flex gap-2">
+                <span className="text-primary/60 mt-0.5">•</span>
+                <span>{a}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* Cadence */}
       <div className="grid grid-cols-2 gap-3 pt-2 border-t border-border/40">
         <div className="space-y-0.5">
           <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Last scan</p>
@@ -409,6 +631,23 @@ function AutopilotStatusCard({ lastScanAt, nextScanAt, enabled }: AutopilotStatu
         </div>
       </div>
     </Card>
+  );
+}
+
+function bot_daily_loss_label_helper(_s: AutotraderState | null): string {
+  // Daily loss limit isn't on the state row — it's always the user's chosen value.
+  // Kept as a small helper so the JSX above stays readable.
+  return "user-controlled, default 3%";
+}
+
+function EffectiveCell({ label, value, suffix = "" }: { label: string; value: number | null | undefined; suffix?: string }) {
+  return (
+    <div className="space-y-0.5">
+      <p className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</p>
+      <p className="text-sm font-mono font-medium text-primary tabular-nums">
+        {value != null ? `${value}${suffix}` : "—"}
+      </p>
+    </div>
   );
 }
 
@@ -427,15 +666,22 @@ interface CapSliderProps {
   onChange: (v: number) => void;
   min: number; max: number; step: number;
   suffix?: string; decimals?: number;
+  effective?: number;
 }
 
-function CapSlider({ label, hint, value, onChange, min, max, step, suffix = "", decimals = 0 }: CapSliderProps) {
+function CapSlider({ label, hint, value, onChange, min, max, step, suffix = "", decimals = 0, effective }: CapSliderProps) {
+  const showEffective = effective != null && Math.abs(effective - value) > 0.01;
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <div>
           <Label className="text-sm">{label}</Label>
           <p className="text-xs text-muted-foreground mt-0.5">{hint}</p>
+          {showEffective && (
+            <p className="text-[10px] text-primary/80 font-mono mt-1">
+              Adaptive override → currently {Number(effective).toFixed(decimals)}{suffix}
+            </p>
+          )}
         </div>
         <div className="font-mono text-sm font-medium text-primary tabular-nums">
           {value.toFixed(decimals)}{suffix}

@@ -111,6 +111,17 @@ interface Settings {
   last_scan_at: string | null;
   next_scan_at: string | null;
   use_news_sentiment: boolean;
+  risk_profile: "conservative" | "balanced" | "aggressive";
+  adaptive_mode: boolean;
+}
+
+interface AdaptiveContext {
+  vix: number | null;
+  vixRegime: "calm" | "normal" | "elevated" | "crisis";
+  spyTrend: "up" | "down" | "flat";
+  recentPnlPct: number;        // last 7-day realized P&L % vs starting NAV
+  windowDays: number;
+  adjustments: string[];       // human-readable reasons applied
 }
 
 interface SentimentRead {
@@ -158,45 +169,155 @@ async function getSentiment(ticker: string): Promise<SentimentRead | null> {
   }
 }
 
-// ─── Autopilot defaults (used when advanced_mode = false) ────────────────
-// The algorithm picks every threshold based on macro context, replacing
-// whatever the user previously had stored in their settings row.
-function resolveEffectiveSettings(s: Settings, macro: MacroContext | null): Settings {
-  if (s.advanced_mode) return s;
+// ─── Risk profile baselines ──────────────────────────────────────────────
+const RISK_PROFILE_BASELINES = {
+  conservative: { minConv: 78, maxPos: 5, maxNav: 60, maxSingle: 12 },
+  balanced:     { minConv: 72, maxPos: 8, maxNav: 80, maxSingle: 20 },
+  aggressive:   { minConv: 66, maxPos: 12, maxNav: 95, maxSingle: 28 },
+} as const;
 
-  const bear = isBearishMacro(macro);
-  const minConv = bear ? 78 : 72;
-  const maxPos = Math.min(12, Math.max(4, Math.round(s.starting_nav / 12500)));
-  const maxNav = bear ? 60 : 80;
+// SPY 50-SMA slope check
+function spyTrendOf(macro: MacroContext | null): "up" | "down" | "flat" {
+  if (!macro || macro.spyClose.length < 50) return "flat";
+  const c = macro.spyClose;
+  const sma = calculateSMA(c, 50);
+  const last = sma[sma.length - 1];
+  const prev = sma[sma.length - 6] ?? last;
+  if (!Number.isFinite(last) || !Number.isFinite(prev)) return "flat";
+  const slope = (last - prev) / prev;
+  if (slope > 0.005) return "up";
+  if (slope < -0.005) return "down";
+  return "flat";
+}
+function isBearishMacro(macro: MacroContext | null): boolean {
+  return spyTrendOf(macro) === "down";
+}
+
+// VIX regime classifier
+function vixRegimeOf(vix: number | null): "calm" | "normal" | "elevated" | "crisis" {
+  if (vix == null || !Number.isFinite(vix)) return "normal";
+  if (vix < 15) return "calm";
+  if (vix < 22) return "normal";
+  if (vix < 30) return "elevated";
+  return "crisis";
+}
+
+// ─── Adaptive engine: derive effective settings from regime + perf + profile ──
+function computeEffectiveSettings(
+  s: Settings,
+  ctx: AdaptiveContext,
+  regimeFloors: Record<string, number> | null,
+): Settings {
+  // If adaptive_mode is OFF and advanced_mode is ON, use stored values verbatim.
+  // Otherwise we always layer adaptive logic on top of a profile baseline.
+  const adjustments: string[] = [];
+
+  // Pick baseline:
+  //   - adaptive_mode ON  → from risk_profile
+  //   - adaptive_mode OFF → user's stored values (advanced) or risk_profile baseline
+  let minConv: number;
+  let maxPos: number;
+  let maxNav: number;
+  let maxSingle: number;
+
+  if (s.adaptive_mode) {
+    const baseline = RISK_PROFILE_BASELINES[s.risk_profile];
+    minConv = baseline.minConv;
+    maxPos = Math.min(baseline.maxPos, Math.max(3, Math.round(s.starting_nav / 12500)));
+    maxNav = baseline.maxNav;
+    maxSingle = baseline.maxSingle;
+    adjustments.push(`base: ${s.risk_profile} profile`);
+  } else if (s.advanced_mode) {
+    minConv = s.min_conviction;
+    maxPos = s.max_positions;
+    maxNav = s.max_nav_exposure_pct;
+    maxSingle = s.max_single_name_pct;
+  } else {
+    const baseline = RISK_PROFILE_BASELINES[s.risk_profile];
+    minConv = baseline.minConv;
+    maxPos = Math.min(baseline.maxPos, Math.max(3, Math.round(s.starting_nav / 12500)));
+    maxNav = baseline.maxNav;
+    maxSingle = baseline.maxSingle;
+  }
+
+  // ── Layer 1: VIX regime modulation (only when adaptive) ──
+  if (s.adaptive_mode) {
+    switch (ctx.vixRegime) {
+      case "calm":
+        minConv -= 2; maxPos += 1; maxNav += 5;
+        adjustments.push(`calm VIX (${ctx.vix?.toFixed(1) ?? "?"}): −2 conv, +1 pos, +5% NAV`);
+        break;
+      case "normal":
+        // no adjustment
+        break;
+      case "elevated":
+        minConv += 4; maxPos -= 1; maxNav -= 10; maxSingle -= 3;
+        adjustments.push(`elevated VIX (${ctx.vix?.toFixed(1) ?? "?"}): +4 conv, −1 pos, −10% NAV`);
+        break;
+      case "crisis":
+        minConv += 10; maxPos = Math.min(maxPos, 3); maxNav = Math.min(maxNav, 40); maxSingle = Math.min(maxSingle, 10);
+        adjustments.push(`crisis VIX (${ctx.vix?.toFixed(1) ?? "?"}): +10 conv, hard caps applied`);
+        break;
+    }
+
+    // ── Layer 2: SPY trend ──
+    if (ctx.spyTrend === "down") {
+      minConv += 4; maxNav -= 10;
+      adjustments.push(`SPY downtrend: +4 conv, −10% NAV`);
+    } else if (ctx.spyTrend === "up") {
+      minConv -= 1;
+      adjustments.push(`SPY uptrend: −1 conv`);
+    }
+
+    // ── Layer 3: Performance feedback (rolling 7-day) ──
+    if (ctx.recentPnlPct <= -5) {
+      minConv += 8; maxPos = Math.max(2, maxPos - 2); maxSingle = Math.max(8, maxSingle * 0.6);
+      adjustments.push(`drawdown ${ctx.recentPnlPct.toFixed(1)}%: +8 conv, tighter caps`);
+    } else if (ctx.recentPnlPct <= -2) {
+      minConv += 3; maxSingle = Math.max(10, maxSingle * 0.8);
+      adjustments.push(`mild drawdown ${ctx.recentPnlPct.toFixed(1)}%: +3 conv`);
+    } else if (ctx.recentPnlPct >= 5) {
+      minConv -= 2;
+      adjustments.push(`strong P&L +${ctx.recentPnlPct.toFixed(1)}%: −2 conv`);
+    }
+
+    // ── Layer 4: Calibration floor (from nightly strategy_weights.regime_floors) ──
+    if (regimeFloors) {
+      const regimeKey = ctx.spyTrend === "down" ? "bear" : ctx.vixRegime === "calm" ? "bull" : "neutral";
+      const calFloor = Number(regimeFloors[regimeKey]);
+      if (Number.isFinite(calFloor) && calFloor > minConv) {
+        adjustments.push(`calibration floor (${regimeKey}): conv raised ${minConv}→${calFloor}`);
+        minConv = calFloor;
+      }
+    }
+  }
+
+  // ── Hard safety clamps ──
+  minConv = Math.max(55, Math.min(95, Math.round(minConv)));
+  maxPos = Math.max(1, Math.min(20, Math.round(maxPos)));
+  maxNav = Math.max(20, Math.min(100, maxNav));
+  maxSingle = Math.max(5, Math.min(50, maxSingle));
+
+  ctx.adjustments = adjustments;
 
   return {
     ...s,
     min_conviction: minConv,
     max_positions: maxPos,
     max_nav_exposure_pct: maxNav,
-    max_single_name_pct: 20,    // Kelly fraction further caps this per-trade
-    daily_loss_limit_pct: 3,    // safety floor
+    max_single_name_pct: maxSingle,
+    daily_loss_limit_pct: s.daily_loss_limit_pct, // always user-controlled / 3% default
   };
 }
 
-// SPY 50-SMA slope check — same heuristic the signal engine uses
-function isBearishMacro(macro: MacroContext | null): boolean {
-  if (!macro || macro.spyClose.length < 50) return false;
-  const c = macro.spyClose;
-  const sma = calculateSMA(c, 50);
-  const last = sma[sma.length - 1];
-  const prev = sma[sma.length - 6] ?? last;
-  return Number.isFinite(last) && Number.isFinite(prev) && last < prev;
-}
-
 // Autopilot scan cadence — tighter on volatile/open, looser on calm afternoons
-function algoScanIntervalMinutes(macro: MacroContext | null): number {
-  // Approx NY hour from UTC (DST-agnostic ±1h is acceptable for cadence)
+function algoScanIntervalMinutes(macro: MacroContext | null, vixRegime: string): number {
   const utcHour = new Date().getUTCHours();
   const nyHour = (utcHour - 4 + 24) % 24;
-  if (nyHour === 9 || nyHour === 10) return 5;     // first 90 min after open
-  if (isBearishMacro(macro)) return 5;             // tighter risk in bear regimes
-  if (nyHour >= 14 && nyHour < 16) return 15;      // sleepy afternoon
+  if (nyHour === 9 || nyHour === 10) return 5;
+  if (vixRegime === "elevated" || vixRegime === "crisis") return 5;
+  if (isBearishMacro(macro)) return 5;
+  if (nyHour >= 14 && nyHour < 16) return 15;
   return 10;
 }
 
@@ -515,9 +636,20 @@ serve(async (req) => {
     }
     summary.users = settingsRows.length;
 
-    // 2. Pre-fetch SPY for macro context (shared across all users)
-    const spy = await fetchYahooData("SPY");
+    // 2. Pre-fetch SPY + VIX + active calibration weights (shared across users)
+    const [spy, vixData, weightsRes] = await Promise.all([
+      fetchYahooData("SPY"),
+      fetchYahooData("^VIX"),
+      supabase.from("strategy_weights").select("regime_floors").eq("is_active", true)
+        .order("computed_at", { ascending: false }).limit(1).maybeSingle(),
+    ]);
     const macro: MacroContext | null = spy ? { spyClose: spy.close } : null;
+    const vixValue: number | null = vixData && vixData.close.length > 0
+      ? vixData.close[vixData.close.length - 1]
+      : null;
+    const vixRegime = vixRegimeOf(vixValue);
+    const spyTrend = spyTrendOf(macro);
+    const regimeFloors = (weightsRes.data?.regime_floors as Record<string, number> | null) ?? null;
 
     // 3. Per-user processing — gated by per-user next_scan_at
     const now = new Date();
@@ -531,14 +663,56 @@ serve(async (req) => {
         continue;
       }
 
-      const settings = resolveEffectiveSettings(rawSettings, macro);
+      // Compute 7-day rolling P&L for this user
+      const sevenDaysAgo = new Date(Date.now() - 7 * 86400000).toISOString();
+      const { data: recentClosed } = await supabase
+        .from("virtual_positions")
+        .select("pnl")
+        .eq("user_id", rawSettings.user_id)
+        .eq("status", "closed")
+        .gte("exit_date", sevenDaysAgo);
+      const recentPnlDollars = (recentClosed ?? []).reduce(
+        (s: number, p: any) => s + Number(p.pnl ?? 0), 0,
+      );
+      const recentPnlPct = (recentPnlDollars / Number(rawSettings.starting_nav || 100000)) * 100;
+
+      const adaptiveCtx: AdaptiveContext = {
+        vix: vixValue,
+        vixRegime,
+        spyTrend,
+        recentPnlPct,
+        windowDays: 7,
+        adjustments: [],
+      };
+
+      const settings = computeEffectiveSettings(rawSettings, adaptiveCtx, regimeFloors);
+
+      // Persist live state for UI transparency (only when adaptive)
+      if (rawSettings.adaptive_mode) {
+        await supabase.from("autotrader_state").upsert({
+          user_id: rawSettings.user_id,
+          effective_min_conviction: settings.min_conviction,
+          effective_max_positions: settings.max_positions,
+          effective_max_nav_exposure_pct: settings.max_nav_exposure_pct,
+          effective_max_single_name_pct: settings.max_single_name_pct,
+          vix_value: vixValue,
+          vix_regime: vixRegime,
+          spy_trend: spyTrend,
+          recent_pnl_pct: recentPnlPct,
+          recent_pnl_window_days: 7,
+          adjustments: adaptiveCtx.adjustments,
+          reason: adaptiveCtx.adjustments.join(" • "),
+          computed_at: now.toISOString(),
+        }, { onConflict: "user_id" });
+      }
+
       try {
         await processUser(supabase, settings, macro, summary);
 
         // Update cadence timestamps
         const intervalMin = rawSettings.advanced_mode
           ? rawSettings.scan_interval_minutes
-          : algoScanIntervalMinutes(macro);
+          : algoScanIntervalMinutes(macro, vixRegime);
         const nextScan = new Date(now.getTime() + intervalMin * 60_000);
         await supabase.from("autotrade_settings")
           .update({ last_scan_at: now.toISOString(), next_scan_at: nextScan.toISOString() })
