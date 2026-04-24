@@ -42,6 +42,9 @@ interface AutoTradeSettings {
   daily_loss_limit_pct: number;
   starting_nav: number;
   use_news_sentiment: boolean;
+  auto_add_watchlist: boolean;
+  auto_watchlist_consideration_floor: number;
+  auto_watchlist_stale_days: number;
 }
 
 interface AutotraderState {
