@@ -10,11 +10,12 @@ import { Badge } from "@/components/ui/badge";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { Shield, Loader2, Info, Bot, Sparkles, Clock } from "lucide-react";
+import { Shield, Loader2, Info, Bot, Sparkles, Clock, Activity, TrendingUp, TrendingDown, Minus } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { useNavigate } from "react-router-dom";
+import { cn } from "@/lib/utils";
 
 interface PortfolioCaps {
   sector_max_pct: number;
@@ -24,10 +25,14 @@ interface PortfolioCaps {
   enabled: boolean;
 }
 
+type RiskProfile = "conservative" | "balanced" | "aggressive";
+
 interface AutoTradeSettings {
   enabled: boolean;
   paper_mode: boolean;
   advanced_mode: boolean;
+  adaptive_mode: boolean;
+  risk_profile: RiskProfile;
   scan_interval_minutes: number;
   min_conviction: number;
   max_positions: number;
@@ -36,6 +41,20 @@ interface AutoTradeSettings {
   daily_loss_limit_pct: number;
   starting_nav: number;
   use_news_sentiment: boolean;
+}
+
+interface AutotraderState {
+  effective_min_conviction: number;
+  effective_max_positions: number;
+  effective_max_nav_exposure_pct: number;
+  effective_max_single_name_pct: number;
+  vix_value: number | null;
+  vix_regime: string | null;
+  spy_trend: string | null;
+  recent_pnl_pct: number | null;
+  adjustments: string[] | null;
+  reason: string | null;
+  computed_at: string;
 }
 
 const SCAN_INTERVAL_OPTIONS = [5, 10, 15, 30, 60] as const;
@@ -52,6 +71,8 @@ const AUTOTRADE_DEFAULTS: AutoTradeSettings = {
   enabled: false,
   paper_mode: true,
   advanced_mode: false,
+  adaptive_mode: true,
+  risk_profile: "balanced",
   scan_interval_minutes: 10,
   min_conviction: 70,
   max_positions: 8,
@@ -60,6 +81,12 @@ const AUTOTRADE_DEFAULTS: AutoTradeSettings = {
   daily_loss_limit_pct: 3,
   starting_nav: 100000,
   use_news_sentiment: true,
+};
+
+const RISK_PROFILE_LABEL: Record<RiskProfile, { label: string; hint: string }> = {
+  conservative: { label: "Conservative", hint: "Higher conviction floor, fewer & smaller positions, lower exposure." },
+  balanced:     { label: "Balanced",     hint: "Default. Calibrated for steady risk-adjusted returns." },
+  aggressive:   { label: "Aggressive",   hint: "Lower floor, more positions, larger sizes. Higher variance." },
 };
 
 const Settings = () => {
