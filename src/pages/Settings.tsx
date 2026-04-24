@@ -260,6 +260,41 @@ const Settings = () => {
                     </div>
                     <Switch checked={bot.paper_mode} onCheckedChange={(v) => setBot({ ...bot, paper_mode: v })} />
                   </div>
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div className="space-y-0.5">
+                        <Label className="text-sm">Risk profile</Label>
+                        <p className="text-xs text-muted-foreground">
+                          {RISK_PROFILE_LABEL[bot.risk_profile].hint}
+                        </p>
+                      </div>
+                      <Select
+                        value={bot.risk_profile}
+                        onValueChange={(v: RiskProfile) => setBot({ ...bot, risk_profile: v })}
+                      >
+                        <SelectTrigger className="w-36"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          {(Object.keys(RISK_PROFILE_LABEL) as RiskProfile[]).map((k) => (
+                            <SelectItem key={k} value={k}>{RISK_PROFILE_LABEL[k].label}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <div className="space-y-0.5">
+                      <div className="flex items-center gap-2">
+                        <Label className="text-sm">Adaptive mode</Label>
+                        <Badge variant="outline" className="text-[10px] px-1.5 py-0 gap-1">
+                          <Activity className="w-2.5 h-2.5" /> live
+                        </Badge>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Auto-tune conviction floor, position cap, and exposure to live VIX, SPY trend, and your recent P&L.
+                      </p>
+                    </div>
+                    <Switch checked={bot.adaptive_mode} onCheckedChange={(v) => setBot({ ...bot, adaptive_mode: v })} />
+                  </div>
                   <div className="flex items-center justify-between">
                     <div className="space-y-0.5">
                       <div className="flex items-center gap-2">
@@ -267,7 +302,7 @@ const Settings = () => {
                         <Badge variant="outline" className="text-[10px] px-1.5 py-0">manual control</Badge>
                       </div>
                       <p className="text-xs text-muted-foreground">
-                        Reveal scan interval, conviction floor, exposure caps, and the daily kill-switch.
+                        Reveal scan interval and manual caps. Adaptive mode (when on) still layers on top.
                       </p>
                     </div>
                     <Switch checked={bot.advanced_mode} onCheckedChange={(v) => setBot({ ...bot, advanced_mode: v })} />
@@ -281,22 +316,31 @@ const Settings = () => {
                     </div>
                     <Switch checked={bot.use_news_sentiment} onCheckedChange={(v) => setBot({ ...bot, use_news_sentiment: v })} />
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <Badge variant={bot.enabled ? "default" : "secondary"}>
                       {bot.enabled ? "Active" : "Paused"}
                     </Badge>
                     {bot.paper_mode && <Badge variant="outline">Paper</Badge>}
-                    {!bot.advanced_mode && (
-                      <Badge variant="outline" className="gap-1">
-                        <Sparkles className="w-3 h-3" /> Autopilot
+                    <Badge variant="outline" className="gap-1 capitalize">
+                      <Sparkles className="w-3 h-3" /> {bot.risk_profile}
+                    </Badge>
+                    {bot.adaptive_mode && (
+                      <Badge variant="outline" className="gap-1 text-primary border-primary/30">
+                        <Activity className="w-3 h-3" /> Adaptive
                       </Badge>
                     )}
                   </div>
                 </Card>
 
-                {!bot.advanced_mode ? (
-                  <AutopilotStatusCard lastScanAt={lastScanAt} nextScanAt={nextScanAt} enabled={bot.enabled} />
-                ) : (
+                <AdaptiveStatusCard
+                  state={adaptiveState}
+                  enabled={bot.enabled}
+                  adaptive={bot.adaptive_mode}
+                  lastScanAt={lastScanAt}
+                  nextScanAt={nextScanAt}
+                />
+
+                {bot.advanced_mode && (
                   <Card className="glass-card p-5 space-y-6">
                     <div className="space-y-3">
                       <div className="flex items-center justify-between">
