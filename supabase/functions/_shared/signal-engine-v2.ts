@@ -289,6 +289,50 @@ export function classifyStockSimple(close: number[], high: number[], low: number
 }
 
 // ============================================================================
+// MACRO CONTEXT — explicit SPY-driven regime filter
+// Optional: when callers pass raw SPY closes here, weekly bias and the
+// strategy engine will block counter-trend entries automatically.
+// ============================================================================
+
+export interface MacroContext {
+  /** SPY (or chosen benchmark) daily closes */
+  spyClose: number[];
+  /** Optional stress flag — set true when VIX > 30 or HYG drawdown is severe */
+  stressed?: boolean;
+}
+
+/**
+ * Returns true when the macro environment permits the requested direction.
+ * Long entries are blocked when SPY is below 50- and 200-SMA AND momentum
+ * is negative. Short entries are blocked in confirmed bull regimes.
+ * Returns true (no block) when ctx is null or insufficient data.
+ */
+export function macroPermitsEntry(
+  direction: "long" | "short",
+  ctx: MacroContext | null | undefined,
+): boolean {
+  if (!ctx || !ctx.spyClose || ctx.spyClose.length < 200) return true;
+
+  const spy = ctx.spyClose;
+  const sma50 = calculateSMA(spy, 50);
+  const sma200 = calculateSMA(spy, 200);
+  const n = spy.length - 1;
+  const spyPrice = spy[n];
+  const s50 = safeGet(sma50, spyPrice);
+  const s200 = safeGet(sma200, spyPrice);
+  const spyMomentum = n >= 5 ? (spy[n] - spy[n - 5]) / spy[n - 5] : 0;
+
+  const bearRegime = spyPrice < s50 && spyPrice < s200 && spyMomentum < -0.02;
+  const bullRegime = spyPrice > s50 && s50 > s200;
+
+  if (direction === "long" && bearRegime) return false;
+  if (direction === "short" && bullRegime) return false;
+  if (ctx.stressed && direction === "long") return false;
+
+  return true;
+}
+
+// ============================================================================
 // WEEKLY BIAS COMPUTATION
 // ============================================================================
 
@@ -297,6 +341,7 @@ export function computeWeeklyBias(
   idx: number,
   params: { fastMA: number; slowMA: number; rsiLong: number },
   isLowVol: boolean = false,
+  macro: MacroContext | null = null,
 ): WeeklyBias {
   if (idx < params.slowMA + 10) return { bias: "flat", targetAllocation: 0 };
 
@@ -316,29 +361,43 @@ export function computeWeeklyBias(
 
   // DEFENSIVE MEAN-REVERSION MODE for low-volatility stocks
   if (isLowVol) {
-    if (rsiVal < 30 && c > slow) return { bias: "long", targetAllocation: 0.75 };
-    if (rsiVal < 35 && c > slow && adxVal < 25) return { bias: "long", targetAllocation: 0.5 };
-    if (rsiVal > 70) return { bias: "flat", targetAllocation: 0 };
-    if (rsiVal >= 35 && rsiVal <= 65 && c > slow) return { bias: "long", targetAllocation: 0.25 };
+    if (rsiVal < 30 && c > slow && macroPermitsEntry("long", macro))
+      return { bias: "long", targetAllocation: 0.75 };
+    if (rsiVal < 35 && c > slow && adxVal < 25 && macroPermitsEntry("long", macro))
+      return { bias: "long", targetAllocation: 0.5 };
+    if (rsiVal > 70 && macroPermitsEntry("short", macro))
+      return { bias: "short", targetAllocation: -0.5 }; // symmetric short on overbought low-vol
+    if (rsiVal >= 35 && rsiVal <= 65 && c > slow && macroPermitsEntry("long", macro))
+      return { bias: "long", targetAllocation: 0.25 };
     return { bias: "flat", targetAllocation: 0 };
   }
 
   // STANDARD TREND-FOLLOWING MODE
   if (c > fast && fast > slow) {
+    if (!macroPermitsEntry("long", macro)) return { bias: "flat", targetAllocation: 0 };
     if (rsiVal >= params.rsiLong && rsiVal <= 75 && adxVal > 20) return { bias: "long", targetAllocation: 1.0 };
     if (rsiVal > 75) return { bias: "long", targetAllocation: 0.25 };
     if (adxVal <= 20 || rsiVal < params.rsiLong) return { bias: "long", targetAllocation: 0.5 };
     return { bias: "long", targetAllocation: 0.5 };
   }
 
-  if (fast > slow && c <= fast && c > slow) return { bias: "long", targetAllocation: 0.25 };
+  if (fast > slow && c <= fast && c > slow)
+    return macroPermitsEntry("long", macro)
+      ? { bias: "long", targetAllocation: 0.25 }
+      : { bias: "flat", targetAllocation: 0 };
 
-  // SHORT: confirmed downtrend with momentum (now sized symmetrically by conviction
-  // when used through computeStrategySignal — this weekly bias remains a macro filter)
-  if (c < fast && fast < slow && rsiVal < 40 && adxVal > 20) {
-    // Symmetric sizing: same magnitude rules as longs would get with a 0.5 baseline
-    return { bias: "short", targetAllocation: -0.5 };
+  // FULLY SYMMETRIC SHORT LADDER (matches long side magnitudes)
+  if (c < fast && fast < slow) {
+    if (!macroPermitsEntry("short", macro)) return { bias: "flat", targetAllocation: 0 };
+    if (rsiVal < 25) return { bias: "short", targetAllocation: -0.25 }; // oversold — reduce
+    if (rsiVal < 40 && adxVal > 20) return { bias: "short", targetAllocation: -1.0 };
+    if (rsiVal < 50 && adxVal > 15) return { bias: "short", targetAllocation: -0.5 };
+    return { bias: "short", targetAllocation: -0.25 };
   }
+
+  // Bearish stack without strong RSI/ADX confirmation — light short
+  if (fast < slow && c < fast && macroPermitsEntry("short", macro))
+    return { bias: "short", targetAllocation: -0.25 };
 
   return { bias: "flat", targetAllocation: 0 };
 }
@@ -764,10 +823,57 @@ export interface EvaluateSignalResult {
   reasoning: string;
 }
 
+// ============================================================================
+// POSITION SIZING — volatility-targeted Kelly
+// Optional alternative to the strategy engine's positionSizeMultiplier.
+// Returns a fraction of NAV (signed) suitable for a single-name allocation.
+// Maps conviction 60–100 → Kelly fraction 0.10–0.25, then scales by ATR%
+// to target a constant per-name daily vol contribution.
+// ============================================================================
+
+export function computePositionSize(
+  conviction: number,
+  atrPct: number,
+  direction: "long" | "short",
+  targetVol: number = 0.01,
+): number {
+  if (conviction < 60 || atrPct <= 0) return 0;
+  const kellyBase = 0.10 + ((conviction - 60) / 40) * 0.15;
+  const volScalar = Math.min(1.5, targetVol / atrPct);
+  const raw = kellyBase * volScalar;
+  const capped = Math.min(0.25, Math.max(0, raw));
+  return direction === "short" ? -capped : capped;
+}
+
+// ============================================================================
+// EVALUATE SIGNAL — top-level convenience function
+// Combines weekly bias (macro filter) + daily strategy signal (entry timing
+// with conviction) + adaptive context. The single function the scanner,
+// sell-alerts, predict and backtest can all call to get the canonical
+// trade decision for a ticker.
+// ============================================================================
+
+export interface EvaluateSignalResult {
+  decision: "BUY" | "SHORT" | "HOLD";
+  conviction: number;        // 0–100
+  weeklyBias: WeeklyBias;
+  profile: StockProfile;
+  blendedParams: ProfileParams;
+  strategy: "trend" | "mean_reversion" | "breakout" | "none";
+  regime: string;
+  positionSizeMultiplier: number;
+  /** Volatility-targeted Kelly fraction (0–0.25 for longs, 0 to −0.25 for shorts) */
+  kellyFraction: number;
+  atr: number;
+  atrPct: number;
+  reasoning: string;
+}
+
 export function evaluateSignal(
   data: DataSet,
   ticker: string,
   adaptiveContext?: { spyBearish?: boolean; spySMADeclining?: boolean; isLeader?: boolean },
+  macro?: MacroContext | null,
 ): EvaluateSignalResult | null {
   if (data.close.length < 200) return null;
 
@@ -795,7 +901,13 @@ export function evaluateSignal(
     weekly.close, weekly.high, weekly.low, wIdx,
     { fastMA: activeProfile.weeklyFastMA, slowMA: activeProfile.weeklySlowMA, rsiLong: activeProfile.weeklyRSILong },
     isLowVol,
+    macro ?? null,
   );
+
+  // Daily ATR % for Kelly sizing
+  const dATR = calculateATR(data.high, data.low, data.close, 14);
+  const dLast = data.close[data.close.length - 1];
+  const atrPctNow = dLast > 0 ? safeGet(dATR, dLast * 0.02) / dLast : 0.02;
 
   if (weeklyBias.bias === "flat") {
     return {
@@ -807,7 +919,9 @@ export function evaluateSignal(
       strategy: "none",
       regime: "neutral",
       positionSizeMultiplier: 0,
+      kellyFraction: 0,
       atr: 0,
+      atrPct: atrPctNow,
       reasoning: "Weekly bias flat — no trend",
     };
   }
@@ -845,7 +959,12 @@ export function evaluateSignal(
   const biasMatches = (weeklyBias.bias === "long" && sigDir === "BUY") ||
                       (weeklyBias.bias === "short" && sigDir === "SHORT");
 
-  if (!biasMatches || !dailyEntry || sig.confidence === 0) {
+  // Final macro permit check (defense-in-depth: weeklyBias already considers it,
+  // but a strategy signal could fire SHORT in a confirmed bull SPY regime via the
+  // counter-trend penalty — block it here).
+  const macroOk = macroPermitsEntry(targetDir, macro ?? null);
+
+  if (!biasMatches || !dailyEntry || sig.confidence === 0 || !macroOk) {
     return {
       decision: "HOLD",
       conviction: sig.confidence,
@@ -855,14 +974,20 @@ export function evaluateSignal(
       strategy: sig.strategy,
       regime: sig.regime,
       positionSizeMultiplier: 0,
+      kellyFraction: 0,
       atr: sig.atr,
-      reasoning: !biasMatches
+      atrPct: atrPctNow,
+      reasoning: !macroOk
+        ? `Macro regime blocks ${targetDir} entry`
+        : !biasMatches
         ? `Weekly bias ${weeklyBias.bias} disagrees with daily ${sigDir.toLowerCase()}`
         : !dailyEntry
         ? "Daily entry timing not confirmed"
         : "Conviction below threshold",
     };
   }
+
+  const kellyFraction = computePositionSize(sig.confidence, atrPctNow, targetDir);
 
   return {
     decision: sigDir,
@@ -873,7 +998,9 @@ export function evaluateSignal(
     strategy: sig.strategy,
     regime: sig.regime,
     positionSizeMultiplier: sig.positionSizeMultiplier,
+    kellyFraction,
     atr: sig.atr,
-    reasoning: `${sig.strategy.replace("_", " ")} ${sigDir.toLowerCase()} | ${cls.classification} profile | ${sig.regime} regime | conviction ${sig.confidence}`,
+    atrPct: atrPctNow,
+    reasoning: `${sig.strategy.replace("_", " ")} ${sigDir.toLowerCase()} | ${cls.classification} profile | ${sig.regime} regime | conviction ${sig.confidence} | kelly ${(kellyFraction * 100).toFixed(1)}%`,
   };
 }
