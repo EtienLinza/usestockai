@@ -591,21 +591,18 @@ export function computeStrategySignal(
   const CONV_BUY_THRESH = SP.buyThreshold ?? 65;
   const CONV_SHORT_THRESH = SP.shortThreshold ?? 65;
 
-  // OBV (On-Balance Volume) for trend confirmation
+  // OBV (On-Balance Volume) trend confirmation — only the *delta* over the
+  // last 20 bars matters, so we sum signed volumes in a single 20-bar pass
+  // instead of building an n-length OBV array on every call.
   let obvRising = true;
-  if (volume.length >= 30) {
-    let obv = 0;
-    const obvArr: number[] = [0];
-    for (let oi = 1; oi < close.length; oi++) {
-      if (close[oi] > close[oi - 1]) obv += volume[oi];
-      else if (close[oi] < close[oi - 1]) obv -= volume[oi];
-      obvArr.push(obv);
+  if (volume.length >= 21 && close.length >= 21) {
+    let obvDelta = 0;
+    const start = Math.max(1, close.length - 20);
+    for (let oi = start; oi < close.length; oi++) {
+      if (close[oi] > close[oi - 1]) obvDelta += volume[oi];
+      else if (close[oi] < close[oi - 1]) obvDelta -= volume[oi];
     }
-    if (obvArr.length >= 20) {
-      const obvNow = obvArr[obvArr.length - 1];
-      const obv20Ago = obvArr[obvArr.length - 20];
-      obvRising = obvNow >= obv20Ago;
-    }
+    obvRising = obvDelta >= 0;
   }
 
   // Bonus pool: bonus magnitude scales with the *strength* of the base signal,
