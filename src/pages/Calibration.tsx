@@ -12,6 +12,7 @@ import {
   ReferenceLine, Cell, LineChart, Line, Legend,
 } from "recharts";
 import { Brain, Target, Activity, TrendingUp, Loader2, RefreshCw, AlertCircle } from "lucide-react";
+import { toast } from "sonner";
 
 interface CalibrationData {
   windowDays: number;
