@@ -21,6 +21,9 @@ interface LogRow {
   strategy: string | null;
   profile: string | null;
   created_at: string;
+  sentiment_score: number | null;
+  sentiment_confidence: number | null;
+  sentiment_headlines: Array<{ title: string; source: string; url: string; publishedAt: string }> | null;
 }
 
 const actionMeta: Record<LogRow["action"], { label: string; cls: string; Icon: typeof ArrowUpRight }> = {
@@ -52,7 +55,7 @@ const AutotraderLog = () => {
         .eq("user_id", user.id)
         .order("created_at", { ascending: false })
         .limit(200);
-      setRows((data ?? []) as LogRow[]);
+      setRows((data ?? []) as unknown as LogRow[]);
       setLoading(false);
     })();
   }, [user]);

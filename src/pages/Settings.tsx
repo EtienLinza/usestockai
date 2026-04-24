@@ -35,6 +35,7 @@ interface AutoTradeSettings {
   max_single_name_pct: number;
   daily_loss_limit_pct: number;
   starting_nav: number;
+  use_news_sentiment: boolean;
 }
 
 const SCAN_INTERVAL_OPTIONS = [5, 10, 15, 30, 60] as const;
@@ -58,6 +59,7 @@ const AUTOTRADE_DEFAULTS: AutoTradeSettings = {
   max_single_name_pct: 20,
   daily_loss_limit_pct: 3,
   starting_nav: 100000,
+  use_news_sentiment: true,
 };
 
 const Settings = () => {
@@ -83,7 +85,7 @@ const Settings = () => {
           .select("sector_max_pct, portfolio_beta_max, max_correlated_positions, enforcement_mode, enabled")
           .eq("user_id", user.id).maybeSingle(),
         supabase.from("autotrade_settings")
-          .select("enabled, paper_mode, advanced_mode, scan_interval_minutes, min_conviction, max_positions, max_nav_exposure_pct, max_single_name_pct, daily_loss_limit_pct, starting_nav, last_scan_at, next_scan_at")
+          .select("enabled, paper_mode, advanced_mode, scan_interval_minutes, min_conviction, max_positions, max_nav_exposure_pct, max_single_name_pct, daily_loss_limit_pct, starting_nav, last_scan_at, next_scan_at, use_news_sentiment")
           .eq("user_id", user.id).maybeSingle(),
       ]);
       if (capsRes.data) {
@@ -107,6 +109,7 @@ const Settings = () => {
           max_single_name_pct: Number(botRes.data.max_single_name_pct),
           daily_loss_limit_pct: Number(botRes.data.daily_loss_limit_pct),
           starting_nav: Number(botRes.data.starting_nav),
+          use_news_sentiment: botRes.data.use_news_sentiment ?? true,
         });
         setLastScanAt(botRes.data.last_scan_at as string | null);
         setNextScanAt(botRes.data.next_scan_at as string | null);
@@ -189,6 +192,15 @@ const Settings = () => {
                       </p>
                     </div>
                     <Switch checked={bot.advanced_mode} onCheckedChange={(v) => setBot({ ...bot, advanced_mode: v })} />
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <div className="space-y-0.5">
+                      <Label className="text-sm">Use news sentiment</Label>
+                      <p className="text-xs text-muted-foreground">
+                        AI reads recent headlines before every entry. Vetoes trades on extreme negative news; nudges conviction otherwise.
+                      </p>
+                    </div>
+                    <Switch checked={bot.use_news_sentiment} onCheckedChange={(v) => setBot({ ...bot, use_news_sentiment: v })} />
                   </div>
                   <div className="flex items-center gap-2">
                     <Badge variant={bot.enabled ? "default" : "secondary"}>

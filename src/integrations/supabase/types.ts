@@ -25,6 +25,9 @@ export type Database = {
           price: number | null
           profile: string | null
           reason: string | null
+          sentiment_confidence: number | null
+          sentiment_headlines: Json | null
+          sentiment_score: number | null
           shares: number | null
           strategy: string | null
           ticker: string
@@ -40,6 +43,9 @@ export type Database = {
           price?: number | null
           profile?: string | null
           reason?: string | null
+          sentiment_confidence?: number | null
+          sentiment_headlines?: Json | null
+          sentiment_score?: number | null
           shares?: number | null
           strategy?: string | null
           ticker: string
@@ -55,6 +61,9 @@ export type Database = {
           price?: number | null
           profile?: string | null
           reason?: string | null
+          sentiment_confidence?: number | null
+          sentiment_headlines?: Json | null
+          sentiment_score?: number | null
           shares?: number | null
           strategy?: string | null
           ticker?: string
@@ -79,6 +88,7 @@ export type Database = {
           scan_interval_minutes: number
           starting_nav: number
           updated_at: string
+          use_news_sentiment: boolean
           user_id: string
         }
         Insert: {
@@ -97,6 +107,7 @@ export type Database = {
           scan_interval_minutes?: number
           starting_nav?: number
           updated_at?: string
+          use_news_sentiment?: boolean
           user_id: string
         }
         Update: {
@@ -115,6 +126,7 @@ export type Database = {
           scan_interval_minutes?: number
           starting_nav?: number
           updated_at?: string
+          use_news_sentiment?: boolean
           user_id?: string
         }
         Relationships: []
@@ -197,6 +209,33 @@ export type Database = {
           sp500_change?: number | null
           updated_at?: string | null
           vix_value?: number | null
+        }
+        Relationships: []
+      }
+      news_sentiment_cache: {
+        Row: {
+          confidence: number
+          fetched_at: string
+          headlines: Json
+          reasoning: string | null
+          score: number
+          ticker: string
+        }
+        Insert: {
+          confidence: number
+          fetched_at?: string
+          headlines?: Json
+          reasoning?: string | null
+          score: number
+          ticker: string
+        }
+        Update: {
+          confidence?: number
+          fetched_at?: string
+          headlines?: Json
+          reasoning?: string | null
+          score?: number
+          ticker?: string
         }
         Relationships: []
       }
