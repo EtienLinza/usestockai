@@ -19,7 +19,32 @@ import {
   calculateADX,
   calculateStochastic,
   calculateATR,
+  safeGet,
 } from "../_shared/indicators.ts";
+
+// ============================================================================
+// SIGNAL ENGINE — imported from canonical shared module (v2)
+// This is the SAME engine used by market-scanner, check-sell-alerts and
+// stock-predict. The backtest now literally simulates the live code path.
+// ============================================================================
+import {
+  type DataSet as SharedDataSet,
+  type StockProfile,
+  type WeeklyBias,
+  type StockClassification,
+  type ProfileParams,
+  type SignalState,
+  PROFILE_PARAMS,
+  INDEX_TICKERS,
+  aggregateToWeekly,
+  classifyStock,
+  blendProfiles,
+  computeWeeklyBias,
+  hasDailyEntrySignal,
+  hasDailyMeanReversionEntry,
+  createSignalTracker,
+  computeStrategySignal,
+} from "../_shared/signal-engine-v2.ts";
 // ============================================================================
 // WEEKLY BAR AGGREGATION
 // ============================================================================
