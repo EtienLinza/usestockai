@@ -73,6 +73,7 @@ export type Database = {
       }
       autotrade_settings: {
         Row: {
+          adaptive_mode: boolean
           advanced_mode: boolean
           created_at: string
           daily_loss_limit_pct: number
@@ -85,6 +86,7 @@ export type Database = {
           next_scan_at: string | null
           notify_on_action: boolean
           paper_mode: boolean
+          risk_profile: string
           scan_interval_minutes: number
           starting_nav: number
           updated_at: string
@@ -92,6 +94,7 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          adaptive_mode?: boolean
           advanced_mode?: boolean
           created_at?: string
           daily_loss_limit_pct?: number
@@ -104,6 +107,7 @@ export type Database = {
           next_scan_at?: string | null
           notify_on_action?: boolean
           paper_mode?: boolean
+          risk_profile?: string
           scan_interval_minutes?: number
           starting_nav?: number
           updated_at?: string
@@ -111,6 +115,7 @@ export type Database = {
           user_id: string
         }
         Update: {
+          adaptive_mode?: boolean
           advanced_mode?: boolean
           created_at?: string
           daily_loss_limit_pct?: number
@@ -123,11 +128,63 @@ export type Database = {
           next_scan_at?: string | null
           notify_on_action?: boolean
           paper_mode?: boolean
+          risk_profile?: string
           scan_interval_minutes?: number
           starting_nav?: number
           updated_at?: string
           use_news_sentiment?: boolean
           user_id?: string
+        }
+        Relationships: []
+      }
+      autotrader_state: {
+        Row: {
+          adjustments: Json
+          computed_at: string
+          effective_max_nav_exposure_pct: number
+          effective_max_positions: number
+          effective_max_single_name_pct: number
+          effective_min_conviction: number
+          reason: string | null
+          recent_pnl_pct: number | null
+          recent_pnl_window_days: number | null
+          spy_trend: string | null
+          updated_at: string
+          user_id: string
+          vix_regime: string | null
+          vix_value: number | null
+        }
+        Insert: {
+          adjustments?: Json
+          computed_at?: string
+          effective_max_nav_exposure_pct?: number
+          effective_max_positions?: number
+          effective_max_single_name_pct?: number
+          effective_min_conviction?: number
+          reason?: string | null
+          recent_pnl_pct?: number | null
+          recent_pnl_window_days?: number | null
+          spy_trend?: string | null
+          updated_at?: string
+          user_id: string
+          vix_regime?: string | null
+          vix_value?: number | null
+        }
+        Update: {
+          adjustments?: Json
+          computed_at?: string
+          effective_max_nav_exposure_pct?: number
+          effective_max_positions?: number
+          effective_max_single_name_pct?: number
+          effective_min_conviction?: number
+          reason?: string | null
+          recent_pnl_pct?: number | null
+          recent_pnl_window_days?: number | null
+          spy_trend?: string | null
+          updated_at?: string
+          user_id?: string
+          vix_regime?: string | null
+          vix_value?: number | null
         }
         Relationships: []
       }
