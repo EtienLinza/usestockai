@@ -208,8 +208,10 @@ type ExitAction =
 type EntryAction =
   | { kind: "ENTER"; conviction: number; kellyFraction: number; price: number;
       strategy: string; profile: StockProfile; atr: number; hardStop: number;
-      weeklyAlloc: number; reasoning: string }
-  | { kind: "HOLD" | "BLOCKED"; reason: string };
+      weeklyAlloc: number; reasoning: string;
+      sentiment?: SentimentRead | null }
+  | { kind: "HOLD" | "BLOCKED"; reason: string;
+      sentiment?: SentimentRead | null };
 
 // ============================================================================
 // WIN EXIT — peak detection (5 signals, 3-of-5 fires FULL_EXIT)
@@ -396,7 +398,7 @@ function businessDaysSince(iso: string): number {
 // ============================================================================
 // ENTRY DECISION
 // ============================================================================
-function runEntryDecision(
+async function runEntryDecision(
   ticker: string,
   data: DataSet,
   macro: MacroContext | null,
@@ -404,7 +406,7 @@ function runEntryDecision(
   openCount: number,
   totalNavExposurePct: number,
   todayPnlPct: number,
-): EntryAction {
+): Promise<EntryAction> {
   // Daily loss limit — block all new entries
   if (todayPnlPct <= -settings.daily_loss_limit_pct) {
     return { kind: "BLOCKED", reason: `Daily loss limit (${todayPnlPct.toFixed(1)}% vs −${settings.daily_loss_limit_pct}% cap)` };
@@ -423,6 +425,34 @@ function runEntryDecision(
     return { kind: "HOLD", reason: `Conviction ${sig.conviction} < min ${settings.min_conviction}` };
   }
 
+  // ── News sentiment layer (only when technicals already passed) ─────────
+  let sentiment: SentimentRead | null = null;
+  let effectiveConviction = sig.conviction;
+  if (settings.use_news_sentiment) {
+    sentiment = await getSentiment(ticker);
+    if (sentiment) {
+      // Hard veto on extreme negative news with high confidence
+      if (sentiment.score <= -60 && sentiment.confidence >= 0.7) {
+        return {
+          kind: "BLOCKED",
+          reason: `News veto: ${sentiment.reasoning || "extreme negative sentiment"} (score ${sentiment.score}, conf ${sentiment.confidence.toFixed(2)})`,
+          sentiment,
+        };
+      }
+      // Bounded conviction adjustment: -10..+5 (don't chase hype)
+      const raw = sentiment.score * 0.1 * sentiment.confidence;
+      const adj = Math.max(-10, Math.min(5, raw));
+      effectiveConviction = Math.round(sig.conviction + adj);
+      if (effectiveConviction < settings.min_conviction) {
+        return {
+          kind: "HOLD",
+          reason: `Conviction after news (${effectiveConviction}) < min ${settings.min_conviction} — ${sentiment.reasoning || "negative drag"}`,
+          sentiment,
+        };
+      }
+    }
+  }
+
   // Size
   const headroom = (settings.max_nav_exposure_pct - totalNavExposurePct) / 100;
   const baseFrac = sig.kellyFraction;
@@ -431,7 +461,7 @@ function runEntryDecision(
   const targetDollars = settings.starting_nav * cappedFrac;
 
   if (targetDollars < currentPrice) {
-    return { kind: "HOLD", reason: "Position too small after caps" };
+    return { kind: "HOLD", reason: "Position too small after caps", sentiment };
   }
 
   // Hard stop at entry
@@ -445,7 +475,7 @@ function runEntryDecision(
 
   return {
     kind: "ENTER",
-    conviction: sig.conviction,
+    conviction: effectiveConviction,
     kellyFraction: cappedFrac,
     price: currentPrice,
     strategy: sig.strategy,
@@ -453,7 +483,10 @@ function runEntryDecision(
     atr,
     hardStop,
     weeklyAlloc: sig.weeklyBias.targetAllocation,
-    reasoning: sig.reasoning,
+    reasoning: sentiment && sentiment.reasoning
+      ? `${sig.reasoning} | news: ${sentiment.reasoning}`
+      : sig.reasoning,
+    sentiment,
   };
 }
 
@@ -632,7 +665,7 @@ async function processUser(
     const data = priceCache.get(ticker);
     if (!data || data.close.length < 200) continue;
 
-    const decision = runEntryDecision(
+    const decision = await runEntryDecision(
       ticker, data, macro, settings,
       refreshedOpenCount,
       navExposurePct,
@@ -648,6 +681,9 @@ async function processUser(
       summary.blocked++;
       await supabase.from("autotrade_log").insert({
         user_id: userId, ticker, action: "BLOCKED", reason: decision.reason,
+        sentiment_score: decision.sentiment?.score ?? null,
+        sentiment_confidence: decision.sentiment?.confidence ?? null,
+        sentiment_headlines: decision.sentiment?.headlines ?? null,
       });
     } else {
       summary.holds++;
@@ -803,6 +839,9 @@ async function executeEntry(
     reason: e.reasoning, price: e.price, shares,
     conviction: e.conviction, strategy: e.strategy, profile: e.profile,
     position_id: ins.id,
+    sentiment_score: e.sentiment?.score ?? null,
+    sentiment_confidence: e.sentiment?.confidence ?? null,
+    sentiment_headlines: e.sentiment?.headlines ?? null,
   });
 }
 
