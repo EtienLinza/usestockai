@@ -398,9 +398,9 @@ export function computeWeeklyBias(
     return { bias: "short", targetAllocation: -0.25 };
   }
 
-  // Bearish stack without strong RSI/ADX confirmation — light short
-  if (fast < slow && c < fast && macroPermitsEntry("short", macro))
-    return { bias: "short", targetAllocation: -0.25 };
+  // (Removed unreachable bearish-stack short — its condition is a strict subset
+  // of the symmetric short ladder above, which already returns either a short
+  // or a macro-blocked flat.)
 
   return { bias: "flat", targetAllocation: 0 };
 }
