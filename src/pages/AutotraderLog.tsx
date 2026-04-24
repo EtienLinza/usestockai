@@ -115,7 +115,10 @@ const AutotraderLog = () => {
             <Card className="glass-card overflow-hidden">
               <div className="divide-y divide-border/50">
                 {rows.map((r) => {
-                  const m = actionMeta[r.action];
+                  const isScanRollup = r.ticker === "SCAN" && r.action === "HOLD";
+                  const m = isScanRollup
+                    ? { label: "Scan", cls: "text-muted-foreground border-muted-foreground/20 bg-muted/30", Icon: Radar }
+                    : actionMeta[r.action];
                   const t = new Date(r.created_at);
                   const hasSentiment = r.sentiment_score != null;
                   const headlines = Array.isArray(r.sentiment_headlines) ? r.sentiment_headlines : [];
@@ -129,7 +132,7 @@ const AutotraderLog = () => {
                         </div>
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 flex-wrap">
-                            <span className="font-mono text-sm font-medium">{r.ticker}</span>
+                            <span className="font-mono text-sm font-medium">{isScanRollup ? "AutoTrader" : r.ticker}</span>
                             <Badge variant="outline" className={cn("text-[10px] uppercase tracking-wide", m.cls)}>
                               {m.label}
                             </Badge>
