@@ -22,14 +22,16 @@ serve(async (req) => {
 
     console.log(`Fetching stock price for: ${ticker}`);
 
-    // Fetch chart (daily history) and live quote in parallel.
-    const [chartRes, quoteRes] = await Promise.all([
+    // Fetch daily history (5d) and intraday meta (live quote) in parallel.
+    // We use the chart endpoint with a 1m interval for the live quote because
+    // Yahoo's /v7/quote endpoint now requires a crumb cookie.
+    const [chartRes, intradayRes] = await Promise.all([
       fetch(
         `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=5d`,
         { headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" } }
       ),
       fetch(
-        `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(ticker)}`,
+        `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1m&range=1d`,
         { headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" } }
       ).catch(() => null),
     ]);
@@ -68,21 +70,23 @@ serve(async (req) => {
       price: closes[i],
     })).filter((item: { price: number | null }) => item.price !== null);
 
-    // Live quote (best-effort — falls back to last close if quote endpoint is unavailable).
+    // Live quote from intraday meta (best-effort).
     let liveQuote: number | null = null;
     let previousClose: number | null = null;
     let marketState: string | null = null;
-    if (quoteRes && quoteRes.ok) {
+    if (intradayRes && intradayRes.ok) {
       try {
-        const qj = await quoteRes.json();
-        const q = qj?.quoteResponse?.result?.[0];
-        if (q) {
-          liveQuote = q.regularMarketPrice ?? null;
-          previousClose = q.regularMarketPreviousClose ?? null;
-          marketState = q.marketState ?? null;
+        const ij = await intradayRes.json();
+        const meta = ij?.chart?.result?.[0]?.meta;
+        if (meta) {
+          liveQuote = typeof meta.regularMarketPrice === "number" ? meta.regularMarketPrice : null;
+          previousClose = typeof meta.previousClose === "number"
+            ? meta.previousClose
+            : (typeof meta.chartPreviousClose === "number" ? meta.chartPreviousClose : null);
+          marketState = meta.marketState ?? null;
         }
       } catch (e) {
-        console.warn("quote parse failed", e);
+        console.warn("intraday meta parse failed", e);
       }
     }
 
