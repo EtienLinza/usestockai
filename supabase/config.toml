@@ -32,3 +32,6 @@ verify_jwt = false
 
 [functions.calibrate-weights]
 verify_jwt = false
+
+[functions.news-sentiment]
+verify_jwt = false
