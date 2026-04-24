@@ -20,7 +20,7 @@ function sentimentTone(score: number): { cls: string; label: string } {
 interface LogRow {
   id: string;
   ticker: string;
-  action: "ENTRY" | "PARTIAL_EXIT" | "FULL_EXIT" | "HOLD" | "BLOCKED" | "ERROR";
+  action: "ENTRY" | "PARTIAL_EXIT" | "FULL_EXIT" | "HOLD" | "BLOCKED" | "ERROR" | "AUTO_ADD" | "AUTO_REMOVE";
   reason: string | null;
   price: number | null;
   shares: number | null;
