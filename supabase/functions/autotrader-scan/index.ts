@@ -78,6 +78,33 @@ async function batchFetch(tickers: string[]): Promise<void> {
   }
 }
 
+// ── Live intraday quote (used at entry execution to get an actual fillable price) ──
+// Yahoo's /v7/quote endpoint returns regularMarketPrice (~15min delayed but tradable),
+// not a stale daily close. Falls back to null on failure so callers can degrade safely.
+interface LiveQuote { price: number; previousClose: number | null; marketState: string | null }
+async function fetchLiveQuote(ticker: string): Promise<LiveQuote | null> {
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 5000);
+    const r = await fetch(
+      `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(ticker)}`,
+      { headers: { "User-Agent": "Mozilla/5.0" }, signal: ctrl.signal },
+    );
+    clearTimeout(t);
+    if (!r.ok) return null;
+    const j = await r.json();
+    const q = j?.quoteResponse?.result?.[0];
+    if (!q || typeof q.regularMarketPrice !== "number") return null;
+    return {
+      price: q.regularMarketPrice,
+      previousClose: typeof q.regularMarketPreviousClose === "number" ? q.regularMarketPreviousClose : null,
+      marketState: q.marketState ?? null,
+    };
+  } catch {
+    return null;
+  }
+}
+
 // ============================================================================
 // TYPES
 // ============================================================================
