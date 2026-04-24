@@ -1174,11 +1174,22 @@ async function executeEntry(
     return;
   }
 
+  // Market-hours gate: never open new positions when the cash market is closed.
+  // Yahoo daily closes are stale outside RTH and would create fictional fills.
+  if (!isMarketOpen()) {
+    await supabase.from("autotrade_log").insert({
+      user_id: settings.user_id, ticker, action: "BLOCKED",
+      reason: "Market closed (NYSE 09:30–16:00 ET, Mon–Fri) — entry deferred",
+    });
+    return;
+  }
+
   const dollars = settings.starting_nav * e.kellyFraction;
   const shares = Math.floor(dollars / e.price);
   if (shares < 1) return;
 
-  const positionType = (e.reasoning.toLowerCase().includes("short") ? "short" : "long");
+  // Direction comes directly from the signal — never parse free-form reasoning.
+  const positionType: "long" | "short" = e.decision === "SHORT" ? "short" : "long";
 
   const { data: ins, error: insErr } = await supabase.from("virtual_positions").insert({
     user_id: settings.user_id, ticker, entry_price: e.price, shares,
