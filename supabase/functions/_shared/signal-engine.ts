@@ -15,6 +15,7 @@ export {
   type ProfileParams,
   type SignalState,
   type EvaluateSignalResult,
+  type MacroContext,
 
   // Constants
   PROFILE_PARAMS,
@@ -31,11 +32,16 @@ export {
   computeWeeklyBias,
   hasDailyEntrySignal,
   hasDailyMeanReversionEntry,
+  macroPermitsEntry,
 
   // Multi-strategy signal
   createSignalTracker,
+  getOrCreateTracker,
+  clearTrackerCache,
   computeStrategySignal,
 
-  // Top-level orchestrator
+  // Sizing & top-level orchestrator
+  computePositionSize,
   evaluateSignal,
 } from "./signal-engine-v2.ts";
+
