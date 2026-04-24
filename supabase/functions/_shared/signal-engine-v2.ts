@@ -543,7 +543,7 @@ export function computeStrategySignal(
   const bbU = safeGet(bb.upper, currentPrice * 1.1);
   const bbL = safeGet(bb.lower, currentPrice * 0.9);
   const bbBW = safeGet(bb.bandwidth, 0.1);
-  const sk = safeGet(stochK, 50);
+  const sk = safeGet(stochK.k, 50);
   const macdH = safeGet(macdData.histogram, 0);
   const prevMacdH = macdData.histogram.length >= 2 ? macdData.histogram[macdData.histogram.length - 2] : 0;
   const currentVol = safeGet(vol, 0.02);
