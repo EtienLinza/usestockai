@@ -96,6 +96,7 @@ const Settings = () => {
   const [bot, setBot] = useState<AutoTradeSettings>(AUTOTRADE_DEFAULTS);
   const [lastScanAt, setLastScanAt] = useState<string | null>(null);
   const [nextScanAt, setNextScanAt] = useState<string | null>(null);
+  const [adaptiveState, setAdaptiveState] = useState<AutotraderState | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -107,12 +108,15 @@ const Settings = () => {
     if (!user) return;
     (async () => {
       setLoading(true);
-      const [capsRes, botRes] = await Promise.all([
+      const [capsRes, botRes, stateRes] = await Promise.all([
         supabase.from("portfolio_caps")
           .select("sector_max_pct, portfolio_beta_max, max_correlated_positions, enforcement_mode, enabled")
           .eq("user_id", user.id).maybeSingle(),
         supabase.from("autotrade_settings")
-          .select("enabled, paper_mode, advanced_mode, scan_interval_minutes, min_conviction, max_positions, max_nav_exposure_pct, max_single_name_pct, daily_loss_limit_pct, starting_nav, last_scan_at, next_scan_at, use_news_sentiment")
+          .select("enabled, paper_mode, advanced_mode, adaptive_mode, risk_profile, scan_interval_minutes, min_conviction, max_positions, max_nav_exposure_pct, max_single_name_pct, daily_loss_limit_pct, starting_nav, last_scan_at, next_scan_at, use_news_sentiment")
+          .eq("user_id", user.id).maybeSingle(),
+        supabase.from("autotrader_state")
+          .select("effective_min_conviction, effective_max_positions, effective_max_nav_exposure_pct, effective_max_single_name_pct, vix_value, vix_regime, spy_trend, recent_pnl_pct, adjustments, reason, computed_at")
           .eq("user_id", user.id).maybeSingle(),
       ]);
       if (capsRes.data) {
@@ -129,6 +133,8 @@ const Settings = () => {
           enabled: Boolean(botRes.data.enabled),
           paper_mode: Boolean(botRes.data.paper_mode),
           advanced_mode: Boolean(botRes.data.advanced_mode),
+          adaptive_mode: botRes.data.adaptive_mode ?? true,
+          risk_profile: (botRes.data.risk_profile as RiskProfile) ?? "balanced",
           scan_interval_minutes: Number(botRes.data.scan_interval_minutes ?? 10),
           min_conviction: Number(botRes.data.min_conviction),
           max_positions: Number(botRes.data.max_positions),
@@ -141,8 +147,54 @@ const Settings = () => {
         setLastScanAt(botRes.data.last_scan_at as string | null);
         setNextScanAt(botRes.data.next_scan_at as string | null);
       }
+      if (stateRes.data) {
+        setAdaptiveState({
+          effective_min_conviction: Number(stateRes.data.effective_min_conviction),
+          effective_max_positions: Number(stateRes.data.effective_max_positions),
+          effective_max_nav_exposure_pct: Number(stateRes.data.effective_max_nav_exposure_pct),
+          effective_max_single_name_pct: Number(stateRes.data.effective_max_single_name_pct),
+          vix_value: stateRes.data.vix_value != null ? Number(stateRes.data.vix_value) : null,
+          vix_regime: stateRes.data.vix_regime as string | null,
+          spy_trend: stateRes.data.spy_trend as string | null,
+          recent_pnl_pct: stateRes.data.recent_pnl_pct != null ? Number(stateRes.data.recent_pnl_pct) : null,
+          adjustments: (stateRes.data.adjustments as string[] | null) ?? null,
+          reason: stateRes.data.reason as string | null,
+          computed_at: stateRes.data.computed_at as string,
+        });
+      }
       setLoading(false);
     })();
+  }, [user]);
+
+  // Realtime: refresh adaptive state whenever the autotrader scan updates it
+  useEffect(() => {
+    if (!user) return;
+    const channel = supabase
+      .channel(`autotrader_state:${user.id}`)
+      .on("postgres_changes", {
+        event: "*",
+        schema: "public",
+        table: "autotrader_state",
+        filter: `user_id=eq.${user.id}`,
+      }, (payload) => {
+        const r = payload.new as Record<string, unknown>;
+        if (!r) return;
+        setAdaptiveState({
+          effective_min_conviction: Number(r.effective_min_conviction),
+          effective_max_positions: Number(r.effective_max_positions),
+          effective_max_nav_exposure_pct: Number(r.effective_max_nav_exposure_pct),
+          effective_max_single_name_pct: Number(r.effective_max_single_name_pct),
+          vix_value: r.vix_value != null ? Number(r.vix_value) : null,
+          vix_regime: (r.vix_regime as string | null) ?? null,
+          spy_trend: (r.spy_trend as string | null) ?? null,
+          recent_pnl_pct: r.recent_pnl_pct != null ? Number(r.recent_pnl_pct) : null,
+          adjustments: (r.adjustments as string[] | null) ?? null,
+          reason: (r.reason as string | null) ?? null,
+          computed_at: r.computed_at as string,
+        });
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
   }, [user]);
 
   const save = async () => {
