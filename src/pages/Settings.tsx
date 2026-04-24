@@ -333,6 +333,11 @@ const Settings = () => {
                   </div>
                 </Card>
 
+                <StartingCapitalCard
+                  value={bot.starting_nav}
+                  onChange={(v) => setBot({ ...bot, starting_nav: v })}
+                />
+
                 <AdaptiveStatusCard
                   state={adaptiveState}
                   enabled={bot.enabled}
