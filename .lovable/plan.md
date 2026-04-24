@@ -1,124 +1,148 @@
-## What changes
 
-The AutoTrader Settings page currently exposes 7 knobs at all times, with a fixed 10-min cron schedule baked into Postgres. We'll restructure it so:
+## What we're building
 
-1. **By default, the algorithm runs on autopilot** — no sliders shown, the engine picks every threshold and a sensible scan cadence on its own.
-2. **An "Advanced mode" toggle** reveals all controls, including a new **Scan Interval** control.
-3. **Scan interval becomes user-customisable** (5 / 10 / 15 / 30 / 60 minutes).
+A news sentiment layer that runs **only on tickers that already passed the technical conviction gate**. Gemini reads the last 24h of headlines, returns a signed score, and the autotrader either:
 
-The Portfolio Risk Caps section above stays as-is (already separate from AutoTrader).
+- nudges the conviction up/down by ≤10 points,
+- blocks the entry on extreme negative news, or
+- proceeds normally if nothing material was found.
+
+Sentiment is **never** used for exits in v1.
 
 ---
 
-## User-facing flow
+## How it plugs into the scan flow
 
 ```text
-Settings → AutoTrader card
-┌──────────────────────────────────────────────┐
-│  ⚙ Enable AutoTrader            [ON/OFF]    │
-│  📄 Paper mode                  [ON/OFF]    │
-│  🧠 Advanced mode               [OFF]   ←── │
-│                                              │
-│  When Advanced is OFF:                       │
-│  ┌────────────────────────────────────────┐ │
-│  │ Algorithm picks all thresholds and     │ │
-│  │ adapts scan cadence to volatility.     │ │
-│  │ Last scan: 4 min ago · Next: in 6 min  │ │
-│  └────────────────────────────────────────┘ │
-│                                              │
-│  When Advanced is ON:                        │
-│  ▸ Scan interval         [5/10/15/30/60 min]│
-│  ▸ Min conviction        [50──95]            │
-│  ▸ Max open positions    [1──20]             │
-│  ▸ Max NAV exposure      [20%──100%]         │
-│  ▸ Max single-name %     [5%──50%]           │
-│  ▸ Daily loss kill-switch[1%──10%]           │
-└──────────────────────────────────────────────┘
+runEntryDecision(ticker)
+  ├─ daily-loss / max-positions / NAV gates           ← unchanged
+  ├─ evaluateSignal() → conviction = X
+  ├─ if X < min_conviction → HOLD (no Gemini call)    ← keeps cost down
+  ├─ getNewsSentiment(ticker)                         ← NEW
+  │     ├─ hit news_sentiment_cache (TTL 30 min)
+  │     └─ miss → invoke `news-sentiment` edge fn
+  │           ├─ NewsAPI: last 24h headlines
+  │           └─ Gemini tool-call → {score, confidence, key_headlines, reasoning}
+  ├─ if score ≤ −60 AND confidence ≥ 0.7 → BLOCKED (logged with headlines)
+  ├─ adjusted = X + clamp(score × 0.1 × confidence, −10, +10)
+  │     (positive sentiment caps at +5 to avoid chasing hype)
+  └─ if adjusted ≥ min_conviction → ENTER, else HOLD
 ```
-
-In **non-advanced mode**, the saved values in the DB are ignored at scan-time; the engine reads `advanced_mode = false` and substitutes its own dynamic values:
-
-| Knob | Algo default in non-advanced mode |
-|------|-----------------------------------|
-| `min_conviction` | 72 floor, but raised to 78 when SPY macro is bearish |
-| `max_positions` | `clamp(round(starting_nav / 12 500), 4, 12)` |
-| `max_nav_exposure_pct` | 60% in bear macro, 80% in bull |
-| `max_single_name_pct` | `min(20, kellyFraction × 100)` per signal |
-| `daily_loss_limit_pct` | 3% (hardcoded safety floor) |
-| `scan_interval_minutes` | dynamic: 5 in high VIX / open-half-hour, 10 normally, 15 in slow afternoon |
 
 ---
 
-## Schema changes (single migration)
+## Database
 
-```sql
-ALTER TABLE public.autotrade_settings
-  ADD COLUMN advanced_mode boolean NOT NULL DEFAULT false,
-  ADD COLUMN scan_interval_minutes integer NOT NULL DEFAULT 10
-    CHECK (scan_interval_minutes IN (5, 10, 15, 30, 60)),
-  ADD COLUMN last_scan_at timestamptz,
-  ADD COLUMN next_scan_at timestamptz;
-```
-
-No data migration needed — every existing row gets `advanced_mode = false` (autopilot) and `scan_interval_minutes = 10` (current behaviour).
-
----
-
-## Cron strategy
-
-Keep the existing `pg_cron` job firing **every 5 minutes** (the smallest user-selectable interval). The edge function itself becomes the gate:
+**New table** `news_sentiment_cache`:
 
 ```text
-autotrader-scan invoked (every 5 min)
-  └─ for each enabled user:
-       ├─ if now() < user.next_scan_at → skip
-       ├─ run scan
-       └─ update last_scan_at = now()
-                  next_scan_at = now() + interval (advanced ? user.scan_interval : algoScanInterval(macro))
+ticker text PK
+score int (-100..+100)
+confidence numeric (0..1)
+headlines jsonb        -- [{title, source, url, publishedAt}]
+reasoning text         -- Gemini's 1-line rationale
+fetched_at timestamptz default now()
 ```
 
-This means we don't touch user-specific data in `pg_cron` (which would be a remix-unsafe pattern), and every user gets their own personal cadence enforced server-side.
+- No RLS needed (server-only writes via service role; reads also server-only).
+- Lookup rule: row valid if `now() - fetched_at < 30 minutes`.
+
+**Extend `autotrade_log`** — add nullable columns:
+- `sentiment_score int`
+- `sentiment_confidence numeric`
+- `sentiment_headlines jsonb`
+
+So every `ENTRY` / `BLOCKED` / `HOLD` row carries the news context that influenced it. Audit-grade.
+
+---
+
+## New edge function: `news-sentiment`
+
+Single-purpose, callable from `autotrader-scan`. Takes `{ticker}`, returns the cached or freshly-computed sentiment object.
+
+```text
+1. Check news_sentiment_cache → return if fresh (<30 min)
+2. NewsAPI: GET /everything?q={ticker}&from=24h&language=en&sortBy=publishedAt
+3. Filter to top 10 headlines (drop duplicates, drop pure price-summary articles)
+4. If 0 headlines → return {score: 0, confidence: 0, headlines: [], reasoning: "no news"}
+5. Call Lovable AI Gateway:
+     model: google/gemini-3-flash-preview
+     tool-call schema returns {score, confidence, reasoning, key_headlines}
+     system prompt: blind to technicals, asked only "what would these headlines do to the stock in the next 24h?"
+6. Upsert into news_sentiment_cache, return result
+```
+
+Config: `verify_jwt = false` (called server-to-server from autotrader-scan via service role).
+
+---
+
+## Settings UI
+
+Add one row to `Settings.tsx` AutoTrader card, under the Advanced toggle but visible in **both** modes (it's a safety feature, not a tuning knob):
+
+```text
+🗞  Use news sentiment        [ON]
+    Gemini reads recent headlines before every entry. Blocks
+    trades on extreme negative news; nudges conviction otherwise.
+```
+
+Stored as `use_news_sentiment boolean default true` on `autotrade_settings`. Default ON for autopilot users.
 
 ---
 
 ## Files touched
 
 **Migration (new):**
-- `supabase/migrations/<ts>_autotrader_advanced_mode.sql` — adds the 4 columns above.
+- adds `news_sentiment_cache` table
+- adds `sentiment_score`, `sentiment_confidence`, `sentiment_headlines` to `autotrade_log`
+- adds `use_news_sentiment` to `autotrade_settings`
 
-**Edge function:**
+**Edge functions:**
+- `supabase/functions/news-sentiment/index.ts` — new, full implementation as above
 - `supabase/functions/autotrader-scan/index.ts`
-  - Read new columns into the `Settings` type.
-  - Add `resolveEffectiveSettings(settings, macro)` that returns the algo-decided values when `advanced_mode = false`.
-  - Add `algoScanInterval(macro)` returning 5/10/15 based on SPY 5-bar realised vol + time-of-day (NY).
-  - Per-user gate on `next_scan_at`; update both timestamps after each successful scan.
-  - Pass `effectiveSettings` (not raw `settings`) into `runEntryDecision`.
-
-**Cron schedule:**
-- Update the `pg_cron` job from `*/10` to `*/5` during market hours via the insert tool (data op, not migration).
+  - import sentiment helper
+  - inside `runEntryDecision`, after the conviction gate passes, call sentiment
+  - apply adjustment / veto, attach sentiment fields to the action
+- `supabase/config.toml` — add `[functions.news-sentiment] verify_jwt = false`
 
 **Frontend:**
-- `src/pages/Settings.tsx`
-  - Add `advanced_mode` + `scan_interval_minutes` to the `AutoTradeSettings` interface and defaults.
-  - Add an "Advanced mode" `Switch` row directly under the Paper-mode switch.
-  - Wrap the 5 existing `CapSlider`s in `{bot.advanced_mode && (...)}`.
-  - Add a new `Select` for scan interval (5/10/15/30/60) — only when advanced.
-  - When non-advanced, render a small status card showing "Last scan · Next scan" using `last_scan_at` / `next_scan_at`.
-  - Update the upsert payload to include the two new fields.
+- `src/pages/Settings.tsx` — add `use_news_sentiment` switch, include in upsert payload
+- `src/pages/AutotraderLog.tsx` — show a small badge on rows with sentiment data ("📰 −72") and expandable headlines on click
+- `src/integrations/supabase/types.ts` — auto-regenerated
+
+---
+
+## Cost & latency math
+
+- Gemini call only fires when **technicals already passed** → ~10–20% of watchlist tickers per scan, not 100%.
+- Cache key is the ticker (not user-specific) → 5 users watching NVDA = 1 Gemini call, not 5.
+- 30-min TTL → at most 2 Gemini calls/ticker/hour during market hours.
+- Estimated: ~50 Gemini calls/day across all users at current scale. Negligible.
+- Added latency per entry decision: ~1.5s on cache miss, ~5ms on cache hit. Scan budget is 60s, well within.
 
 ---
 
 ## What stays the same
 
-- All exit logic (peak detection, hard stop, time stop, thesis invalidation) — unchanged.
-- Portfolio Risk Caps section — untouched.
-- Paper mode — still on by default; live broker is still out of scope.
-- The unified `evaluateSignal()` engine — no algo changes.
+- All exit logic (peak detection, stops, time stops) — sentiment is **entry-only** in v1.
+- `evaluateSignal()` — untouched, sentiment is a wrapper not a rewrite.
+- Cron schedule — still `*/5 13-21 * * 1-5`.
+- Paper mode — still default-on.
 
 ---
 
-## Why this is safe
+## Failure modes & safety
 
-- Autopilot defaults are strictly *more conservative* than current hardcoded ones (e.g., 72 conviction floor vs 70, exposure auto-throttles in bear macro).
-- Existing users keep current behaviour because the column defaults are equivalent (`scan_interval_minutes = 10`, plus autopilot picks the same 70-conviction-style numbers in normal markets).
-- The cron change from `*/10` to `*/5` only adds extra "is it time yet?" checks; no extra scans actually run unless a user has selected the 5-min interval.
+- **NewsAPI down** → return `{score: 0, confidence: 0}`, scan proceeds on pure technicals. Logged.
+- **Gemini 429/402** → same fallback, logged with the error code so we can surface it in the UI later.
+- **Gemini returns malformed JSON** → tool-calling enforces schema, but if it fails, fall back to neutral.
+- **Cache table grows unbounded** → add a one-line cleanup in the scan: `DELETE FROM news_sentiment_cache WHERE fetched_at < now() - interval '24 hours'`. Runs once per scan invocation.
+
+---
+
+## Why this is the right shape
+
+- Sentiment **can only hurt a trade, never force one** — adjustments are bounded ±10 conv, hard veto requires both extreme score AND high confidence.
+- Gemini is **blind to the technical signal** — it can't rationalize "well the chart looks good so the lawsuit isn't that bad." Pure news read.
+- **Cache by ticker, not user** — economically scales to thousands of users without scaling Gemini bills.
+- Every adjustment is **logged with the headlines that caused it** — when the user asks "why didn't I get into NVDA today?" the answer is one click away.
