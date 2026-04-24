@@ -802,26 +802,7 @@ export function computeStrategySignal(
   return { consensusScore, regime, confidence, strategy: bestStrategy, positionSizeMultiplier, atr: currentATR };
 }
 
-// ============================================================================
-// EVALUATE SIGNAL — top-level convenience function
-// Combines weekly bias (macro filter) + daily strategy signal (entry timing
-// with conviction) + adaptive context. The single function the scanner,
-// sell-alerts, predict and backtest can all call to get the canonical
-// trade decision for a ticker.
-// ============================================================================
-
-export interface EvaluateSignalResult {
-  decision: "BUY" | "SHORT" | "HOLD";
-  conviction: number;        // 0–100
-  weeklyBias: WeeklyBias;
-  profile: StockProfile;
-  blendedParams: ProfileParams;
-  strategy: "trend" | "mean_reversion" | "breakout" | "none";
-  regime: string;
-  positionSizeMultiplier: number;
-  atr: number;
-  reasoning: string;
-}
+// (EvaluateSignalResult is declared once below — single canonical interface.)
 
 // ============================================================================
 // POSITION SIZING — volatility-targeted Kelly
