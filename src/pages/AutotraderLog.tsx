@@ -4,7 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { Navbar } from "@/components/Navbar";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Bot, Loader2, ArrowDownRight, ArrowUpRight, Pause, Ban, Newspaper, ChevronDown, ExternalLink } from "lucide-react";
+import { Bot, Loader2, ArrowDownRight, ArrowUpRight, Pause, Ban, Newspaper, ChevronDown, ExternalLink, Radar } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
