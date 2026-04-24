@@ -855,7 +855,11 @@ async function processUser(
     const lossAct = runLossExit(pos, data, currentPrice, profile, liveDecision, liveBias, liveRsi);
     const action: ExitAction = lossAct ?? runWinExit(pos, data, currentPrice, profile, liveWeeklyAlloc);
 
+    const beforeExits = summary.exits, beforePartials = summary.partials, beforeHolds = summary.holds;
     await executeExit(supabase, pos, action, profile, summary);
+    userSummary.exits += summary.exits - beforeExits;
+    userSummary.partials += summary.partials - beforePartials;
+    userSummary.holds += summary.holds - beforeHolds;
   }
 
   // ── ENTRIES ─────────────────────────────────────────────────────────────
@@ -891,12 +895,15 @@ async function processUser(
     );
 
     if (decision.kind === "ENTER") {
+      const beforeEntries = summary.entries;
       await executeEntry(supabase, settings, ticker, decision, summary);
+      userSummary.entries += summary.entries - beforeEntries;
       // Update local counters so the same scan doesn't blow past caps
       const dollars = decision.kellyFraction * settings.starting_nav;
       totalNavExposureDollars += dollars;
     } else if (decision.kind === "BLOCKED") {
       summary.blocked++;
+      userSummary.blocked++;
       await supabase.from("autotrade_log").insert({
         user_id: userId, ticker, action: "BLOCKED", reason: decision.reason,
         sentiment_score: decision.sentiment?.score ?? null,
@@ -905,6 +912,7 @@ async function processUser(
       });
     } else {
       summary.holds++;
+      userSummary.holds++;
     }
   }
 
