@@ -6,7 +6,6 @@ const corsHeaders = {
 };
 
 serve(async (req) => {
-  // Handle CORS preflight requests
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
@@ -23,26 +22,27 @@ serve(async (req) => {
 
     console.log(`Fetching stock price for: ${ticker}`);
 
-    // Fetch from Yahoo Finance API
-    const response = await fetch(
-      `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=5d`,
-      {
-        headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        },
-      }
-    );
+    // Fetch chart (daily history) and live quote in parallel.
+    const [chartRes, quoteRes] = await Promise.all([
+      fetch(
+        `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=5d`,
+        { headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" } }
+      ),
+      fetch(
+        `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(ticker)}`,
+        { headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" } }
+      ).catch(() => null),
+    ]);
 
-    if (!response.ok) {
-      console.error(`Yahoo Finance API error: ${response.status}`);
+    if (!chartRes.ok) {
+      console.error(`Yahoo Finance chart API error: ${chartRes.status}`);
       return new Response(
-        JSON.stringify({ error: "Failed to fetch stock data", status: response.status }),
+        JSON.stringify({ error: "Failed to fetch stock data", status: chartRes.status }),
         { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    const data = await response.json();
-    
+    const data = await chartRes.json();
     const result = data?.chart?.result?.[0];
     if (!result) {
       console.error("No data in Yahoo Finance response");
@@ -63,13 +63,30 @@ serve(async (req) => {
       );
     }
 
-    // Build price history array
     const priceHistory = timestamps.map((ts: number, i: number) => ({
       timestamp: ts,
       price: closes[i],
     })).filter((item: { price: number | null }) => item.price !== null);
 
-    console.log(`Successfully fetched ${priceHistory.length} price points for ${ticker}`);
+    // Live quote (best-effort — falls back to last close if quote endpoint is unavailable).
+    let liveQuote: number | null = null;
+    let previousClose: number | null = null;
+    let marketState: string | null = null;
+    if (quoteRes && quoteRes.ok) {
+      try {
+        const qj = await quoteRes.json();
+        const q = qj?.quoteResponse?.result?.[0];
+        if (q) {
+          liveQuote = q.regularMarketPrice ?? null;
+          previousClose = q.regularMarketPreviousClose ?? null;
+          marketState = q.marketState ?? null;
+        }
+      } catch (e) {
+        console.warn("quote parse failed", e);
+      }
+    }
+
+    console.log(`Fetched ${priceHistory.length} bars for ${ticker}; liveQuote=${liveQuote} prevClose=${previousClose}`);
 
     return new Response(
       JSON.stringify({
@@ -77,6 +94,9 @@ serve(async (req) => {
         priceHistory,
         latestPrice: closes[closes.length - 1],
         latestTimestamp: timestamps[timestamps.length - 1],
+        liveQuote,
+        previousClose,
+        marketState,
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );

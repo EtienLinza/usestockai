@@ -1,148 +1,76 @@
+## Goal
+Stop the autotrader from buying "fictional tops" at the daily-bar close. Move to a live intraday quote, only execute a small number of entries per scan, and reject any fill that's clearly off the previous close.
 
-## What we're building
-
-A news sentiment layer that runs **only on tickers that already passed the technical conviction gate**. Gemini reads the last 24h of headlines, returns a signed score, and the autotrader either:
-
-- nudges the conviction up/down by ≤10 points,
-- blocks the entry on extreme negative news, or
-- proceeds normally if nothing material was found.
-
-Sentiment is **never** used for exits in v1.
+This is a combined fix: **(b) live quote** + **(c) stagger entries** + **(d) sanity check**.
 
 ---
 
-## How it plugs into the scan flow
+## Changes
 
-```text
-runEntryDecision(ticker)
-  ├─ daily-loss / max-positions / NAV gates           ← unchanged
-  ├─ evaluateSignal() → conviction = X
-  ├─ if X < min_conviction → HOLD (no Gemini call)    ← keeps cost down
-  ├─ getNewsSentiment(ticker)                         ← NEW
-  │     ├─ hit news_sentiment_cache (TTL 30 min)
-  │     └─ miss → invoke `news-sentiment` edge fn
-  │           ├─ NewsAPI: last 24h headlines
-  │           └─ Gemini tool-call → {score, confidence, key_headlines, reasoning}
-  ├─ if score ≤ −60 AND confidence ≥ 0.7 → BLOCKED (logged with headlines)
-  ├─ adjusted = X + clamp(score × 0.1 × confidence, −10, +10)
-  │     (positive sentiment caps at +5 to avoid chasing hype)
-  └─ if adjusted ≥ min_conviction → ENTER, else HOLD
+### 1. `fetch-stock-price` edge function — add live quote support
+Currently uses `chart?interval=1d&range=5d`, which returns daily bars (during RTH the last bar is a moving "intraday last" but it's noisy and prone to single-tick spikes).
+
+Switch the entry-pricing path to Yahoo's `quote` endpoint, which returns `regularMarketPrice` (the actual live last trade, ~15min delayed but tradable):
+```
+https://query1.finance.yahoo.com/v7/finance/quote?symbols=TICKER
 ```
 
----
+Return both fields in the response so existing callers (chart UI, Dashboard logs) keep working with `latestPrice`, while new code can read `liveQuote`:
+- `liveQuote` → `regularMarketPrice` (live)
+- `previousClose` → `regularMarketPreviousClose` (for sanity check below)
+- `latestPrice`, `priceHistory` → unchanged (still from the 5d daily chart)
 
-## Database
+### 2. `autotrader-scan` — use live quote as the entry fill
+In `runEntryDecision` (around line 585) and `executeEntry` (line 1190+), replace `currentPrice = data.close[data.close.length - 1]` for **entry pricing only** with a fresh live quote fetched at the moment of execution.
 
-**New table** `news_sentiment_cache`:
+Keep `data.close[last]` for indicator math (RSI, MACD, ATR) — those need a complete daily bar. Only the **fill price** and **hard stop** are recomputed against the live quote.
 
-```text
-ticker text PK
-score int (-100..+100)
-confidence numeric (0..1)
-headlines jsonb        -- [{title, source, url, publishedAt}]
-reasoning text         -- Gemini's 1-line rationale
-fetched_at timestamptz default now()
-```
+Implementation:
+- Add a small `fetchLiveQuote(ticker)` helper inside `autotrader-scan` that calls the Yahoo quote endpoint directly (no need to round-trip through another edge function).
+- Call it inside `executeEntry`, right after the `isMarketOpen()` gate.
+- Recompute `hardStop` using the live price (so the stop is anchored to actual fill, not the stale daily close).
 
-- No RLS needed (server-only writes via service role; reads also server-only).
-- Lookup rule: row valid if `now() - fetched_at < 30 minutes`.
+### 3. Sanity check — reject fills that diverge from previous close
+Inside `executeEntry`, after fetching `liveQuote` and `previousClose`:
+- Compute `gapPct = |liveQuote − previousClose| / previousClose`.
+- If `gapPct > 8%`, log a `BLOCKED` row with reason `"Live quote diverges >8% from prev close ($X vs $Y) — possible bad tick or halt"` and return.
 
-**Extend `autotrade_log`** — add nullable columns:
-- `sentiment_score int`
-- `sentiment_confidence numeric`
-- `sentiment_headlines jsonb`
+This catches Yahoo data glitches, halted stocks, and pre-market spikes that occasionally bleed into the RTH endpoint.
 
-So every `ENTRY` / `BLOCKED` / `HOLD` row carries the news context that influenced it. Audit-grade.
+### 4. Stagger entries — cap new entries per scan
+In `processUser` (around line 1004–1058), cap the number of new entries executed per single scan run to **2 per user** (configurable later if needed). Iterate the watchlist sorted by signal `conviction` descending so the strongest opportunities go first.
 
----
+Implementation:
+- Before the `for (const ticker of watchlist)` loop, compute `decisions[]` by running `runEntryDecision` for every eligible ticker first (cheap — math only, no DB writes).
+- Sort `ENTER` decisions by `conviction` desc.
+- Slice top 2 → execute those via `executeEntry`.
+- Remaining `ENTER` candidates get logged as `HOLD` with reason `"Deferred — entry stagger cap (2/scan); will retry next cycle"` so the user can see them in the activity log.
 
-## New edge function: `news-sentiment`
+This means the worst case is the bot opens 2 fresh positions every 10 minutes instead of 4–8 in a single tick. Over an hour that's still ~12 positions of headroom, but spread across very different price contexts.
 
-Single-purpose, callable from `autotrader-scan`. Takes `{ticker}`, returns the cached or freshly-computed sentiment object.
-
-```text
-1. Check news_sentiment_cache → return if fresh (<30 min)
-2. NewsAPI: GET /everything?q={ticker}&from=24h&language=en&sortBy=publishedAt
-3. Filter to top 10 headlines (drop duplicates, drop pure price-summary articles)
-4. If 0 headlines → return {score: 0, confidence: 0, headlines: [], reasoning: "no news"}
-5. Call Lovable AI Gateway:
-     model: google/gemini-3-flash-preview
-     tool-call schema returns {score, confidence, reasoning, key_headlines}
-     system prompt: blind to technicals, asked only "what would these headlines do to the stock in the next 24h?"
-6. Upsert into news_sentiment_cache, return result
-```
-
-Config: `verify_jwt = false` (called server-to-server from autotrader-scan via service role).
-
----
-
-## Settings UI
-
-Add one row to `Settings.tsx` AutoTrader card, under the Advanced toggle but visible in **both** modes (it's a safety feature, not a tuning knob):
-
-```text
-🗞  Use news sentiment        [ON]
-    Gemini reads recent headlines before every entry. Blocks
-    trades on extreme negative news; nudges conviction otherwise.
-```
-
-Stored as `use_news_sentiment boolean default true` on `autotrade_settings`. Default ON for autopilot users.
+### 5. Minor: persist `last_price` snapshot to `autotrade_log`
+The `autotrade_log` row already records `price`. With the live quote in play, this becomes the actual fill price. No schema change needed — just make sure `executeEntry` writes the `liveQuote` into the `price` field (which it already does via `e.price`, now updated).
 
 ---
 
 ## Files touched
+- `supabase/functions/fetch-stock-price/index.ts` — add `liveQuote` + `previousClose` to response
+- `supabase/functions/autotrader-scan/index.ts` — `fetchLiveQuote` helper, swap entry price, sanity check, stagger cap
 
-**Migration (new):**
-- adds `news_sentiment_cache` table
-- adds `sentiment_score`, `sentiment_confidence`, `sentiment_headlines` to `autotrade_log`
-- adds `use_news_sentiment` to `autotrade_settings`
+## Not touched
+- Backtest engine (it correctly uses historical bars — no live concept exists there)
+- Exit logic (already uses `data.close[last]` correctly for the EOD stop/peak math; intraday exits would be a separate, larger change)
+- DB schema, RLS, cron schedule
 
-**Edge functions:**
-- `supabase/functions/news-sentiment/index.ts` — new, full implementation as above
-- `supabase/functions/autotrader-scan/index.ts`
-  - import sentiment helper
-  - inside `runEntryDecision`, after the conviction gate passes, call sentiment
-  - apply adjustment / veto, attach sentiment fields to the action
-- `supabase/config.toml` — add `[functions.news-sentiment] verify_jwt = false`
+## What this fixes
+- **Entry slippage**: live quote ≈ tradable mid, not yesterday's close or an intraday spike
+- **Single-tick concentration**: 2-per-scan cap spreads risk across multiple price contexts
+- **Bad data fills**: 8% gap check kills obviously broken quotes before they cost real money
+- **Stop placement**: hard stop anchored to actual fill, not stale data
 
-**Frontend:**
-- `src/pages/Settings.tsx` — add `use_news_sentiment` switch, include in upsert payload
-- `src/pages/AutotraderLog.tsx` — show a small badge on rows with sentiment data ("📰 −72") and expandable headlines on click
-- `src/integrations/supabase/types.ts` — auto-regenerated
+## What this doesn't fix
+- ~15min Yahoo quote delay (real-time would need a paid feed like Polygon/Tiingo)
+- Intraday exit timing — exits still trigger at scan cadence on daily-bar logic
+- Holiday calendar — `isMarketOpen()` is still weekday/hours only
 
----
-
-## Cost & latency math
-
-- Gemini call only fires when **technicals already passed** → ~10–20% of watchlist tickers per scan, not 100%.
-- Cache key is the ticker (not user-specific) → 5 users watching NVDA = 1 Gemini call, not 5.
-- 30-min TTL → at most 2 Gemini calls/ticker/hour during market hours.
-- Estimated: ~50 Gemini calls/day across all users at current scale. Negligible.
-- Added latency per entry decision: ~1.5s on cache miss, ~5ms on cache hit. Scan budget is 60s, well within.
-
----
-
-## What stays the same
-
-- All exit logic (peak detection, stops, time stops) — sentiment is **entry-only** in v1.
-- `evaluateSignal()` — untouched, sentiment is a wrapper not a rewrite.
-- Cron schedule — still `*/5 13-21 * * 1-5`.
-- Paper mode — still default-on.
-
----
-
-## Failure modes & safety
-
-- **NewsAPI down** → return `{score: 0, confidence: 0}`, scan proceeds on pure technicals. Logged.
-- **Gemini 429/402** → same fallback, logged with the error code so we can surface it in the UI later.
-- **Gemini returns malformed JSON** → tool-calling enforces schema, but if it fails, fall back to neutral.
-- **Cache table grows unbounded** → add a one-line cleanup in the scan: `DELETE FROM news_sentiment_cache WHERE fetched_at < now() - interval '24 hours'`. Runs once per scan invocation.
-
----
-
-## Why this is the right shape
-
-- Sentiment **can only hurt a trade, never force one** — adjustments are bounded ±10 conv, hard veto requires both extreme score AND high confidence.
-- Gemini is **blind to the technical signal** — it can't rationalize "well the chart looks good so the lawsuit isn't that bad." Pure news read.
-- **Cache by ticker, not user** — economically scales to thousands of users without scaling Gemini bills.
-- Every adjustment is **logged with the headlines that caused it** — when the user asks "why didn't I get into NVDA today?" the answer is one click away.
+After approval I'll implement, deploy both functions, and confirm with a test call on the next scan cycle.
