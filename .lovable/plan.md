@@ -1,109 +1,80 @@
 
-The user has done a rigorous critique of the backtest. They're not asking for new features — they want the **measurement tools fixed** before any more algo work. The three concrete bugs they've identified:
 
-1. **Beta calculation is broken** — returning ~0.04 for a 75-87% deployed long-only equity portfolio (impossible)
-2. **Robustness/parameter-sensitivity test is not actually varying parameters** — identical results across ±20/±30/±40 perturbations
-3. **Stress test attribution is broken** — showing +75% to +1008% returns during 2008/COVID crashes for long-biased books
+## You're right — and here's exactly what's happening
 
-Let me read the relevant backtest code to confirm what's actually happening.
-<lov-tool-use id="toolu_vrtx_01XVQbUXqtA3TiJWFBYatdVw" name="code--list_dir" integration-id="code" data="{\"dir_path\": \"supabase/functions/backtest\"}">
-</lov-tool-use>
+Your read of `_shared/signal-engine.ts` is correct on every count. But there's one nuance worth flagging before the fix: the **scanner** (`market-scanner/index.ts`) already wraps the shared engine with extra logic — it calls `computeSignalConviction(...)` *after* `hasDailyEntrySignal` passes, and applies macro/calibration adjustments. So live signals do get a 0–100 conviction. The problem is:
 
-<lov-tool-use id="toolu_vrtx_01SQzuDJfZdaZkbbW3r5Vy2W" name="code--exec" integration-id="code" data="{\"command\": \"wc -l supabase/functions/backtest/index.ts\", \"user_facing_description\": \"Checking backtest engine size\"}">
-</lov-tool-use>
-I'm in plan mode (read-only). Let me investigate the three bugs the user identified.
-<lov-tool-use id="toolu_vrtx_01XoG9NMyq4rJECJD2hfuyiw" name="code--list_dir" integration-id="code" data="{\"dir_path\": \"supabase/functions/backtest\"}">
-</lov-tool-use>
+1. **The gate is still the simple engine.** `hasDailyEntrySignal` is what decides whether `computeSignalConviction` even runs. If the gate is wrong, the rich downstream conviction never gets a chance.
+2. **`check-sell-alerts` uses ONLY the simple engine** — it has no `computeSignalConviction` wrapper. So exits run on a different signal than entries.
+3. **The backtest uses a totally different code path** (`computeStrategySignal` in `backtest/index.ts`) — so when you backtest, you're measuring something the live system never actually executes.
 
-<lov-tool-use id="toolu_vrtx_01FTeGaPu5qCLKieewfcrPJh" name="code--exec" integration-id="code" data="{\"command\": \"wc -l supabase/functions/backtest/index.ts && grep -n -i \\\"beta\\\\|alpha\\\\|robustness\\\\|stress\\\\|sensitivity\\\\|kurtosis\\\\|skewness\\\" supabase/functions/backtest/index.ts | head -120\", \"user_facing_description\": \"Locating beta, robustness and stress test logic in the backtest engine\"}">
-</lov-tool-use>
+The consolidation needs to make `_shared/signal-engine.ts` the **single source of truth** that all four call sites use: market-scanner, check-sell-alerts, stock-predict, and backtest.
 
-<lov-tool-use id="toolu_vrtx_01VfEyrK8LEgcUmpgh7vERMh" name="code--view" integration-id="code" data="{\"file_path\": \"supabase/functions/backtest/index.ts\", \"lines\": \"1690-1780\"}">
-</lov-tool-use>
+---
 
-<lov-tool-use id="toolu_vrtx_01GVjBK9SxperBjqvm7GkB5E" name="code--view" integration-id="code" data="{\"file_path\": \"supabase/functions/backtest/index.ts\", \"lines\": \"2160-2300\"}">
-</lov-tool-use>
-Now I have enough to diagnose all three bugs. Let me also check `runWalkForwardBacktest` to confirm `buyThreshold`/`shortThreshold` are actually consumed:
-<lov-tool-use id="toolu_vrtx_01JHU3yXNfCxAa1FPhBnZrmR" name="code--exec" integration-id="code" data="{\"command\": \"grep -n \\\"buyThreshold\\\\|shortThreshold\\\\|runWalkForwardBacktest\\\\b\\\" supabase/functions/backtest/index.ts | head -40\", \"user_facing_description\": \"Checking whether threshold parameters are actually used inside the walk-forward backtest\"}">
-</lov-tool-use>
-Confirmed. Now I have the full picture of the three bugs. Let me also check the equity curve sampling to understand the beta issue better:
-<lov-tool-use id="toolu_vrtx_01A2PHhT1kcCb6p5SnDEuize" name="code--exec" integration-id="code" data="{\"command\": \"grep -n \\\"equityCurve.push\\\\|dailyEqReturns\\\" supabase/functions/backtest/index.ts | head -20\", \"user_facing_description\": \"Checking equity curve sampling cadence\"}">
-</lov-tool-use>
+## The consolidation plan
 
-<lov-tool-use id="toolu_vrtx_013PkMKCMXabv5bXEdz2JoHF" name="code--view" integration-id="code" data="{\"file_path\": \"supabase/functions/backtest/index.ts\", \"lines\": \"1455-1480\"}">
-</lov-tool-use>
-Now I have a complete diagnosis. Let me also confirm the stress-test attribution issue: `stratReturn` simply *sums* `t.returnPct` of all trades that closed in the window (no notion of position size or direction). For a basket of 5 tickers each compounding ~30% per trade with several trades closed during a long window, that easily produces +1000%. Got it.
+### Step 1 — Promote the backtest's signal engine into `_shared/`
 
-<lov-plan>
+Create `supabase/functions/_shared/signal-engine-v2.ts` containing the canonical multi-strategy engine, lifted directly from `backtest/index.ts`:
 
-## Diagnosis — three measurement bugs
+- `classifyStock(close, high, low, ticker)` — full version with `meanReversionRate`, `trendScore`, ATR%, blended profiles, INDEX_TICKERS hint. Replaces the broken 3-condition `classifyStockSimple` so `value` actually matches real value names.
+- `PROFILE_PARAMS` (full 16-field record) and `blendProfiles(...)`.
+- `computeStrategySignal(...)` — runs trend / mean-reversion / breakout in parallel, picks highest conviction, returns `{ signal, conviction (0–100), strategy, regime, atr, positionSizeMultiplier }`.
+- `computeWeeklyBias(...)` — keep the existing weekly bias function (it's correct, just used as a *macro filter*, not the entry trigger).
+- `evaluateSignal(...)` — new top-level convenience function that combines weekly bias + daily strategy signal + macro context, returns the canonical signal object the scanner stores.
 
-**Bug 1: Beta ≈ 0.04 across all baskets**
+Both long and short paths get full conviction-based sizing (0–100), not the asymmetric `-0.5` cap.
 
-Equity curve is sampled every 5 bars (line 1462) AND only when an open position exists is `openMTM` mark-to-market — but `capital` itself only changes on trade close, not bar-by-bar. Combined with the `eqReturnsByDate.set` map keyed by date being abandoned (the actual `stratRets` is built from `sortedEqCurve` interval-to-interval), most equity-curve "intervals" show ~0 change while SPY is moving daily. Cov(strat, SPY) collapses → beta → ~0. Alpha is then computed from this broken beta.
+### Step 2 — Wire all four call sites to `signal-engine-v2.ts`
 
-Fix: sample equity curve **every bar** (mark-to-market with `close[i]` whether or not a position is open), align strat-vs-SPY returns by exact date intersection (drop missing dates), and compute beta on the resulting daily series. With 75–87% deployment, beta should land around 0.6–0.9 — that's the sanity check.
+| Call site | Change |
+|---|---|
+| `market-scanner/index.ts` | Replace `hasDailyEntrySignal` + `computeSignalConviction` with one call to `evaluateSignal(...)`. Macro context (`spyContext`, `macroFloorAdjust`) keeps working — passed in as a param. |
+| `check-sell-alerts/index.ts` | Use `evaluateSignal` for exit decisions too — so an open long is closed when the *same engine* that opened it now says HOLD or SHORT. No more "entered with engine A, exited with engine B." |
+| `stock-predict/index.ts` | Replace its bespoke prediction math with `evaluateSignal` so the manual analyzer matches the autotrader. |
+| `backtest/index.ts` | Delete the duplicated `computeStrategySignal` / `classifyStock` / `PROFILE_PARAMS` and import from `_shared/signal-engine-v2.ts`. The backtest now literally simulates the live code path. |
 
-**Bug 2: Parameter sensitivity returns identical numbers for ±20/±30/±40**
+### Step 3 — Delete the broken bits
 
-Line 2270: `{ ...config, buyThreshold: thresh, shortThreshold: -thresh }`. But signal generation reads `signalParams?.buyThreshold` (line 507) — and `signalParams` is built inside `runWalkForwardBacktest` from the *adaptive profile* (lines 1109/1117) using `profile.buyThreshold`, **not** from `config.buyThreshold`. So the perturbation is silently dropped and every variation runs the same strategy. Identical numbers to 4 sig figs is the proof.
+- Old `hasDailyEntrySignal` (the one that ignores `_high, _low, _volume`) — removed entirely.
+- Old `classifyStockSimple` (the 3-condition value gate) — removed.
+- The asymmetric `targetAllocation: -0.5` short cap — removed; shorts size by conviction like longs.
+- The header comment `// (backtest/index.ts has its own enriched classifier with blending — keep separate)` — replaced with `// SINGLE SOURCE OF TRUTH — used by scanner, sell-alerts, predict, backtest`.
 
-Fix: thread `config.buyThreshold` / `config.shortThreshold` through to the signal-params override (override the profile after lookup, before passing to the signal function). Verify by logging mean conviction at each threshold — they should diverge.
+### Step 4 — Verification step (after the consolidation)
 
-**Bug 3: Stress-test returns of +1008% / +166% / +75% during crashes**
+Re-run the same 25-ticker / 2000–2025 archetype backtest. Because the backtest now imports from `_shared/signal-engine-v2.ts`, the win-rate/Sharpe/profit-factor numbers it produces are now the **real** numbers your live autotrader will deliver — no more gap between simulated and live performance. If the numbers drop materially from 59.8% / 7.37 PF, that's the truth showing up; if they hold, the gap was real and is now closed.
 
-Line 2189: `stratReturn = windowTrades.reduce((a, t) => a + t.returnPct, 0)` — naively *adds* per-trade percent returns with no weighting. A basket with 5 tickers and 30 trades in a 60-bar window where each trade returned ~25% gives "stratReturn = +750%" even if the actual portfolio was flat. The 60-bar/30-step rolling window also picks the *worst 60-day SPY drawdown inside the window* as the "stress period" — which doesn't necessarily align with the named crisis dates (the COVID/2008 labels are just date-prefix matches on the *start* of the window, which can fall months before the actual crash).
+---
 
-Fix: replace summed `returnPct` with the actual **equity-curve delta** over the stress window (`(eqAtEnd − eqAtStart) / eqAtStart`). And anchor the named periods (COVID, 2008, 2022, Q4 2018) to **fixed historical date ranges**, not pattern-matched 60-bar SPY windows. That way "2008 Financial Crisis" always means 2008-09-01 → 2009-03-31.
+## Files touched
 
-## Build plan — fix the measurement layer
+**New:** `supabase/functions/_shared/signal-engine-v2.ts` (~600 lines, mostly lifted verbatim from `backtest/index.ts` lines 180–760)
 
-### File: `supabase/functions/backtest/index.ts`
+**Modified:**
+- `supabase/functions/_shared/signal-engine.ts` — replaced with re-exports from v2 for backward-compat during the swap, then deleted in a follow-up
+- `supabase/functions/market-scanner/index.ts` — call site swap (lines ~95–110 imports, ~820–880 call site)
+- `supabase/functions/check-sell-alerts/index.ts` — call site swap (lines ~5–10 imports, ~150–170 call site)
+- `supabase/functions/stock-predict/index.ts` — call site swap
+- `supabase/functions/backtest/index.ts` — delete duplicate definitions (lines 180–760), import from `_shared`
 
-**1. Daily equity curve (foundation for fixes 1 & 3)**
+## What's deliberately out of scope
 
-Change line 1462 from `if (i % 5 === 0 || i === close.length - 2)` to record **every bar**. Always include open-position MTM. This makes `dailyEqReturns`, beta, and stress-test deltas all correct.
+- **Building new strategies.** This is a pure consolidation — same logic, single home. No alpha changes.
+- **Re-tuning thresholds.** Once the live system actually runs the engine the backtest validated, we'll see honest numbers, then tune.
+- **Touching the measurement-layer fixes** from the previous round (beta, stress, sensitivity). Those stay.
 
-**2. Beta/Alpha rewrite (lines 1703–1764)**
+---
 
-- Build `eqReturnByDate: Map<date, dailyReturn>` from the now-daily equity curve.
-- Build `spyReturnByDate` (already exists).
-- Take the date intersection, build aligned `stratRets[]` and `benchRets[]`.
-- Compute `beta = cov / var(SPY)` on those daily aligned returns.
-- Compute `alpha = annualizedReturn − beta * spyAnnReturn` (already correct, just needs valid beta).
-- Add a sanity log: `console.log({ beta, expectedRange: '[0.4, 1.2] for long-biased strategy' })`.
+## Why this fixes your six points
 
-**3. Parameter-sensitivity actually varies parameters (lines 2266–2284)**
-
-Pass `config.buyThreshold` / `config.shortThreshold` through to `runWalkForwardBacktest` such that they override the adaptive profile's threshold inside the signal call (modify lines 1109 & 1117 to honor a config override, or pass an explicit `signalOverrides` arg). Add an assertion: if all three sensitivity rows are identical to 2 decimal places, log a warning and tag `parameterSensitivity` with `degenerate: true`.
-
-**4. Stress-test attribution (lines 2163–2211)**
-
-- Replace the sliding 60-bar SPY-drawdown scanner with a **fixed historical periods table**: `[{ label: 'COVID Crash', start: '2020-02-19', end: '2020-04-07' }, { label: '2008 Financial Crisis', start: '2008-09-01', end: '2009-03-31' }, { label: 'Q4 2018 Selloff', start: '2018-10-01', end: '2018-12-31' }, { label: '2022 Bear Market', start: '2022-01-01', end: '2022-10-15' }, { label: 'Aug 2015 China', start: '2015-08-01', end: '2015-09-30' }, { label: 'Aug 2024 Yen Carry', start: '2024-08-01', end: '2024-08-15' }]`.
-- For each window present in the data, compute strategy return as **equity curve delta**: find equity at first and last in-window dates, return `(end − start) / start * 100`. This is correct portfolio-level return.
-- Benchmark return computed the same way on SPY closes.
-
-**5. Drop-in safety net**
-
-Add a `metricsHealth` field to the response with three booleans: `betaInRange` (0.2–1.5 for long-biased), `parameterSensitivityVaried` (>1% spread across rows), `stressReturnsPlausible` (no row > +200% or < −80%). Render a warning banner on the Backtest page when any are false — so future regressions can't hide.
-
-### File: `src/pages/Backtest.tsx`
-
-- Read `metricsHealth` from the report; if any flag is false, show a yellow banner above the metric cards explaining which measurement is suspect.
-- No other UI changes needed — the existing cards will simply now show honest numbers.
-
-## Validation steps after the fix
-
-Re-run the same 5-basket backtest (2000–2025, 25 tickers across the 5 archetypes). Sanity checks:
-1. Beta lands in **0.4–1.0** range across baskets (currently 0.04 → broken).
-2. Parameter-sensitivity rows differ by at least 2–5% return across thresholds.
-3. Indexes basket during 2008 returns somewhere in **−15% to +5%**, not +166%.
-4. High-vol basket during COVID returns **−30% to +30%**, not +1008%.
-
-If those four pass, the measurement layer is honest. *Then* — and only then — we can have a real conversation about whether the algo beats buy-and-hold (which, per your read, it currently doesn't for 4 of 5 baskets — that's the next problem to solve, but it's downstream of trustworthy metrics).
-
-## What's deliberately out of scope here
-
-- Fixing the underperformance vs buy-and-hold. That's a strategy problem, not a measurement problem. Once metrics are honest we'll see whether the gap is real or partly a beta-misattribution illusion.
-- Touching the live `_shared/signal-engine.ts`. These bugs are confined to the backtest measurement code — the live trading pipeline is unaffected.
+| Your concern | How it's resolved |
+|---|---|
+| 1. `hasDailyEntrySignal` ignores high/low/volume | Replaced by `computeStrategySignal` which uses ATR, BB, OBV, volume ratio, range expansion |
+| 2. Only one strategy runs live | All three (trend/MR/breakout) now run live, best one selected by conviction |
+| 3. No conviction score | Returns 0–100 conviction at every entry; sizing scales with it |
+| 4. `value` classification basically never matches | Replaced with full classifier using `meanReversionRate` + blended profiles — value names actually classify as value |
+| 5. No macro/SPY context | `evaluateSignal` accepts `adaptiveContext: { spyBearish, spySMADeclining, isLeader }` and applies the dual-regime guard |
+| 6. Asymmetric short side capped at -0.5 | Shorts size by conviction same as longs |
 
