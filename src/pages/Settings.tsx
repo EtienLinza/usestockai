@@ -375,6 +375,7 @@ const Settings = () => {
                       value={bot.min_conviction}
                       onChange={(v) => setBot({ ...bot, min_conviction: Math.round(v) })}
                       min={50} max={95} step={1}
+                      effective={bot.adaptive_mode ? adaptiveState?.effective_min_conviction : undefined}
                     />
                     <CapSlider
                       label="Max open positions"
@@ -382,6 +383,7 @@ const Settings = () => {
                       value={bot.max_positions}
                       onChange={(v) => setBot({ ...bot, max_positions: Math.round(v) })}
                       min={1} max={20} step={1}
+                      effective={bot.adaptive_mode ? adaptiveState?.effective_max_positions : undefined}
                     />
                     <CapSlider
                       label="Max NAV exposure"
@@ -389,6 +391,7 @@ const Settings = () => {
                       value={bot.max_nav_exposure_pct}
                       onChange={(v) => setBot({ ...bot, max_nav_exposure_pct: v })}
                       min={20} max={100} step={5} suffix="%"
+                      effective={bot.adaptive_mode ? adaptiveState?.effective_max_nav_exposure_pct : undefined}
                     />
                     <CapSlider
                       label="Max per single name"
@@ -396,6 +399,7 @@ const Settings = () => {
                       value={bot.max_single_name_pct}
                       onChange={(v) => setBot({ ...bot, max_single_name_pct: v })}
                       min={5} max={50} step={1} suffix="%"
+                      effective={bot.adaptive_mode ? adaptiveState?.effective_max_single_name_pct : undefined}
                     />
                     <CapSlider
                       label="Daily loss kill-switch"
