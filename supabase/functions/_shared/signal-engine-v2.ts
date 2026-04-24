@@ -835,6 +835,11 @@ export function computePositionSize(
 // with conviction) + adaptive context. The single function the scanner,
 // sell-alerts, predict and backtest can all call to get the canonical
 // trade decision for a ticker.
+//
+// SIZING: returns a single sizing output — `kellyFraction` (signed NAV
+// fraction, range -0.25 … +0.25). The legacy `positionSizeMultiplier` has
+// been removed to avoid two conflicting sizing systems. Multi-name
+// portfolios should size positions directly from `kellyFraction`.
 // ============================================================================
 
 export interface EvaluateSignalResult {
@@ -845,12 +850,35 @@ export interface EvaluateSignalResult {
   blendedParams: ProfileParams;
   strategy: "trend" | "mean_reversion" | "breakout" | "none";
   regime: string;
-  positionSizeMultiplier: number;
-  /** Volatility-targeted Kelly fraction (0–0.25 for longs, 0 to −0.25 for shorts) */
+  /** Volatility-targeted Kelly fraction — single canonical sizing output.
+   *  Range: 0…+0.25 for longs, 0…-0.25 for shorts. 0 when no entry. */
   kellyFraction: number;
   atr: number;
   atrPct: number;
   reasoning: string;
+}
+
+// ----------------------------------------------------------------------------
+// Per-ticker signal tracker cache (in-memory, persists across evaluateSignal
+// calls within the same edge-function invocation). Keeps cooldownBarsRemaining
+// alive between bars so the cooldown actually fires instead of resetting to 0
+// on every call. Callers that need cross-invocation persistence (e.g. the live
+// scanner across cron runs) should pass their own tracker explicitly.
+// ----------------------------------------------------------------------------
+const signalTrackerCache = new Map<string, SignalState>();
+
+export function getOrCreateTracker(ticker: string): SignalState {
+  const key = ticker.toUpperCase();
+  let t = signalTrackerCache.get(key);
+  if (!t) {
+    t = createSignalTracker();
+    signalTrackerCache.set(key, t);
+  }
+  return t;
+}
+
+export function clearTrackerCache() {
+  signalTrackerCache.clear();
 }
 
 export function evaluateSignal(
@@ -858,6 +886,10 @@ export function evaluateSignal(
   ticker: string,
   adaptiveContext?: { spyBearish?: boolean; spySMADeclining?: boolean; isLeader?: boolean },
   macro?: MacroContext | null,
+  /** Optional caller-supplied tracker for cooldown persistence across runs.
+   *  When omitted, a per-ticker in-memory tracker is used (lives for the
+   *  duration of the edge-function invocation). */
+  tracker?: SignalState,
 ): EvaluateSignalResult | null {
   if (data.close.length < 200) return null;
 
@@ -902,7 +934,6 @@ export function evaluateSignal(
       blendedParams: activeProfile,
       strategy: "none",
       regime: "neutral",
-      positionSizeMultiplier: 0,
       kellyFraction: 0,
       atr: 0,
       atrPct: atrPctNow,
@@ -910,11 +941,12 @@ export function evaluateSignal(
     };
   }
 
-  // 3. Compute multi-strategy conviction signal
-  const tracker = createSignalTracker();
+  // 3. Compute multi-strategy conviction signal — use a *persistent* tracker so
+  //    cooldownBarsRemaining actually carries between calls.
+  const activeTracker = tracker ?? getOrCreateTracker(ticker);
   const sig = computeStrategySignal(
     data.close, data.high, data.low, data.volume,
-    tracker, 1,
+    activeTracker, 1,
     {
       adxThreshold: activeProfile.adxThreshold,
       rsiOversold: activeProfile.rsiOversold,
@@ -957,7 +989,6 @@ export function evaluateSignal(
       blendedParams: activeProfile,
       strategy: sig.strategy,
       regime: sig.regime,
-      positionSizeMultiplier: 0,
       kellyFraction: 0,
       atr: sig.atr,
       atrPct: atrPctNow,
@@ -981,10 +1012,10 @@ export function evaluateSignal(
     blendedParams: activeProfile,
     strategy: sig.strategy,
     regime: sig.regime,
-    positionSizeMultiplier: sig.positionSizeMultiplier,
     kellyFraction,
     atr: sig.atr,
     atrPct: atrPctNow,
     reasoning: `${sig.strategy.replace("_", " ")} ${sigDir.toLowerCase()} | ${cls.classification} profile | ${sig.regime} regime | conviction ${sig.confidence} | kelly ${(kellyFraction * 100).toFixed(1)}%`,
   };
 }
+
