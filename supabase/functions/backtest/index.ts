@@ -28,7 +28,6 @@ import {
 // stock-predict. The backtest now literally simulates the live code path.
 // ============================================================================
 import {
-  type DataSet as SharedDataSet,
   type StockProfile,
   type WeeklyBias,
   type StockClassification,
