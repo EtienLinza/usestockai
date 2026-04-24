@@ -852,7 +852,7 @@ serve(async (req) => {
         }
 
         // ─── PHASE B + D: dynamic floor (adaptive baseline + macro adjust) ─
-        const baselineFloor = strategy === "mean_reversion" || strategy === "divergence" ? 60 : 65;
+        const baselineFloor = strategy === "mean_reversion" ? 60 : 65;
         const adaptiveFloor = regimeFloors[regime]?.floor ?? baselineFloor;
         const macroAdj = macro ? macroFloorAdjust(macro.score) : 0;
         const minConviction = Math.max(50, Math.min(90, adaptiveFloor + macroAdj));
