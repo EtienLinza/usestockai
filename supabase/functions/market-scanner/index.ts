@@ -820,9 +820,15 @@ serve(async (req) => {
       if (!data || data.close.length < 200) continue;
 
       try {
-        // 1. Classify stock
-        const profile = classifyStockSimple(data.close, data.high, data.low, ticker);
-        const weeklyParams = PROFILE_WEEKLY_PARAMS[profile];
+        // 1. Classify stock — full blended classifier (v2)
+        const cls = classifyStock(data.close, data.high, data.low, ticker);
+        const profile = cls.classification;
+        const activeProfile = cls.blendedParams || PROFILE_PARAMS[profile];
+        const weeklyParams = {
+          fastMA: activeProfile.weeklyFastMA,
+          slowMA: activeProfile.weeklySlowMA,
+          rsiLong: activeProfile.weeklyRSILong,
+        };
 
         // 2. Build weekly data
         const weeklyData = aggregateToWeekly(data);
@@ -851,9 +857,13 @@ serve(async (req) => {
         if (weeklyBias.bias === "flat") continue;
         if (weeklyBias.bias === "short" && !spyBearish) continue;
 
-        // 4. Check daily entry signal
+        // 4. Check daily entry signal — low-vol stocks use mean-reversion timing,
+        //    everyone else uses the trend-confirmation gate (now uses high/low/volume).
         const lastIdx = data.close.length - 1;
-        const hasEntry = hasDailyEntrySignal(data.close, data.high, data.low, data.volume, lastIdx, weeklyBias.bias);
+        const targetDir: "long" | "short" = weeklyBias.bias === "long" ? "long" : "short";
+        const hasEntry = isLowVol
+          ? hasDailyMeanReversionEntry(data.close, lastIdx, targetDir)
+          : hasDailyEntrySignal(data.close, data.high, data.low, data.volume, lastIdx, targetDir);
         if (!hasEntry) continue;
 
         // 5. Compute conviction (enhanced)
