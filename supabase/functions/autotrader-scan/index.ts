@@ -707,7 +707,19 @@ serve(async (req) => {
       }
 
       try {
-        await processUser(supabase, settings, macro, summary);
+        const userSummary = { entries: 0, exits: 0, partials: 0, holds: 0, blocked: 0, errors: 0, watchlistSize: 0, openPositions: 0, evaluated: 0 };
+        await processUser(supabase, settings, macro, summary, userSummary);
+
+        // Always write a per-scan rollup so users see the bot is alive even when
+        // no trades fire. This is the single source of "scan happened" visibility.
+        const rollupReason = buildScanRollupReason(userSummary, settings, adaptiveCtx);
+        await supabase.from("autotrade_log").insert({
+          user_id: rawSettings.user_id,
+          ticker: "SCAN",
+          action: "HOLD",
+          reason: rollupReason,
+          conviction: settings.min_conviction,
+        });
 
         // Update cadence timestamps
         const intervalMin = rawSettings.advanced_mode
