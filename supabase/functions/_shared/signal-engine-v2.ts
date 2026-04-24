@@ -202,8 +202,11 @@ export function classifyStock(close: number[], high: number[], low: number[], ti
   const sma50 = calculateSMA(close, 50);
   const sma200 = calculateSMA(close, 200);
 
+  // Use a rolling ~1-year window so a stock that was a momentum name 3 years
+  // ago doesn't drag on today's classification.
   let maAlignedCount = 0, maValidCount = 0;
-  for (let i = 199; i < n; i++) {
+  const maStart = Math.max(199, n - 252);
+  for (let i = maStart; i < n; i++) {
     if (!isNaN(sma50[i]) && !isNaN(sma200[i])) {
       maValidCount++;
       if (close[i] > sma50[i] && sma50[i] > sma200[i]) maAlignedCount++;
