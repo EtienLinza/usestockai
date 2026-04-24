@@ -603,12 +603,13 @@ export function computeStrategySignal(
     }
   }
 
-  // Bonus pool: diminishing returns into remaining headroom
+  // Bonus pool: bonus magnitude scales with the *strength* of the base signal,
+  // not the headroom. A 60-conviction signal earns less from the same pool than
+  // an 85-conviction signal — stronger base, larger absolute bonus. Capped at 100.
   const applyBonusPool = (base: number, bonusPool: number, maxPool: number) => {
     if (maxPool <= 0) return base;
-    const headroom = Math.max(0, 100 - base);
     const fillRatio = Math.min(1, bonusPool / maxPool);
-    return Math.min(100, base + headroom * fillRatio * 0.65);
+    return Math.min(100, base + base * fillRatio * 0.25);
   };
 
   // --- Strategy A: Trend Following ---
