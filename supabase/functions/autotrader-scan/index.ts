@@ -106,6 +106,52 @@ interface Settings {
   max_nav_exposure_pct: number; max_single_name_pct: number;
   daily_loss_limit_pct: number; starting_nav: number;
   paper_mode: boolean; notify_on_action: boolean;
+  advanced_mode: boolean;
+  scan_interval_minutes: number;
+  last_scan_at: string | null;
+  next_scan_at: string | null;
+}
+
+// ─── Autopilot defaults (used when advanced_mode = false) ────────────────
+// The algorithm picks every threshold based on macro context, replacing
+// whatever the user previously had stored in their settings row.
+function resolveEffectiveSettings(s: Settings, macro: MacroContext | null): Settings {
+  if (s.advanced_mode) return s;
+
+  const bear = isBearishMacro(macro);
+  const minConv = bear ? 78 : 72;
+  const maxPos = Math.min(12, Math.max(4, Math.round(s.starting_nav / 12500)));
+  const maxNav = bear ? 60 : 80;
+
+  return {
+    ...s,
+    min_conviction: minConv,
+    max_positions: maxPos,
+    max_nav_exposure_pct: maxNav,
+    max_single_name_pct: 20,    // Kelly fraction further caps this per-trade
+    daily_loss_limit_pct: 3,    // safety floor
+  };
+}
+
+// SPY 50-SMA slope check — same heuristic the signal engine uses
+function isBearishMacro(macro: MacroContext | null): boolean {
+  if (!macro || macro.spyClose.length < 50) return false;
+  const c = macro.spyClose;
+  const sma = calculateSMA(c, 50);
+  const last = sma[sma.length - 1];
+  const prev = sma[sma.length - 6] ?? last;
+  return Number.isFinite(last) && Number.isFinite(prev) && last < prev;
+}
+
+// Autopilot scan cadence — tighter on volatile/open, looser on calm afternoons
+function algoScanIntervalMinutes(macro: MacroContext | null): number {
+  // Approx NY hour from UTC (DST-agnostic ±1h is acceptable for cadence)
+  const utcHour = new Date().getUTCHours();
+  const nyHour = (utcHour - 4 + 24) % 24;
+  if (nyHour === 9 || nyHour === 10) return 5;     // first 90 min after open
+  if (isBearishMacro(macro)) return 5;             // tighter risk in bear regimes
+  if (nyHour >= 14 && nyHour < 16) return 15;      // sleepy afternoon
+  return 10;
 }
 
 type ExitAction =
@@ -394,20 +440,40 @@ serve(async (req) => {
     const spy = await fetchYahooData("SPY");
     const macro: MacroContext | null = spy ? { spyClose: spy.close } : null;
 
-    // 3. Per-user processing
+    // 3. Per-user processing — gated by per-user next_scan_at
+    const now = new Date();
+    let skippedNotDue = 0;
     for (const settingsRow of settingsRows) {
-      const settings = settingsRow as Settings;
+      const rawSettings = settingsRow as Settings;
+
+      // Per-user cadence gate
+      if (rawSettings.next_scan_at && new Date(rawSettings.next_scan_at) > now) {
+        skippedNotDue++;
+        continue;
+      }
+
+      const settings = resolveEffectiveSettings(rawSettings, macro);
       try {
         await processUser(supabase, settings, macro, summary);
+
+        // Update cadence timestamps
+        const intervalMin = rawSettings.advanced_mode
+          ? rawSettings.scan_interval_minutes
+          : algoScanIntervalMinutes(macro);
+        const nextScan = new Date(now.getTime() + intervalMin * 60_000);
+        await supabase.from("autotrade_settings")
+          .update({ last_scan_at: now.toISOString(), next_scan_at: nextScan.toISOString() })
+          .eq("user_id", rawSettings.user_id);
       } catch (err) {
-        console.error(`User ${settings.user_id} failed:`, err);
+        console.error(`User ${rawSettings.user_id} failed:`, err);
         summary.errors++;
         await supabase.from("autotrade_log").insert({
-          user_id: settings.user_id, ticker: "—", action: "ERROR",
+          user_id: rawSettings.user_id, ticker: "—", action: "ERROR",
           reason: (err as Error).message ?? "Unknown error",
         });
       }
     }
+    (summary as Record<string, unknown>).skipped_not_due = skippedNotDue;
 
     return json({ status: "ok", summary });
   } catch (err) {
