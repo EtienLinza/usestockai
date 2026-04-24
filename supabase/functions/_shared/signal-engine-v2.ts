@@ -289,6 +289,50 @@ export function classifyStockSimple(close: number[], high: number[], low: number
 }
 
 // ============================================================================
+// MACRO CONTEXT — explicit SPY-driven regime filter
+// Optional: when callers pass raw SPY closes here, weekly bias and the
+// strategy engine will block counter-trend entries automatically.
+// ============================================================================
+
+export interface MacroContext {
+  /** SPY (or chosen benchmark) daily closes */
+  spyClose: number[];
+  /** Optional stress flag — set true when VIX > 30 or HYG drawdown is severe */
+  stressed?: boolean;
+}
+
+/**
+ * Returns true when the macro environment permits the requested direction.
+ * Long entries are blocked when SPY is below 50- and 200-SMA AND momentum
+ * is negative. Short entries are blocked in confirmed bull regimes.
+ * Returns true (no block) when ctx is null or insufficient data.
+ */
+export function macroPermitsEntry(
+  direction: "long" | "short",
+  ctx: MacroContext | null | undefined,
+): boolean {
+  if (!ctx || !ctx.spyClose || ctx.spyClose.length < 200) return true;
+
+  const spy = ctx.spyClose;
+  const sma50 = calculateSMA(spy, 50);
+  const sma200 = calculateSMA(spy, 200);
+  const n = spy.length - 1;
+  const spyPrice = spy[n];
+  const s50 = safeGet(sma50, spyPrice);
+  const s200 = safeGet(sma200, spyPrice);
+  const spyMomentum = n >= 5 ? (spy[n] - spy[n - 5]) / spy[n - 5] : 0;
+
+  const bearRegime = spyPrice < s50 && spyPrice < s200 && spyMomentum < -0.02;
+  const bullRegime = spyPrice > s50 && s50 > s200;
+
+  if (direction === "long" && bearRegime) return false;
+  if (direction === "short" && bullRegime) return false;
+  if (ctx.stressed && direction === "long") return false;
+
+  return true;
+}
+
+// ============================================================================
 // WEEKLY BIAS COMPUTATION
 // ============================================================================
 
@@ -297,6 +341,7 @@ export function computeWeeklyBias(
   idx: number,
   params: { fastMA: number; slowMA: number; rsiLong: number },
   isLowVol: boolean = false,
+  macro: MacroContext | null = null,
 ): WeeklyBias {
   if (idx < params.slowMA + 10) return { bias: "flat", targetAllocation: 0 };
 
@@ -316,29 +361,43 @@ export function computeWeeklyBias(
 
   // DEFENSIVE MEAN-REVERSION MODE for low-volatility stocks
   if (isLowVol) {
-    if (rsiVal < 30 && c > slow) return { bias: "long", targetAllocation: 0.75 };
-    if (rsiVal < 35 && c > slow && adxVal < 25) return { bias: "long", targetAllocation: 0.5 };
-    if (rsiVal > 70) return { bias: "flat", targetAllocation: 0 };
-    if (rsiVal >= 35 && rsiVal <= 65 && c > slow) return { bias: "long", targetAllocation: 0.25 };
+    if (rsiVal < 30 && c > slow && macroPermitsEntry("long", macro))
+      return { bias: "long", targetAllocation: 0.75 };
+    if (rsiVal < 35 && c > slow && adxVal < 25 && macroPermitsEntry("long", macro))
+      return { bias: "long", targetAllocation: 0.5 };
+    if (rsiVal > 70 && macroPermitsEntry("short", macro))
+      return { bias: "short", targetAllocation: -0.5 }; // symmetric short on overbought low-vol
+    if (rsiVal >= 35 && rsiVal <= 65 && c > slow && macroPermitsEntry("long", macro))
+      return { bias: "long", targetAllocation: 0.25 };
     return { bias: "flat", targetAllocation: 0 };
   }
 
   // STANDARD TREND-FOLLOWING MODE
   if (c > fast && fast > slow) {
+    if (!macroPermitsEntry("long", macro)) return { bias: "flat", targetAllocation: 0 };
     if (rsiVal >= params.rsiLong && rsiVal <= 75 && adxVal > 20) return { bias: "long", targetAllocation: 1.0 };
     if (rsiVal > 75) return { bias: "long", targetAllocation: 0.25 };
     if (adxVal <= 20 || rsiVal < params.rsiLong) return { bias: "long", targetAllocation: 0.5 };
     return { bias: "long", targetAllocation: 0.5 };
   }
 
-  if (fast > slow && c <= fast && c > slow) return { bias: "long", targetAllocation: 0.25 };
+  if (fast > slow && c <= fast && c > slow)
+    return macroPermitsEntry("long", macro)
+      ? { bias: "long", targetAllocation: 0.25 }
+      : { bias: "flat", targetAllocation: 0 };
 
-  // SHORT: confirmed downtrend with momentum (now sized symmetrically by conviction
-  // when used through computeStrategySignal — this weekly bias remains a macro filter)
-  if (c < fast && fast < slow && rsiVal < 40 && adxVal > 20) {
-    // Symmetric sizing: same magnitude rules as longs would get with a 0.5 baseline
-    return { bias: "short", targetAllocation: -0.5 };
+  // FULLY SYMMETRIC SHORT LADDER (matches long side magnitudes)
+  if (c < fast && fast < slow) {
+    if (!macroPermitsEntry("short", macro)) return { bias: "flat", targetAllocation: 0 };
+    if (rsiVal < 25) return { bias: "short", targetAllocation: -0.25 }; // oversold — reduce
+    if (rsiVal < 40 && adxVal > 20) return { bias: "short", targetAllocation: -1.0 };
+    if (rsiVal < 50 && adxVal > 15) return { bias: "short", targetAllocation: -0.5 };
+    return { bias: "short", targetAllocation: -0.25 };
   }
+
+  // Bearish stack without strong RSI/ADX confirmation — light short
+  if (fast < slow && c < fast && macroPermitsEntry("short", macro))
+    return { bias: "short", targetAllocation: -0.25 };
 
   return { bias: "flat", targetAllocation: 0 };
 }
