@@ -748,11 +748,37 @@ serve(async (req) => {
 });
 
 // ── Per-user pipeline ─────────────────────────────────────────────────────
+type UserSummary = {
+  entries: number; exits: number; partials: number; holds: number;
+  blocked: number; errors: number;
+  watchlistSize: number; openPositions: number; evaluated: number;
+};
+
+function buildScanRollupReason(u: UserSummary, s: Settings, ctx: AdaptiveContext): string {
+  if (u.watchlistSize === 0 && u.openPositions === 0) {
+    return `Scan ran but watchlist is empty — add tickers to your Watchlist so AutoTrader has something to evaluate.`;
+  }
+  if (u.entries === 0 && u.exits === 0 && u.partials === 0 && u.blocked === 0) {
+    const regimeBits: string[] = [];
+    if (ctx.vix != null) regimeBits.push(`VIX ${ctx.vix.toFixed(1)} (${ctx.vixRegime})`);
+    if (ctx.spyTrend) regimeBits.push(`SPY ${ctx.spyTrend}`);
+    const regime = regimeBits.length ? ` | ${regimeBits.join(" · ")}` : "";
+    return `Evaluated ${u.evaluated}/${u.watchlistSize} watchlist tickers · ${u.openPositions} open. No signals cleared conviction floor of ${s.min_conviction}.${regime}`;
+  }
+  const parts: string[] = [];
+  if (u.entries) parts.push(`${u.entries} entry`);
+  if (u.exits) parts.push(`${u.exits} exit`);
+  if (u.partials) parts.push(`${u.partials} partial`);
+  if (u.blocked) parts.push(`${u.blocked} blocked`);
+  return `Scan complete: ${parts.join(" · ")} (${u.evaluated} tickers · ${u.openPositions} open).`;
+}
+
 async function processUser(
   supabase: ReturnType<typeof createClient>,
   settings: Settings,
   macro: MacroContext | null,
   summary: { entries: number; exits: number; partials: number; holds: number; blocked: number; errors: number },
+  userSummary: UserSummary,
 ) {
   const userId = settings.user_id;
 
@@ -763,6 +789,8 @@ async function processUser(
   ]);
   const positions = (posRes.data ?? []) as unknown as Position[];
   const watchlist = (watchRes.data ?? []).map((w: any) => String(w.ticker).toUpperCase());
+  userSummary.watchlistSize = watchlist.length;
+  userSummary.openPositions = positions.length;
 
   // Build deduped ticker list
   const allTickers = Array.from(new Set([
@@ -772,6 +800,10 @@ async function processUser(
   if (allTickers.length === 0) return;
 
   await batchFetch(allTickers);
+  userSummary.evaluated = allTickers.filter(t => {
+    const d = priceCache.get(t);
+    return d && d.close.length >= 200;
+  }).length;
 
   // Compute today's P&L (realized today + unrealized today vs entry)
   const today = new Date().toISOString().split("T")[0];
