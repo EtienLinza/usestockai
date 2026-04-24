@@ -636,9 +636,20 @@ serve(async (req) => {
     }
     summary.users = settingsRows.length;
 
-    // 2. Pre-fetch SPY for macro context (shared across all users)
-    const spy = await fetchYahooData("SPY");
+    // 2. Pre-fetch SPY + VIX + active calibration weights (shared across users)
+    const [spy, vixData, weightsRes] = await Promise.all([
+      fetchYahooData("SPY"),
+      fetchYahooData("^VIX"),
+      supabase.from("strategy_weights").select("regime_floors").eq("is_active", true)
+        .order("computed_at", { ascending: false }).limit(1).maybeSingle(),
+    ]);
     const macro: MacroContext | null = spy ? { spyClose: spy.close } : null;
+    const vixValue: number | null = vixData && vixData.close.length > 0
+      ? vixData.close[vixData.close.length - 1]
+      : null;
+    const vixRegime = vixRegimeOf(vixValue);
+    const spyTrend = spyTrendOf(macro);
+    const regimeFloors = (weightsRes.data?.regime_floors as Record<string, number> | null) ?? null;
 
     // 3. Per-user processing — gated by per-user next_scan_at
     const now = new Date();
@@ -652,14 +663,56 @@ serve(async (req) => {
         continue;
       }
 
-      const settings = resolveEffectiveSettings(rawSettings, macro);
+      // Compute 7-day rolling P&L for this user
+      const sevenDaysAgo = new Date(Date.now() - 7 * 86400000).toISOString();
+      const { data: recentClosed } = await supabase
+        .from("virtual_positions")
+        .select("pnl")
+        .eq("user_id", rawSettings.user_id)
+        .eq("status", "closed")
+        .gte("exit_date", sevenDaysAgo);
+      const recentPnlDollars = (recentClosed ?? []).reduce(
+        (s: number, p: any) => s + Number(p.pnl ?? 0), 0,
+      );
+      const recentPnlPct = (recentPnlDollars / Number(rawSettings.starting_nav || 100000)) * 100;
+
+      const adaptiveCtx: AdaptiveContext = {
+        vix: vixValue,
+        vixRegime,
+        spyTrend,
+        recentPnlPct,
+        windowDays: 7,
+        adjustments: [],
+      };
+
+      const settings = computeEffectiveSettings(rawSettings, adaptiveCtx, regimeFloors);
+
+      // Persist live state for UI transparency (only when adaptive)
+      if (rawSettings.adaptive_mode) {
+        await supabase.from("autotrader_state").upsert({
+          user_id: rawSettings.user_id,
+          effective_min_conviction: settings.min_conviction,
+          effective_max_positions: settings.max_positions,
+          effective_max_nav_exposure_pct: settings.max_nav_exposure_pct,
+          effective_max_single_name_pct: settings.max_single_name_pct,
+          vix_value: vixValue,
+          vix_regime: vixRegime,
+          spy_trend: spyTrend,
+          recent_pnl_pct: recentPnlPct,
+          recent_pnl_window_days: 7,
+          adjustments: adaptiveCtx.adjustments,
+          reason: adaptiveCtx.adjustments.join(" • "),
+          computed_at: now.toISOString(),
+        }, { onConflict: "user_id" });
+      }
+
       try {
         await processUser(supabase, settings, macro, summary);
 
         // Update cadence timestamps
         const intervalMin = rawSettings.advanced_mode
           ? rawSettings.scan_interval_minutes
-          : algoScanIntervalMinutes(macro);
+          : algoScanIntervalMinutes(macro, vixRegime);
         const nextScan = new Date(now.getTime() + intervalMin * 60_000);
         await supabase.from("autotrade_settings")
           .update({ last_scan_at: now.toISOString(), next_scan_at: nextScan.toISOString() })
