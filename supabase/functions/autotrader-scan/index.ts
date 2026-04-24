@@ -788,10 +788,21 @@ async function processUser(
   // Load open positions + watchlist
   const [posRes, watchRes] = await Promise.all([
     supabase.from("virtual_positions").select("*").eq("user_id", userId).eq("status", "open"),
-    supabase.from("watchlist").select("ticker").eq("user_id", userId).eq("asset_type", "stock"),
+    supabase.from("watchlist").select("ticker, source").eq("user_id", userId).eq("asset_type", "stock"),
   ]);
   const positions = (posRes.data ?? []) as unknown as Position[];
-  const watchlist = (watchRes.data ?? []).map((w: any) => String(w.ticker).toUpperCase());
+  let watchRows = (watchRes.data ?? []) as Array<{ ticker: string; source: string | null }>;
+
+  // ── AUTO-DISCOVERY: pull promising tickers from live_signals into watchlist ──
+  if (settings.auto_add_watchlist) {
+    await syncAutoWatchlist(supabase, settings, watchRows, positions.map(p => p.ticker.toUpperCase()));
+    // Re-read so the rest of the scan picks up newly-added rows
+    const refreshed = await supabase.from("watchlist")
+      .select("ticker, source").eq("user_id", userId).eq("asset_type", "stock");
+    watchRows = (refreshed.data ?? []) as Array<{ ticker: string; source: string | null }>;
+  }
+
+  const watchlist = watchRows.map(w => String(w.ticker).toUpperCase());
   userSummary.watchlistSize = watchlist.length;
   userSummary.openPositions = positions.length;
 
