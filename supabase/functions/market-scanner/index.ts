@@ -100,11 +100,13 @@ import {
   hasDailyEntrySignal,
   hasDailyMeanReversionEntry,
   classifyStock,
+  evaluateSignal,
   PROFILE_PARAMS,
   INDEX_TICKERS,
   type DataSet,
   type StockProfile,
   type WeeklyBias,
+  type MacroContext,
 } from "../_shared/signal-engine-v2.ts";
 
 
