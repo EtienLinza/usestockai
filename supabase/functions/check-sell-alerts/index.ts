@@ -3,11 +3,11 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import { calculateATR } from "../_shared/indicators.ts";
 import {
   aggregateToWeekly,
-  classifyStockSimple,
+  classifyStock,
   computeWeeklyBias,
-  PROFILE_WEEKLY_PARAMS,
+  PROFILE_PARAMS,
   type DataSet,
-} from "../_shared/signal-engine.ts";
+} from "../_shared/signal-engine-v2.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -146,12 +146,17 @@ serve(async (req) => {
           triggeredReason = `🎯 Profit target reached (+${pnlPct.toFixed(1)}% vs ${takeProfitThreshold}% goal)`;
           alerts.push({ ticker: pos.ticker, reason: triggeredReason, current_price: currentPrice, position_id: pos.id });
         }
-        // Weekly reversal — uses canonical shared signal engine (Wilder's ADX, lookahead-fixed classifier)
+        // Weekly reversal — uses canonical shared signal engine v2 (full blended classifier)
         else if (data.close.length >= 200) {
-          const profile = classifyStockSimple(data.close, data.high, data.low, pos.ticker);
+          const cls = classifyStock(data.close, data.high, data.low, pos.ticker);
+          const activeProfile = cls.blendedParams || PROFILE_PARAMS[cls.classification];
+          const params = {
+            fastMA: activeProfile.weeklyFastMA,
+            slowMA: activeProfile.weeklySlowMA,
+            rsiLong: activeProfile.weeklyRSILong,
+          };
           const weeklyData = aggregateToWeekly(data);
           const wIdx = weeklyData.close.length - 1;
-          const params = PROFILE_WEEKLY_PARAMS[profile];
           const weeklyATR = calculateATR(weeklyData.high, weeklyData.low, weeklyData.close, 14);
           let wAtrSum = 0, wAtrCt = 0;
           for (let wi = 14; wi < weeklyData.close.length; wi++) {
