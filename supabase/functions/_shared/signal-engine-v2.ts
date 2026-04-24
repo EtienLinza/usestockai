@@ -202,8 +202,11 @@ export function classifyStock(close: number[], high: number[], low: number[], ti
   const sma50 = calculateSMA(close, 50);
   const sma200 = calculateSMA(close, 200);
 
+  // Use a rolling ~1-year window so a stock that was a momentum name 3 years
+  // ago doesn't drag on today's classification.
   let maAlignedCount = 0, maValidCount = 0;
-  for (let i = 199; i < n; i++) {
+  const maStart = Math.max(199, n - 252);
+  for (let i = maStart; i < n; i++) {
     if (!isNaN(sma50[i]) && !isNaN(sma200[i])) {
       maValidCount++;
       if (close[i] > sma50[i] && sma50[i] > sma200[i]) maAlignedCount++;
@@ -395,9 +398,9 @@ export function computeWeeklyBias(
     return { bias: "short", targetAllocation: -0.25 };
   }
 
-  // Bearish stack without strong RSI/ADX confirmation — light short
-  if (fast < slow && c < fast && macroPermitsEntry("short", macro))
-    return { bias: "short", targetAllocation: -0.25 };
+  // (Removed unreachable bearish-stack short — its condition is a strict subset
+  // of the symmetric short ladder above, which already returns either a short
+  // or a macro-blocked flat.)
 
   return { bias: "flat", targetAllocation: 0 };
 }
@@ -465,9 +468,11 @@ export function hasDailyMeanReversionEntry(
   const price = slice[slice.length - 1];
 
   if (direction === "long") {
-    return rsiVal < 45 || price <= smaVal * 1.005;
+    // Real pullback: oversold-ish RSI AND price near/below the 20-day mean
+    return rsiVal < 40 && price < smaVal * 1.01;
   } else {
-    return rsiVal > 55 || price >= smaVal * 0.995;
+    // Real bounce-to-fade: overbought-ish RSI AND price near/above the 20-day mean
+    return rsiVal > 60 && price > smaVal * 0.99;
   }
 }
 
@@ -538,7 +543,7 @@ export function computeStrategySignal(
   const bbU = safeGet(bb.upper, currentPrice * 1.1);
   const bbL = safeGet(bb.lower, currentPrice * 0.9);
   const bbBW = safeGet(bb.bandwidth, 0.1);
-  const sk = safeGet(stochK, 50);
+  const sk = safeGet(stochK.k, 50);
   const macdH = safeGet(macdData.histogram, 0);
   const prevMacdH = macdData.histogram.length >= 2 ? macdData.histogram[macdData.histogram.length - 2] : 0;
   const currentVol = safeGet(vol, 0.02);
@@ -586,29 +591,27 @@ export function computeStrategySignal(
   const CONV_BUY_THRESH = SP.buyThreshold ?? 65;
   const CONV_SHORT_THRESH = SP.shortThreshold ?? 65;
 
-  // OBV (On-Balance Volume) for trend confirmation
+  // OBV (On-Balance Volume) trend confirmation — only the *delta* over the
+  // last 20 bars matters, so we sum signed volumes in a single 20-bar pass
+  // instead of building an n-length OBV array on every call.
   let obvRising = true;
-  if (volume.length >= 30) {
-    let obv = 0;
-    const obvArr: number[] = [0];
-    for (let oi = 1; oi < close.length; oi++) {
-      if (close[oi] > close[oi - 1]) obv += volume[oi];
-      else if (close[oi] < close[oi - 1]) obv -= volume[oi];
-      obvArr.push(obv);
+  if (volume.length >= 21 && close.length >= 21) {
+    let obvDelta = 0;
+    const start = Math.max(1, close.length - 20);
+    for (let oi = start; oi < close.length; oi++) {
+      if (close[oi] > close[oi - 1]) obvDelta += volume[oi];
+      else if (close[oi] < close[oi - 1]) obvDelta -= volume[oi];
     }
-    if (obvArr.length >= 20) {
-      const obvNow = obvArr[obvArr.length - 1];
-      const obv20Ago = obvArr[obvArr.length - 20];
-      obvRising = obvNow >= obv20Ago;
-    }
+    obvRising = obvDelta >= 0;
   }
 
-  // Bonus pool: diminishing returns into remaining headroom
+  // Bonus pool: bonus magnitude scales with the *strength* of the base signal,
+  // not the headroom. A 60-conviction signal earns less from the same pool than
+  // an 85-conviction signal — stronger base, larger absolute bonus. Capped at 100.
   const applyBonusPool = (base: number, bonusPool: number, maxPool: number) => {
     if (maxPool <= 0) return base;
-    const headroom = Math.max(0, 100 - base);
     const fillRatio = Math.min(1, bonusPool / maxPool);
-    return Math.min(100, base + headroom * fillRatio * 0.65);
+    return Math.min(100, base + base * fillRatio * 0.25);
   };
 
   // --- Strategy A: Trend Following ---
@@ -802,26 +805,7 @@ export function computeStrategySignal(
   return { consensusScore, regime, confidence, strategy: bestStrategy, positionSizeMultiplier, atr: currentATR };
 }
 
-// ============================================================================
-// EVALUATE SIGNAL — top-level convenience function
-// Combines weekly bias (macro filter) + daily strategy signal (entry timing
-// with conviction) + adaptive context. The single function the scanner,
-// sell-alerts, predict and backtest can all call to get the canonical
-// trade decision for a ticker.
-// ============================================================================
-
-export interface EvaluateSignalResult {
-  decision: "BUY" | "SHORT" | "HOLD";
-  conviction: number;        // 0–100
-  weeklyBias: WeeklyBias;
-  profile: StockProfile;
-  blendedParams: ProfileParams;
-  strategy: "trend" | "mean_reversion" | "breakout" | "none";
-  regime: string;
-  positionSizeMultiplier: number;
-  atr: number;
-  reasoning: string;
-}
+// (EvaluateSignalResult is declared once below — single canonical interface.)
 
 // ============================================================================
 // POSITION SIZING — volatility-targeted Kelly
@@ -851,6 +835,11 @@ export function computePositionSize(
 // with conviction) + adaptive context. The single function the scanner,
 // sell-alerts, predict and backtest can all call to get the canonical
 // trade decision for a ticker.
+//
+// SIZING: returns a single sizing output — `kellyFraction` (signed NAV
+// fraction, range -0.25 … +0.25). The legacy `positionSizeMultiplier` has
+// been removed to avoid two conflicting sizing systems. Multi-name
+// portfolios should size positions directly from `kellyFraction`.
 // ============================================================================
 
 export interface EvaluateSignalResult {
@@ -861,12 +850,35 @@ export interface EvaluateSignalResult {
   blendedParams: ProfileParams;
   strategy: "trend" | "mean_reversion" | "breakout" | "none";
   regime: string;
-  positionSizeMultiplier: number;
-  /** Volatility-targeted Kelly fraction (0–0.25 for longs, 0 to −0.25 for shorts) */
+  /** Volatility-targeted Kelly fraction — single canonical sizing output.
+   *  Range: 0…+0.25 for longs, 0…-0.25 for shorts. 0 when no entry. */
   kellyFraction: number;
   atr: number;
   atrPct: number;
   reasoning: string;
+}
+
+// ----------------------------------------------------------------------------
+// Per-ticker signal tracker cache (in-memory, persists across evaluateSignal
+// calls within the same edge-function invocation). Keeps cooldownBarsRemaining
+// alive between bars so the cooldown actually fires instead of resetting to 0
+// on every call. Callers that need cross-invocation persistence (e.g. the live
+// scanner across cron runs) should pass their own tracker explicitly.
+// ----------------------------------------------------------------------------
+const signalTrackerCache = new Map<string, SignalState>();
+
+export function getOrCreateTracker(ticker: string): SignalState {
+  const key = ticker.toUpperCase();
+  let t = signalTrackerCache.get(key);
+  if (!t) {
+    t = createSignalTracker();
+    signalTrackerCache.set(key, t);
+  }
+  return t;
+}
+
+export function clearTrackerCache() {
+  signalTrackerCache.clear();
 }
 
 export function evaluateSignal(
@@ -874,6 +886,10 @@ export function evaluateSignal(
   ticker: string,
   adaptiveContext?: { spyBearish?: boolean; spySMADeclining?: boolean; isLeader?: boolean },
   macro?: MacroContext | null,
+  /** Optional caller-supplied tracker for cooldown persistence across runs.
+   *  When omitted, a per-ticker in-memory tracker is used (lives for the
+   *  duration of the edge-function invocation). */
+  tracker?: SignalState,
 ): EvaluateSignalResult | null {
   if (data.close.length < 200) return null;
 
@@ -918,7 +934,6 @@ export function evaluateSignal(
       blendedParams: activeProfile,
       strategy: "none",
       regime: "neutral",
-      positionSizeMultiplier: 0,
       kellyFraction: 0,
       atr: 0,
       atrPct: atrPctNow,
@@ -926,11 +941,12 @@ export function evaluateSignal(
     };
   }
 
-  // 3. Compute multi-strategy conviction signal
-  const tracker = createSignalTracker();
+  // 3. Compute multi-strategy conviction signal — use a *persistent* tracker so
+  //    cooldownBarsRemaining actually carries between calls.
+  const activeTracker = tracker ?? getOrCreateTracker(ticker);
   const sig = computeStrategySignal(
     data.close, data.high, data.low, data.volume,
-    tracker, 1,
+    activeTracker, 1,
     {
       adxThreshold: activeProfile.adxThreshold,
       rsiOversold: activeProfile.rsiOversold,
@@ -973,7 +989,6 @@ export function evaluateSignal(
       blendedParams: activeProfile,
       strategy: sig.strategy,
       regime: sig.regime,
-      positionSizeMultiplier: 0,
       kellyFraction: 0,
       atr: sig.atr,
       atrPct: atrPctNow,
@@ -997,10 +1012,10 @@ export function evaluateSignal(
     blendedParams: activeProfile,
     strategy: sig.strategy,
     regime: sig.regime,
-    positionSizeMultiplier: sig.positionSizeMultiplier,
     kellyFraction,
     atr: sig.atr,
     atrPct: atrPctNow,
     reasoning: `${sig.strategy.replace("_", " ")} ${sigDir.toLowerCase()} | ${cls.classification} profile | ${sig.regime} regime | conviction ${sig.confidence} | kelly ${(kellyFraction * 100).toFixed(1)}%`,
   };
 }
+
