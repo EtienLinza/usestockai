@@ -326,6 +326,54 @@ const Settings = () => {
                     </div>
                     <Switch checked={bot.use_news_sentiment} onCheckedChange={(v) => setBot({ ...bot, use_news_sentiment: v })} />
                   </div>
+                  <div className="space-y-3 rounded-lg border border-border/50 p-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="space-y-0.5">
+                        <Label className="text-sm">Auto-discover tickers</Label>
+                        <p className="text-xs text-muted-foreground">
+                          Automatically add promising tickers from the live signal feed to your watchlist. Auto-added tickers are removed if no qualifying signal appears for {bot.auto_watchlist_stale_days} days (held positions are never removed).
+                        </p>
+                      </div>
+                      <Switch
+                        checked={bot.auto_add_watchlist}
+                        onCheckedChange={(v) => setBot({ ...bot, auto_add_watchlist: v })}
+                      />
+                    </div>
+                    {bot.auto_add_watchlist && (
+                      <div className="grid grid-cols-2 gap-3 pt-1">
+                        <div className="space-y-1">
+                          <Label className="text-xs text-muted-foreground">Consideration floor</Label>
+                          <Input
+                            type="number"
+                            min={50}
+                            max={95}
+                            value={bot.auto_watchlist_consideration_floor}
+                            onChange={(e) => setBot({
+                              ...bot,
+                              auto_watchlist_consideration_floor: Math.max(50, Math.min(95, Number(e.target.value) || 60)),
+                            })}
+                            className="h-8 text-sm"
+                          />
+                          <p className="text-[10px] text-muted-foreground">Min signal conviction (50–95)</p>
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-xs text-muted-foreground">Stale after (days)</Label>
+                          <Input
+                            type="number"
+                            min={1}
+                            max={90}
+                            value={bot.auto_watchlist_stale_days}
+                            onChange={(e) => setBot({
+                              ...bot,
+                              auto_watchlist_stale_days: Math.max(1, Math.min(90, Number(e.target.value) || 14)),
+                            })}
+                            className="h-8 text-sm"
+                          />
+                          <p className="text-[10px] text-muted-foreground">Auto-remove window (1–90)</p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
                   <div className="flex items-center gap-2 flex-wrap">
                     <Badge variant={bot.enabled ? "default" : "secondary"}>
                       {bot.enabled ? "Active" : "Paused"}
