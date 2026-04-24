@@ -1,0 +1,2 @@
+COMMENT ON TABLE public.news_sentiment_cache IS
+  'Server-only cache for AI-derived news sentiment per ticker. Intentionally has RLS enabled with no public policies — only the service role (edge functions) reads/writes this table. End-user roles must not access it directly; sentiment is exposed to clients only via autotrade_log rows that already have user-scoped RLS.';
