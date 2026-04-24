@@ -6,7 +6,6 @@ const corsHeaders = {
 };
 
 serve(async (req) => {
-  // Handle CORS preflight requests
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
@@ -23,26 +22,29 @@ serve(async (req) => {
 
     console.log(`Fetching stock price for: ${ticker}`);
 
-    // Fetch from Yahoo Finance API
-    const response = await fetch(
-      `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=5d`,
-      {
-        headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        },
-      }
-    );
+    // Fetch daily history (5d) and intraday meta (live quote) in parallel.
+    // We use the chart endpoint with a 1m interval for the live quote because
+    // Yahoo's /v7/quote endpoint now requires a crumb cookie.
+    const [chartRes, intradayRes] = await Promise.all([
+      fetch(
+        `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=5d`,
+        { headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" } }
+      ),
+      fetch(
+        `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1m&range=1d`,
+        { headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" } }
+      ).catch(() => null),
+    ]);
 
-    if (!response.ok) {
-      console.error(`Yahoo Finance API error: ${response.status}`);
+    if (!chartRes.ok) {
+      console.error(`Yahoo Finance chart API error: ${chartRes.status}`);
       return new Response(
-        JSON.stringify({ error: "Failed to fetch stock data", status: response.status }),
+        JSON.stringify({ error: "Failed to fetch stock data", status: chartRes.status }),
         { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    const data = await response.json();
-    
+    const data = await chartRes.json();
     const result = data?.chart?.result?.[0];
     if (!result) {
       console.error("No data in Yahoo Finance response");
@@ -63,13 +65,32 @@ serve(async (req) => {
       );
     }
 
-    // Build price history array
     const priceHistory = timestamps.map((ts: number, i: number) => ({
       timestamp: ts,
       price: closes[i],
     })).filter((item: { price: number | null }) => item.price !== null);
 
-    console.log(`Successfully fetched ${priceHistory.length} price points for ${ticker}`);
+    // Live quote from intraday meta (best-effort).
+    let liveQuote: number | null = null;
+    let previousClose: number | null = null;
+    let marketState: string | null = null;
+    if (intradayRes && intradayRes.ok) {
+      try {
+        const ij = await intradayRes.json();
+        const meta = ij?.chart?.result?.[0]?.meta;
+        if (meta) {
+          liveQuote = typeof meta.regularMarketPrice === "number" ? meta.regularMarketPrice : null;
+          previousClose = typeof meta.previousClose === "number"
+            ? meta.previousClose
+            : (typeof meta.chartPreviousClose === "number" ? meta.chartPreviousClose : null);
+          marketState = meta.marketState ?? null;
+        }
+      } catch (e) {
+        console.warn("intraday meta parse failed", e);
+      }
+    }
+
+    console.log(`Fetched ${priceHistory.length} bars for ${ticker}; liveQuote=${liveQuote} prevClose=${previousClose}`);
 
     return new Response(
       JSON.stringify({
@@ -77,6 +98,9 @@ serve(async (req) => {
         priceHistory,
         latestPrice: closes[closes.length - 1],
         latestTimestamp: timestamps[timestamps.length - 1],
+        liveQuote,
+        previousClose,
+        marketState,
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );

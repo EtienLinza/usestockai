@@ -78,6 +78,35 @@ async function batchFetch(tickers: string[]): Promise<void> {
   }
 }
 
+// ── Live intraday quote (used at entry execution to get an actual fillable price) ──
+// Yahoo's /v8/chart with intraday interval returns meta.regularMarketPrice (live, ~15min
+// delayed but tradable). The /v7/quote endpoint now requires a crumb cookie so we avoid it.
+interface LiveQuote { price: number; previousClose: number | null; marketState: string | null }
+async function fetchLiveQuote(ticker: string): Promise<LiveQuote | null> {
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 5000);
+    const r = await fetch(
+      `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=1m&range=1d`,
+      { headers: { "User-Agent": "Mozilla/5.0" }, signal: ctrl.signal },
+    );
+    clearTimeout(t);
+    if (!r.ok) return null;
+    const j = await r.json();
+    const meta = j?.chart?.result?.[0]?.meta;
+    if (!meta || typeof meta.regularMarketPrice !== "number") return null;
+    return {
+      price: meta.regularMarketPrice,
+      previousClose: typeof meta.previousClose === "number"
+        ? meta.previousClose
+        : (typeof meta.chartPreviousClose === "number" ? meta.chartPreviousClose : null),
+      marketState: meta.marketState ?? null,
+    };
+  } catch {
+    return null;
+  }
+}
+
 // ============================================================================
 // TYPES
 // ============================================================================
@@ -1009,6 +1038,18 @@ async function processUser(
   const todayPnlPct = ((realizedToday + unrealizedToday) / settings.starting_nav) * 100;
 
   const heldTickers = new Set(positions.map(p => p.ticker.toUpperCase()));
+
+  // PASS 1 — gather decisions for every eligible ticker (no DB writes yet).
+  // This lets us rank ENTER candidates by conviction and stagger entries
+  // (cap at MAX_ENTRIES_PER_SCAN per run) so we don't open 4–8 positions in a
+  // single tick at correlated highs.
+  const MAX_ENTRIES_PER_SCAN = 2;
+  type Pending =
+    | { kind: "enter"; ticker: string; decision: Extract<EntryAction, { kind: "ENTER" }> }
+    | { kind: "blocked"; ticker: string; decision: Extract<EntryAction, { kind: "BLOCKED" }> }
+    | { kind: "hold" };
+  const pending: Pending[] = [];
+
   for (const ticker of watchlist) {
     if (heldTickers.has(ticker)) continue;
 
@@ -1021,9 +1062,7 @@ async function processUser(
       .order("closed_at", { ascending: false, nullsFirst: false })
       .limit(1);
     const cd = lastClose?.[0]?.cooldown_until;
-    if (cd && new Date(cd as string).getTime() > Date.now()) {
-      continue; // silent skip — cooldowns are noisy
-    }
+    if (cd && new Date(cd as string).getTime() > Date.now()) continue;
 
     const data = priceCache.get(ticker);
     if (!data || data.close.length < 200) continue;
@@ -1035,26 +1074,54 @@ async function processUser(
       todayPnlPct,
     );
 
-    if (decision.kind === "ENTER") {
-      const beforeEntries = summary.entries;
-      await executeEntry(supabase, settings, ticker, decision, summary);
-      userSummary.entries += summary.entries - beforeEntries;
-      // Update local counters so the same scan doesn't blow past caps
-      const dollars = decision.kellyFraction * settings.starting_nav;
+    if (decision.kind === "ENTER") pending.push({ kind: "enter", ticker, decision });
+    else if (decision.kind === "BLOCKED") pending.push({ kind: "blocked", ticker, decision });
+    else pending.push({ kind: "hold" });
+  }
+
+  // PASS 2 — sort ENTER candidates by conviction desc, take top N, defer the rest.
+  const enterCandidates = pending
+    .filter((p): p is Extract<Pending, { kind: "enter" }> => p.kind === "enter")
+    .sort((a, b) => b.decision.conviction - a.decision.conviction);
+  const toExecute = enterCandidates.slice(0, MAX_ENTRIES_PER_SCAN);
+  const deferred = enterCandidates.slice(MAX_ENTRIES_PER_SCAN);
+
+  for (const p of toExecute) {
+    const beforeEntries = summary.entries;
+    await executeEntry(supabase, settings, p.ticker, p.decision, summary);
+    userSummary.entries += summary.entries - beforeEntries;
+    if (summary.entries > beforeEntries) {
+      const dollars = p.decision.kellyFraction * settings.starting_nav;
       totalNavExposureDollars += dollars;
-    } else if (decision.kind === "BLOCKED") {
-      summary.blocked++;
-      userSummary.blocked++;
-      await supabase.from("autotrade_log").insert({
-        user_id: userId, ticker, action: "BLOCKED", reason: decision.reason,
-        sentiment_score: decision.sentiment?.score ?? null,
-        sentiment_confidence: decision.sentiment?.confidence ?? null,
-        sentiment_headlines: decision.sentiment?.headlines ?? null,
-      });
-    } else {
-      summary.holds++;
-      userSummary.holds++;
     }
+  }
+
+  for (const p of deferred) {
+    summary.holds++;
+    userSummary.holds++;
+    await supabase.from("autotrade_log").insert({
+      user_id: userId, ticker: p.ticker, action: "HOLD",
+      reason: `Deferred — entry stagger cap (${MAX_ENTRIES_PER_SCAN}/scan); will retry next cycle (conviction ${p.decision.conviction})`,
+      conviction: p.decision.conviction,
+      strategy: p.decision.strategy,
+      profile: p.decision.profile,
+    });
+  }
+
+  for (const p of pending) {
+    if (p.kind !== "blocked") continue;
+    summary.blocked++;
+    userSummary.blocked++;
+    await supabase.from("autotrade_log").insert({
+      user_id: userId, ticker: p.ticker, action: "BLOCKED", reason: p.decision.reason,
+      sentiment_score: p.decision.sentiment?.score ?? null,
+      sentiment_confidence: p.decision.sentiment?.confidence ?? null,
+      sentiment_headlines: p.decision.sentiment?.headlines ?? null,
+    });
+  }
+
+  for (const p of pending) {
+    if (p.kind === "hold") { summary.holds++; userSummary.holds++; }
   }
 
   // Portfolio snapshot
@@ -1188,15 +1255,51 @@ async function executeEntry(
     return;
   }
 
+  // ── LIVE QUOTE: replace stale daily close with a tradable intraday price ──
+  // The signal-engine's `e.price` is the last daily-bar close (or moving intraday last
+  // from the daily endpoint), which is noisy and prone to single-tick spikes. We refetch
+  // the live quote at execution time and use it as the actual fill.
+  const live = await fetchLiveQuote(ticker);
+  if (!live) {
+    await supabase.from("autotrade_log").insert({
+      user_id: settings.user_id, ticker, action: "BLOCKED",
+      reason: "Live quote unavailable — entry deferred to next scan",
+      conviction: e.conviction, strategy: e.strategy, profile: e.profile,
+    });
+    return;
+  }
+
+  // ── SANITY CHECK: reject obviously broken quotes (data glitch / halted / wide gap) ──
+  if (live.previousClose && live.previousClose > 0) {
+    const gapPct = Math.abs(live.price - live.previousClose) / live.previousClose;
+    if (gapPct > 0.08) {
+      await supabase.from("autotrade_log").insert({
+        user_id: settings.user_id, ticker, action: "BLOCKED",
+        reason: `Live quote diverges ${(gapPct * 100).toFixed(1)}% from prev close ($${live.price.toFixed(2)} vs $${live.previousClose.toFixed(2)}) — possible bad tick or halt`,
+        price: live.price,
+        conviction: e.conviction, strategy: e.strategy, profile: e.profile,
+      });
+      return;
+    }
+  }
+
+  // Recompute fill + stop against the live price (preserve the original ATR multiplier).
+  const fillPrice = live.price;
+  const isLong = e.decision !== "SHORT";
+  const stopATRMult = e.atr > 0 ? Math.abs(e.price - e.hardStop) / e.atr : 2;
+  const hardStop = isLong
+    ? fillPrice - e.atr * stopATRMult
+    : fillPrice + e.atr * stopATRMult;
+
   const dollars = settings.starting_nav * e.kellyFraction;
-  const shares = Math.floor(dollars / e.price);
+  const shares = Math.floor(dollars / fillPrice);
   if (shares < 1) return;
 
   // Direction comes directly from the signal — never parse free-form reasoning.
   const positionType: "long" | "short" = e.decision === "SHORT" ? "short" : "long";
 
   const { data: ins, error: insErr } = await supabase.from("virtual_positions").insert({
-    user_id: settings.user_id, ticker, entry_price: e.price, shares,
+    user_id: settings.user_id, ticker, entry_price: fillPrice, shares,
     position_type: positionType,
     status: "open",
     opened_by: "autotrader",
@@ -1205,16 +1308,19 @@ async function executeEntry(
     entry_strategy: e.strategy,
     entry_profile: e.profile,
     entry_weekly_alloc: e.weeklyAlloc,
-    hard_stop_price: e.hardStop,
-    trailing_stop_price: e.hardStop,
-    peak_price: e.price,
+    hard_stop_price: hardStop,
+    trailing_stop_price: hardStop,
+    peak_price: fillPrice,
   }).select("id").single();
   if (insErr) { console.error("entry insert failed", insErr); return; }
 
   summary.entries++;
+  const signalPrice = e.price;
+  const slipPct = ((fillPrice - signalPrice) / signalPrice) * 100;
   await supabase.from("autotrade_log").insert({
     user_id: settings.user_id, ticker, action: "ENTRY",
-    reason: e.reasoning, price: e.price, shares,
+    reason: `${e.reasoning} | live fill $${fillPrice.toFixed(2)} (signal $${signalPrice.toFixed(2)}, ${slipPct >= 0 ? "+" : ""}${slipPct.toFixed(2)}%)`,
+    price: fillPrice, shares,
     conviction: e.conviction, strategy: e.strategy, profile: e.profile,
     position_id: ins.id,
     sentiment_score: e.sentiment?.score ?? null,
