@@ -85,6 +85,9 @@ const AUTOTRADE_DEFAULTS: AutoTradeSettings = {
   daily_loss_limit_pct: 3,
   starting_nav: 100000,
   use_news_sentiment: true,
+  auto_add_watchlist: true,
+  auto_watchlist_consideration_floor: 60,
+  auto_watchlist_stale_days: 14,
 };
 
 const RISK_PROFILE_LABEL: Record<RiskProfile, { label: string; hint: string }> = {
