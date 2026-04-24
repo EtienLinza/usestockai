@@ -109,6 +109,7 @@ const Settings = () => {
           max_single_name_pct: Number(botRes.data.max_single_name_pct),
           daily_loss_limit_pct: Number(botRes.data.daily_loss_limit_pct),
           starting_nav: Number(botRes.data.starting_nav),
+          use_news_sentiment: botRes.data.use_news_sentiment ?? true,
         });
         setLastScanAt(botRes.data.last_scan_at as string | null);
         setNextScanAt(botRes.data.next_scan_at as string | null);
