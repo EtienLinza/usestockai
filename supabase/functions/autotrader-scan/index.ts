@@ -113,6 +113,9 @@ interface Settings {
   use_news_sentiment: boolean;
   risk_profile: "conservative" | "balanced" | "aggressive";
   adaptive_mode: boolean;
+  auto_add_watchlist: boolean;
+  auto_watchlist_consideration_floor: number;
+  auto_watchlist_stale_days: number;
 }
 
 interface AdaptiveContext {
