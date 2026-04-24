@@ -7,10 +7,11 @@ import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { Shield, Loader2, Info, Bot, Sparkles, Clock, Activity, TrendingUp, TrendingDown, Minus } from "lucide-react";
+import { Shield, Loader2, Info, Bot, Sparkles, Clock, Activity, TrendingUp, TrendingDown, Minus, Wallet, Infinity as InfinityIcon } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
