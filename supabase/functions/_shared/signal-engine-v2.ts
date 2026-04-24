@@ -465,9 +465,11 @@ export function hasDailyMeanReversionEntry(
   const price = slice[slice.length - 1];
 
   if (direction === "long") {
-    return rsiVal < 45 || price <= smaVal * 1.005;
+    // Real pullback: oversold-ish RSI AND price near/below the 20-day mean
+    return rsiVal < 40 && price < smaVal * 1.01;
   } else {
-    return rsiVal > 55 || price >= smaVal * 0.995;
+    // Real bounce-to-fade: overbought-ish RSI AND price near/above the 20-day mean
+    return rsiVal > 60 && price > smaVal * 0.99;
   }
 }
 
