@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { Navbar } from "@/components/Navbar";
 import { Card } from "@/components/ui/card";
@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { Shield, Loader2, Info, Bot } from "lucide-react";
+import { Shield, Loader2, Info, Bot, Sparkles, Clock } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
@@ -26,14 +26,18 @@ interface PortfolioCaps {
 
 interface AutoTradeSettings {
   enabled: boolean;
+  paper_mode: boolean;
+  advanced_mode: boolean;
+  scan_interval_minutes: number;
   min_conviction: number;
   max_positions: number;
   max_nav_exposure_pct: number;
   max_single_name_pct: number;
   daily_loss_limit_pct: number;
   starting_nav: number;
-  paper_mode: boolean;
 }
+
+const SCAN_INTERVAL_OPTIONS = [5, 10, 15, 30, 60] as const;
 
 const CAPS_DEFAULTS: PortfolioCaps = {
   sector_max_pct: 35,
@@ -45,13 +49,15 @@ const CAPS_DEFAULTS: PortfolioCaps = {
 
 const AUTOTRADE_DEFAULTS: AutoTradeSettings = {
   enabled: false,
+  paper_mode: true,
+  advanced_mode: false,
+  scan_interval_minutes: 10,
   min_conviction: 70,
   max_positions: 8,
   max_nav_exposure_pct: 80,
   max_single_name_pct: 20,
   daily_loss_limit_pct: 3,
   starting_nav: 100000,
-  paper_mode: true,
 };
 
 const Settings = () => {
@@ -59,6 +65,8 @@ const Settings = () => {
   const navigate = useNavigate();
   const [caps, setCaps] = useState<PortfolioCaps>(CAPS_DEFAULTS);
   const [bot, setBot] = useState<AutoTradeSettings>(AUTOTRADE_DEFAULTS);
+  const [lastScanAt, setLastScanAt] = useState<string | null>(null);
+  const [nextScanAt, setNextScanAt] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -75,7 +83,7 @@ const Settings = () => {
           .select("sector_max_pct, portfolio_beta_max, max_correlated_positions, enforcement_mode, enabled")
           .eq("user_id", user.id).maybeSingle(),
         supabase.from("autotrade_settings")
-          .select("enabled, min_conviction, max_positions, max_nav_exposure_pct, max_single_name_pct, daily_loss_limit_pct, starting_nav, paper_mode")
+          .select("enabled, paper_mode, advanced_mode, scan_interval_minutes, min_conviction, max_positions, max_nav_exposure_pct, max_single_name_pct, daily_loss_limit_pct, starting_nav, last_scan_at, next_scan_at")
           .eq("user_id", user.id).maybeSingle(),
       ]);
       if (capsRes.data) {
@@ -90,14 +98,18 @@ const Settings = () => {
       if (botRes.data) {
         setBot({
           enabled: Boolean(botRes.data.enabled),
+          paper_mode: Boolean(botRes.data.paper_mode),
+          advanced_mode: Boolean(botRes.data.advanced_mode),
+          scan_interval_minutes: Number(botRes.data.scan_interval_minutes ?? 10),
           min_conviction: Number(botRes.data.min_conviction),
           max_positions: Number(botRes.data.max_positions),
           max_nav_exposure_pct: Number(botRes.data.max_nav_exposure_pct),
           max_single_name_pct: Number(botRes.data.max_single_name_pct),
           daily_loss_limit_pct: Number(botRes.data.daily_loss_limit_pct),
           starting_nav: Number(botRes.data.starting_nav),
-          paper_mode: Boolean(botRes.data.paper_mode),
         });
+        setLastScanAt(botRes.data.last_scan_at as string | null);
+        setNextScanAt(botRes.data.next_scan_at as string | null);
       }
       setLoading(false);
     })();
@@ -136,7 +148,7 @@ const Settings = () => {
                 <h1 className="text-2xl font-medium tracking-tight">AutoTrader</h1>
               </div>
               <p className="text-sm text-muted-foreground">
-                Hands-off scanner that opens, holds, and closes positions every 10 minutes during market hours.
+                Hands-off scanner that opens, holds, and closes positions on its own.
                 Win exits use 5-signal peak detection; loss exits use thesis invalidation.
               </p>
             </div>
@@ -152,7 +164,7 @@ const Settings = () => {
                     <div className="space-y-0.5">
                       <Label className="text-sm">Enable AutoTrader</Label>
                       <p className="text-xs text-muted-foreground">
-                        When on, the system scans your watchlist every 10 minutes and trades for you.
+                        When on, the system scans your watchlist and trades on your behalf.
                       </p>
                     </div>
                     <Switch checked={bot.enabled} onCheckedChange={(v) => setBot({ ...bot, enabled: v })} />
@@ -166,51 +178,99 @@ const Settings = () => {
                     </div>
                     <Switch checked={bot.paper_mode} onCheckedChange={(v) => setBot({ ...bot, paper_mode: v })} />
                   </div>
+                  <div className="flex items-center justify-between">
+                    <div className="space-y-0.5">
+                      <div className="flex items-center gap-2">
+                        <Label className="text-sm">Advanced mode</Label>
+                        <Badge variant="outline" className="text-[10px] px-1.5 py-0">manual control</Badge>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Reveal scan interval, conviction floor, exposure caps, and the daily kill-switch.
+                      </p>
+                    </div>
+                    <Switch checked={bot.advanced_mode} onCheckedChange={(v) => setBot({ ...bot, advanced_mode: v })} />
+                  </div>
                   <div className="flex items-center gap-2">
                     <Badge variant={bot.enabled ? "default" : "secondary"}>
                       {bot.enabled ? "Active" : "Paused"}
                     </Badge>
                     {bot.paper_mode && <Badge variant="outline">Paper</Badge>}
+                    {!bot.advanced_mode && (
+                      <Badge variant="outline" className="gap-1">
+                        <Sparkles className="w-3 h-3" /> Autopilot
+                      </Badge>
+                    )}
                   </div>
                 </Card>
 
-                <Card className="glass-card p-5 space-y-6">
-                  <CapSlider
-                    label="Min conviction to enter"
-                    hint="0–100. Only signals at or above this score open positions."
-                    value={bot.min_conviction}
-                    onChange={(v) => setBot({ ...bot, min_conviction: Math.round(v) })}
-                    min={50} max={95} step={1}
-                  />
-                  <CapSlider
-                    label="Max open positions"
-                    hint="Maximum simultaneous trades."
-                    value={bot.max_positions}
-                    onChange={(v) => setBot({ ...bot, max_positions: Math.round(v) })}
-                    min={1} max={20} step={1}
-                  />
-                  <CapSlider
-                    label="Max NAV exposure"
-                    hint="Total % of starting capital that can be deployed at once."
-                    value={bot.max_nav_exposure_pct}
-                    onChange={(v) => setBot({ ...bot, max_nav_exposure_pct: v })}
-                    min={20} max={100} step={5} suffix="%"
-                  />
-                  <CapSlider
-                    label="Max per single name"
-                    hint="No single ticker can exceed this % of starting NAV."
-                    value={bot.max_single_name_pct}
-                    onChange={(v) => setBot({ ...bot, max_single_name_pct: v })}
-                    min={5} max={50} step={1} suffix="%"
-                  />
-                  <CapSlider
-                    label="Daily loss kill-switch"
-                    hint="When today's combined P&L drops below this, no new entries until tomorrow."
-                    value={bot.daily_loss_limit_pct}
-                    onChange={(v) => setBot({ ...bot, daily_loss_limit_pct: v })}
-                    min={1} max={10} step={0.5} suffix="%" decimals={1}
-                  />
-                </Card>
+                {!bot.advanced_mode ? (
+                  <AutopilotStatusCard lastScanAt={lastScanAt} nextScanAt={nextScanAt} enabled={bot.enabled} />
+                ) : (
+                  <Card className="glass-card p-5 space-y-6">
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <Label className="text-sm flex items-center gap-2">
+                            <Clock className="w-3.5 h-3.5 text-primary" />
+                            Scan interval
+                          </Label>
+                          <p className="text-xs text-muted-foreground mt-0.5">
+                            How often the bot re-evaluates entries and exits during market hours.
+                          </p>
+                        </div>
+                        <Select
+                          value={String(bot.scan_interval_minutes)}
+                          onValueChange={(v) => setBot({ ...bot, scan_interval_minutes: Number(v) })}
+                        >
+                          <SelectTrigger className="w-32"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            {SCAN_INTERVAL_OPTIONS.map((m) => (
+                              <SelectItem key={m} value={String(m)}>
+                                Every {m} min
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+
+                    <CapSlider
+                      label="Min conviction to enter"
+                      hint="0–100. Only signals at or above this score open positions."
+                      value={bot.min_conviction}
+                      onChange={(v) => setBot({ ...bot, min_conviction: Math.round(v) })}
+                      min={50} max={95} step={1}
+                    />
+                    <CapSlider
+                      label="Max open positions"
+                      hint="Maximum simultaneous trades."
+                      value={bot.max_positions}
+                      onChange={(v) => setBot({ ...bot, max_positions: Math.round(v) })}
+                      min={1} max={20} step={1}
+                    />
+                    <CapSlider
+                      label="Max NAV exposure"
+                      hint="Total % of starting capital that can be deployed at once."
+                      value={bot.max_nav_exposure_pct}
+                      onChange={(v) => setBot({ ...bot, max_nav_exposure_pct: v })}
+                      min={20} max={100} step={5} suffix="%"
+                    />
+                    <CapSlider
+                      label="Max per single name"
+                      hint="No single ticker can exceed this % of starting NAV."
+                      value={bot.max_single_name_pct}
+                      onChange={(v) => setBot({ ...bot, max_single_name_pct: v })}
+                      min={5} max={50} step={1} suffix="%"
+                    />
+                    <CapSlider
+                      label="Daily loss kill-switch"
+                      hint="When today's combined P&L drops below this, no new entries until tomorrow."
+                      value={bot.daily_loss_limit_pct}
+                      onChange={(v) => setBot({ ...bot, daily_loss_limit_pct: v })}
+                      min={1} max={10} step={0.5} suffix="%" decimals={1}
+                    />
+                  </Card>
+                )}
               </>
             )}
           </section>
@@ -303,6 +363,52 @@ const Settings = () => {
     </div>
   );
 };
+
+interface AutopilotStatusCardProps {
+  lastScanAt: string | null;
+  nextScanAt: string | null;
+  enabled: boolean;
+}
+
+function AutopilotStatusCard({ lastScanAt, nextScanAt, enabled }: AutopilotStatusCardProps) {
+  const lastLabel = useMemo(() => formatRelative(lastScanAt, "past"), [lastScanAt]);
+  const nextLabel = useMemo(() => formatRelative(nextScanAt, "future"), [nextScanAt]);
+
+  return (
+    <Card className="glass-card p-5 space-y-4 bg-primary/5 border-primary/20">
+      <div className="flex items-start gap-3">
+        <Sparkles className="w-4 h-4 text-primary mt-0.5 flex-shrink-0" />
+        <div className="space-y-1">
+          <p className="text-sm text-foreground font-medium">Algorithm in control</p>
+          <p className="text-xs text-muted-foreground leading-relaxed">
+            Conviction floor, exposure caps, position count, and scan cadence all adapt to live market conditions.
+            Tighter rules in bear regimes; faster scans around the open and during high volatility.
+          </p>
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-3 pt-2 border-t border-border/40">
+        <div className="space-y-0.5">
+          <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Last scan</p>
+          <p className="text-sm font-mono">{enabled ? lastLabel : "—"}</p>
+        </div>
+        <div className="space-y-0.5">
+          <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Next scan</p>
+          <p className="text-sm font-mono">{enabled ? nextLabel : "—"}</p>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+function formatRelative(iso: string | null, dir: "past" | "future"): string {
+  if (!iso) return "—";
+  const ms = new Date(iso).getTime() - Date.now();
+  const absMin = Math.round(Math.abs(ms) / 60000);
+  if (absMin < 1) return dir === "past" ? "just now" : "any moment";
+  if (absMin < 60) return dir === "past" ? `${absMin} min ago` : `in ${absMin} min`;
+  const hrs = Math.round(absMin / 60);
+  return dir === "past" ? `${hrs}h ago` : `in ${hrs}h`;
+}
 
 interface CapSliderProps {
   label: string; hint: string; value: number;

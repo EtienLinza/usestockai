@@ -64,43 +64,55 @@ export type Database = {
       }
       autotrade_settings: {
         Row: {
+          advanced_mode: boolean
           created_at: string
           daily_loss_limit_pct: number
           enabled: boolean
+          last_scan_at: string | null
           max_nav_exposure_pct: number
           max_positions: number
           max_single_name_pct: number
           min_conviction: number
+          next_scan_at: string | null
           notify_on_action: boolean
           paper_mode: boolean
+          scan_interval_minutes: number
           starting_nav: number
           updated_at: string
           user_id: string
         }
         Insert: {
+          advanced_mode?: boolean
           created_at?: string
           daily_loss_limit_pct?: number
           enabled?: boolean
+          last_scan_at?: string | null
           max_nav_exposure_pct?: number
           max_positions?: number
           max_single_name_pct?: number
           min_conviction?: number
+          next_scan_at?: string | null
           notify_on_action?: boolean
           paper_mode?: boolean
+          scan_interval_minutes?: number
           starting_nav?: number
           updated_at?: string
           user_id: string
         }
         Update: {
+          advanced_mode?: boolean
           created_at?: string
           daily_loss_limit_pct?: number
           enabled?: boolean
+          last_scan_at?: string | null
           max_nav_exposure_pct?: number
           max_positions?: number
           max_single_name_pct?: number
           min_conviction?: number
+          next_scan_at?: string | null
           notify_on_action?: boolean
           paper_mode?: boolean
+          scan_interval_minutes?: number
           starting_nav?: number
           updated_at?: string
           user_id?: string
