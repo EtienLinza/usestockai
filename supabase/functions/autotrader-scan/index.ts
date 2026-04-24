@@ -608,6 +608,7 @@ async function runEntryDecision(
     atr,
     hardStop,
     weeklyAlloc: sig.weeklyBias.targetAllocation,
+    decision: sig.decision === "SHORT" ? "SHORT" : "BUY",
     reasoning: sentiment && sentiment.reasoning
       ? `${sig.reasoning} | news: ${sentiment.reasoning}`
       : sig.reasoning,
