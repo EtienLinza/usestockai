@@ -14,6 +14,99 @@ export type Database = {
   }
   public: {
     Tables: {
+      autotrade_log: {
+        Row: {
+          action: string
+          conviction: number | null
+          created_at: string
+          id: string
+          pnl_pct: number | null
+          position_id: string | null
+          price: number | null
+          profile: string | null
+          reason: string | null
+          shares: number | null
+          strategy: string | null
+          ticker: string
+          user_id: string
+        }
+        Insert: {
+          action: string
+          conviction?: number | null
+          created_at?: string
+          id?: string
+          pnl_pct?: number | null
+          position_id?: string | null
+          price?: number | null
+          profile?: string | null
+          reason?: string | null
+          shares?: number | null
+          strategy?: string | null
+          ticker: string
+          user_id: string
+        }
+        Update: {
+          action?: string
+          conviction?: number | null
+          created_at?: string
+          id?: string
+          pnl_pct?: number | null
+          position_id?: string | null
+          price?: number | null
+          profile?: string | null
+          reason?: string | null
+          shares?: number | null
+          strategy?: string | null
+          ticker?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      autotrade_settings: {
+        Row: {
+          created_at: string
+          daily_loss_limit_pct: number
+          enabled: boolean
+          max_nav_exposure_pct: number
+          max_positions: number
+          max_single_name_pct: number
+          min_conviction: number
+          notify_on_action: boolean
+          paper_mode: boolean
+          starting_nav: number
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          daily_loss_limit_pct?: number
+          enabled?: boolean
+          max_nav_exposure_pct?: number
+          max_positions?: number
+          max_single_name_pct?: number
+          min_conviction?: number
+          notify_on_action?: boolean
+          paper_mode?: boolean
+          starting_nav?: number
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          daily_loss_limit_pct?: number
+          enabled?: boolean
+          max_nav_exposure_pct?: number
+          max_positions?: number
+          max_single_name_pct?: number
+          min_conviction?: number
+          notify_on_action?: boolean
+          paper_mode?: boolean
+          starting_nav?: number
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       live_signals: {
         Row: {
           confidence: number
@@ -508,13 +601,23 @@ export type Database = {
       }
       virtual_positions: {
         Row: {
+          breakout_failed_count: number
           closed_at: string | null
+          cooldown_until: string | null
           created_at: string
+          entry_atr: number | null
+          entry_conviction: number | null
           entry_price: number
+          entry_profile: string | null
+          entry_strategy: string | null
+          entry_weekly_alloc: number | null
           exit_date: string | null
           exit_price: number | null
           exit_reason: string | null
+          hard_stop_price: number | null
           id: string
+          opened_by: string
+          peak_price: number | null
           pnl: number | null
           position_type: string
           shares: number
@@ -522,16 +625,27 @@ export type Database = {
           status: string
           target_profit_pct: number | null
           ticker: string
+          trailing_stop_price: number | null
           user_id: string
         }
         Insert: {
+          breakout_failed_count?: number
           closed_at?: string | null
+          cooldown_until?: string | null
           created_at?: string
+          entry_atr?: number | null
+          entry_conviction?: number | null
           entry_price: number
+          entry_profile?: string | null
+          entry_strategy?: string | null
+          entry_weekly_alloc?: number | null
           exit_date?: string | null
           exit_price?: number | null
           exit_reason?: string | null
+          hard_stop_price?: number | null
           id?: string
+          opened_by?: string
+          peak_price?: number | null
           pnl?: number | null
           position_type?: string
           shares: number
@@ -539,16 +653,27 @@ export type Database = {
           status?: string
           target_profit_pct?: number | null
           ticker: string
+          trailing_stop_price?: number | null
           user_id: string
         }
         Update: {
+          breakout_failed_count?: number
           closed_at?: string | null
+          cooldown_until?: string | null
           created_at?: string
+          entry_atr?: number | null
+          entry_conviction?: number | null
           entry_price?: number
+          entry_profile?: string | null
+          entry_strategy?: string | null
+          entry_weekly_alloc?: number | null
           exit_date?: string | null
           exit_price?: number | null
           exit_reason?: string | null
+          hard_stop_price?: number | null
           id?: string
+          opened_by?: string
+          peak_price?: number | null
           pnl?: number | null
           position_type?: string
           shares?: number
@@ -556,6 +681,7 @@ export type Database = {
           status?: string
           target_profit_pct?: number | null
           ticker?: string
+          trailing_stop_price?: number | null
           user_id?: string
         }
         Relationships: [
