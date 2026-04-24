@@ -901,7 +901,13 @@ export function evaluateSignal(
     weekly.close, weekly.high, weekly.low, wIdx,
     { fastMA: activeProfile.weeklyFastMA, slowMA: activeProfile.weeklySlowMA, rsiLong: activeProfile.weeklyRSILong },
     isLowVol,
+    macro ?? null,
   );
+
+  // Daily ATR % for Kelly sizing
+  const dATR = calculateATR(data.high, data.low, data.close, 14);
+  const dLast = data.close[data.close.length - 1];
+  const atrPctNow = dLast > 0 ? safeGet(dATR, dLast * 0.02) / dLast : 0.02;
 
   if (weeklyBias.bias === "flat") {
     return {
@@ -913,7 +919,9 @@ export function evaluateSignal(
       strategy: "none",
       regime: "neutral",
       positionSizeMultiplier: 0,
+      kellyFraction: 0,
       atr: 0,
+      atrPct: atrPctNow,
       reasoning: "Weekly bias flat — no trend",
     };
   }
@@ -951,7 +959,12 @@ export function evaluateSignal(
   const biasMatches = (weeklyBias.bias === "long" && sigDir === "BUY") ||
                       (weeklyBias.bias === "short" && sigDir === "SHORT");
 
-  if (!biasMatches || !dailyEntry || sig.confidence === 0) {
+  // Final macro permit check (defense-in-depth: weeklyBias already considers it,
+  // but a strategy signal could fire SHORT in a confirmed bull SPY regime via the
+  // counter-trend penalty — block it here).
+  const macroOk = macroPermitsEntry(targetDir, macro ?? null);
+
+  if (!biasMatches || !dailyEntry || sig.confidence === 0 || !macroOk) {
     return {
       decision: "HOLD",
       conviction: sig.confidence,
@@ -961,14 +974,20 @@ export function evaluateSignal(
       strategy: sig.strategy,
       regime: sig.regime,
       positionSizeMultiplier: 0,
+      kellyFraction: 0,
       atr: sig.atr,
-      reasoning: !biasMatches
+      atrPct: atrPctNow,
+      reasoning: !macroOk
+        ? `Macro regime blocks ${targetDir} entry`
+        : !biasMatches
         ? `Weekly bias ${weeklyBias.bias} disagrees with daily ${sigDir.toLowerCase()}`
         : !dailyEntry
         ? "Daily entry timing not confirmed"
         : "Conviction below threshold",
     };
   }
+
+  const kellyFraction = computePositionSize(sig.confidence, atrPctNow, targetDir);
 
   return {
     decision: sigDir,
@@ -979,7 +998,9 @@ export function evaluateSignal(
     strategy: sig.strategy,
     regime: sig.regime,
     positionSizeMultiplier: sig.positionSizeMultiplier,
+    kellyFraction,
     atr: sig.atr,
-    reasoning: `${sig.strategy.replace("_", " ")} ${sigDir.toLowerCase()} | ${cls.classification} profile | ${sig.regime} regime | conviction ${sig.confidence}`,
+    atrPct: atrPctNow,
+    reasoning: `${sig.strategy.replace("_", " ")} ${sigDir.toLowerCase()} | ${cls.classification} profile | ${sig.regime} regime | conviction ${sig.confidence} | kelly ${(kellyFraction * 100).toFixed(1)}%`,
   };
 }
