@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Activity, RefreshCw, Clock, LayoutGrid, Grid3X3 } from "lucide-react";
+import { Activity, RefreshCw, Clock } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { SentimentGauge } from "@/components/market/SentimentGauge";
