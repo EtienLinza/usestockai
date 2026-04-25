@@ -944,9 +944,38 @@ async function processUser(
   if (allTickers.length === 0) return;
 
   await batchFetch(allTickers);
+
+  // ── CIRCUIT BREAKER — evaluate batch fetch health before any decisions ──
+  // If any threshold trips (>20% null prices, >50% fetch failures, etc.) we
+  // flip the global kill switch so subsequent users in this scan are also
+  // halted, then abort. Manual reset only — see system_flags table.
+  const nowEt = new Date();
+  const marketIsOpen =
+    !isMarketHoliday(nowEt) &&
+    (() => {
+      const wd = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", weekday: "short" }).format(nowEt);
+      if (wd === "Sat" || wd === "Sun") return false;
+      const parts = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour: "2-digit", minute: "2-digit", hour12: false }).formatToParts(nowEt);
+      const hh = Number(parts.find(p => p.type === "hour")?.value ?? "0");
+      const mm = Number(parts.find(p => p.type === "minute")?.value ?? "0");
+      const min = hh * 60 + mm;
+      return min >= 9 * 60 + 30 && min < nyseCloseMinute(nowEt);
+    })();
+
+  const healths: TickerHealth[] = allTickers.map(t => ({
+    ticker: t,
+    data: priceCache.get(t) ?? null,
+  }));
+  const verdict = evaluateScanHealth(healths, marketIsOpen);
+  if (verdict.trip) {
+    const reason = `circuit_breaker: ${verdict.reason} at ${nowEt.toISOString()}`;
+    console.error(`[autotrader-scan] CIRCUIT BREAKER TRIPPED — ${reason}`);
+    throw new CircuitBreakerTrippedError(reason);
+  }
+
   userSummary.evaluated = allTickers.filter(t => {
     const d = priceCache.get(t);
-    return d && d.close.length >= 200;
+    return d && d.close.length >= 200 && !verdict.suspectTickers.has(t);
   }).length;
 
   // Compute today's P&L (realized today + unrealized today vs entry)
