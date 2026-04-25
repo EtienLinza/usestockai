@@ -1,90 +1,148 @@
-# StockAI fix plan
+# Trust-the-money hardening plan
 
-Quick correction to my last audit: **MarketTab is not broken** (it reads live from the edge functions, not from those tables) and **per-position P&L already exists** in TradingTab. So the real issues are smaller and more focused than I made it sound. Here's everything worth fixing, ranked.
-
----
-
-## 🔴 P0 — Security / cost
-
-### 1. Lock down the `backtest` edge function
-**Problem:** `backtest` has `verify_jwt = false` AND zero in-code auth check (no `getUser`, no `Authorization` header read). It calls Yahoo + heavy CPU and is publicly callable. Anyone with the URL can DoS it or run unlimited backtests on your dime.
-
-**Fix:**
-- Add the same `verifyAuth()` pattern that `stock-predict` already uses (Bearer token → `supabase.auth.getUser()` → 401 if invalid).
-- Add a simple in-memory rate limit (10 backtests/min/user, mirroring `stock-predict`).
-- Keep `verify_jwt = false` in `config.toml` (signing-keys system requires in-code check anyway).
-
-### 2. Confirm `stock-predict` rate limit is actually wired
-Already has `verifyAuth()` + rate-limit map — quick read-through to confirm it's invoked on every request path (the file is 2,591 lines so it's worth grepping).
+Three concrete changes. No new dependencies. All deterministic.
 
 ---
 
-## 🟡 P1 — Correctness
+## 1. 🧠 Rip AI out of every trading-adjacent path
 
-### 3. US market holiday calendar
-**Problem:** `isMarketOpen()` in `autotrader-scan/index.ts` (line 813) only checks weekday + 9:30–16:00 ET. On Thanksgiving, Christmas, July 4, MLK Day, etc., the bot will try to trade and either get bad fills or stale data. Same gap in the new `usMarketStatus()` in `Settings.tsx`.
+**Scope** (per your call: "everything trading-adjacent"):
 
-**Fix:**
-- Create `supabase/functions/_shared/market-calendar.ts` with a hardcoded NYSE holiday list for 2025–2027 (full closures + early closes at 13:00 ET).
-- Export `isMarketHoliday(date)` and update `isMarketOpen()` to consult it.
-- Mirror the same list to a frontend `src/lib/market-hours.ts` (see #4) so the Settings countdown also skips holidays.
+| Surface | Today | After |
+|---|---|---|
+| `autotrader-scan` → `getSentiment()` → `news-sentiment` | AI-scored sentiment fed into entry/exit | **Removed.** All `getSentiment()` calls + `use_news_sentiment` setting deleted from autotrader. |
+| `news-sentiment` edge function | LOVABLE_API_KEY + Gemini call | **Replaced** with a deterministic headline-keyword scorer (bullish/bearish word lists, source weighting). Same `{score, confidence, headlines, reasoning}` contract so `NewsPanel` keeps working — just pure rules now. |
+| `stock-predict` edge function | 2,591 lines, 3 AI calls | **Deleted.** No code path calls it anymore (manual prediction UI was removed weeks ago — it's orphaned). Removes ~$$ exposure + the biggest single attack surface. |
+| `WatchlistSuggestions.tsx` | Static seed list (already not AI) | No change — confirmed it's not AI-backed. |
+| `weekly-digest` | Pure SQL summary, no AI | No change. |
 
-### 4. Move market-hours helpers into a shared lib
-**Problem:** `usMarketStatus()` and `nextUsMarketOpen()` currently live inside `src/pages/Settings.tsx`. Other components (Dashboard countdown, MarketTab status badge) re-implement weaker versions.
+**Result**: zero AI in any code path that touches a position, signal, stop, or entry. Pure deterministic quant + technicals. Backtest ↔ live parity is preserved (signal-engine-v2 was already AI-free).
 
-**Fix:**
-- Extract to `src/lib/market-hours.ts`.
-- Update `Settings.tsx`, `MarketTab.tsx` (`getMarketStatus()` at line 32), and any other consumers to import from there.
-- Single source of truth + holiday-aware everywhere.
-
----
-
-## 🟢 P2 — Cleanup / hygiene
-
-### 5. Drop the dead `market_sentiment` and `sector_performance` tables
-**Problem:** Both tables are empty (0 rows) and nothing writes to them. The frontend reads live from `market-sentiment` and `sector-analysis` edge functions, which return JSON directly. The tables are leftover schema from an earlier "cache to DB" design.
-
-**Fix:**
-- Migration: `DROP TABLE public.market_sentiment` and `DROP TABLE public.sector_performance`.
-- No code changes needed (nothing references them — confirmed via grep).
-- Optional alternative: keep them and have the edge functions UPSERT a snapshot on each call so you get a free historical record. **I'd lean drop unless you want the history.**
-
-### 6. Per-scan watchdog: update `next_scan_at` even on early-exit
-**Problem:** When `autotrader-scan` early-exits because the market is closed, it doesn't update `next_scan_at`. That's why your dashboard countdown was showing stale "10 hours" earlier.
-
-**Fix:** In the early-exit branch (around line 1250 in `autotrader-scan/index.ts`), still write `next_scan_at = now() + scan_interval_minutes` and `last_scan_at = now()` with a note like `"skipped: market closed"`. Now the UI countdown is always meaningful.
+**Files touched**:
+- `supabase/functions/autotrader-scan/index.ts` — strip `getSentiment`, sentiment cache, sentiment branches in entry/exit logic, the `use_news_sentiment` flag.
+- `supabase/functions/news-sentiment/index.ts` — rewrite as keyword scorer (NewsAPI fetch stays; AI call removed).
+- `supabase/functions/stock-predict/` — delete the whole function directory.
+- `src/pages/Settings.tsx` — remove the "Use news sentiment" toggle from the autotrader settings UI.
+- Migration: drop `autotrade_settings.use_news_sentiment` column.
 
 ---
 
-## ⚪ P3 — Optional / not urgent (skip unless you want it)
+## 2. 🔴 Kill switch — per-user + global, "halt entries + freeze exits"
 
-- **Refactor `stock-predict/index.ts`** (2,591 lines → split into `auth.ts`, `indicators.ts`, `ai-prompts.ts`, `index.ts`). Pure code-health, no functional change. Risky to do in one shot — would defer.
-- **Real-time data feed** (Polygon/Tiingo to replace 15-min-delayed Yahoo). Costs $$ — only worth it if/when going live with real money.
-- **Intraday exit triggers** (move from daily-bar exits to bar-by-bar). Larger architectural change; tied to real-time feed above.
+Per your call: when flipped, no new buys AND no automated sells. User must manually close.
+
+### Per-user kill switch
+- **New column** on `autotrade_settings`: `kill_switch boolean default false`.
+- **In `autotrader-scan`**: at the top of each user's loop, if `kill_switch = true`:
+  - Skip both `runEntryDecision` *and* `runExitDecision`.
+  - Write a `kill_switch_active` row to `autotrade_log` so it shows up in AutotraderLog.
+  - Update `next_scan_at` so the dashboard countdown stays honest.
+- **UI**: big red "EMERGENCY STOP" toggle in `Settings.tsx`, separate from the regular `enabled` flag. When ON, surface a persistent banner on Dashboard: *"Kill switch active — autotrader frozen. Manage positions manually."*
+
+### Global kill switch (admin / data-anomaly fallback)
+- **New table** `system_flags (key text pk, value jsonb, updated_at timestamptz)`.
+- **Seeded row**: `('global_kill_switch', '{"active": false, "reason": null}')`.
+- **In `autotrader-scan`**: first thing it does (before loading users) is read this row. If `active = true`, abort the whole scan with a logged reason.
+- **Auto-trip**: the circuit breaker (#3) flips this to `true` on its own when thresholds are breached. Manual reset only.
+- **UI**: read-only banner on Dashboard when global flag is on; admin reset is a SQL update for now (no admin UI — you're the only admin).
+
+### Why "halt + freeze exits" and not force-close
+You picked freeze, which is the right call: force-closing at "last known price" during a suspected data outage is *exactly* how you eat a worse fill than you would have got. Freeze + manual takeover is what real desks do.
+
+**Files touched**:
+- Migration: add `autotrade_settings.kill_switch`, create `system_flags` table with RLS (anyone authed can SELECT, no client INSERT/UPDATE — service role only).
+- `supabase/functions/autotrader-scan/index.ts` — global flag check + per-user check.
+- `src/pages/Settings.tsx` — emergency stop toggle UI.
+- `src/pages/Dashboard.tsx` — banner when either flag is active.
 
 ---
 
-## What I'll touch
+## 3. 🛡️ Data-quality circuit breaker
 
-| File | Change |
-|---|---|
-| `supabase/functions/backtest/index.ts` | Add `verifyAuth()` + rate limit (P0) |
-| `supabase/functions/_shared/market-calendar.ts` | **New** — NYSE holidays (P1) |
-| `supabase/functions/autotrader-scan/index.ts` | Use holiday helper; update `next_scan_at` on skip (P1, P2) |
-| `src/lib/market-hours.ts` | **New** — shared status + holidays (P1) |
-| `src/pages/Settings.tsx` | Import from shared lib (P1) |
-| `src/components/dashboard/MarketTab.tsx` | Import from shared lib (P1) |
-| `supabase/migrations/<new>.sql` | Drop `market_sentiment`, `sector_performance` (P2) |
+You said "whatever I think best" — here's what I'm building. Four signals, any one trips it. Conservative thresholds because false-positives are way cheaper than bad fills:
 
-No backend schema changes beyond the two drops. No data loss (both tables are empty).
+| Trigger | Threshold | Why |
+|---|---|---|
+| **Yahoo returns null/zero/NaN price** | >20% of tickers in a single scan | Catches API outages and Yahoo serving stale/garbage. |
+| **Quote timestamp stale** | >30 min old during NYSE regular hours | Yahoo sometimes serves you yesterday's close at 11am ET. |
+| **Implausible price gap** | Any ticker moved >25% vs its last-scan close with no halt flag | Catches data glitches, splits not yet adjusted, ticker symbol collisions. The position is skipped *and* counted toward the breaker tally. |
+| **Scan-wide fetch failure rate** | >50% of tickers errored out | Network / Yahoo rate limit / DNS issue. |
+
+### How it works
+- Each scan tracks counters in a `scanHealth` object.
+- After the OHLCV batch fetch (before entries/exits run), evaluate all four conditions.
+- If any trip, **set `system_flags.global_kill_switch = true`** with a `reason` like `"circuit_breaker: 38% of tickers returned null prices at 2026-04-25T15:32"`, abort the scan, and write a `circuit_breaker_tripped` row to `autotrade_log` for every opted-in user (so it shows up in their log, not just yours).
+- Reset is manual — you read the log, eyeball Yahoo, then `UPDATE system_flags SET value = '{"active":false,"reason":null}' WHERE key = 'global_kill_switch'`. Belt-and-suspenders by design.
+
+### Why these four
+- **Null-price + stale-timestamp** = the real Yahoo failure modes I've seen in your logs.
+- **25% gap** is loose enough to allow earnings-day moves but tight enough to catch obvious glitches (real single-day >25% on a non-earnings day is exceptionally rare on liquid names).
+- **50% scan failure** is the "Yahoo just rate-limited us" canary.
+
+**Files touched**:
+- `supabase/functions/autotrader-scan/index.ts` — `scanHealth` tracker, evaluation block after batch fetch, trip logic.
+- New helper `supabase/functions/_shared/circuit-breaker.ts` — pure functions for each check, easy to unit-test later.
 
 ---
 
-## Order I'd ship
+## 📋 Migration summary
 
-1. Lock down `backtest` (5 min, biggest risk reduction)
-2. Holiday calendar + shared market-hours lib (15 min, fixes the "bot trades on Thanksgiving" foot-gun)
-3. Fix `next_scan_at` on early exit (2 min, fixes the misleading countdown for real)
-4. Drop dead tables (1 migration)
+```sql
+-- 1. Per-user kill switch
+ALTER TABLE public.autotrade_settings
+  ADD COLUMN kill_switch boolean NOT NULL DEFAULT false;
 
-Want me to proceed with all four, or pick a subset?
+-- 2. Drop the now-unused sentiment toggle
+ALTER TABLE public.autotrade_settings
+  DROP COLUMN use_news_sentiment;
+
+-- 3. Global system flags
+CREATE TABLE public.system_flags (
+  key text PRIMARY KEY,
+  value jsonb NOT NULL,
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE public.system_flags ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Authed users can read flags"
+  ON public.system_flags FOR SELECT TO authenticated USING (true);
+-- No INSERT/UPDATE/DELETE policies → service role only (autotrader-scan + manual SQL)
+
+INSERT INTO public.system_flags (key, value)
+VALUES ('global_kill_switch', '{"active": false, "reason": null}'::jsonb);
+```
+
+---
+
+## 📁 File-by-file change list
+
+| File | Action | What |
+|---|---|---|
+| `supabase/functions/stock-predict/` | **Delete** | Orphaned, AI-heavy, not called anywhere |
+| `supabase/functions/news-sentiment/index.ts` | **Rewrite** | Replace AI call with keyword scorer; preserve response shape |
+| `supabase/functions/autotrader-scan/index.ts` | **Edit** | Strip sentiment; add global+per-user kill checks; add circuit breaker tracker |
+| `supabase/functions/_shared/circuit-breaker.ts` | **New** | Pure functions for the 4 health checks |
+| `src/pages/Settings.tsx` | **Edit** | Remove "Use news sentiment" toggle; add red "Emergency Stop" toggle |
+| `src/pages/Dashboard.tsx` | **Edit** | Banner when global or per-user kill switch is on |
+| `src/integrations/supabase/types.ts` | Auto-regen | Reflects schema changes |
+| Migration | **New** | The SQL above |
+
+---
+
+## 🚦 Ship order
+
+1. **Migration first** (kill switch column + system_flags table) — non-breaking, deploys instantly.
+2. **`autotrader-scan` edits** in one shot (strip AI + add kill checks + circuit breaker) — biggest blast radius, want it atomic.
+3. **`news-sentiment` rewrite** — keeps `NewsPanel` alive but pure-rule.
+4. **Delete `stock-predict`** — last because it's the most "are you sure?" step.
+5. **`Settings.tsx` + `Dashboard.tsx`** UI for the kill switch.
+
+After this lands, you'll be able to honestly say: *"100% deterministic signals, user can panic-stop at any time, system panic-stops itself if Yahoo lies."* That's the trust posture you actually need.
+
+---
+
+## What this does NOT solve (explicit)
+- **Forward-tested track record** — still your time, not code.
+- **Broker integration** — separate sprint.
+- **Intraday exits** — separate sprint, needs real-time feed first.
+
+Good with this? Approve and I'll ship in the order above.
