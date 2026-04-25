@@ -690,11 +690,97 @@ function AdaptiveStatusCard({ state, enabled, adaptive, lastScanAt, nextScanAt }
         </div>
         <div className="space-y-0.5">
           <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Next scan</p>
-          <p className="text-sm font-mono">{enabled ? nextLabel : "—"}</p>
+          <p className="text-sm font-mono">{enabled ? nextScanDisplay(nextScanAt) : "—"}</p>
         </div>
       </div>
     </Card>
   );
+}
+
+/**
+ * Returns a friendly "next scan" label that respects US market hours.
+ * The autotrader cron fires every 10 min but the function early-exits on
+ * weekends/after-hours, so a stale next_scan_at from yesterday's last
+ * successful scan would otherwise show a misleading countdown.
+ */
+function nextScanDisplay(nextScanAt: string | null): string {
+  const status = usMarketStatus(new Date());
+  if (status.state === "open") {
+    return formatRelative(nextScanAt, "future");
+  }
+  return status.label;
+}
+
+type MarketStatus = { state: "open" | "closed"; label: string };
+
+function usMarketStatus(now: Date): MarketStatus {
+  // NYSE regular hours: Mon–Fri 09:30–16:00 America/New_York.
+  // We compute "now in NY" by reading parts via Intl with timeZone.
+  const fmt = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+  const parts = fmt.formatToParts(now);
+  const weekday = parts.find((p) => p.type === "weekday")?.value ?? "";
+  const hour = Number(parts.find((p) => p.type === "hour")?.value ?? "0");
+  const minute = Number(parts.find((p) => p.type === "minute")?.value ?? "0");
+  const minutesOfDay = hour * 60 + minute;
+  const OPEN = 9 * 60 + 30;
+  const CLOSE = 16 * 60;
+
+  const isWeekday = ["Mon", "Tue", "Wed", "Thu", "Fri"].includes(weekday);
+  if (isWeekday && minutesOfDay >= OPEN && minutesOfDay < CLOSE) {
+    return { state: "open", label: "open" };
+  }
+
+  // Compute friendly next-open label in user's local time.
+  const next = nextUsMarketOpen(now);
+  const localOpen = next.toLocaleString(undefined, {
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  return { state: "closed", label: `Market closed · opens ${localOpen}` };
+}
+
+function nextUsMarketOpen(now: Date): Date {
+  // Walk forward day-by-day in NY tz until we find the next weekday open at 09:30 ET.
+  for (let i = 0; i < 8; i++) {
+    const candidate = new Date(now.getTime() + i * 24 * 60 * 60 * 1000);
+    const fmt = new Intl.DateTimeFormat("en-US", {
+      timeZone: "America/New_York",
+      weekday: "short",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    });
+    const parts = fmt.formatToParts(candidate);
+    const weekday = parts.find((p) => p.type === "weekday")?.value ?? "";
+    if (!["Mon", "Tue", "Wed", "Thu", "Fri"].includes(weekday)) continue;
+
+    const y = parts.find((p) => p.type === "year")?.value;
+    const m = parts.find((p) => p.type === "month")?.value;
+    const d = parts.find((p) => p.type === "day")?.value;
+    // 09:30 ET — convert to UTC by trial: build a Date assuming ET offset for that date.
+    // Use a known ET probe to detect DST offset for that date.
+    const probe = new Date(`${y}-${m}-${d}T12:00:00Z`);
+    const etHourAtProbe = Number(
+      new Intl.DateTimeFormat("en-US", {
+        timeZone: "America/New_York",
+        hour: "2-digit",
+        hour12: false,
+      }).formatToParts(probe).find((p) => p.type === "hour")?.value ?? "0"
+    );
+    // probe is 12:00 UTC; ET hour tells us offset (e.g. 7 ⇒ UTC-5 EST, 8 ⇒ UTC-4 EDT).
+    const offsetHours = 12 - etHourAtProbe;
+    const openUtc = new Date(`${y}-${m}-${d}T09:30:00Z`);
+    openUtc.setUTCHours(openUtc.getUTCHours() + offsetHours);
+    if (openUtc.getTime() > now.getTime()) return openUtc;
+  }
+  return now;
 }
 
 function bot_daily_loss_label_helper(_s: AutotraderState | null): string {
