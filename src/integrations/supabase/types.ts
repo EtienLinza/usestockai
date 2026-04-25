@@ -623,24 +623,6 @@ export type Database = {
         }
         Relationships: []
       }
-      system_flags: {
-        Row: {
-          key: string
-          updated_at: string
-          value: Json
-        }
-        Insert: {
-          key: string
-          updated_at?: string
-          value: Json
-        }
-        Update: {
-          key?: string
-          updated_at?: string
-          value?: Json
-        }
-        Relationships: []
-      }
       virtual_portfolio_log: {
         Row: {
           cash: number
