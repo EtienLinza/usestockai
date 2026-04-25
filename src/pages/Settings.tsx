@@ -17,6 +17,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { useNavigate } from "react-router-dom";
 import { cn } from "@/lib/utils";
+import { getMarketStatus } from "@/lib/market-hours";
 
 interface PortfolioCaps {
   sector_max_pct: number;
