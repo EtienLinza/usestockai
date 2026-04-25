@@ -29,6 +29,7 @@ import {
   type StockProfile,
 } from "../_shared/signal-engine-v2.ts";
 import { isMarketHoliday, nyseCloseMinute } from "../_shared/market-calendar.ts";
+import { evaluateScanHealth, type TickerHealth } from "../_shared/circuit-breaker.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
