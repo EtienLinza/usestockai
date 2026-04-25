@@ -737,6 +737,30 @@ serve(async (req) => {
           .update({ last_scan_at: now.toISOString(), next_scan_at: nextScan.toISOString() })
           .eq("user_id", rawSettings.user_id);
       } catch (err) {
+        // Circuit breaker trips abort the entire scan and trip the global flag,
+        // so subsequent users don't get partial fills on bad data.
+        if (err instanceof CircuitBreakerTrippedError) {
+          await supabase.from("system_flags").upsert({
+            key: "global_kill_switch",
+            value: { active: true, reason: err.verdictReason, tripped_at: new Date().toISOString() },
+            updated_at: new Date().toISOString(),
+          }, { onConflict: "key" });
+          // Log a row to every active user's autotrade_log so it surfaces in their UI.
+          const allUserIds = settingsRows.map(s => (s as Settings).user_id);
+          if (allUserIds.length > 0) {
+            await supabase.from("autotrade_log").insert(
+              allUserIds.map(uid => ({
+                user_id: uid,
+                ticker: "SCAN",
+                action: "CIRCUIT_BREAKER",
+                reason: err.verdictReason,
+              })),
+            );
+          }
+          (summary as Record<string, unknown>).circuit_breaker_tripped = true;
+          (summary as Record<string, unknown>).reason = err.verdictReason;
+          return json({ status: "circuit-breaker-tripped", reason: err.verdictReason, summary });
+        }
         console.error(`User ${rawSettings.user_id} failed:`, err);
         summary.errors++;
         await supabase.from("autotrade_log").insert({
