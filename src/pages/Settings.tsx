@@ -318,15 +318,40 @@ const Settings = () => {
                     </div>
                     <Switch checked={bot.advanced_mode} onCheckedChange={(v) => setBot({ ...bot, advanced_mode: v })} />
                   </div>
-                  <div className="flex items-center justify-between">
-                    <div className="space-y-0.5">
-                      <Label className="text-sm">Use news sentiment</Label>
-                      <p className="text-xs text-muted-foreground">
-                        AI reads recent headlines before every entry. Vetoes trades on extreme negative news; nudges conviction otherwise.
+                </Card>
+
+                {/* Emergency Stop — visually distinct, dangerous-looking on purpose */}
+                <Card className={cn(
+                  "p-5 space-y-3 border-2 transition-colors",
+                  bot.kill_switch
+                    ? "border-destructive bg-destructive/10"
+                    : "border-destructive/30 bg-destructive/5",
+                )}>
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="space-y-1 flex-1">
+                      <div className="flex items-center gap-2">
+                        <AlertTriangle className={cn("w-4 h-4", bot.kill_switch ? "text-destructive" : "text-destructive/70")} />
+                        <Label className="text-sm font-semibold">Emergency Stop</Label>
+                        {bot.kill_switch && (
+                          <Badge variant="destructive" className="text-[10px] px-1.5 py-0">ACTIVE</Badge>
+                        )}
+                      </div>
+                      <p className="text-xs text-muted-foreground leading-relaxed">
+                        Freezes the autotrader: no new entries AND no automated exits will run.
+                        Your existing positions stay open until you close them manually.
+                        Use this if you suspect bad data, want to take manual control, or just need a breather.
                       </p>
                     </div>
-                    <Switch checked={bot.use_news_sentiment} onCheckedChange={(v) => setBot({ ...bot, use_news_sentiment: v })} />
+                    <Switch
+                      checked={bot.kill_switch}
+                      onCheckedChange={(v) => setBot({ ...bot, kill_switch: v })}
+                      className="data-[state=checked]:bg-destructive"
+                    />
                   </div>
+                </Card>
+
+                <Card className="glass-card p-5 space-y-5">
+                  {/* (continued — the original card is split here so the kill switch sits between sections) */}
                   <div className="space-y-3 rounded-lg border border-border/50 p-3">
                     <div className="flex items-center justify-between gap-3">
                       <div className="space-y-0.5">
