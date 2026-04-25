@@ -174,7 +174,7 @@ export const Navbar = () => {
                     </span>
                   </button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-48">
+                <DropdownMenuContent align="end" className="w-52">
                   <DropdownMenuItem onClick={() => navigate("/dashboard")}>
                     <LayoutDashboard className="w-4 h-4 mr-2" />
                     Dashboard
@@ -183,6 +183,16 @@ export const Navbar = () => {
                     <Heart className="w-4 h-4 mr-2" />
                     Watchlist
                   </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  {secondaryLinks.map((link) => {
+                    const Icon = link.icon;
+                    return (
+                      <DropdownMenuItem key={link.href} onClick={() => navigate(link.href)}>
+                        <Icon className="w-4 h-4 mr-2" />
+                        {link.label}
+                      </DropdownMenuItem>
+                    );
+                  })}
                   <DropdownMenuSeparator />
                   <DropdownMenuItem onClick={handleSignOut} className="text-destructive">
                     <LogOut className="w-4 h-4 mr-2" />
