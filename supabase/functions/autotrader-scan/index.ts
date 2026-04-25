@@ -28,6 +28,7 @@ import {
   type ProfileParams,
   type StockProfile,
 } from "../_shared/signal-engine-v2.ts";
+import { isMarketHoliday, nyseCloseMinute } from "../_shared/market-calendar.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -808,9 +809,10 @@ function buildScanRollupReason(u: UserSummary, s: Settings, ctx: AdaptiveContext
 }
 
 // ── NYSE market-hours gate ────────────────────────────────────────────────
-// Returns true Mon–Fri, 9:30–16:00 America/New_York. Does not check holidays;
-// this is a coarse safety filter, not a calendar.
+// Returns true Mon–Fri, 9:30–16:00 America/New_York, with NYSE holiday calendar
+// applied (full closures + early-close days at 13:00 ET).
 function isMarketOpen(now: Date = new Date()): boolean {
+  if (isMarketHoliday(now)) return false;
   // Convert to NY wall-clock via locale string (handles DST automatically)
   const nyStr = now.toLocaleString("en-US", { timeZone: "America/New_York", hour12: false });
   // Format: "M/D/YYYY, HH:MM:SS"
@@ -822,7 +824,8 @@ function isMarketOpen(now: Date = new Date()): boolean {
   const dow = new Date(Date.UTC(yr, mo, day)).getUTCDay(); // 0=Sun .. 6=Sat
   if (dow === 0 || dow === 6) return false;
   const minutes = hh * 60 + mm;
-  return minutes >= 9 * 60 + 30 && minutes < 16 * 60;
+  const close = nyseCloseMinute(now); // 16:00 normal, 13:00 on early-close days
+  return minutes >= 9 * 60 + 30 && minutes < close;
 }
 
 // ── AUTO-DISCOVERY: pull good live_signals into watchlist + prune stale auto-adds ──
