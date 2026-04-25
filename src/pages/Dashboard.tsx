@@ -220,6 +220,44 @@ const Dashboard = () => {
     };
   }, [loadSignalData, user]);
 
+  // ── Kill-switch monitoring (per-user + global) ──────────────────────────────
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    const loadKillSwitch = async () => {
+      const [perUserRes, globalRes] = await Promise.all([
+        supabase.from("autotrade_settings").select("kill_switch").eq("user_id", user.id).maybeSingle(),
+        supabase.from("system_flags").select("value").eq("key", "global_kill_switch").maybeSingle(),
+      ]);
+      if (cancelled) return;
+      const globalVal = (globalRes.data?.value as { active?: boolean; reason?: string | null } | null) ?? null;
+      setKillSwitch({
+        perUser: Boolean(perUserRes.data?.kill_switch),
+        global: globalVal ? { active: Boolean(globalVal.active), reason: globalVal.reason ?? null } : null,
+      });
+    };
+    loadKillSwitch();
+
+    const flagsChannel = supabase
+      .channel("system-flags-realtime")
+      .on("postgres_changes", { event: "*", schema: "public", table: "system_flags" }, loadKillSwitch)
+      .subscribe();
+    const settingsChannel = supabase
+      .channel("autotrade-settings-realtime")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "autotrade_settings", filter: `user_id=eq.${user.id}` },
+        loadKillSwitch,
+      )
+      .subscribe();
+
+    return () => {
+      cancelled = true;
+      supabase.removeChannel(flagsChannel);
+      supabase.removeChannel(settingsChannel);
+    };
+  }, [user]);
+
   const fetchCurrentPrices = useCallback(async () => {
     const tickers = [...new Set(openPositions.map(p => p.ticker))];
     if (tickers.length === 0) return;
