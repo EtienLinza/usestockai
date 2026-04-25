@@ -635,8 +635,26 @@ serve(async (req) => {
     // 3. Per-user processing — gated by per-user next_scan_at
     const now = new Date();
     let skippedNotDue = 0;
+    let skippedKillSwitch = 0;
     for (const settingsRow of settingsRows) {
       const rawSettings = settingsRow as Settings;
+
+      // PER-USER KILL SWITCH — halt entries AND freeze automated exits.
+      // User must manage positions manually until they flip it off.
+      if (rawSettings.kill_switch) {
+        skippedKillSwitch++;
+        const nextScan = new Date(now.getTime() + 10 * 60_000);
+        await supabase.from("autotrade_settings")
+          .update({ last_scan_at: now.toISOString(), next_scan_at: nextScan.toISOString() })
+          .eq("user_id", rawSettings.user_id);
+        await supabase.from("autotrade_log").insert({
+          user_id: rawSettings.user_id,
+          ticker: "SCAN",
+          action: "KILL_SWITCH",
+          reason: "Emergency stop active — no entries, no automated exits. Manage positions manually.",
+        });
+        continue;
+      }
 
       // Per-user cadence gate
       if (rawSettings.next_scan_at && new Date(rawSettings.next_scan_at) > now) {
