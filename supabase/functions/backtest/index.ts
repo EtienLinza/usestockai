@@ -1692,6 +1692,10 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  // Require authenticated caller before doing any expensive work.
+  const authError = await requireAuth(req);
+  if (authError) return authError;
+
   try {
     const startTime = Date.now();
     const body = await req.json();
