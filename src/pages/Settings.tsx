@@ -11,7 +11,7 @@ import { Input } from "@/components/ui/input";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { Shield, Loader2, Info, Bot, Sparkles, Clock, Activity, TrendingUp, TrendingDown, Minus, Wallet } from "lucide-react";
+import { Shield, Loader2, Info, Bot, Sparkles, Clock, Activity, TrendingUp, TrendingDown, Minus, Wallet, AlertTriangle } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
@@ -31,6 +31,7 @@ type RiskProfile = "conservative" | "balanced" | "aggressive";
 
 interface AutoTradeSettings {
   enabled: boolean;
+  kill_switch: boolean;
   paper_mode: boolean;
   advanced_mode: boolean;
   adaptive_mode: boolean;
@@ -42,7 +43,6 @@ interface AutoTradeSettings {
   max_single_name_pct: number;
   daily_loss_limit_pct: number;
   starting_nav: number;
-  use_news_sentiment: boolean;
   auto_add_watchlist: boolean;
   auto_watchlist_consideration_floor: number;
   auto_watchlist_stale_days: number;
@@ -74,6 +74,7 @@ const CAPS_DEFAULTS: PortfolioCaps = {
 
 const AUTOTRADE_DEFAULTS: AutoTradeSettings = {
   enabled: false,
+  kill_switch: false,
   paper_mode: true,
   advanced_mode: false,
   adaptive_mode: true,
@@ -85,7 +86,6 @@ const AUTOTRADE_DEFAULTS: AutoTradeSettings = {
   max_single_name_pct: 20,
   daily_loss_limit_pct: 3,
   starting_nav: 100000,
-  use_news_sentiment: true,
   auto_add_watchlist: true,
   auto_watchlist_consideration_floor: 60,
   auto_watchlist_stale_days: 14,
@@ -121,7 +121,7 @@ const Settings = () => {
           .select("sector_max_pct, portfolio_beta_max, max_correlated_positions, enforcement_mode, enabled")
           .eq("user_id", user.id).maybeSingle(),
         supabase.from("autotrade_settings")
-          .select("enabled, paper_mode, advanced_mode, adaptive_mode, risk_profile, scan_interval_minutes, min_conviction, max_positions, max_nav_exposure_pct, max_single_name_pct, daily_loss_limit_pct, starting_nav, last_scan_at, next_scan_at, use_news_sentiment, auto_add_watchlist, auto_watchlist_consideration_floor, auto_watchlist_stale_days")
+          .select("enabled, kill_switch, paper_mode, advanced_mode, adaptive_mode, risk_profile, scan_interval_minutes, min_conviction, max_positions, max_nav_exposure_pct, max_single_name_pct, daily_loss_limit_pct, starting_nav, last_scan_at, next_scan_at, auto_add_watchlist, auto_watchlist_consideration_floor, auto_watchlist_stale_days")
           .eq("user_id", user.id).maybeSingle(),
         supabase.from("autotrader_state")
           .select("effective_min_conviction, effective_max_positions, effective_max_nav_exposure_pct, effective_max_single_name_pct, vix_value, vix_regime, spy_trend, recent_pnl_pct, adjustments, reason, computed_at")
@@ -139,6 +139,7 @@ const Settings = () => {
       if (botRes.data) {
         setBot({
           enabled: Boolean(botRes.data.enabled),
+          kill_switch: Boolean(botRes.data.kill_switch),
           paper_mode: Boolean(botRes.data.paper_mode),
           advanced_mode: Boolean(botRes.data.advanced_mode),
           adaptive_mode: botRes.data.adaptive_mode ?? true,
@@ -150,7 +151,6 @@ const Settings = () => {
           max_single_name_pct: Number(botRes.data.max_single_name_pct),
           daily_loss_limit_pct: Number(botRes.data.daily_loss_limit_pct),
           starting_nav: Number(botRes.data.starting_nav),
-          use_news_sentiment: botRes.data.use_news_sentiment ?? true,
           auto_add_watchlist: botRes.data.auto_add_watchlist ?? true,
           auto_watchlist_consideration_floor: Number(botRes.data.auto_watchlist_consideration_floor ?? 60),
           auto_watchlist_stale_days: Number(botRes.data.auto_watchlist_stale_days ?? 14),
@@ -318,15 +318,40 @@ const Settings = () => {
                     </div>
                     <Switch checked={bot.advanced_mode} onCheckedChange={(v) => setBot({ ...bot, advanced_mode: v })} />
                   </div>
-                  <div className="flex items-center justify-between">
-                    <div className="space-y-0.5">
-                      <Label className="text-sm">Use news sentiment</Label>
-                      <p className="text-xs text-muted-foreground">
-                        AI reads recent headlines before every entry. Vetoes trades on extreme negative news; nudges conviction otherwise.
+                </Card>
+
+                {/* Emergency Stop — visually distinct, dangerous-looking on purpose */}
+                <Card className={cn(
+                  "p-5 space-y-3 border-2 transition-colors",
+                  bot.kill_switch
+                    ? "border-destructive bg-destructive/10"
+                    : "border-destructive/30 bg-destructive/5",
+                )}>
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="space-y-1 flex-1">
+                      <div className="flex items-center gap-2">
+                        <AlertTriangle className={cn("w-4 h-4", bot.kill_switch ? "text-destructive" : "text-destructive/70")} />
+                        <Label className="text-sm font-semibold">Emergency Stop</Label>
+                        {bot.kill_switch && (
+                          <Badge variant="destructive" className="text-[10px] px-1.5 py-0">ACTIVE</Badge>
+                        )}
+                      </div>
+                      <p className="text-xs text-muted-foreground leading-relaxed">
+                        Freezes the autotrader: no new entries AND no automated exits will run.
+                        Your existing positions stay open until you close them manually.
+                        Use this if you suspect bad data, want to take manual control, or just need a breather.
                       </p>
                     </div>
-                    <Switch checked={bot.use_news_sentiment} onCheckedChange={(v) => setBot({ ...bot, use_news_sentiment: v })} />
+                    <Switch
+                      checked={bot.kill_switch}
+                      onCheckedChange={(v) => setBot({ ...bot, kill_switch: v })}
+                      className="data-[state=checked]:bg-destructive"
+                    />
                   </div>
+                </Card>
+
+                <Card className="glass-card p-5 space-y-5">
+                  {/* (continued — the original card is split here so the kill switch sits between sections) */}
                   <div className="space-y-3 rounded-lg border border-border/50 p-3">
                     <div className="flex items-center justify-between gap-3">
                       <div className="space-y-0.5">

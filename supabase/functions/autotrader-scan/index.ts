@@ -132,6 +132,7 @@ interface Position {
 
 interface Settings {
   user_id: string; enabled: boolean;
+  kill_switch: boolean;
   min_conviction: number; max_positions: number;
   max_nav_exposure_pct: number; max_single_name_pct: number;
   daily_loss_limit_pct: number; starting_nav: number;
@@ -140,7 +141,6 @@ interface Settings {
   scan_interval_minutes: number;
   last_scan_at: string | null;
   next_scan_at: string | null;
-  use_news_sentiment: boolean;
   risk_profile: "conservative" | "balanced" | "aggressive";
   adaptive_mode: boolean;
   auto_add_watchlist: boolean;
@@ -157,50 +157,9 @@ interface AdaptiveContext {
   adjustments: string[];       // human-readable reasons applied
 }
 
-interface SentimentRead {
-  score: number;        // -100 .. +100
-  confidence: number;   // 0 .. 1
-  headlines: Array<{ title: string; source: string; url: string; publishedAt: string }>;
-  reasoning: string;
-}
-
-// Per-invocation sentiment cache (separate from the DB cache — covers same scan)
-const sentimentCache = new Map<string, SentimentRead | null>();
-
-async function getSentiment(ticker: string): Promise<SentimentRead | null> {
-  const k = ticker.toUpperCase();
-  if (sentimentCache.has(k)) return sentimentCache.get(k)!;
-  try {
-    const url = `${Deno.env.get("SUPABASE_URL")}/functions/v1/news-sentiment`;
-    const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), 12000);
-    const r = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`,
-      },
-      body: JSON.stringify({ ticker: k }),
-      signal: ctrl.signal,
-    });
-    clearTimeout(t);
-    if (!r.ok) { sentimentCache.set(k, null); return null; }
-    const j = await r.json();
-    if (typeof j.score !== "number") { sentimentCache.set(k, null); return null; }
-    const out: SentimentRead = {
-      score: j.score,
-      confidence: Number(j.confidence) || 0,
-      headlines: Array.isArray(j.headlines) ? j.headlines : [],
-      reasoning: String(j.reasoning ?? ""),
-    };
-    sentimentCache.set(k, out);
-    return out;
-  } catch (e) {
-    console.warn(`sentiment fetch failed for ${k}`, e);
-    sentimentCache.set(k, null);
-    return null;
-  }
-}
+// (Sentiment / AI layer removed: signals are now 100% deterministic.
+//  Trading-loop AI was a regulatory + reproducibility risk — keep this surface
+//  pure technical from now on.)
 
 // ─── Risk profile baselines ──────────────────────────────────────────────
 const RISK_PROFILE_BASELINES = {
@@ -363,10 +322,8 @@ type EntryAction =
   | { kind: "ENTER"; conviction: number; kellyFraction: number; price: number;
       strategy: string; profile: StockProfile; atr: number; hardStop: number;
       weeklyAlloc: number; reasoning: string;
-      decision: "BUY" | "SHORT";
-      sentiment?: SentimentRead | null }
-  | { kind: "HOLD" | "BLOCKED"; reason: string;
-      sentiment?: SentimentRead | null };
+      decision: "BUY" | "SHORT" }
+  | { kind: "HOLD" | "BLOCKED"; reason: string };
 
 // ============================================================================
 // WIN EXIT — peak detection (5 signals, 3-of-5 fires FULL_EXIT)
@@ -580,33 +537,8 @@ async function runEntryDecision(
     return { kind: "HOLD", reason: `Conviction ${sig.conviction} < min ${settings.min_conviction}` };
   }
 
-  // ── News sentiment layer (only when technicals already passed) ─────────
-  let sentiment: SentimentRead | null = null;
-  let effectiveConviction = sig.conviction;
-  if (settings.use_news_sentiment) {
-    sentiment = await getSentiment(ticker);
-    if (sentiment) {
-      // Hard veto on extreme negative news with high confidence
-      if (sentiment.score <= -60 && sentiment.confidence >= 0.7) {
-        return {
-          kind: "BLOCKED",
-          reason: `News veto: ${sentiment.reasoning || "extreme negative sentiment"} (score ${sentiment.score}, conf ${sentiment.confidence.toFixed(2)})`,
-          sentiment,
-        };
-      }
-      // Bounded conviction adjustment: -10..+5 (don't chase hype)
-      const raw = sentiment.score * 0.1 * sentiment.confidence;
-      const adj = Math.max(-10, Math.min(5, raw));
-      effectiveConviction = Math.round(sig.conviction + adj);
-      if (effectiveConviction < settings.min_conviction) {
-        return {
-          kind: "HOLD",
-          reason: `Conviction after news (${effectiveConviction}) < min ${settings.min_conviction} — ${sentiment.reasoning || "negative drag"}`,
-          sentiment,
-        };
-      }
-    }
-  }
+  // (News-sentiment layer removed — pure deterministic conviction now.)
+  const effectiveConviction = sig.conviction;
 
   // Size
   const headroom = (settings.max_nav_exposure_pct - totalNavExposurePct) / 100;
@@ -616,7 +548,7 @@ async function runEntryDecision(
   const targetDollars = settings.starting_nav * cappedFrac;
 
   if (targetDollars < currentPrice) {
-    return { kind: "HOLD", reason: "Position too small after caps", sentiment };
+    return { kind: "HOLD", reason: "Position too small after caps" };
   }
 
   // Hard stop at entry
@@ -639,10 +571,7 @@ async function runEntryDecision(
     hardStop,
     weeklyAlloc: sig.weeklyBias.targetAllocation,
     decision: sig.decision === "SHORT" ? "SHORT" : "BUY",
-    reasoning: sentiment && sentiment.reasoning
-      ? `${sig.reasoning} | news: ${sentiment.reasoning}`
-      : sig.reasoning,
-    sentiment,
+    reasoning: sig.reasoning,
   };
 }
 
@@ -1117,9 +1046,6 @@ async function processUser(
     userSummary.blocked++;
     await supabase.from("autotrade_log").insert({
       user_id: userId, ticker: p.ticker, action: "BLOCKED", reason: p.decision.reason,
-      sentiment_score: p.decision.sentiment?.score ?? null,
-      sentiment_confidence: p.decision.sentiment?.confidence ?? null,
-      sentiment_headlines: p.decision.sentiment?.headlines ?? null,
     });
   }
 
@@ -1326,9 +1252,6 @@ async function executeEntry(
     price: fillPrice, shares,
     conviction: e.conviction, strategy: e.strategy, profile: e.profile,
     position_id: ins.id,
-    sentiment_score: e.sentiment?.score ?? null,
-    sentiment_confidence: e.sentiment?.confidence ?? null,
-    sentiment_headlines: e.sentiment?.headlines ?? null,
   });
 }
 

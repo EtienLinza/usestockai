@@ -81,6 +81,7 @@ export type Database = {
           created_at: string
           daily_loss_limit_pct: number
           enabled: boolean
+          kill_switch: boolean
           last_scan_at: string | null
           max_nav_exposure_pct: number
           max_positions: number
@@ -93,7 +94,6 @@ export type Database = {
           scan_interval_minutes: number
           starting_nav: number
           updated_at: string
-          use_news_sentiment: boolean
           user_id: string
         }
         Insert: {
@@ -105,6 +105,7 @@ export type Database = {
           created_at?: string
           daily_loss_limit_pct?: number
           enabled?: boolean
+          kill_switch?: boolean
           last_scan_at?: string | null
           max_nav_exposure_pct?: number
           max_positions?: number
@@ -117,7 +118,6 @@ export type Database = {
           scan_interval_minutes?: number
           starting_nav?: number
           updated_at?: string
-          use_news_sentiment?: boolean
           user_id: string
         }
         Update: {
@@ -129,6 +129,7 @@ export type Database = {
           created_at?: string
           daily_loss_limit_pct?: number
           enabled?: boolean
+          kill_switch?: boolean
           last_scan_at?: string | null
           max_nav_exposure_pct?: number
           max_positions?: number
@@ -141,7 +142,6 @@ export type Database = {
           scan_interval_minutes?: number
           starting_nav?: number
           updated_at?: string
-          use_news_sentiment?: boolean
           user_id?: string
         }
         Relationships: []
@@ -620,6 +620,24 @@ export type Database = {
           sample_size?: number
           strategy_tilts?: Json
           window_days?: number
+        }
+        Relationships: []
+      }
+      system_flags: {
+        Row: {
+          key: string
+          updated_at: string
+          value: Json
+        }
+        Insert: {
+          key: string
+          updated_at?: string
+          value: Json
+        }
+        Update: {
+          key?: string
+          updated_at?: string
+          value?: Json
         }
         Relationships: []
       }
