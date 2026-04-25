@@ -13,6 +13,7 @@ import { MarketIndicators } from "@/components/market/MarketIndicators";
 import { TrendingTickers } from "@/components/market/TrendingTickers";
 import { SectorCard } from "@/components/sectors/SectorCard";
 import { SectorHeatmap } from "@/components/sectors/SectorHeatmap";
+import { getMarketStatus as getNyseStatus } from "@/lib/market-hours";
 
 interface MarketData {
   fearGreedScore: number;
@@ -34,16 +35,12 @@ interface SectorData {
 }
 
 function getMarketStatus() {
-  const now = new Date();
-  const nyTime = new Date(now.toLocaleString("en-US", { timeZone: "America/New_York" }));
-  const hours = nyTime.getHours();
-  const minutes = nyTime.getMinutes();
-  const day = nyTime.getDay();
-  if (day === 0 || day === 6) return { status: "Closed", color: "text-muted-foreground" };
-  const time = hours * 60 + minutes;
-  if (time >= 570 && time < 960) return { status: "Open", color: "text-success" };
-  if (time >= 240 && time < 570) return { status: "Pre-Market", color: "text-warning" };
-  if (time >= 960 && time < 1200) return { status: "After Hours", color: "text-warning" };
+  const s = getNyseStatus();
+  if (s.state === "open") return { status: "Open", color: "text-success" };
+  if (s.state === "early-close") return { status: "Early Close", color: "text-warning" };
+  if (s.state === "closed-pre-market") return { status: "Pre-Market", color: "text-warning" };
+  if (s.state === "closed-after-hours") return { status: "After Hours", color: "text-warning" };
+  if (s.state === "closed-holiday") return { status: "Holiday", color: "text-muted-foreground" };
   return { status: "Closed", color: "text-muted-foreground" };
 }
 
