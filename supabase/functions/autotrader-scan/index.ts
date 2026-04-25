@@ -322,10 +322,8 @@ type EntryAction =
   | { kind: "ENTER"; conviction: number; kellyFraction: number; price: number;
       strategy: string; profile: StockProfile; atr: number; hardStop: number;
       weeklyAlloc: number; reasoning: string;
-      decision: "BUY" | "SHORT";
-      sentiment?: SentimentRead | null }
-  | { kind: "HOLD" | "BLOCKED"; reason: string;
-      sentiment?: SentimentRead | null };
+      decision: "BUY" | "SHORT" }
+  | { kind: "HOLD" | "BLOCKED"; reason: string };
 
 // ============================================================================
 // WIN EXIT — peak detection (5 signals, 3-of-5 fires FULL_EXIT)
