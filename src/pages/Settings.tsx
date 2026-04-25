@@ -735,12 +735,15 @@ function usMarketStatus(now: Date): MarketStatus {
     return { state: "open", label: "open" };
   }
 
-  // Compute friendly next-open label in user's local time.
+  // Compute friendly next-open label in the viewer's local timezone.
+  // `undefined` locale + omitted timeZone tells Intl to use the browser's
+  // own locale + IANA tz, so a user in Tirana sees CET/CEST, NYC sees EST/EDT, etc.
   const next = nextUsMarketOpen(now);
   const localOpen = next.toLocaleString(undefined, {
     weekday: "short",
     hour: "2-digit",
     minute: "2-digit",
+    timeZoneName: "short",
   });
   return { state: "closed", label: `Market closed · opens ${localOpen}` };
 }
