@@ -109,7 +109,7 @@ export const Navbar = () => {
                   </SheetTitle>
                 </SheetHeader>
                 <nav className="flex flex-col gap-2 mt-6">
-                  {navLinks.map((link) => {
+                  {allLinks.map((link) => {
                     const isActive = location.pathname === link.href;
                     const Icon = link.icon;
                     return (
