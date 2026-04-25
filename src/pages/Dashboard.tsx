@@ -128,10 +128,7 @@ const Dashboard = () => {
   const [currentPrices, setCurrentPrices] = useState<Record<string, number>>({});
   const [pricesLoading, setPricesLoading] = useState(false);
   const [sellAlerts, setSellAlerts] = useState<SellAlert[]>([]);
-  const [killSwitch, setKillSwitch] = useState<{
-    perUser: boolean;
-    global: { active: boolean; reason: string | null } | null;
-  }>({ perUser: false, global: null });
+  const [killSwitchActive, setKillSwitchActive] = useState(false);
   const [portfolioHistory, setPortfolioHistory] = useState<PortfolioSnapshot[]>([]);
   const [lastScanTime, setLastScanTime] = useState<string | null>(null);
   const [showTradeLog, setShowTradeLog] = useState(false);
@@ -220,28 +217,21 @@ const Dashboard = () => {
     };
   }, [loadSignalData, user]);
 
-  // ── Kill-switch monitoring (per-user + global) ──────────────────────────────
+  // ── Per-user kill-switch monitoring ────────────────────────────────────────
   useEffect(() => {
     if (!user) return;
     let cancelled = false;
     const loadKillSwitch = async () => {
-      const [perUserRes, globalRes] = await Promise.all([
-        supabase.from("autotrade_settings").select("kill_switch").eq("user_id", user.id).maybeSingle(),
-        supabase.from("system_flags").select("value").eq("key", "global_kill_switch").maybeSingle(),
-      ]);
+      const { data } = await supabase
+        .from("autotrade_settings")
+        .select("kill_switch")
+        .eq("user_id", user.id)
+        .maybeSingle();
       if (cancelled) return;
-      const globalVal = (globalRes.data?.value as { active?: boolean; reason?: string | null } | null) ?? null;
-      setKillSwitch({
-        perUser: Boolean(perUserRes.data?.kill_switch),
-        global: globalVal ? { active: Boolean(globalVal.active), reason: globalVal.reason ?? null } : null,
-      });
+      setKillSwitchActive(Boolean(data?.kill_switch));
     };
     loadKillSwitch();
 
-    const flagsChannel = supabase
-      .channel("system-flags-realtime")
-      .on("postgres_changes", { event: "*", schema: "public", table: "system_flags" }, loadKillSwitch)
-      .subscribe();
     const settingsChannel = supabase
       .channel("autotrade-settings-realtime")
       .on(
@@ -253,7 +243,6 @@ const Dashboard = () => {
 
     return () => {
       cancelled = true;
-      supabase.removeChannel(flagsChannel);
       supabase.removeChannel(settingsChannel);
     };
   }, [user]);
@@ -429,26 +418,8 @@ const Dashboard = () => {
       <main className="pt-20 pb-12 px-4 sm:px-6 relative z-10">
         <div className="container mx-auto max-w-7xl">
 
-          {/* Kill-switch banners — shown when global circuit breaker tripped or user emergency stop active */}
-          {killSwitch.global?.active && (
-            <motion.div
-              initial={{ opacity: 0, y: -8 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="mb-4 rounded-lg border border-destructive/40 bg-destructive/10 p-4 flex items-start gap-3"
-            >
-              <AlertTriangle className="w-5 h-5 text-destructive shrink-0 mt-0.5" />
-              <div className="text-sm">
-                <div className="font-semibold text-destructive">System-wide AutoTrader halt</div>
-                <div className="text-foreground/80 mt-0.5">
-                  All automated trading is frozen across the platform. Manage open positions manually.
-                </div>
-                {killSwitch.global.reason && (
-                  <div className="text-xs text-muted-foreground mt-1 font-mono">{killSwitch.global.reason}</div>
-                )}
-              </div>
-            </motion.div>
-          )}
-          {killSwitch.perUser && !killSwitch.global?.active && (
+          {/* Per-user emergency stop banner */}
+          {killSwitchActive && (
             <motion.div
               initial={{ opacity: 0, y: -8 }}
               animate={{ opacity: 1, y: 0 }}

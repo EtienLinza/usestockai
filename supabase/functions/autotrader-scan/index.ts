@@ -598,22 +598,6 @@ serve(async (req) => {
   const summary = { users: 0, entries: 0, exits: 0, partials: 0, holds: 0, blocked: 0, errors: 0 };
 
   try {
-    // 0. GLOBAL KILL SWITCH — if tripped (manually or by circuit breaker), abort entire scan.
-    const { data: globalFlag } = await supabase
-      .from("system_flags")
-      .select("value")
-      .eq("key", "global_kill_switch")
-      .maybeSingle();
-    const globalKill = (globalFlag?.value as { active?: boolean; reason?: string } | null) ?? null;
-    if (globalKill?.active) {
-      console.warn(`[autotrader-scan] Global kill switch ACTIVE — aborting scan. Reason: ${globalKill.reason ?? "unspecified"}`);
-      return json({
-        status: "global-kill-switch-active",
-        reason: globalKill.reason ?? "unspecified",
-        summary,
-      });
-    }
-
     // 1. Active users
     const { data: settingsRows, error: sErr } = await supabase
       .from("autotrade_settings")
@@ -737,14 +721,10 @@ serve(async (req) => {
           .update({ last_scan_at: now.toISOString(), next_scan_at: nextScan.toISOString() })
           .eq("user_id", rawSettings.user_id);
       } catch (err) {
-        // Circuit breaker trips abort the entire scan and trip the global flag,
-        // so subsequent users don't get partial fills on bad data.
+        // Circuit breaker trips abort the current scan only — no global state is
+        // persisted. Each scan re-evaluates Yahoo health from scratch; if the
+        // upstream issue is resolved, the next scan proceeds normally.
         if (err instanceof CircuitBreakerTrippedError) {
-          await supabase.from("system_flags").upsert({
-            key: "global_kill_switch",
-            value: { active: true, reason: err.verdictReason, tripped_at: new Date().toISOString() },
-            updated_at: new Date().toISOString(),
-          }, { onConflict: "key" });
           // Log a row to every active user's autotrade_log so it surfaces in their UI.
           const allUserIds = settingsRows.map(s => (s as Settings).user_id);
           if (allUserIds.length > 0) {
@@ -971,8 +951,8 @@ async function processUser(
 
   // ── CIRCUIT BREAKER — evaluate batch fetch health before any decisions ──
   // If any threshold trips (>20% null prices, >50% fetch failures, etc.) we
-  // flip the global kill switch so subsequent users in this scan are also
-  // halted, then abort. Manual reset only — see system_flags table.
+  // abort the entire scan to protect every user from bad-data fills. The next
+  // scheduled scan re-checks Yahoo from scratch — no global state is persisted.
   const nowEt = new Date();
   const marketIsOpen =
     !isMarketHoliday(nowEt) &&
