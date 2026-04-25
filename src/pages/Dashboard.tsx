@@ -418,26 +418,8 @@ const Dashboard = () => {
       <main className="pt-20 pb-12 px-4 sm:px-6 relative z-10">
         <div className="container mx-auto max-w-7xl">
 
-          {/* Kill-switch banners — shown when global circuit breaker tripped or user emergency stop active */}
-          {killSwitch.global?.active && (
-            <motion.div
-              initial={{ opacity: 0, y: -8 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="mb-4 rounded-lg border border-destructive/40 bg-destructive/10 p-4 flex items-start gap-3"
-            >
-              <AlertTriangle className="w-5 h-5 text-destructive shrink-0 mt-0.5" />
-              <div className="text-sm">
-                <div className="font-semibold text-destructive">System-wide AutoTrader halt</div>
-                <div className="text-foreground/80 mt-0.5">
-                  All automated trading is frozen across the platform. Manage open positions manually.
-                </div>
-                {killSwitch.global.reason && (
-                  <div className="text-xs text-muted-foreground mt-1 font-mono">{killSwitch.global.reason}</div>
-                )}
-              </div>
-            </motion.div>
-          )}
-          {killSwitch.perUser && !killSwitch.global?.active && (
+          {/* Per-user emergency stop banner */}
+          {killSwitchActive && (
             <motion.div
               initial={{ opacity: 0, y: -8 }}
               animate={{ opacity: 1, y: 0 }}
