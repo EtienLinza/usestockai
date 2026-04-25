@@ -721,14 +721,10 @@ serve(async (req) => {
           .update({ last_scan_at: now.toISOString(), next_scan_at: nextScan.toISOString() })
           .eq("user_id", rawSettings.user_id);
       } catch (err) {
-        // Circuit breaker trips abort the entire scan and trip the global flag,
-        // so subsequent users don't get partial fills on bad data.
+        // Circuit breaker trips abort the current scan only — no global state is
+        // persisted. Each scan re-evaluates Yahoo health from scratch; if the
+        // upstream issue is resolved, the next scan proceeds normally.
         if (err instanceof CircuitBreakerTrippedError) {
-          await supabase.from("system_flags").upsert({
-            key: "global_kill_switch",
-            value: { active: true, reason: err.verdictReason, tripped_at: new Date().toISOString() },
-            updated_at: new Date().toISOString(),
-          }, { onConflict: "key" });
           // Log a row to every active user's autotrade_log so it surfaces in their UI.
           const allUserIds = settingsRows.map(s => (s as Settings).user_id);
           if (allUserIds.length > 0) {
