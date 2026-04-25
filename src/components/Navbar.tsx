@@ -28,14 +28,21 @@ export const Navbar = () => {
   const { user, signOut } = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
+  // Primary nav (always visible on desktop)
   const navLinks = [
     { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
     { href: "/watchlist", label: "Watchlist", icon: Heart },
     { href: "/backtest", label: "Backtest", icon: BarChart3 },
-    { href: "/calibration", label: "Calibration", icon: Brain },
-    { href: "/autotrader-log", label: "AutoTrader Log", icon: Bot },
     { href: "/settings", label: "Settings", icon: Shield },
   ];
+
+  // Secondary nav (in user dropdown on desktop, full list in mobile sheet)
+  const secondaryLinks = [
+    { href: "/calibration", label: "Calibration", icon: Brain },
+    { href: "/autotrader-log", label: "AutoTrader Log", icon: Bot },
+  ];
+
+  const allLinks = [...navLinks, ...secondaryLinks];
 
   const handleSignOut = async () => {
     await signOut();
