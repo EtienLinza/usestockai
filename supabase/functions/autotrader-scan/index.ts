@@ -951,8 +951,8 @@ async function processUser(
 
   // ── CIRCUIT BREAKER — evaluate batch fetch health before any decisions ──
   // If any threshold trips (>20% null prices, >50% fetch failures, etc.) we
-  // flip the global kill switch so subsequent users in this scan are also
-  // halted, then abort. Manual reset only — see system_flags table.
+  // abort the entire scan to protect every user from bad-data fills. The next
+  // scheduled scan re-checks Yahoo from scratch — no global state is persisted.
   const nowEt = new Date();
   const marketIsOpen =
     !isMarketHoliday(nowEt) &&
