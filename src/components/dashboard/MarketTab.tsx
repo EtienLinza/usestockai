@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Activity, RefreshCw, Clock, LayoutGrid, Grid3X3 } from "lucide-react";
+import { Activity, RefreshCw, Clock } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { SentimentGauge } from "@/components/market/SentimentGauge";
@@ -98,22 +98,20 @@ export function MarketTab() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex items-center justify-between mb-4 gap-2 flex-wrap">
         <div className="flex items-center gap-2">
-          <Badge variant="outline" className={`${marketStatus.color} gap-1`}>
+          <Tabs value={viewMode} onValueChange={(v) => { setViewMode(v as "market" | "sectors"); setFetched(false); }}>
+            <TabsList className="bg-secondary/30 h-8">
+              <TabsTrigger value="market" className="text-xs h-6 px-3">Market</TabsTrigger>
+              <TabsTrigger value="sectors" className="text-xs h-6 px-3">Sectors</TabsTrigger>
+            </TabsList>
+          </Tabs>
+          <Badge variant="outline" className={`${marketStatus.color} gap-1 text-[10px]`}>
             <Activity className="w-3 h-3" />{marketStatus.status}
           </Badge>
-          <div className="flex items-center gap-1 p-1 bg-secondary/50 rounded-lg">
-            <Button variant="ghost" size="sm" onClick={() => setViewMode("market")} className={`h-7 px-2 text-xs ${viewMode === "market" ? "bg-background shadow-sm" : ""}`}>
-              Market
-            </Button>
-            <Button variant="ghost" size="sm" onClick={() => { setViewMode("sectors"); setFetched(false); }} className={`h-7 px-2 text-xs ${viewMode === "sectors" ? "bg-background shadow-sm" : ""}`}>
-              Sectors
-            </Button>
-          </div>
         </div>
-        <Button variant="ghost" size="sm" onClick={() => viewMode === "market" ? fetchMarketData(true) : fetchSectorData(true)} disabled={isLoading}>
-          <RefreshCw className={`w-4 h-4 ${isLoading ? "animate-spin" : ""}`} />
+        <Button variant="ghost" size="sm" onClick={() => viewMode === "market" ? fetchMarketData(true) : fetchSectorData(true)} disabled={isLoading} className="h-8 px-2">
+          <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? "animate-spin" : ""}`} />
         </Button>
       </div>
 

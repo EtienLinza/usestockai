@@ -28,14 +28,21 @@ export const Navbar = () => {
   const { user, signOut } = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
+  // Primary nav (always visible on desktop)
   const navLinks = [
     { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
     { href: "/watchlist", label: "Watchlist", icon: Heart },
     { href: "/backtest", label: "Backtest", icon: BarChart3 },
-    { href: "/calibration", label: "Calibration", icon: Brain },
-    { href: "/autotrader-log", label: "AutoTrader Log", icon: Bot },
     { href: "/settings", label: "Settings", icon: Shield },
   ];
+
+  // Secondary nav (in user dropdown on desktop, full list in mobile sheet)
+  const secondaryLinks = [
+    { href: "/calibration", label: "Calibration", icon: Brain },
+    { href: "/autotrader-log", label: "AutoTrader Log", icon: Bot },
+  ];
+
+  const allLinks = [...navLinks, ...secondaryLinks];
 
   const handleSignOut = async () => {
     await signOut();
@@ -102,7 +109,7 @@ export const Navbar = () => {
                   </SheetTitle>
                 </SheetHeader>
                 <nav className="flex flex-col gap-2 mt-6">
-                  {navLinks.map((link) => {
+                  {allLinks.map((link) => {
                     const isActive = location.pathname === link.href;
                     const Icon = link.icon;
                     return (
@@ -167,7 +174,7 @@ export const Navbar = () => {
                     </span>
                   </button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-48">
+                <DropdownMenuContent align="end" className="w-52">
                   <DropdownMenuItem onClick={() => navigate("/dashboard")}>
                     <LayoutDashboard className="w-4 h-4 mr-2" />
                     Dashboard
@@ -176,6 +183,16 @@ export const Navbar = () => {
                     <Heart className="w-4 h-4 mr-2" />
                     Watchlist
                   </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  {secondaryLinks.map((link) => {
+                    const Icon = link.icon;
+                    return (
+                      <DropdownMenuItem key={link.href} onClick={() => navigate(link.href)}>
+                        <Icon className="w-4 h-4 mr-2" />
+                        {link.label}
+                      </DropdownMenuItem>
+                    );
+                  })}
                   <DropdownMenuSeparator />
                   <DropdownMenuItem onClick={handleSignOut} className="text-destructive">
                     <LogOut className="w-4 h-4 mr-2" />
