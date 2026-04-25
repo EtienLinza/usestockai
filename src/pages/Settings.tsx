@@ -576,7 +576,6 @@ interface AdaptiveStatusCardProps {
 
 function AdaptiveStatusCard({ state, enabled, adaptive, lastScanAt, nextScanAt }: AdaptiveStatusCardProps) {
   const lastLabel = useMemo(() => formatRelative(lastScanAt, "past"), [lastScanAt]);
-  const nextLabel = useMemo(() => formatRelative(nextScanAt, "future"), [nextScanAt]);
 
   if (!adaptive) {
     return (
