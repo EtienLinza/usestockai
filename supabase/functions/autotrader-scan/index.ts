@@ -157,50 +157,9 @@ interface AdaptiveContext {
   adjustments: string[];       // human-readable reasons applied
 }
 
-interface SentimentRead {
-  score: number;        // -100 .. +100
-  confidence: number;   // 0 .. 1
-  headlines: Array<{ title: string; source: string; url: string; publishedAt: string }>;
-  reasoning: string;
-}
-
-// Per-invocation sentiment cache (separate from the DB cache — covers same scan)
-const sentimentCache = new Map<string, SentimentRead | null>();
-
-async function getSentiment(ticker: string): Promise<SentimentRead | null> {
-  const k = ticker.toUpperCase();
-  if (sentimentCache.has(k)) return sentimentCache.get(k)!;
-  try {
-    const url = `${Deno.env.get("SUPABASE_URL")}/functions/v1/news-sentiment`;
-    const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), 12000);
-    const r = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`,
-      },
-      body: JSON.stringify({ ticker: k }),
-      signal: ctrl.signal,
-    });
-    clearTimeout(t);
-    if (!r.ok) { sentimentCache.set(k, null); return null; }
-    const j = await r.json();
-    if (typeof j.score !== "number") { sentimentCache.set(k, null); return null; }
-    const out: SentimentRead = {
-      score: j.score,
-      confidence: Number(j.confidence) || 0,
-      headlines: Array.isArray(j.headlines) ? j.headlines : [],
-      reasoning: String(j.reasoning ?? ""),
-    };
-    sentimentCache.set(k, out);
-    return out;
-  } catch (e) {
-    console.warn(`sentiment fetch failed for ${k}`, e);
-    sentimentCache.set(k, null);
-    return null;
-  }
-}
+// (Sentiment / AI layer removed: signals are now 100% deterministic.
+//  Trading-loop AI was a regulatory + reproducibility risk — keep this surface
+//  pure technical from now on.)
 
 // ─── Risk profile baselines ──────────────────────────────────────────────
 const RISK_PROFILE_BASELINES = {
