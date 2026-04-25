@@ -537,33 +537,8 @@ async function runEntryDecision(
     return { kind: "HOLD", reason: `Conviction ${sig.conviction} < min ${settings.min_conviction}` };
   }
 
-  // ── News sentiment layer (only when technicals already passed) ─────────
-  let sentiment: SentimentRead | null = null;
-  let effectiveConviction = sig.conviction;
-  if (settings.use_news_sentiment) {
-    sentiment = await getSentiment(ticker);
-    if (sentiment) {
-      // Hard veto on extreme negative news with high confidence
-      if (sentiment.score <= -60 && sentiment.confidence >= 0.7) {
-        return {
-          kind: "BLOCKED",
-          reason: `News veto: ${sentiment.reasoning || "extreme negative sentiment"} (score ${sentiment.score}, conf ${sentiment.confidence.toFixed(2)})`,
-          sentiment,
-        };
-      }
-      // Bounded conviction adjustment: -10..+5 (don't chase hype)
-      const raw = sentiment.score * 0.1 * sentiment.confidence;
-      const adj = Math.max(-10, Math.min(5, raw));
-      effectiveConviction = Math.round(sig.conviction + adj);
-      if (effectiveConviction < settings.min_conviction) {
-        return {
-          kind: "HOLD",
-          reason: `Conviction after news (${effectiveConviction}) < min ${settings.min_conviction} — ${sentiment.reasoning || "negative drag"}`,
-          sentiment,
-        };
-      }
-    }
-  }
+  // (News-sentiment layer removed — pure deterministic conviction now.)
+  const effectiveConviction = sig.conviction;
 
   // Size
   const headroom = (settings.max_nav_exposure_pct - totalNavExposurePct) / 100;
@@ -573,7 +548,7 @@ async function runEntryDecision(
   const targetDollars = settings.starting_nav * cappedFrac;
 
   if (targetDollars < currentPrice) {
-    return { kind: "HOLD", reason: "Position too small after caps", sentiment };
+    return { kind: "HOLD", reason: "Position too small after caps" };
   }
 
   // Hard stop at entry
@@ -596,10 +571,7 @@ async function runEntryDecision(
     hardStop,
     weeklyAlloc: sig.weeklyBias.targetAllocation,
     decision: sig.decision === "SHORT" ? "SHORT" : "BUY",
-    reasoning: sentiment && sentiment.reasoning
-      ? `${sig.reasoning} | news: ${sentiment.reasoning}`
-      : sig.reasoning,
-    sentiment,
+    reasoning: sig.reasoning,
   };
 }
 
