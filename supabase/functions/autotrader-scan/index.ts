@@ -29,6 +29,15 @@ import {
   type StockProfile,
 } from "../_shared/signal-engine-v2.ts";
 import { isMarketHoliday, nyseCloseMinute } from "../_shared/market-calendar.ts";
+import { evaluateScanHealth, type TickerHealth } from "../_shared/circuit-breaker.ts";
+
+/** Thrown by the circuit breaker to abort the entire scan immediately. */
+class CircuitBreakerTrippedError extends Error {
+  constructor(public readonly verdictReason: string) {
+    super(verdictReason);
+    this.name = "CircuitBreakerTrippedError";
+  }
+}
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -589,6 +598,22 @@ serve(async (req) => {
   const summary = { users: 0, entries: 0, exits: 0, partials: 0, holds: 0, blocked: 0, errors: 0 };
 
   try {
+    // 0. GLOBAL KILL SWITCH — if tripped (manually or by circuit breaker), abort entire scan.
+    const { data: globalFlag } = await supabase
+      .from("system_flags")
+      .select("value")
+      .eq("key", "global_kill_switch")
+      .maybeSingle();
+    const globalKill = (globalFlag?.value as { active?: boolean; reason?: string } | null) ?? null;
+    if (globalKill?.active) {
+      console.warn(`[autotrader-scan] Global kill switch ACTIVE — aborting scan. Reason: ${globalKill.reason ?? "unspecified"}`);
+      return json({
+        status: "global-kill-switch-active",
+        reason: globalKill.reason ?? "unspecified",
+        summary,
+      });
+    }
+
     // 1. Active users
     const { data: settingsRows, error: sErr } = await supabase
       .from("autotrade_settings")
@@ -618,8 +643,26 @@ serve(async (req) => {
     // 3. Per-user processing — gated by per-user next_scan_at
     const now = new Date();
     let skippedNotDue = 0;
+    let skippedKillSwitch = 0;
     for (const settingsRow of settingsRows) {
       const rawSettings = settingsRow as Settings;
+
+      // PER-USER KILL SWITCH — halt entries AND freeze automated exits.
+      // User must manage positions manually until they flip it off.
+      if (rawSettings.kill_switch) {
+        skippedKillSwitch++;
+        const nextScan = new Date(now.getTime() + 10 * 60_000);
+        await supabase.from("autotrade_settings")
+          .update({ last_scan_at: now.toISOString(), next_scan_at: nextScan.toISOString() })
+          .eq("user_id", rawSettings.user_id);
+        await supabase.from("autotrade_log").insert({
+          user_id: rawSettings.user_id,
+          ticker: "SCAN",
+          action: "KILL_SWITCH",
+          reason: "Emergency stop active — no entries, no automated exits. Manage positions manually.",
+        });
+        continue;
+      }
 
       // Per-user cadence gate
       if (rawSettings.next_scan_at && new Date(rawSettings.next_scan_at) > now) {
@@ -694,6 +737,30 @@ serve(async (req) => {
           .update({ last_scan_at: now.toISOString(), next_scan_at: nextScan.toISOString() })
           .eq("user_id", rawSettings.user_id);
       } catch (err) {
+        // Circuit breaker trips abort the entire scan and trip the global flag,
+        // so subsequent users don't get partial fills on bad data.
+        if (err instanceof CircuitBreakerTrippedError) {
+          await supabase.from("system_flags").upsert({
+            key: "global_kill_switch",
+            value: { active: true, reason: err.verdictReason, tripped_at: new Date().toISOString() },
+            updated_at: new Date().toISOString(),
+          }, { onConflict: "key" });
+          // Log a row to every active user's autotrade_log so it surfaces in their UI.
+          const allUserIds = settingsRows.map(s => (s as Settings).user_id);
+          if (allUserIds.length > 0) {
+            await supabase.from("autotrade_log").insert(
+              allUserIds.map(uid => ({
+                user_id: uid,
+                ticker: "SCAN",
+                action: "CIRCUIT_BREAKER",
+                reason: err.verdictReason,
+              })),
+            );
+          }
+          (summary as Record<string, unknown>).circuit_breaker_tripped = true;
+          (summary as Record<string, unknown>).reason = err.verdictReason;
+          return json({ status: "circuit-breaker-tripped", reason: err.verdictReason, summary });
+        }
         console.error(`User ${rawSettings.user_id} failed:`, err);
         summary.errors++;
         await supabase.from("autotrade_log").insert({
@@ -703,6 +770,7 @@ serve(async (req) => {
       }
     }
     (summary as Record<string, unknown>).skipped_not_due = skippedNotDue;
+    (summary as Record<string, unknown>).skipped_kill_switch = skippedKillSwitch;
 
     return json({ status: "ok", summary });
   } catch (err) {
@@ -900,9 +968,38 @@ async function processUser(
   if (allTickers.length === 0) return;
 
   await batchFetch(allTickers);
+
+  // ── CIRCUIT BREAKER — evaluate batch fetch health before any decisions ──
+  // If any threshold trips (>20% null prices, >50% fetch failures, etc.) we
+  // flip the global kill switch so subsequent users in this scan are also
+  // halted, then abort. Manual reset only — see system_flags table.
+  const nowEt = new Date();
+  const marketIsOpen =
+    !isMarketHoliday(nowEt) &&
+    (() => {
+      const wd = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", weekday: "short" }).format(nowEt);
+      if (wd === "Sat" || wd === "Sun") return false;
+      const parts = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour: "2-digit", minute: "2-digit", hour12: false }).formatToParts(nowEt);
+      const hh = Number(parts.find(p => p.type === "hour")?.value ?? "0");
+      const mm = Number(parts.find(p => p.type === "minute")?.value ?? "0");
+      const min = hh * 60 + mm;
+      return min >= 9 * 60 + 30 && min < nyseCloseMinute(nowEt);
+    })();
+
+  const healths: TickerHealth[] = allTickers.map(t => ({
+    ticker: t,
+    data: priceCache.get(t) ?? null,
+  }));
+  const verdict = evaluateScanHealth(healths, marketIsOpen);
+  if (verdict.trip) {
+    const reason = `circuit_breaker: ${verdict.reason} at ${nowEt.toISOString()}`;
+    console.error(`[autotrader-scan] CIRCUIT BREAKER TRIPPED — ${reason}`);
+    throw new CircuitBreakerTrippedError(reason);
+  }
+
   userSummary.evaluated = allTickers.filter(t => {
     const d = priceCache.get(t);
-    return d && d.close.length >= 200;
+    return d && d.close.length >= 200 && !verdict.suspectTickers.has(t);
   }).length;
 
   // Compute today's P&L (realized today + unrealized today vs entry)
