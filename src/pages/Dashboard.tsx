@@ -128,6 +128,10 @@ const Dashboard = () => {
   const [currentPrices, setCurrentPrices] = useState<Record<string, number>>({});
   const [pricesLoading, setPricesLoading] = useState(false);
   const [sellAlerts, setSellAlerts] = useState<SellAlert[]>([]);
+  const [killSwitch, setKillSwitch] = useState<{
+    perUser: boolean;
+    global: { active: boolean; reason: string | null } | null;
+  }>({ perUser: false, global: null });
   const [portfolioHistory, setPortfolioHistory] = useState<PortfolioSnapshot[]>([]);
   const [lastScanTime, setLastScanTime] = useState<string | null>(null);
   const [showTradeLog, setShowTradeLog] = useState(false);
