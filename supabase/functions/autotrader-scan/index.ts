@@ -1046,9 +1046,6 @@ async function processUser(
     userSummary.blocked++;
     await supabase.from("autotrade_log").insert({
       user_id: userId, ticker: p.ticker, action: "BLOCKED", reason: p.decision.reason,
-      sentiment_score: p.decision.sentiment?.score ?? null,
-      sentiment_confidence: p.decision.sentiment?.confidence ?? null,
-      sentiment_headlines: p.decision.sentiment?.headlines ?? null,
     });
   }
 
@@ -1255,9 +1252,6 @@ async function executeEntry(
     price: fillPrice, shares,
     conviction: e.conviction, strategy: e.strategy, profile: e.profile,
     position_id: ins.id,
-    sentiment_score: e.sentiment?.score ?? null,
-    sentiment_confidence: e.sentiment?.confidence ?? null,
-    sentiment_headlines: e.sentiment?.headlines ?? null,
   });
 }
 
