@@ -1,76 +1,90 @@
-## Goal
-Stop the autotrader from buying "fictional tops" at the daily-bar close. Move to a live intraday quote, only execute a small number of entries per scan, and reject any fill that's clearly off the previous close.
+# StockAI fix plan
 
-This is a combined fix: **(b) live quote** + **(c) stagger entries** + **(d) sanity check**.
-
----
-
-## Changes
-
-### 1. `fetch-stock-price` edge function — add live quote support
-Currently uses `chart?interval=1d&range=5d`, which returns daily bars (during RTH the last bar is a moving "intraday last" but it's noisy and prone to single-tick spikes).
-
-Switch the entry-pricing path to Yahoo's `quote` endpoint, which returns `regularMarketPrice` (the actual live last trade, ~15min delayed but tradable):
-```
-https://query1.finance.yahoo.com/v7/finance/quote?symbols=TICKER
-```
-
-Return both fields in the response so existing callers (chart UI, Dashboard logs) keep working with `latestPrice`, while new code can read `liveQuote`:
-- `liveQuote` → `regularMarketPrice` (live)
-- `previousClose` → `regularMarketPreviousClose` (for sanity check below)
-- `latestPrice`, `priceHistory` → unchanged (still from the 5d daily chart)
-
-### 2. `autotrader-scan` — use live quote as the entry fill
-In `runEntryDecision` (around line 585) and `executeEntry` (line 1190+), replace `currentPrice = data.close[data.close.length - 1]` for **entry pricing only** with a fresh live quote fetched at the moment of execution.
-
-Keep `data.close[last]` for indicator math (RSI, MACD, ATR) — those need a complete daily bar. Only the **fill price** and **hard stop** are recomputed against the live quote.
-
-Implementation:
-- Add a small `fetchLiveQuote(ticker)` helper inside `autotrader-scan` that calls the Yahoo quote endpoint directly (no need to round-trip through another edge function).
-- Call it inside `executeEntry`, right after the `isMarketOpen()` gate.
-- Recompute `hardStop` using the live price (so the stop is anchored to actual fill, not the stale daily close).
-
-### 3. Sanity check — reject fills that diverge from previous close
-Inside `executeEntry`, after fetching `liveQuote` and `previousClose`:
-- Compute `gapPct = |liveQuote − previousClose| / previousClose`.
-- If `gapPct > 8%`, log a `BLOCKED` row with reason `"Live quote diverges >8% from prev close ($X vs $Y) — possible bad tick or halt"` and return.
-
-This catches Yahoo data glitches, halted stocks, and pre-market spikes that occasionally bleed into the RTH endpoint.
-
-### 4. Stagger entries — cap new entries per scan
-In `processUser` (around line 1004–1058), cap the number of new entries executed per single scan run to **2 per user** (configurable later if needed). Iterate the watchlist sorted by signal `conviction` descending so the strongest opportunities go first.
-
-Implementation:
-- Before the `for (const ticker of watchlist)` loop, compute `decisions[]` by running `runEntryDecision` for every eligible ticker first (cheap — math only, no DB writes).
-- Sort `ENTER` decisions by `conviction` desc.
-- Slice top 2 → execute those via `executeEntry`.
-- Remaining `ENTER` candidates get logged as `HOLD` with reason `"Deferred — entry stagger cap (2/scan); will retry next cycle"` so the user can see them in the activity log.
-
-This means the worst case is the bot opens 2 fresh positions every 10 minutes instead of 4–8 in a single tick. Over an hour that's still ~12 positions of headroom, but spread across very different price contexts.
-
-### 5. Minor: persist `last_price` snapshot to `autotrade_log`
-The `autotrade_log` row already records `price`. With the live quote in play, this becomes the actual fill price. No schema change needed — just make sure `executeEntry` writes the `liveQuote` into the `price` field (which it already does via `e.price`, now updated).
+Quick correction to my last audit: **MarketTab is not broken** (it reads live from the edge functions, not from those tables) and **per-position P&L already exists** in TradingTab. So the real issues are smaller and more focused than I made it sound. Here's everything worth fixing, ranked.
 
 ---
 
-## Files touched
-- `supabase/functions/fetch-stock-price/index.ts` — add `liveQuote` + `previousClose` to response
-- `supabase/functions/autotrader-scan/index.ts` — `fetchLiveQuote` helper, swap entry price, sanity check, stagger cap
+## 🔴 P0 — Security / cost
 
-## Not touched
-- Backtest engine (it correctly uses historical bars — no live concept exists there)
-- Exit logic (already uses `data.close[last]` correctly for the EOD stop/peak math; intraday exits would be a separate, larger change)
-- DB schema, RLS, cron schedule
+### 1. Lock down the `backtest` edge function
+**Problem:** `backtest` has `verify_jwt = false` AND zero in-code auth check (no `getUser`, no `Authorization` header read). It calls Yahoo + heavy CPU and is publicly callable. Anyone with the URL can DoS it or run unlimited backtests on your dime.
 
-## What this fixes
-- **Entry slippage**: live quote ≈ tradable mid, not yesterday's close or an intraday spike
-- **Single-tick concentration**: 2-per-scan cap spreads risk across multiple price contexts
-- **Bad data fills**: 8% gap check kills obviously broken quotes before they cost real money
-- **Stop placement**: hard stop anchored to actual fill, not stale data
+**Fix:**
+- Add the same `verifyAuth()` pattern that `stock-predict` already uses (Bearer token → `supabase.auth.getUser()` → 401 if invalid).
+- Add a simple in-memory rate limit (10 backtests/min/user, mirroring `stock-predict`).
+- Keep `verify_jwt = false` in `config.toml` (signing-keys system requires in-code check anyway).
 
-## What this doesn't fix
-- ~15min Yahoo quote delay (real-time would need a paid feed like Polygon/Tiingo)
-- Intraday exit timing — exits still trigger at scan cadence on daily-bar logic
-- Holiday calendar — `isMarketOpen()` is still weekday/hours only
+### 2. Confirm `stock-predict` rate limit is actually wired
+Already has `verifyAuth()` + rate-limit map — quick read-through to confirm it's invoked on every request path (the file is 2,591 lines so it's worth grepping).
 
-After approval I'll implement, deploy both functions, and confirm with a test call on the next scan cycle.
+---
+
+## 🟡 P1 — Correctness
+
+### 3. US market holiday calendar
+**Problem:** `isMarketOpen()` in `autotrader-scan/index.ts` (line 813) only checks weekday + 9:30–16:00 ET. On Thanksgiving, Christmas, July 4, MLK Day, etc., the bot will try to trade and either get bad fills or stale data. Same gap in the new `usMarketStatus()` in `Settings.tsx`.
+
+**Fix:**
+- Create `supabase/functions/_shared/market-calendar.ts` with a hardcoded NYSE holiday list for 2025–2027 (full closures + early closes at 13:00 ET).
+- Export `isMarketHoliday(date)` and update `isMarketOpen()` to consult it.
+- Mirror the same list to a frontend `src/lib/market-hours.ts` (see #4) so the Settings countdown also skips holidays.
+
+### 4. Move market-hours helpers into a shared lib
+**Problem:** `usMarketStatus()` and `nextUsMarketOpen()` currently live inside `src/pages/Settings.tsx`. Other components (Dashboard countdown, MarketTab status badge) re-implement weaker versions.
+
+**Fix:**
+- Extract to `src/lib/market-hours.ts`.
+- Update `Settings.tsx`, `MarketTab.tsx` (`getMarketStatus()` at line 32), and any other consumers to import from there.
+- Single source of truth + holiday-aware everywhere.
+
+---
+
+## 🟢 P2 — Cleanup / hygiene
+
+### 5. Drop the dead `market_sentiment` and `sector_performance` tables
+**Problem:** Both tables are empty (0 rows) and nothing writes to them. The frontend reads live from `market-sentiment` and `sector-analysis` edge functions, which return JSON directly. The tables are leftover schema from an earlier "cache to DB" design.
+
+**Fix:**
+- Migration: `DROP TABLE public.market_sentiment` and `DROP TABLE public.sector_performance`.
+- No code changes needed (nothing references them — confirmed via grep).
+- Optional alternative: keep them and have the edge functions UPSERT a snapshot on each call so you get a free historical record. **I'd lean drop unless you want the history.**
+
+### 6. Per-scan watchdog: update `next_scan_at` even on early-exit
+**Problem:** When `autotrader-scan` early-exits because the market is closed, it doesn't update `next_scan_at`. That's why your dashboard countdown was showing stale "10 hours" earlier.
+
+**Fix:** In the early-exit branch (around line 1250 in `autotrader-scan/index.ts`), still write `next_scan_at = now() + scan_interval_minutes` and `last_scan_at = now()` with a note like `"skipped: market closed"`. Now the UI countdown is always meaningful.
+
+---
+
+## ⚪ P3 — Optional / not urgent (skip unless you want it)
+
+- **Refactor `stock-predict/index.ts`** (2,591 lines → split into `auth.ts`, `indicators.ts`, `ai-prompts.ts`, `index.ts`). Pure code-health, no functional change. Risky to do in one shot — would defer.
+- **Real-time data feed** (Polygon/Tiingo to replace 15-min-delayed Yahoo). Costs $$ — only worth it if/when going live with real money.
+- **Intraday exit triggers** (move from daily-bar exits to bar-by-bar). Larger architectural change; tied to real-time feed above.
+
+---
+
+## What I'll touch
+
+| File | Change |
+|---|---|
+| `supabase/functions/backtest/index.ts` | Add `verifyAuth()` + rate limit (P0) |
+| `supabase/functions/_shared/market-calendar.ts` | **New** — NYSE holidays (P1) |
+| `supabase/functions/autotrader-scan/index.ts` | Use holiday helper; update `next_scan_at` on skip (P1, P2) |
+| `src/lib/market-hours.ts` | **New** — shared status + holidays (P1) |
+| `src/pages/Settings.tsx` | Import from shared lib (P1) |
+| `src/components/dashboard/MarketTab.tsx` | Import from shared lib (P1) |
+| `supabase/migrations/<new>.sql` | Drop `market_sentiment`, `sector_performance` (P2) |
+
+No backend schema changes beyond the two drops. No data loss (both tables are empty).
+
+---
+
+## Order I'd ship
+
+1. Lock down `backtest` (5 min, biggest risk reduction)
+2. Holiday calendar + shared market-hours lib (15 min, fixes the "bot trades on Thanksgiving" foot-gun)
+3. Fix `next_scan_at` on early exit (2 min, fixes the misleading countdown for real)
+4. Drop dead tables (1 migration)
+
+Want me to proceed with all four, or pick a subset?
