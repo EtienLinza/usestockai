@@ -31,6 +31,7 @@ type RiskProfile = "conservative" | "balanced" | "aggressive";
 
 interface AutoTradeSettings {
   enabled: boolean;
+  kill_switch: boolean;
   paper_mode: boolean;
   advanced_mode: boolean;
   adaptive_mode: boolean;
@@ -42,7 +43,6 @@ interface AutoTradeSettings {
   max_single_name_pct: number;
   daily_loss_limit_pct: number;
   starting_nav: number;
-  use_news_sentiment: boolean;
   auto_add_watchlist: boolean;
   auto_watchlist_consideration_floor: number;
   auto_watchlist_stale_days: number;
@@ -74,6 +74,7 @@ const CAPS_DEFAULTS: PortfolioCaps = {
 
 const AUTOTRADE_DEFAULTS: AutoTradeSettings = {
   enabled: false,
+  kill_switch: false,
   paper_mode: true,
   advanced_mode: false,
   adaptive_mode: true,
@@ -85,7 +86,6 @@ const AUTOTRADE_DEFAULTS: AutoTradeSettings = {
   max_single_name_pct: 20,
   daily_loss_limit_pct: 3,
   starting_nav: 100000,
-  use_news_sentiment: true,
   auto_add_watchlist: true,
   auto_watchlist_consideration_floor: 60,
   auto_watchlist_stale_days: 14,
@@ -121,7 +121,7 @@ const Settings = () => {
           .select("sector_max_pct, portfolio_beta_max, max_correlated_positions, enforcement_mode, enabled")
           .eq("user_id", user.id).maybeSingle(),
         supabase.from("autotrade_settings")
-          .select("enabled, paper_mode, advanced_mode, adaptive_mode, risk_profile, scan_interval_minutes, min_conviction, max_positions, max_nav_exposure_pct, max_single_name_pct, daily_loss_limit_pct, starting_nav, last_scan_at, next_scan_at, use_news_sentiment, auto_add_watchlist, auto_watchlist_consideration_floor, auto_watchlist_stale_days")
+          .select("enabled, kill_switch, paper_mode, advanced_mode, adaptive_mode, risk_profile, scan_interval_minutes, min_conviction, max_positions, max_nav_exposure_pct, max_single_name_pct, daily_loss_limit_pct, starting_nav, last_scan_at, next_scan_at, auto_add_watchlist, auto_watchlist_consideration_floor, auto_watchlist_stale_days")
           .eq("user_id", user.id).maybeSingle(),
         supabase.from("autotrader_state")
           .select("effective_min_conviction, effective_max_positions, effective_max_nav_exposure_pct, effective_max_single_name_pct, vix_value, vix_regime, spy_trend, recent_pnl_pct, adjustments, reason, computed_at")
@@ -139,6 +139,7 @@ const Settings = () => {
       if (botRes.data) {
         setBot({
           enabled: Boolean(botRes.data.enabled),
+          kill_switch: Boolean(botRes.data.kill_switch),
           paper_mode: Boolean(botRes.data.paper_mode),
           advanced_mode: Boolean(botRes.data.advanced_mode),
           adaptive_mode: botRes.data.adaptive_mode ?? true,
@@ -150,7 +151,6 @@ const Settings = () => {
           max_single_name_pct: Number(botRes.data.max_single_name_pct),
           daily_loss_limit_pct: Number(botRes.data.daily_loss_limit_pct),
           starting_nav: Number(botRes.data.starting_nav),
-          use_news_sentiment: botRes.data.use_news_sentiment ?? true,
           auto_add_watchlist: botRes.data.auto_add_watchlist ?? true,
           auto_watchlist_consideration_floor: Number(botRes.data.auto_watchlist_consideration_floor ?? 60),
           auto_watchlist_stale_days: Number(botRes.data.auto_watchlist_stale_days ?? 14),
