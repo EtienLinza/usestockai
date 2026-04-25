@@ -590,6 +590,22 @@ serve(async (req) => {
   const summary = { users: 0, entries: 0, exits: 0, partials: 0, holds: 0, blocked: 0, errors: 0 };
 
   try {
+    // 0. GLOBAL KILL SWITCH — if tripped (manually or by circuit breaker), abort entire scan.
+    const { data: globalFlag } = await supabase
+      .from("system_flags")
+      .select("value")
+      .eq("key", "global_kill_switch")
+      .maybeSingle();
+    const globalKill = (globalFlag?.value as { active?: boolean; reason?: string } | null) ?? null;
+    if (globalKill?.active) {
+      console.warn(`[autotrader-scan] Global kill switch ACTIVE — aborting scan. Reason: ${globalKill.reason ?? "unspecified"}`);
+      return json({
+        status: "global-kill-switch-active",
+        reason: globalKill.reason ?? "unspecified",
+        summary,
+      });
+    }
+
     // 1. Active users
     const { data: settingsRows, error: sErr } = await supabase
       .from("autotrade_settings")
