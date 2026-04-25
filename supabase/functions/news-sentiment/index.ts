@@ -21,6 +21,7 @@
 // ============================================================================
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+import { getCompanyNews, isFinnhubConfigured } from "../_shared/finnhub.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -461,9 +462,22 @@ serve(async (req) => {
       }
     }
 
-    // 2. Fetch headlines
-    const newsKey = Deno.env.get("NEWSAPI_KEY");
-    const headlines = newsKey ? await fetchHeadlines(ticker, newsKey) : [];
+    // 2. Fetch headlines — Finnhub first (ticker-tagged, higher quality),
+    //    NewsAPI as fallback if Finnhub returns nothing or isn't configured.
+    let headlines: Headline[] = [];
+    if (isFinnhubConfigured()) {
+      const fh = await getCompanyNews(ticker, 7);
+      headlines = fh.slice(0, MAX_HEADLINES).map((n) => ({
+        title: n.title,
+        source: n.source,
+        url: n.url,
+        publishedAt: n.publishedAt,
+      }));
+    }
+    if (headlines.length === 0) {
+      const newsKey = Deno.env.get("NEWSAPI_KEY");
+      if (newsKey) headlines = await fetchHeadlines(ticker, newsKey);
+    }
 
     // 3. Score deterministically (works fine with empty headlines too)
     const result = aggregate(ticker, headlines);
