@@ -217,28 +217,21 @@ const Dashboard = () => {
     };
   }, [loadSignalData, user]);
 
-  // ── Kill-switch monitoring (per-user + global) ──────────────────────────────
+  // ── Per-user kill-switch monitoring ────────────────────────────────────────
   useEffect(() => {
     if (!user) return;
     let cancelled = false;
     const loadKillSwitch = async () => {
-      const [perUserRes, globalRes] = await Promise.all([
-        supabase.from("autotrade_settings").select("kill_switch").eq("user_id", user.id).maybeSingle(),
-        supabase.from("system_flags").select("value").eq("key", "global_kill_switch").maybeSingle(),
-      ]);
+      const { data } = await supabase
+        .from("autotrade_settings")
+        .select("kill_switch")
+        .eq("user_id", user.id)
+        .maybeSingle();
       if (cancelled) return;
-      const globalVal = (globalRes.data?.value as { active?: boolean; reason?: string | null } | null) ?? null;
-      setKillSwitch({
-        perUser: Boolean(perUserRes.data?.kill_switch),
-        global: globalVal ? { active: Boolean(globalVal.active), reason: globalVal.reason ?? null } : null,
-      });
+      setKillSwitchActive(Boolean(data?.kill_switch));
     };
     loadKillSwitch();
 
-    const flagsChannel = supabase
-      .channel("system-flags-realtime")
-      .on("postgres_changes", { event: "*", schema: "public", table: "system_flags" }, loadKillSwitch)
-      .subscribe();
     const settingsChannel = supabase
       .channel("autotrade-settings-realtime")
       .on(
@@ -250,7 +243,6 @@ const Dashboard = () => {
 
     return () => {
       cancelled = true;
-      supabase.removeChannel(flagsChannel);
       supabase.removeChannel(settingsChannel);
     };
   }, [user]);
