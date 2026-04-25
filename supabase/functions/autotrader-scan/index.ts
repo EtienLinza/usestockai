@@ -132,6 +132,7 @@ interface Position {
 
 interface Settings {
   user_id: string; enabled: boolean;
+  kill_switch: boolean;
   min_conviction: number; max_positions: number;
   max_nav_exposure_pct: number; max_single_name_pct: number;
   daily_loss_limit_pct: number; starting_nav: number;
@@ -140,7 +141,6 @@ interface Settings {
   scan_interval_minutes: number;
   last_scan_at: string | null;
   next_scan_at: string | null;
-  use_news_sentiment: boolean;
   risk_profile: "conservative" | "balanced" | "aggressive";
   adaptive_mode: boolean;
   auto_add_watchlist: boolean;
