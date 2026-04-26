@@ -143,18 +143,24 @@ Deno.serve(async (req) => {
       }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    // ── Fetch current prices for valuation ────────────────────────────────────
+    // ── Fetch historical closes (for beta) AND live prices (for valuation) ────
     const allTickers = Array.from(new Set([ticker, ...openPositions.map((p: any) => p.ticker.toUpperCase()), "SPY"]));
     const closesByTicker: Record<string, number[]> = {};
+    const livePriceByTicker: Record<string, number> = {};
     await Promise.all(allTickers.map(async (t) => {
-      const closes = await fetchYahooClose(t, "3mo");
+      const [closes, live] = await Promise.all([
+        fetchYahooClose(t, "3mo"),  // history → Yahoo
+        fetchLivePrice(t),          // current → Finnhub primary
+      ]);
       if (closes && closes.length > 0) closesByTicker[t] = closes;
+      if (live !== null) livePriceByTicker[t] = live;
     }));
 
     const spyCloses = closesByTicker["SPY"] || [];
 
-    // Use latest close as current price; fallback to entry_price
+    // Prefer live Finnhub price; fall back to last close; finally to caller's fallback.
     const priceFor = (t: string, fallback: number) => {
+      if (livePriceByTicker[t] !== undefined) return livePriceByTicker[t];
       const c = closesByTicker[t];
       return c && c.length > 0 ? c[c.length - 1] : fallback;
     };
