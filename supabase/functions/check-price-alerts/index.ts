@@ -82,14 +82,15 @@ serve(async (req) => {
 
     // Check each ticker
     for (const [ticker, tickerAlerts] of tickerMap) {
-      const currentPrice = await fetchCurrentPrice(ticker);
+      const quote = await fetchCurrentPrice(ticker);
 
-      if (currentPrice === null) {
+      if (quote === null) {
         console.warn(`Could not fetch price for ${ticker}, skipping`);
         continue;
       }
+      const currentPrice = quote.price;
 
-      console.log(`${ticker}: current price $${currentPrice.toFixed(2)}`);
+      console.log(`${ticker}: current price $${currentPrice.toFixed(2)} (src=${quote.source})`);
 
       for (const alert of tickerAlerts) {
         let isTriggered = false;
