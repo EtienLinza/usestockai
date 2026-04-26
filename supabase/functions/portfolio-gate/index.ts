@@ -1,4 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { fetchDailyCloses } from "../_shared/yahoo-history.ts";
+import { getQuoteWithFallback } from "../_shared/finnhub.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -43,18 +45,16 @@ function getSectorETF(ticker: string): string {
   return TICKER_TO_SECTOR_ETF[ticker.toUpperCase()] || "OTHER";
 }
 
-// ── Yahoo Finance helper ─────────────────────────────────────────────────────
+// ── Historical closes for beta math (Yahoo — Finnhub free tier blocks /candle) ──
 async function fetchYahooClose(ticker: string, range = "3mo"): Promise<number[] | null> {
-  try {
-    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?range=${range}&interval=1d`;
-    const res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" } });
-    if (!res.ok) return null;
-    const json = await res.json();
-    const closes: number[] = json?.chart?.result?.[0]?.indicators?.quote?.[0]?.close ?? [];
-    return closes.filter((v) => typeof v === "number" && !isNaN(v));
-  } catch {
-    return null;
-  }
+  const closes = await fetchDailyCloses(ticker, range);
+  return closes.length > 0 ? closes : null;
+}
+
+// ── Live price for current valuation — Finnhub primary, Yahoo fallback ─────
+async function fetchLivePrice(ticker: string): Promise<number | null> {
+  const q = await getQuoteWithFallback(ticker);
+  return q?.price ?? null;
 }
 
 // Compute beta of stock vs SPY using daily returns
