@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+import { recordHeartbeat } from "../_shared/heartbeat.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -58,6 +59,7 @@ function bucketCenter(label: string): number {
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
+  const startedAt = Date.now();
   try {
     const supabase = createClient(
       Deno.env.get("SUPABASE_URL")!,
@@ -219,6 +221,13 @@ serve(async (req) => {
       .single();
     if (insErr) throw insErr;
 
+    await recordHeartbeat(
+      "calibrate-weights",
+      startedAt,
+      "ok",
+      `samples=${sampleSize} window=${WINDOW_DAYS}d`,
+    );
+
     return new Response(JSON.stringify({
       ok: true,
       sampleSize,
@@ -231,6 +240,7 @@ serve(async (req) => {
 
   } catch (e: any) {
     console.error("calibrate-weights error:", e);
+    await recordHeartbeat("calibrate-weights", startedAt, "error", e?.message ?? "failed");
     return new Response(JSON.stringify({ error: e.message ?? "failed" }), {
       status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },

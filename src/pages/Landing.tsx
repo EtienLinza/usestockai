@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Logo } from "@/components/Logo";
+import { Footer } from "@/components/Footer";
 import {
   ArrowRight, TrendingUp, Brain, Zap, BarChart3, Shield,
   Target, Activity, LineChart, PieChart, Bell, Eye,
@@ -53,7 +54,7 @@ const Landing = () => {
   ];
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-background flex flex-col">
       <Navbar />
       
       {/* Hero Section */}
@@ -238,17 +239,7 @@ const Landing = () => {
         </div>
       </section>
 
-      {/* Footer */}
-      <footer className="py-6 border-t border-border/30">
-        <div className="container mx-auto px-6">
-          <div className="flex flex-col md:flex-row items-center justify-between gap-4">
-            <Logo size="sm" />
-            <p className="text-xs text-muted-foreground text-center">
-              © {new Date().getFullYear()} StockAI. Intelligence only. Not financial advice.
-            </p>
-          </div>
-        </div>
-      </footer>
+      <Footer />
     </div>
   );
 };

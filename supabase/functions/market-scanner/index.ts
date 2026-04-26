@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+import { recordHeartbeat } from "../_shared/heartbeat.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -662,6 +663,7 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  const heartbeatStart = Date.now();
   try {
     const startTime = Date.now();
     const body = await req.json().catch(() => ({}));
@@ -939,6 +941,17 @@ serve(async (req) => {
     const elapsed = Date.now() - startTime;
     console.log(`Scan complete: ${signals.length} signals from ${tickersToScan.length} tickers in ${elapsed}ms`);
 
+    // Only record a heartbeat on the FINAL batch so health-check sees the
+    // canonical "scan completed" signal once per full sweep, not once per batch.
+    if (end >= allTickers.length) {
+      await recordHeartbeat(
+        "market-scanner",
+        heartbeatStart,
+        "ok",
+        `signals=${signals.length} tickers=${allTickers.length}`,
+      );
+    }
+
     return new Response(JSON.stringify({
       signals,
       batch,
@@ -968,6 +981,7 @@ serve(async (req) => {
   } catch (error) {
     console.error("Scanner error:", error);
     const message = error instanceof Error ? error.message : "Scanner failed";
+    await recordHeartbeat("market-scanner", heartbeatStart, "error", message);
     return new Response(
       JSON.stringify({ error: message }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }

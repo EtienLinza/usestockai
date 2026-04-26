@@ -10,6 +10,7 @@ import {
 } from "../_shared/signal-engine-v2.ts";
 import { fetchDailyHistory } from "../_shared/yahoo-history.ts";
 import { getQuoteWithFallback } from "../_shared/finnhub.ts";
+import { recordHeartbeat } from "../_shared/heartbeat.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -26,6 +27,7 @@ async function fetchYahooData(ticker: string): Promise<DataSet | null> {
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
+  const startedAt = Date.now();
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -246,6 +248,13 @@ serve(async (req) => {
 
     console.log(`Sell alert check complete: ${openPositions.length} positions, ${totalAlerts} new alerts`);
 
+    await recordHeartbeat(
+      "check-sell-alerts",
+      startedAt,
+      "ok",
+      `positions=${openPositions.length} alerts=${totalAlerts}`,
+    );
+
     return new Response(JSON.stringify({
       checked: openPositions.length,
       users: Object.keys(byUser).length,
@@ -256,6 +265,7 @@ serve(async (req) => {
   } catch (error) {
     console.error("Check sell alerts error:", error);
     const message = error instanceof Error ? error.message : "Failed";
+    await recordHeartbeat("check-sell-alerts", startedAt, "error", message);
     return new Response(JSON.stringify({ error: message }), {
       status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },

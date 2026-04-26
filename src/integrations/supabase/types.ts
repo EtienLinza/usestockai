@@ -197,6 +197,33 @@ export type Database = {
         }
         Relationships: []
       }
+      cron_heartbeat: {
+        Row: {
+          duration_ms: number | null
+          job_name: string
+          last_run_at: string
+          notes: string | null
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          duration_ms?: number | null
+          job_name: string
+          last_run_at?: string
+          notes?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          duration_ms?: number | null
+          job_name?: string
+          last_run_at?: string
+          notes?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       live_signals: {
         Row: {
           confidence: number
