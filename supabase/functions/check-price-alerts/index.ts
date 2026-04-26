@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { getQuoteWithFallback } from "../_shared/finnhub.ts";
+import { recordHeartbeat } from "../_shared/heartbeat.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -29,6 +30,7 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  const startedAt = Date.now();
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -159,6 +161,13 @@ serve(async (req) => {
 
     console.log(`Triggered ${triggeredAlerts.length} alerts`);
 
+    await recordHeartbeat(
+      "check-price-alerts",
+      startedAt,
+      "ok",
+      `checked=${alerts.length} triggered=${triggeredAlerts.length}`,
+    );
+
     return new Response(
       JSON.stringify({
         message: `Checked ${alerts.length} alerts, triggered ${triggeredAlerts.length}`,
@@ -168,6 +177,12 @@ serve(async (req) => {
     );
   } catch (error) {
     console.error("check-price-alerts error:", error);
+    await recordHeartbeat(
+      "check-price-alerts",
+      startedAt,
+      "error",
+      error instanceof Error ? error.message : "Unknown error",
+    );
     return new Response(
       JSON.stringify({ error: error instanceof Error ? error.message : "Unknown error" }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
