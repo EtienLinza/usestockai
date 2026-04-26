@@ -62,6 +62,23 @@ serve(async (req) => {
       if (i + 5 < allTickers.length) await new Promise(r => setTimeout(r, 200));
     }
 
+    // Overlay the LATEST live quote (Finnhub primary, Yahoo fallback) onto each
+    // dataset's last bar so PnL / MFE / MAE / stop checks use real-time prices
+    // rather than yesterday's close. We mutate close[last] only — high/low stay
+    // as the official end-of-day values.
+    for (let i = 0; i < allTickers.length; i += 5) {
+      const batch = allTickers.slice(i, i + 5);
+      const quotes = await Promise.all(batch.map(t => getQuoteWithFallback(t)));
+      batch.forEach((t, j) => {
+        const q = quotes[j];
+        const ds = priceData[t];
+        if (q && ds && ds.close.length > 0) {
+          ds.close[ds.close.length - 1] = q.price;
+        }
+      });
+      if (i + 5 < allTickers.length) await new Promise(r => setTimeout(r, 100));
+    }
+
     let totalAlerts = 0;
 
     // ─────────────────────────────────────────────────────────────────────
