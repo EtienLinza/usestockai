@@ -23,6 +23,7 @@ import {
   calculateOBV,
   safeGet,
 } from "../_shared/indicators.ts";
+import { fetchDailyHistory } from "../_shared/yahoo-history.ts";
 
 // ============================================================================
 // [NEW] DIVERGENCE DETECTION (ported from stock-predict)
