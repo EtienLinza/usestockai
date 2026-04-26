@@ -153,3 +153,63 @@ export async function getFundamentals(ticker: string): Promise<FinnhubFundamenta
 export function isFinnhubConfigured(): boolean {
   return getKey() !== null;
 }
+
+// ── Universal live-quote with Yahoo fallback ─────────────────────────────────
+// Single entry point for "give me the current price right now" across the
+// entire backend. Tries Finnhub first; if it fails or is unconfigured, falls
+// back to Yahoo's intraday meta endpoint. Returns null only if BOTH fail.
+export interface LiveQuote {
+  price: number;
+  previousClose: number | null;
+  changePct: number | null;
+  marketState: string | null;
+  source: "finnhub" | "yahoo";
+}
+
+const YAHOO_UA_FALLBACK = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36";
+
+async function yahooIntradayQuote(ticker: string): Promise<LiveQuote | null> {
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 5000);
+    const r = await fetch(
+      `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=1m&range=1d`,
+      { headers: { "User-Agent": YAHOO_UA_FALLBACK }, signal: ctrl.signal },
+    );
+    clearTimeout(t);
+    if (!r.ok) return null;
+    const j = await r.json();
+    const meta = j?.chart?.result?.[0]?.meta;
+    if (!meta || typeof meta.regularMarketPrice !== "number") return null;
+    const prev = typeof meta.previousClose === "number"
+      ? meta.previousClose
+      : (typeof meta.chartPreviousClose === "number" ? meta.chartPreviousClose : null);
+    return {
+      price: meta.regularMarketPrice,
+      previousClose: prev,
+      changePct: prev && prev > 0 ? ((meta.regularMarketPrice - prev) / prev) * 100 : null,
+      marketState: meta.marketState ?? null,
+      source: "yahoo",
+    };
+  } catch {
+    return null;
+  }
+}
+
+export async function getQuoteWithFallback(ticker: string): Promise<LiveQuote | null> {
+  // Try Finnhub first (fast, reliable, ticker-validated)
+  const fh = await getQuote(ticker);
+  if (fh && fh.current > 0) {
+    // Finnhub doesn't return marketState; fetch it lazily only if needed by
+    // callers — here we leave it null and let callers that need it call Yahoo.
+    return {
+      price: fh.current,
+      previousClose: fh.previousClose || null,
+      changePct: fh.changePct || null,
+      marketState: null,
+      source: "finnhub",
+    };
+  }
+  // Fallback to Yahoo
+  return await yahooIntradayQuote(ticker);
+}
