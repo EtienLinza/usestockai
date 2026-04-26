@@ -548,8 +548,6 @@ function computeSignalConviction(
 //  a one-file swap.)
 // ============================================================================
 
-import { fetchDailyHistory } from "../_shared/yahoo-history.ts";
-
 async function fetchYahooData(ticker: string, range: string = "1y"): Promise<DataSet | null> {
   return await fetchDailyHistory(ticker, range);
 }
