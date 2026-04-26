@@ -32,6 +32,7 @@ import { isMarketHoliday, nyseCloseMinute } from "../_shared/market-calendar.ts"
 import { evaluateScanHealth, type TickerHealth } from "../_shared/circuit-breaker.ts";
 import { fetchDailyHistory } from "../_shared/yahoo-history.ts";
 import { getQuoteWithFallback } from "../_shared/finnhub.ts";
+import { recordHeartbeat } from "../_shared/heartbeat.ts";
 
 /** Thrown by the circuit breaker to abort the entire scan immediately. */
 class CircuitBreakerTrippedError extends Error {
@@ -553,6 +554,7 @@ async function runEntryDecision(
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
+  const startedAt = Date.now();
   const supabase = createClient(
     Deno.env.get("SUPABASE_URL")!,
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
@@ -568,6 +570,7 @@ serve(async (req) => {
       .eq("enabled", true);
     if (sErr) throw sErr;
     if (!settingsRows || settingsRows.length === 0) {
+      await recordHeartbeat("autotrader-scan", startedAt, "ok", "no-active-users");
       return json({ status: "no-active-users", summary });
     }
     summary.users = settingsRows.length;
@@ -702,6 +705,7 @@ serve(async (req) => {
           }
           (summary as Record<string, unknown>).circuit_breaker_tripped = true;
           (summary as Record<string, unknown>).reason = err.verdictReason;
+          await recordHeartbeat("autotrader-scan", startedAt, "error", `circuit-breaker: ${err.verdictReason}`);
           return json({ status: "circuit-breaker-tripped", reason: err.verdictReason, summary });
         }
         console.error(`User ${rawSettings.user_id} failed:`, err);
@@ -715,9 +719,16 @@ serve(async (req) => {
     (summary as Record<string, unknown>).skipped_not_due = skippedNotDue;
     (summary as Record<string, unknown>).skipped_kill_switch = skippedKillSwitch;
 
+    await recordHeartbeat(
+      "autotrader-scan",
+      startedAt,
+      "ok",
+      `users=${summary.users} entries=${summary.entries} exits=${summary.exits} errors=${summary.errors}`,
+    );
     return json({ status: "ok", summary });
   } catch (err) {
     console.error("AutoTrader top-level error:", err);
+    await recordHeartbeat("autotrader-scan", startedAt, "error", (err as Error).message ?? "unknown");
     return json({ status: "error", error: (err as Error).message, summary }, 500);
   }
 });
