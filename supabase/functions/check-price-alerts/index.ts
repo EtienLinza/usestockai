@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { getQuoteWithFallback } from "../_shared/finnhub.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -15,30 +16,11 @@ interface PriceAlert {
   is_triggered: boolean;
 }
 
-// Fetch current price from Yahoo Finance
-async function fetchCurrentPrice(ticker: string): Promise<number | null> {
-  try {
-    const response = await fetch(
-      `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=1d`,
-      {
-        headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        },
-      }
-    );
-
-    if (!response.ok) {
-      console.error(`Failed to fetch price for ${ticker}: ${response.status}`);
-      return null;
-    }
-
-    const data = await response.json();
-    const price = data?.chart?.result?.[0]?.meta?.regularMarketPrice;
-    return price || null;
-  } catch (error) {
-    console.error(`Error fetching price for ${ticker}:`, error);
-    return null;
-  }
+// Fetch current price — Finnhub primary, Yahoo fallback (centralized helper)
+async function fetchCurrentPrice(ticker: string): Promise<{ price: number; source: string } | null> {
+  const q = await getQuoteWithFallback(ticker);
+  if (!q) return null;
+  return { price: q.price, source: q.source };
 }
 
 serve(async (req) => {
