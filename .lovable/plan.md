@@ -1,148 +1,64 @@
-# Trust-the-money hardening plan
+## Goal
+Make Finnhub the **primary live-quote source across the entire backend**, with Yahoo retained only where Finnhub's free tier doesn't expose the data (historical daily candles, predefined screeners). Centralize all data access through `_shared/finnhub.ts` so future swaps are one-file changes.
 
-Three concrete changes. No new dependencies. All deterministic.
+## Honest constraint (free-tier reality)
+Finnhub's free tier does **not** include `/stock/candle` (historical OHLCV) or screeners. Yahoo therefore must remain for:
+- **1-year daily candles** — used by autotrader-scan, check-sell-alerts, market-scanner, portfolio-gate, sector-analysis, backtest
+- **Predefined screeners** — used by market-sentiment (trending) and market-scanner (discovery batch 0)
 
----
+Everywhere else (single live quote, prev close, market state, news, fundamentals) Finnhub becomes primary.
 
-## 1. 🧠 Rip AI out of every trading-adjacent path
+## Changes
 
-**Scope** (per your call: "everything trading-adjacent"):
+### 1. Expand `_shared/finnhub.ts`
+Add two thin helpers so every function can drop its inline Yahoo quote fetcher:
+- `getLiveQuote(ticker)` — already exists as `getQuote`, just re-exported under a clearer name with `{ price, previousClose, changePct }` shape.
+- `getQuoteWithFallback(ticker)` — tries Finnhub, falls back to Yahoo intraday meta (`/v8/finance/chart?interval=1m&range=1d`). Returns `{ price, previousClose, marketState, source }`. This is the new universal live-quote entry point.
 
-| Surface | Today | After |
-|---|---|---|
-| `autotrader-scan` → `getSentiment()` → `news-sentiment` | AI-scored sentiment fed into entry/exit | **Removed.** All `getSentiment()` calls + `use_news_sentiment` setting deleted from autotrader. |
-| `news-sentiment` edge function | LOVABLE_API_KEY + Gemini call | **Replaced** with a deterministic headline-keyword scorer (bullish/bearish word lists, source weighting). Same `{score, confidence, headlines, reasoning}` contract so `NewsPanel` keeps working — just pure rules now. |
-| `stock-predict` edge function | 2,591 lines, 3 AI calls | **Deleted.** No code path calls it anymore (manual prediction UI was removed weeks ago — it's orphaned). Removes ~$$ exposure + the biggest single attack surface. |
-| `WatchlistSuggestions.tsx` | Static seed list (already not AI) | No change — confirmed it's not AI-backed. |
-| `weekly-digest` | Pure SQL summary, no AI | No change. |
+### 2. Edge functions to refactor (live-quote sites)
+Replace inline Yahoo fetchers with `getQuoteWithFallback`:
 
-**Result**: zero AI in any code path that touches a position, signal, stop, or entry. Pure deterministic quant + technicals. Backtest ↔ live parity is preserved (signal-engine-v2 was already AI-free).
+| Function | What changes |
+|---|---|
+| `check-price-alerts` | `fetchCurrentPrice` → `getQuoteWithFallback().price` |
+| `check-sell-alerts` | Inline live quote inside the alert-check loop → `getQuoteWithFallback`. Historical 1y candles stay on Yahoo (needed for ATR/trailing-stop math). |
+| `autotrader-scan` | `fetchLiveQuote` → `getQuoteWithFallback`. The 1y candle fetch stays on Yahoo. |
+| `market-sentiment` | Index quote (SPY/QQQ/etc) → `getQuoteWithFallback`. Screener calls stay on Yahoo. |
+| `portfolio-gate` | Live price → `getQuoteWithFallback`. Historical bars stay on Yahoo. |
+| `fetch-stock-price` | Already split; keep as-is (Finnhub primary, Yahoo fallback for quote, Yahoo for 5d candles). |
 
-**Files touched**:
-- `supabase/functions/autotrader-scan/index.ts` — strip `getSentiment`, sentiment cache, sentiment branches in entry/exit logic, the `use_news_sentiment` flag.
-- `supabase/functions/news-sentiment/index.ts` — rewrite as keyword scorer (NewsAPI fetch stays; AI call removed).
-- `supabase/functions/stock-predict/` — delete the whole function directory.
-- `src/pages/Settings.tsx` — remove the "Use news sentiment" toggle from the autotrader settings UI.
-- Migration: drop `autotrade_settings.use_news_sentiment` column.
+### 3. Edge functions where nothing changes
+- `backtest` — pure historical-only; no live quote needed.
+- `sector-analysis` — historical sector ETF candles only.
+- `market-scanner` — already calls `fetch-stock-price` indirectly + uses Yahoo screener for discovery.
+- `news-sentiment` — already on Finnhub.
 
----
+### 4. Shared candle helper (light refactor)
+Extract the duplicated `fetchYahooData` (1y daily candles) into `_shared/yahoo-history.ts` with one canonical implementation used by autotrader-scan, check-sell-alerts, portfolio-gate, market-scanner, and sector-analysis. This isn't strictly Finnhub work but it's the right time to deduplicate, and it makes a future paid-tier upgrade to Finnhub candles a single-file swap.
 
-## 2. 🔴 Kill switch — per-user + global, "halt entries + freeze exits"
+### 5. Optional: fundamentals enrichment in `autotrader-scan`
+When evaluating a candidate, opportunistically pull `getFundamentals(ticker)` (PE, beta, market cap, industry) and attach to `autotrade_log.reason`. Cheap context for the user without changing signal math.
 
-Per your call: when flipped, no new buys AND no automated sells. User must manually close.
+## Out of scope (intentionally)
+- **Replacing Yahoo historical candles with Finnhub `/stock/candle`** — paid tier only. If you upgrade, the `_shared/yahoo-history.ts` module is the single swap point.
+- **Replacing Yahoo screener** — no free-tier equivalent.
+- **Changing signal-engine math** — purely a data-source refactor.
 
-### Per-user kill switch
-- **New column** on `autotrade_settings`: `kill_switch boolean default false`.
-- **In `autotrader-scan`**: at the top of each user's loop, if `kill_switch = true`:
-  - Skip both `runEntryDecision` *and* `runExitDecision`.
-  - Write a `kill_switch_active` row to `autotrade_log` so it shows up in AutotraderLog.
-  - Update `next_scan_at` so the dashboard countdown stays honest.
-- **UI**: big red "EMERGENCY STOP" toggle in `Settings.tsx`, separate from the regular `enabled` flag. When ON, surface a persistent banner on Dashboard: *"Kill switch active — autotrader frozen. Manage positions manually."*
+## Files touched
+- `supabase/functions/_shared/finnhub.ts` (extend)
+- `supabase/functions/_shared/yahoo-history.ts` (new — dedup)
+- `supabase/functions/check-price-alerts/index.ts`
+- `supabase/functions/check-sell-alerts/index.ts`
+- `supabase/functions/autotrader-scan/index.ts`
+- `supabase/functions/market-sentiment/index.ts`
+- `supabase/functions/portfolio-gate/index.ts`
+- `supabase/functions/market-scanner/index.ts` (only the dedup import)
+- `supabase/functions/sector-analysis/index.ts` (only the dedup import)
 
-### Global kill switch (admin / data-anomaly fallback)
-- **New table** `system_flags (key text pk, value jsonb, updated_at timestamptz)`.
-- **Seeded row**: `('global_kill_switch', '{"active": false, "reason": null}')`.
-- **In `autotrader-scan`**: first thing it does (before loading users) is read this row. If `active = true`, abort the whole scan with a logged reason.
-- **Auto-trip**: the circuit breaker (#3) flips this to `true` on its own when thresholds are breached. Manual reset only.
-- **UI**: read-only banner on Dashboard when global flag is on; admin reset is a SQL update for now (no admin UI — you're the only admin).
+## Verification
+After deploy, smoke-test with `curl_edge_functions`:
+- `check-price-alerts` against an active alert
+- `autotrader-scan` (read logs to confirm `quoteSource=finnhub`)
+- `market-sentiment` (verify SPY price source)
 
-### Why "halt + freeze exits" and not force-close
-You picked freeze, which is the right call: force-closing at "last known price" during a suspected data outage is *exactly* how you eat a worse fill than you would have got. Freeze + manual takeover is what real desks do.
-
-**Files touched**:
-- Migration: add `autotrade_settings.kill_switch`, create `system_flags` table with RLS (anyone authed can SELECT, no client INSERT/UPDATE — service role only).
-- `supabase/functions/autotrader-scan/index.ts` — global flag check + per-user check.
-- `src/pages/Settings.tsx` — emergency stop toggle UI.
-- `src/pages/Dashboard.tsx` — banner when either flag is active.
-
----
-
-## 3. 🛡️ Data-quality circuit breaker
-
-You said "whatever I think best" — here's what I'm building. Four signals, any one trips it. Conservative thresholds because false-positives are way cheaper than bad fills:
-
-| Trigger | Threshold | Why |
-|---|---|---|
-| **Yahoo returns null/zero/NaN price** | >20% of tickers in a single scan | Catches API outages and Yahoo serving stale/garbage. |
-| **Quote timestamp stale** | >30 min old during NYSE regular hours | Yahoo sometimes serves you yesterday's close at 11am ET. |
-| **Implausible price gap** | Any ticker moved >25% vs its last-scan close with no halt flag | Catches data glitches, splits not yet adjusted, ticker symbol collisions. The position is skipped *and* counted toward the breaker tally. |
-| **Scan-wide fetch failure rate** | >50% of tickers errored out | Network / Yahoo rate limit / DNS issue. |
-
-### How it works
-- Each scan tracks counters in a `scanHealth` object.
-- After the OHLCV batch fetch (before entries/exits run), evaluate all four conditions.
-- If any trip, **set `system_flags.global_kill_switch = true`** with a `reason` like `"circuit_breaker: 38% of tickers returned null prices at 2026-04-25T15:32"`, abort the scan, and write a `circuit_breaker_tripped` row to `autotrade_log` for every opted-in user (so it shows up in their log, not just yours).
-- Reset is manual — you read the log, eyeball Yahoo, then `UPDATE system_flags SET value = '{"active":false,"reason":null}' WHERE key = 'global_kill_switch'`. Belt-and-suspenders by design.
-
-### Why these four
-- **Null-price + stale-timestamp** = the real Yahoo failure modes I've seen in your logs.
-- **25% gap** is loose enough to allow earnings-day moves but tight enough to catch obvious glitches (real single-day >25% on a non-earnings day is exceptionally rare on liquid names).
-- **50% scan failure** is the "Yahoo just rate-limited us" canary.
-
-**Files touched**:
-- `supabase/functions/autotrader-scan/index.ts` — `scanHealth` tracker, evaluation block after batch fetch, trip logic.
-- New helper `supabase/functions/_shared/circuit-breaker.ts` — pure functions for each check, easy to unit-test later.
-
----
-
-## 📋 Migration summary
-
-```sql
--- 1. Per-user kill switch
-ALTER TABLE public.autotrade_settings
-  ADD COLUMN kill_switch boolean NOT NULL DEFAULT false;
-
--- 2. Drop the now-unused sentiment toggle
-ALTER TABLE public.autotrade_settings
-  DROP COLUMN use_news_sentiment;
-
--- 3. Global system flags
-CREATE TABLE public.system_flags (
-  key text PRIMARY KEY,
-  value jsonb NOT NULL,
-  updated_at timestamptz NOT NULL DEFAULT now()
-);
-ALTER TABLE public.system_flags ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Authed users can read flags"
-  ON public.system_flags FOR SELECT TO authenticated USING (true);
--- No INSERT/UPDATE/DELETE policies → service role only (autotrader-scan + manual SQL)
-
-INSERT INTO public.system_flags (key, value)
-VALUES ('global_kill_switch', '{"active": false, "reason": null}'::jsonb);
-```
-
----
-
-## 📁 File-by-file change list
-
-| File | Action | What |
-|---|---|---|
-| `supabase/functions/stock-predict/` | **Delete** | Orphaned, AI-heavy, not called anywhere |
-| `supabase/functions/news-sentiment/index.ts` | **Rewrite** | Replace AI call with keyword scorer; preserve response shape |
-| `supabase/functions/autotrader-scan/index.ts` | **Edit** | Strip sentiment; add global+per-user kill checks; add circuit breaker tracker |
-| `supabase/functions/_shared/circuit-breaker.ts` | **New** | Pure functions for the 4 health checks |
-| `src/pages/Settings.tsx` | **Edit** | Remove "Use news sentiment" toggle; add red "Emergency Stop" toggle |
-| `src/pages/Dashboard.tsx` | **Edit** | Banner when global or per-user kill switch is on |
-| `src/integrations/supabase/types.ts` | Auto-regen | Reflects schema changes |
-| Migration | **New** | The SQL above |
-
----
-
-## 🚦 Ship order
-
-1. **Migration first** (kill switch column + system_flags table) — non-breaking, deploys instantly.
-2. **`autotrader-scan` edits** in one shot (strip AI + add kill checks + circuit breaker) — biggest blast radius, want it atomic.
-3. **`news-sentiment` rewrite** — keeps `NewsPanel` alive but pure-rule.
-4. **Delete `stock-predict`** — last because it's the most "are you sure?" step.
-5. **`Settings.tsx` + `Dashboard.tsx`** UI for the kill switch.
-
-After this lands, you'll be able to honestly say: *"100% deterministic signals, user can panic-stop at any time, system panic-stops itself if Yahoo lies."* That's the trust posture you actually need.
-
----
-
-## What this does NOT solve (explicit)
-- **Forward-tested track record** — still your time, not code.
-- **Broker integration** — separate sprint.
-- **Intraday exits** — separate sprint, needs real-time feed first.
-
-Good with this? Approve and I'll ship in the order above.
+Logs should show `finnhub` as quote source for live prices, `yahoo` only as fallback.
