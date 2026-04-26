@@ -542,43 +542,15 @@ function computeSignalConviction(
 
 // ============================================================================
 // YAHOO FINANCE DATA FETCHER
+// (Historical bars stay on Yahoo — Finnhub free tier blocks /stock/candle.
+//  Centralized in _shared/yahoo-history.ts so a future paid-tier upgrade is
+//  a one-file swap.)
 // ============================================================================
 
+import { fetchDailyHistory } from "../_shared/yahoo-history.ts";
+
 async function fetchYahooData(ticker: string, range: string = "1y"): Promise<DataSet | null> {
-  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?range=${range}&interval=1d`;
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 8000);
-    const resp = await fetch(url, {
-      headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
-      signal: controller.signal,
-    });
-    clearTimeout(timeout);
-    if (!resp.ok) return null;
-    const data = await resp.json();
-    if (data.chart?.error) return null;
-    const result = data.chart.result[0];
-    const quotes = result.indicators.quote[0];
-    const timestamps = result.timestamp.map((t: number) => {
-      const d = new Date(t * 1000);
-      return d.toISOString().split('T')[0];
-    });
-    const close: number[] = [], high: number[] = [], low: number[] = [], volume: number[] = [], dates: string[] = [], open: number[] = [];
-    for (let i = 0; i < timestamps.length; i++) {
-      if (quotes.close[i] != null && quotes.high[i] != null && quotes.low[i] != null && quotes.open[i] != null) {
-        close.push(quotes.close[i]);
-        high.push(quotes.high[i]);
-        low.push(quotes.low[i]);
-        open.push(quotes.open[i]);
-        volume.push(quotes.volume[i] || 0);
-        dates.push(timestamps[i]);
-      }
-    }
-    return { timestamps: dates, close, high, low, open, volume };
-  } catch (e) {
-    console.error(`Failed to fetch ${ticker}:`, e);
-    return null;
-  }
+  return await fetchDailyHistory(ticker, range);
 }
 
 // ============================================================================
