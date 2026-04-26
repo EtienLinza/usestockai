@@ -1,4 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { fetchDailyCloses } from "../_shared/yahoo-history.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -19,50 +20,25 @@ const SECTOR_ETFS = [
   { sector: "Communications", etfTicker: "XLC" },
 ];
 
+// Sector ETF history — Yahoo (Finnhub free tier blocks /stock/candle).
 async function fetchETFData(ticker: string): Promise<{
   dailyChange: number;
   weeklyChange: number;
   monthlyChange: number;
 } | null> {
-  try {
-    const endDate = Math.floor(Date.now() / 1000);
-    const startDate = endDate - 35 * 24 * 60 * 60; // ~35 days for monthly data
+  const closes = await fetchDailyCloses(ticker, "3mo");
+  if (closes.length < 2) return null;
 
-    const response = await fetch(
-      `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?period1=${startDate}&period2=${endDate}&interval=1d`,
-      {
-        headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        },
-      }
-    );
+  const currentPrice = closes[closes.length - 1];
+  const prevDayPrice = closes[closes.length - 2] || currentPrice;
+  const weekAgoPrice = closes[Math.max(0, closes.length - 6)] || currentPrice;
+  const monthAgoPrice = closes[Math.max(0, closes.length - 22)] || closes[0] || currentPrice;
 
-    if (!response.ok) {
-      console.warn(`Failed to fetch ${ticker}: ${response.status}`);
-      return null;
-    }
+  const dailyChange = prevDayPrice > 0 ? ((currentPrice - prevDayPrice) / prevDayPrice) * 100 : 0;
+  const weeklyChange = weekAgoPrice > 0 ? ((currentPrice - weekAgoPrice) / weekAgoPrice) * 100 : 0;
+  const monthlyChange = monthAgoPrice > 0 ? ((currentPrice - monthAgoPrice) / monthAgoPrice) * 100 : 0;
 
-    const data = await response.json();
-    const result = data?.chart?.result?.[0];
-    if (!result) return null;
-
-    const closes = result.indicators?.quote?.[0]?.close?.filter((c: number | null) => c != null) || [];
-    if (closes.length < 2) return null;
-
-    const currentPrice = closes[closes.length - 1];
-    const prevDayPrice = closes[closes.length - 2] || currentPrice;
-    const weekAgoPrice = closes[Math.max(0, closes.length - 6)] || currentPrice;
-    const monthAgoPrice = closes[0] || currentPrice;
-
-    const dailyChange = prevDayPrice > 0 ? ((currentPrice - prevDayPrice) / prevDayPrice) * 100 : 0;
-    const weeklyChange = weekAgoPrice > 0 ? ((currentPrice - weekAgoPrice) / weekAgoPrice) * 100 : 0;
-    const monthlyChange = monthAgoPrice > 0 ? ((currentPrice - monthAgoPrice) / monthAgoPrice) * 100 : 0;
-
-    return { dailyChange, weeklyChange, monthlyChange };
-  } catch (error) {
-    console.error(`Error fetching ${ticker}:`, error);
-    return null;
-  }
+  return { dailyChange, weeklyChange, monthlyChange };
 }
 
 serve(async (req) => {

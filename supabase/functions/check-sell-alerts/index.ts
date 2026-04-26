@@ -8,36 +8,17 @@ import {
   PROFILE_PARAMS,
   type DataSet,
 } from "../_shared/signal-engine-v2.ts";
+import { fetchDailyHistory } from "../_shared/yahoo-history.ts";
+import { getQuoteWithFallback } from "../_shared/finnhub.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+// Historical 1y daily candles still come from Yahoo (Finnhub free tier blocks /stock/candle).
 async function fetchYahooData(ticker: string): Promise<DataSet | null> {
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 8000);
-    const resp = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?range=1y&interval=1d`, {
-      headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
-      signal: controller.signal,
-    });
-    clearTimeout(timeout);
-    if (!resp.ok) return null;
-    const data = await resp.json();
-    if (data.chart?.error) return null;
-    const result = data.chart.result[0];
-    const quotes = result.indicators.quote[0];
-    const ts = result.timestamp.map((t: number) => new Date(t * 1000).toISOString().split("T")[0]);
-    const close: number[] = [], high: number[] = [], low: number[] = [], open: number[] = [], volume: number[] = [], dates: string[] = [];
-    for (let i = 0; i < ts.length; i++) {
-      if (quotes.close[i] != null && quotes.high[i] != null && quotes.low[i] != null && quotes.open[i] != null) {
-        close.push(quotes.close[i]); high.push(quotes.high[i]); low.push(quotes.low[i]);
-        open.push(quotes.open[i]); volume.push(quotes.volume[i] || 0); dates.push(ts[i]);
-      }
-    }
-    return { timestamps: dates, close, high, low, open, volume };
-  } catch { return null; }
+  return await fetchDailyHistory(ticker, "1y");
 }
 
 // ── Main handler ──
@@ -79,6 +60,23 @@ serve(async (req) => {
       const results = await Promise.all(batch.map(t => fetchYahooData(t)));
       batch.forEach((t, j) => { if (results[j]) priceData[t] = results[j]!; });
       if (i + 5 < allTickers.length) await new Promise(r => setTimeout(r, 200));
+    }
+
+    // Overlay the LATEST live quote (Finnhub primary, Yahoo fallback) onto each
+    // dataset's last bar so PnL / MFE / MAE / stop checks use real-time prices
+    // rather than yesterday's close. We mutate close[last] only — high/low stay
+    // as the official end-of-day values.
+    for (let i = 0; i < allTickers.length; i += 5) {
+      const batch = allTickers.slice(i, i + 5);
+      const quotes = await Promise.all(batch.map(t => getQuoteWithFallback(t)));
+      batch.forEach((t, j) => {
+        const q = quotes[j];
+        const ds = priceData[t];
+        if (q && ds && ds.close.length > 0) {
+          ds.close[ds.close.length - 1] = q.price;
+        }
+      });
+      if (i + 5 < allTickers.length) await new Promise(r => setTimeout(r, 100));
     }
 
     let totalAlerts = 0;

@@ -1,4 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { fetchDailyCloses } from "../_shared/yahoo-history.ts";
+import { getQuoteWithFallback } from "../_shared/finnhub.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -43,18 +45,16 @@ function getSectorETF(ticker: string): string {
   return TICKER_TO_SECTOR_ETF[ticker.toUpperCase()] || "OTHER";
 }
 
-// ── Yahoo Finance helper ─────────────────────────────────────────────────────
+// ── Historical closes for beta math (Yahoo — Finnhub free tier blocks /candle) ──
 async function fetchYahooClose(ticker: string, range = "3mo"): Promise<number[] | null> {
-  try {
-    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?range=${range}&interval=1d`;
-    const res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" } });
-    if (!res.ok) return null;
-    const json = await res.json();
-    const closes: number[] = json?.chart?.result?.[0]?.indicators?.quote?.[0]?.close ?? [];
-    return closes.filter((v) => typeof v === "number" && !isNaN(v));
-  } catch {
-    return null;
-  }
+  const closes = await fetchDailyCloses(ticker, range);
+  return closes.length > 0 ? closes : null;
+}
+
+// ── Live price for current valuation — Finnhub primary, Yahoo fallback ─────
+async function fetchLivePrice(ticker: string): Promise<number | null> {
+  const q = await getQuoteWithFallback(ticker);
+  return q?.price ?? null;
 }
 
 // Compute beta of stock vs SPY using daily returns
@@ -143,18 +143,24 @@ Deno.serve(async (req) => {
       }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    // ── Fetch current prices for valuation ────────────────────────────────────
+    // ── Fetch historical closes (for beta) AND live prices (for valuation) ────
     const allTickers = Array.from(new Set([ticker, ...openPositions.map((p: any) => p.ticker.toUpperCase()), "SPY"]));
     const closesByTicker: Record<string, number[]> = {};
+    const livePriceByTicker: Record<string, number> = {};
     await Promise.all(allTickers.map(async (t) => {
-      const closes = await fetchYahooClose(t, "3mo");
+      const [closes, live] = await Promise.all([
+        fetchYahooClose(t, "3mo"),  // history → Yahoo
+        fetchLivePrice(t),          // current → Finnhub primary
+      ]);
       if (closes && closes.length > 0) closesByTicker[t] = closes;
+      if (live !== null) livePriceByTicker[t] = live;
     }));
 
     const spyCloses = closesByTicker["SPY"] || [];
 
-    // Use latest close as current price; fallback to entry_price
+    // Prefer live Finnhub price; fall back to last close; finally to caller's fallback.
     const priceFor = (t: string, fallback: number) => {
+      if (livePriceByTicker[t] !== undefined) return livePriceByTicker[t];
       const c = closesByTicker[t];
       return c && c.length > 0 ? c[c.length - 1] : fallback;
     };

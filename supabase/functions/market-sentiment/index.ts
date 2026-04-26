@@ -1,11 +1,33 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { getQuoteWithFallback } from "../_shared/finnhub.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+// Live index quote — Finnhub primary, Yahoo fallback.
+// NOTE: Finnhub uses different ticker codes for indices than Yahoo
+// (e.g. ^GSPC vs SPY). For free-tier reliability we map Yahoo index symbols
+// to their tradable ETF proxies for Finnhub, then fall back to Yahoo's native
+// index endpoint if Finnhub returns nothing.
+const FINNHUB_INDEX_PROXY: Record<string, string> = {
+  "^GSPC": "SPY",  // S&P 500
+  "^IXIC": "QQQ",  // Nasdaq 100 proxy
+  "^DJI":  "DIA",  // Dow Jones
+  "^VIX":  "",     // VIX has no ETF proxy on free tier — Yahoo only
+};
+
 async function fetchYahooQuote(ticker: string): Promise<{ price: number; change: number } | null> {
+  // For indices, prefer the Finnhub-friendly ETF proxy when available.
+  const proxy = FINNHUB_INDEX_PROXY[ticker];
+  if (proxy) {
+    const q = await getQuoteWithFallback(proxy);
+    if (q && q.price > 0 && q.changePct !== null) {
+      return { price: q.price, change: q.changePct };
+    }
+  }
+  // Fall back to Yahoo's native chart endpoint (handles ^GSPC, ^VIX, etc).
   try {
     const response = await fetch(
       `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=1d`,

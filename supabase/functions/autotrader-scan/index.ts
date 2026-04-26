@@ -30,6 +30,8 @@ import {
 } from "../_shared/signal-engine-v2.ts";
 import { isMarketHoliday, nyseCloseMinute } from "../_shared/market-calendar.ts";
 import { evaluateScanHealth, type TickerHealth } from "../_shared/circuit-breaker.ts";
+import { fetchDailyHistory } from "../_shared/yahoo-history.ts";
+import { getQuoteWithFallback } from "../_shared/finnhub.ts";
 
 /** Thrown by the circuit breaker to abort the entire scan immediately. */
 class CircuitBreakerTrippedError extends Error {
@@ -44,39 +46,15 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-// ── Yahoo fetch with caching (per invocation) ─────────────────────────────
+// ── Daily candle fetch with caching (per invocation) ─────────────────────
+// Historical bars come from Yahoo (Finnhub free tier blocks /stock/candle).
 const priceCache = new Map<string, DataSet | null>();
 
 async function fetchYahooData(ticker: string): Promise<DataSet | null> {
   if (priceCache.has(ticker)) return priceCache.get(ticker)!;
-  try {
-    const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), 8000);
-    const r = await fetch(
-      `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?range=1y&interval=1d`,
-      { headers: { "User-Agent": "Mozilla/5.0" }, signal: ctrl.signal },
-    );
-    clearTimeout(t);
-    if (!r.ok) { priceCache.set(ticker, null); return null; }
-    const j = await r.json();
-    if (j.chart?.error) { priceCache.set(ticker, null); return null; }
-    const res = j.chart.result[0];
-    const q = res.indicators.quote[0];
-    const ts = res.timestamp.map((x: number) => new Date(x * 1000).toISOString().split("T")[0]);
-    const ds: DataSet = { timestamps: [], close: [], high: [], low: [], open: [], volume: [] };
-    for (let i = 0; i < ts.length; i++) {
-      if (q.close[i] != null && q.high[i] != null && q.low[i] != null && q.open[i] != null) {
-        ds.timestamps.push(ts[i]);
-        ds.close.push(q.close[i]); ds.high.push(q.high[i]); ds.low.push(q.low[i]);
-        ds.open.push(q.open[i]); ds.volume.push(q.volume[i] || 0);
-      }
-    }
-    priceCache.set(ticker, ds);
-    return ds;
-  } catch {
-    priceCache.set(ticker, null);
-    return null;
-  }
+  const ds = await fetchDailyHistory(ticker, "1y");
+  priceCache.set(ticker, ds);
+  return ds;
 }
 
 async function batchFetch(tickers: string[]): Promise<void> {
@@ -88,33 +66,18 @@ async function batchFetch(tickers: string[]): Promise<void> {
   }
 }
 
-// ── Live intraday quote (used at entry execution to get an actual fillable price) ──
-// Yahoo's /v8/chart with intraday interval returns meta.regularMarketPrice (live, ~15min
-// delayed but tradable). The /v7/quote endpoint now requires a crumb cookie so we avoid it.
+// ── Live intraday quote — Finnhub primary, Yahoo fallback ──────────────────
+// Used at entry execution to get an actual fillable price (no longer reliant
+// on Yahoo crumb cookies). Returns null if both providers fail.
 interface LiveQuote { price: number; previousClose: number | null; marketState: string | null }
 async function fetchLiveQuote(ticker: string): Promise<LiveQuote | null> {
-  try {
-    const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), 5000);
-    const r = await fetch(
-      `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=1m&range=1d`,
-      { headers: { "User-Agent": "Mozilla/5.0" }, signal: ctrl.signal },
-    );
-    clearTimeout(t);
-    if (!r.ok) return null;
-    const j = await r.json();
-    const meta = j?.chart?.result?.[0]?.meta;
-    if (!meta || typeof meta.regularMarketPrice !== "number") return null;
-    return {
-      price: meta.regularMarketPrice,
-      previousClose: typeof meta.previousClose === "number"
-        ? meta.previousClose
-        : (typeof meta.chartPreviousClose === "number" ? meta.chartPreviousClose : null),
-      marketState: meta.marketState ?? null,
-    };
-  } catch {
-    return null;
-  }
+  const q = await getQuoteWithFallback(ticker);
+  if (!q) return null;
+  return {
+    price: q.price,
+    previousClose: q.previousClose,
+    marketState: q.marketState,
+  };
 }
 
 // ============================================================================
