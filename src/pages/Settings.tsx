@@ -12,7 +12,9 @@ import { Input } from "@/components/ui/input";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { Shield, Loader2, Info, Bot, Sparkles, Clock, Activity, TrendingUp, TrendingDown, Minus, Wallet, AlertTriangle } from "lucide-react";
+import { Shield, Loader2, Info, Bot, Sparkles, Clock, Activity, TrendingUp, TrendingDown, Minus, Wallet, AlertTriangle, ChevronDown, Settings as SettingsIcon, Heart } from "lucide-react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
@@ -233,48 +235,73 @@ const Settings = () => {
     <div className="min-h-screen bg-background">
       <Navbar />
       <main className="container mx-auto px-6 pt-24 pb-12 max-w-3xl">
-        <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-8">
-          {/* AutoTrader section */}
-          <section className="space-y-4">
-            <div>
-              <div className="flex items-center gap-2 mb-1">
-                <Bot className="w-5 h-5 text-primary" />
-                <h1 className="text-2xl font-medium tracking-tight">AutoTrader</h1>
-              </div>
-              <p className="text-sm text-muted-foreground">
-                Hands-off scanner that opens, holds, and closes positions on its own.
-                Win exits use 5-signal peak detection; loss exits use thesis invalidation.
-              </p>
+        <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
+          {/* Page header */}
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <SettingsIcon className="w-5 h-5 text-primary" />
+              <h1 className="text-2xl font-medium tracking-tight">Settings</h1>
             </div>
+            <p className="text-sm text-muted-foreground">
+              Configure how the bot trades, what risks you'll accept, and monitor system health.
+            </p>
+          </div>
 
-            {loading ? (
-              <Card className="glass-card p-12 flex items-center justify-center">
-                <Loader2 className="w-5 h-5 animate-spin text-primary" />
-              </Card>
-            ) : (
-              <>
-                <Card className="glass-card p-5 space-y-5">
-                  <div className="flex items-center justify-between">
-                    <div className="space-y-0.5">
-                      <Label className="text-sm">Enable AutoTrader</Label>
-                      <p className="text-xs text-muted-foreground">
-                        When on, the system scans your watchlist and trades on your behalf.
-                      </p>
-                    </div>
-                    <Switch checked={bot.enabled} onCheckedChange={(v) => setBot({ ...bot, enabled: v })} />
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <div className="space-y-0.5">
-                      <Label className="text-sm">Paper mode</Label>
-                      <p className="text-xs text-muted-foreground">
-                        Simulate fills against your virtual portfolio. Live broker support coming later.
-                      </p>
-                    </div>
-                    <Switch checked={bot.paper_mode} onCheckedChange={(v) => setBot({ ...bot, paper_mode: v })} />
-                  </div>
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <div className="space-y-0.5">
+          {loading ? (
+            <Card className="glass-card p-12 flex items-center justify-center">
+              <Loader2 className="w-5 h-5 animate-spin text-primary" />
+            </Card>
+          ) : (
+            <Tabs defaultValue="autotrader" className="space-y-6">
+              <TabsList className="grid w-full grid-cols-3">
+                <TabsTrigger value="autotrader" className="gap-2">
+                  <Bot className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">AutoTrader</span>
+                  <span className="sm:hidden">Bot</span>
+                </TabsTrigger>
+                <TabsTrigger value="risk" className="gap-2">
+                  <Shield className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Risk Caps</span>
+                  <span className="sm:hidden">Risk</span>
+                </TabsTrigger>
+                <TabsTrigger value="system" className="gap-2">
+                  <Heart className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">System</span>
+                  <span className="sm:hidden">Health</span>
+                </TabsTrigger>
+              </TabsList>
+
+              {/* ─────────── AUTOTRADER TAB ─────────── */}
+              <TabsContent value="autotrader" className="space-y-6 mt-0">
+                {/* 1. Live status — answers "what's happening right now?" */}
+                <AdaptiveStatusCard
+                  state={adaptiveState}
+                  enabled={bot.enabled}
+                  adaptive={bot.adaptive_mode}
+                  lastScanAt={lastScanAt}
+                  nextScanAt={nextScanAt}
+                />
+
+                {/* 2. Core setup */}
+                <div className="space-y-2">
+                  <h2 className="text-xs uppercase tracking-wider text-muted-foreground font-medium px-1">
+                    Core setup
+                  </h2>
+                  <Card className="glass-card p-5 space-y-5">
+                    <ToggleRow
+                      label="Enable AutoTrader"
+                      hint="When on, the system scans your watchlist and trades on your behalf."
+                      checked={bot.enabled}
+                      onChange={(v) => setBot({ ...bot, enabled: v })}
+                    />
+                    <ToggleRow
+                      label="Paper mode"
+                      hint="Simulate fills against your virtual portfolio. Live broker support coming later."
+                      checked={bot.paper_mode}
+                      onChange={(v) => setBot({ ...bot, paper_mode: v })}
+                    />
+                    <div className="flex items-center justify-between gap-4">
+                      <div className="space-y-0.5 flex-1">
                         <Label className="text-sm">Risk profile</Label>
                         <p className="text-xs text-muted-foreground">
                           {RISK_PROFILE_LABEL[bot.risk_profile].hint}
@@ -292,82 +319,51 @@ const Settings = () => {
                         </SelectContent>
                       </Select>
                     </div>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <div className="space-y-0.5">
-                      <div className="flex items-center gap-2">
-                        <Label className="text-sm">Adaptive mode</Label>
-                        <Badge variant="outline" className="text-[10px] px-1.5 py-0 gap-1">
-                          <Activity className="w-2.5 h-2.5" /> live
-                        </Badge>
-                      </div>
-                      <p className="text-xs text-muted-foreground">
-                        Auto-tune conviction floor, position cap, and exposure to live VIX, SPY trend, and your recent P&L.
-                      </p>
-                    </div>
-                    <Switch checked={bot.adaptive_mode} onCheckedChange={(v) => setBot({ ...bot, adaptive_mode: v })} />
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <div className="space-y-0.5">
-                      <div className="flex items-center gap-2">
-                        <Label className="text-sm">Advanced mode</Label>
-                        <Badge variant="outline" className="text-[10px] px-1.5 py-0">manual control</Badge>
-                      </div>
-                      <p className="text-xs text-muted-foreground">
-                        Reveal scan interval and manual caps. Adaptive mode (when on) still layers on top.
-                      </p>
-                    </div>
-                    <Switch checked={bot.advanced_mode} onCheckedChange={(v) => setBot({ ...bot, advanced_mode: v })} />
-                  </div>
-                </Card>
-
-                {/* Emergency Stop — visually distinct, dangerous-looking on purpose */}
-                <Card className={cn(
-                  "p-5 space-y-3 border-2 transition-colors",
-                  bot.kill_switch
-                    ? "border-destructive bg-destructive/10"
-                    : "border-destructive/30 bg-destructive/5",
-                )}>
-                  <div className="flex items-center justify-between gap-4">
-                    <div className="space-y-1 flex-1">
-                      <div className="flex items-center gap-2">
-                        <AlertTriangle className={cn("w-4 h-4", bot.kill_switch ? "text-destructive" : "text-destructive/70")} />
-                        <Label className="text-sm font-semibold">Emergency Stop</Label>
-                        {bot.kill_switch && (
-                          <Badge variant="destructive" className="text-[10px] px-1.5 py-0">ACTIVE</Badge>
-                        )}
-                      </div>
-                      <p className="text-xs text-muted-foreground leading-relaxed">
-                        Freezes the autotrader: no new entries AND no automated exits will run.
-                        Your existing positions stay open until you close them manually.
-                        Use this if you suspect bad data, want to take manual control, or just need a breather.
-                      </p>
-                    </div>
-                    <Switch
-                      checked={bot.kill_switch}
-                      onCheckedChange={(v) => setBot({ ...bot, kill_switch: v })}
-                      className="data-[state=checked]:bg-destructive"
+                    <ToggleRow
+                      label="Adaptive mode"
+                      badge={<Badge variant="outline" className="text-[10px] px-1.5 py-0 gap-1"><Activity className="w-2.5 h-2.5" /> live</Badge>}
+                      hint="Auto-tune conviction floor, position cap, and exposure to live VIX, SPY trend, and your recent P&L."
+                      checked={bot.adaptive_mode}
+                      onChange={(v) => setBot({ ...bot, adaptive_mode: v })}
                     />
-                  </div>
-                </Card>
+                  </Card>
 
-                <Card className="glass-card p-5 space-y-5">
-                  {/* (continued — the original card is split here so the kill switch sits between sections) */}
-                  <div className="space-y-3 rounded-lg border border-border/50 p-3">
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="space-y-0.5">
-                        <Label className="text-sm">Auto-discover tickers</Label>
-                        <p className="text-xs text-muted-foreground">
-                          Automatically add promising tickers from the live signal feed to your watchlist. Auto-added tickers are removed if no qualifying signal appears for {bot.auto_watchlist_stale_days} days (held positions are never removed).
-                        </p>
-                      </div>
-                      <Switch
-                        checked={bot.auto_add_watchlist}
-                        onCheckedChange={(v) => setBot({ ...bot, auto_add_watchlist: v })}
-                      />
-                    </div>
+                  <StartingCapitalCard
+                    value={bot.starting_nav}
+                    onChange={(v) => setBot({ ...bot, starting_nav: v })}
+                  />
+
+                  {/* Status badges */}
+                  <div className="flex items-center gap-2 flex-wrap px-1 pt-1">
+                    <Badge variant={bot.enabled ? "default" : "secondary"}>
+                      {bot.enabled ? "Active" : "Paused"}
+                    </Badge>
+                    {bot.paper_mode && <Badge variant="outline">Paper</Badge>}
+                    <Badge variant="outline" className="gap-1 capitalize">
+                      <Sparkles className="w-3 h-3" /> {bot.risk_profile}
+                    </Badge>
+                    {bot.adaptive_mode && (
+                      <Badge variant="outline" className="gap-1 text-primary border-primary/30">
+                        <Activity className="w-3 h-3" /> Adaptive
+                      </Badge>
+                    )}
+                  </div>
+                </div>
+
+                {/* 3. Discovery */}
+                <div className="space-y-2">
+                  <h2 className="text-xs uppercase tracking-wider text-muted-foreground font-medium px-1">
+                    Watchlist discovery
+                  </h2>
+                  <Card className="glass-card p-5 space-y-4">
+                    <ToggleRow
+                      label="Auto-discover tickers"
+                      hint={`Automatically add promising tickers from the live signal feed to your watchlist. Auto-added tickers are removed if no qualifying signal appears for ${bot.auto_watchlist_stale_days} days (held positions are never removed).`}
+                      checked={bot.auto_add_watchlist}
+                      onChange={(v) => setBot({ ...bot, auto_add_watchlist: v })}
+                    />
                     {bot.auto_add_watchlist && (
-                      <div className="grid grid-cols-2 gap-3 pt-1">
+                      <div className="grid grid-cols-2 gap-3 pt-1 border-t border-border/40">
                         <div className="space-y-1">
                           <Label className="text-xs text-muted-foreground">Consideration floor</Label>
                           <Input
@@ -400,39 +396,31 @@ const Settings = () => {
                         </div>
                       </div>
                     )}
-                  </div>
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <Badge variant={bot.enabled ? "default" : "secondary"}>
-                      {bot.enabled ? "Active" : "Paused"}
-                    </Badge>
-                    {bot.paper_mode && <Badge variant="outline">Paper</Badge>}
-                    <Badge variant="outline" className="gap-1 capitalize">
-                      <Sparkles className="w-3 h-3" /> {bot.risk_profile}
-                    </Badge>
-                    {bot.adaptive_mode && (
-                      <Badge variant="outline" className="gap-1 text-primary border-primary/30">
-                        <Activity className="w-3 h-3" /> Adaptive
-                      </Badge>
-                    )}
-                  </div>
-                </Card>
+                  </Card>
+                </div>
 
-                <StartingCapitalCard
-                  value={bot.starting_nav}
-                  onChange={(v) => setBot({ ...bot, starting_nav: v })}
-                />
-
-                <AdaptiveStatusCard
-                  state={adaptiveState}
-                  enabled={bot.enabled}
-                  adaptive={bot.adaptive_mode}
-                  lastScanAt={lastScanAt}
-                  nextScanAt={nextScanAt}
-                />
-
-                {bot.advanced_mode && (
-                  <Card className="glass-card p-5 space-y-6">
-                    <div className="space-y-3">
+                {/* 4. Advanced (collapsible) */}
+                <Collapsible
+                  open={bot.advanced_mode}
+                  onOpenChange={(v) => setBot({ ...bot, advanced_mode: v })}
+                  className="space-y-2"
+                >
+                  <CollapsibleTrigger asChild>
+                    <button type="button" className="w-full flex items-center justify-between px-1 py-2 group">
+                      <div className="flex items-center gap-2">
+                        <h2 className="text-xs uppercase tracking-wider text-muted-foreground font-medium">
+                          Advanced controls
+                        </h2>
+                        <Badge variant="outline" className="text-[10px] px-1.5 py-0">manual</Badge>
+                      </div>
+                      <ChevronDown className={cn(
+                        "w-4 h-4 text-muted-foreground transition-transform",
+                        bot.advanced_mode && "rotate-180",
+                      )} />
+                    </button>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent className="space-y-4">
+                    <Card className="glass-card p-5 space-y-6">
                       <div className="flex items-center justify-between">
                         <div>
                           <Label className="text-sm flex items-center gap-2">
@@ -457,77 +445,107 @@ const Settings = () => {
                           </SelectContent>
                         </Select>
                       </div>
-                    </div>
 
-                    <CapSlider
-                      label="Min conviction to enter"
-                      hint="0–100. Only signals at or above this score open positions."
-                      value={bot.min_conviction}
-                      onChange={(v) => setBot({ ...bot, min_conviction: Math.round(v) })}
-                      min={50} max={95} step={1}
-                      effective={bot.adaptive_mode ? adaptiveState?.effective_min_conviction : undefined}
-                    />
-                    <CapSlider
-                      label="Max open positions"
-                      hint="Maximum simultaneous trades."
-                      value={bot.max_positions}
-                      onChange={(v) => setBot({ ...bot, max_positions: Math.round(v) })}
-                      min={1} max={20} step={1}
-                      effective={bot.adaptive_mode ? adaptiveState?.effective_max_positions : undefined}
-                    />
-                    <CapSlider
-                      label="Max NAV exposure"
-                      hint="Total % of starting capital that can be deployed at once."
-                      value={bot.max_nav_exposure_pct}
-                      onChange={(v) => setBot({ ...bot, max_nav_exposure_pct: v })}
-                      min={20} max={100} step={5} suffix="%"
-                      effective={bot.adaptive_mode ? adaptiveState?.effective_max_nav_exposure_pct : undefined}
-                    />
-                    <CapSlider
-                      label="Max per single name"
-                      hint="No single ticker can exceed this % of starting NAV."
-                      value={bot.max_single_name_pct}
-                      onChange={(v) => setBot({ ...bot, max_single_name_pct: v })}
-                      min={5} max={50} step={1} suffix="%"
-                      effective={bot.adaptive_mode ? adaptiveState?.effective_max_single_name_pct : undefined}
-                    />
-                    <CapSlider
-                      label="Daily loss kill-switch"
-                      hint="When today's combined P&L drops below this, no new entries until tomorrow."
-                      value={bot.daily_loss_limit_pct}
-                      onChange={(v) => setBot({ ...bot, daily_loss_limit_pct: v })}
-                      min={1} max={10} step={0.5} suffix="%" decimals={1}
-                    />
+                      <CapSlider
+                        label="Min conviction to enter"
+                        hint="0–100. Only signals at or above this score open positions."
+                        value={bot.min_conviction}
+                        onChange={(v) => setBot({ ...bot, min_conviction: Math.round(v) })}
+                        min={50} max={95} step={1}
+                        effective={bot.adaptive_mode ? adaptiveState?.effective_min_conviction : undefined}
+                      />
+                      <CapSlider
+                        label="Max open positions"
+                        hint="Maximum simultaneous trades."
+                        value={bot.max_positions}
+                        onChange={(v) => setBot({ ...bot, max_positions: Math.round(v) })}
+                        min={1} max={20} step={1}
+                        effective={bot.adaptive_mode ? adaptiveState?.effective_max_positions : undefined}
+                      />
+                      <CapSlider
+                        label="Max NAV exposure"
+                        hint="Total % of starting capital that can be deployed at once."
+                        value={bot.max_nav_exposure_pct}
+                        onChange={(v) => setBot({ ...bot, max_nav_exposure_pct: v })}
+                        min={20} max={100} step={5} suffix="%"
+                        effective={bot.adaptive_mode ? adaptiveState?.effective_max_nav_exposure_pct : undefined}
+                      />
+                      <CapSlider
+                        label="Max per single name"
+                        hint="No single ticker can exceed this % of starting NAV."
+                        value={bot.max_single_name_pct}
+                        onChange={(v) => setBot({ ...bot, max_single_name_pct: v })}
+                        min={5} max={50} step={1} suffix="%"
+                        effective={bot.adaptive_mode ? adaptiveState?.effective_max_single_name_pct : undefined}
+                      />
+                      <CapSlider
+                        label="Daily loss kill-switch"
+                        hint="When today's combined P&L drops below this, no new entries until tomorrow."
+                        value={bot.daily_loss_limit_pct}
+                        onChange={(v) => setBot({ ...bot, daily_loss_limit_pct: v })}
+                        min={1} max={10} step={0.5} suffix="%" decimals={1}
+                      />
+                    </Card>
+                  </CollapsibleContent>
+                </Collapsible>
+
+                {/* 5. Danger zone */}
+                <div className="space-y-2">
+                  <h2 className="text-xs uppercase tracking-wider text-destructive/80 font-medium px-1">
+                    Danger zone
+                  </h2>
+                  <Card className={cn(
+                    "p-5 border-2 transition-colors",
+                    bot.kill_switch
+                      ? "border-destructive bg-destructive/10"
+                      : "border-destructive/30 bg-destructive/5",
+                  )}>
+                    <div className="flex items-center justify-between gap-4">
+                      <div className="space-y-1 flex-1">
+                        <div className="flex items-center gap-2">
+                          <AlertTriangle className={cn("w-4 h-4", bot.kill_switch ? "text-destructive" : "text-destructive/70")} />
+                          <Label className="text-sm font-semibold">Emergency Stop</Label>
+                          {bot.kill_switch && (
+                            <Badge variant="destructive" className="text-[10px] px-1.5 py-0">ACTIVE</Badge>
+                          )}
+                        </div>
+                        <p className="text-xs text-muted-foreground leading-relaxed">
+                          Freezes the autotrader: no new entries AND no automated exits will run.
+                          Your existing positions stay open until you close them manually.
+                          Use this if you suspect bad data, want to take manual control, or just need a breather.
+                        </p>
+                      </div>
+                      <Switch
+                        checked={bot.kill_switch}
+                        onCheckedChange={(v) => setBot({ ...bot, kill_switch: v })}
+                        className="data-[state=checked]:bg-destructive"
+                      />
+                    </div>
                   </Card>
-                )}
-              </>
-            )}
-          </section>
+                </div>
+              </TabsContent>
 
-          {/* Portfolio Risk Caps section (existing) */}
-          <section className="space-y-4">
-            <div>
-              <div className="flex items-center gap-2 mb-1">
-                <Shield className="w-5 h-5 text-primary" />
-                <h2 className="text-2xl font-medium tracking-tight">Portfolio Risk Caps</h2>
-              </div>
-              <p className="text-sm text-muted-foreground">
-                Personal limits enforced before any new virtual position is opened from a manual signal.
-              </p>
-            </div>
-
-            {!loading && (
-              <>
-                <Card className="glass-card p-5 space-y-5">
-                  <div className="flex items-center justify-between">
-                    <div className="space-y-0.5">
-                      <Label className="text-sm">Enforcement</Label>
-                      <p className="text-xs text-muted-foreground">Turn portfolio gating on or off entirely.</p>
-                    </div>
-                    <Switch checked={caps.enabled} onCheckedChange={(v) => setCaps({ ...caps, enabled: v })} />
+              {/* ─────────── RISK CAPS TAB ─────────── */}
+              <TabsContent value="risk" className="space-y-6 mt-0">
+                <div>
+                  <div className="flex items-center gap-2 mb-1">
+                    <Shield className="w-5 h-5 text-primary" />
+                    <h2 className="text-xl font-medium tracking-tight">Portfolio Risk Caps</h2>
                   </div>
+                  <p className="text-sm text-muted-foreground">
+                    Personal limits enforced before any new virtual position is opened from a manual signal.
+                  </p>
+                </div>
 
-                  <div className="grid sm:grid-cols-2 gap-4">
+                <Card className="glass-card p-5 space-y-5">
+                  <ToggleRow
+                    label="Enforcement"
+                    hint="Turn portfolio gating on or off entirely."
+                    checked={caps.enabled}
+                    onChange={(v) => setCaps({ ...caps, enabled: v })}
+                  />
+
+                  <div className="grid sm:grid-cols-2 gap-4 pt-1 border-t border-border/40">
                     <div className="space-y-2">
                       <Label className="text-sm">Mode</Label>
                       <Select
@@ -577,34 +595,66 @@ const Settings = () => {
                     the moment you register a new one. Beta is computed from 60 trading days of returns vs SPY.
                   </p>
                 </Card>
-              </>
-            )}
-          </section>
+              </TabsContent>
 
-          <section className="space-y-4">
-            <div>
-              <div className="flex items-center gap-2 mb-1">
-                <Activity className="w-5 h-5 text-primary" />
-                <h2 className="text-2xl font-medium tracking-tight">System Health</h2>
-              </div>
-              <p className="text-sm text-muted-foreground">
-                Live status of background scanners, alerts, and digests.
-              </p>
+              {/* ─────────── SYSTEM TAB ─────────── */}
+              <TabsContent value="system" className="space-y-4 mt-0">
+                <div>
+                  <div className="flex items-center gap-2 mb-1">
+                    <Activity className="w-5 h-5 text-primary" />
+                    <h2 className="text-xl font-medium tracking-tight">System Health</h2>
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    Live status of background scanners, alerts, and digests.
+                  </p>
+                </div>
+                <SystemHealth />
+              </TabsContent>
+            </Tabs>
+          )}
+
+          {/* Sticky save bar */}
+          {!loading && (
+            <div className="sticky bottom-4 z-10 flex justify-end pt-2">
+              <Button
+                onClick={save}
+                disabled={saving}
+                variant="success"
+                className="shadow-lg shadow-primary/20"
+              >
+                {saving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
+                Save Settings
+              </Button>
             </div>
-            <SystemHealth />
-          </section>
-
-          <div className="flex justify-end">
-            <Button onClick={save} disabled={saving} variant="success">
-              {saving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
-              Save Settings
-            </Button>
-          </div>
+          )}
         </motion.div>
       </main>
     </div>
   );
 };
+
+interface ToggleRowProps {
+  label: string;
+  hint: string;
+  checked: boolean;
+  onChange: (v: boolean) => void;
+  badge?: React.ReactNode;
+}
+
+function ToggleRow({ label, hint, checked, onChange, badge }: ToggleRowProps) {
+  return (
+    <div className="flex items-center justify-between gap-4">
+      <div className="space-y-0.5 flex-1">
+        <div className="flex items-center gap-2">
+          <Label className="text-sm">{label}</Label>
+          {badge}
+        </div>
+        <p className="text-xs text-muted-foreground">{hint}</p>
+      </div>
+      <Switch checked={checked} onCheckedChange={onChange} />
+    </div>
+  );
+}
 
 interface AdaptiveStatusCardProps {
   state: AutotraderState | null;
