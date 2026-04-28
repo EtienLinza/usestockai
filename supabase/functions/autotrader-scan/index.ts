@@ -1022,6 +1022,19 @@ async function processUser(
 
   const heldTickers = new Set(positions.map(p => p.ticker.toUpperCase()));
 
+  // ── EARLY EXIT — all slots full ───────────────────────────────────────
+  // If the user already holds max_positions after the exit pass, skip the entire
+  // entry evaluation loop. Saves Yahoo quote fetches, news-sentiment API calls,
+  // and per-ticker cooldown queries. New entries can't fit anyway.
+  if (refreshedOpenCount >= settings.max_positions) {
+    userSummary.holds += Math.max(0, watchlist.length - heldTickers.size);
+    await supabase.from("autotrade_log").insert({
+      user_id: userId, ticker: "—", action: "BLOCKED",
+      reason: `All position slots full (${refreshedOpenCount}/${settings.max_positions}) — entry scan skipped to conserve API calls`,
+    });
+    return;
+  }
+
   // PASS 1 — gather decisions for every eligible ticker (no DB writes yet).
   // This lets us rank ENTER candidates by conviction and stagger entries
   // (cap at MAX_ENTRIES_PER_SCAN per run) so we don't open 4–8 positions in a
