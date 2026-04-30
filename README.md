@@ -1,73 +1,108 @@
-# Welcome to your Lovable project
+# US Stock AI
 
-## Project info
+US Stock AI is a React + Supabase application for scanning U.S. equities, generating signals, running backtests, and managing portfolio/watchlist workflows.
 
-**URL**: https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID
+## What this project does
 
-## How can I edit this code?
+- Scans market data and produces actionable trade signals.
+- Runs strategy backtests with configurable risk and execution assumptions.
+- Tracks portfolio constraints (sector concentration, beta, correlated exposure).
+- Supports watchlists, alerts, sentiment, and dashboard analytics.
 
-There are several ways of editing your application.
+## Tech stack
 
-**Use Lovable**
+### Frontend
+- Vite
+- React + TypeScript
+- Tailwind CSS
+- shadcn/ui
+- React Query
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and start prompting.
+### Backend
+- Supabase (Postgres, Auth, Edge Functions)
+- Supabase Edge Functions for scanning, backtesting, alerts, and calibration jobs
 
-Changes made via Lovable will be committed automatically to this repo.
+## Project structure
 
-**Use your preferred IDE**
-
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
-
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
-
-Follow these steps:
-
-```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
-
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
-
-# Step 3: Install the necessary dependencies.
-npm i
-
-# Step 4: Start the development server with auto-reloading and an instant preview.
-npm run dev
+```text
+src/                         # Frontend app (pages, components, hooks, libs)
+supabase/functions/          # Edge Functions (scanner, backtest, alerts, etc.)
+supabase/migrations/         # Database schema and migration history
 ```
 
-**Edit a file directly in GitHub**
+## Prerequisites
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+- Node.js 18+
+- npm 9+
+- A Supabase project (URL + API keys)
 
-**Use GitHub Codespaces**
+## Environment variables
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+Create a `.env` file in the repository root:
 
-## What technologies are used for this project?
+```bash
+VITE_SUPABASE_URL=your_supabase_project_url
+VITE_SUPABASE_PUBLISHABLE_KEY=your_supabase_anon_or_publishable_key
+```
 
-This project is built with:
+> Note: Some backend functions also require server-side Supabase secrets configured in Supabase (for example service role key) via function environment settings.
 
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
+## Getting started
 
-## How can I deploy this project?
+1. Install dependencies:
+   ```bash
+   npm install
+   ```
+2. Start the development server:
+   ```bash
+   npm run dev
+   ```
+3. Build for production:
+   ```bash
+   npm run build
+   ```
+4. Preview production build locally:
+   ```bash
+   npm run preview
+   ```
 
-Simply open [Lovable](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and click on Share -> Publish.
+## Code quality
 
-## Can I connect a custom domain to my Lovable project?
+Run lint checks:
 
-Yes, you can!
+```bash
+npm run lint
+```
 
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
+## Core workflows (high level)
 
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
+- **Signal generation:** `supabase/functions/market-scanner`
+- **Backtesting:** `supabase/functions/backtest`
+- **Adaptive calibration:** `supabase/functions/calibrate-weights`
+- **Portfolio risk gate:** `supabase/functions/portfolio-gate`
+
+## Deployment notes
+
+- Frontend can be deployed on any static host that supports Vite builds.
+- Edge Functions and database schema are deployed through Supabase.
+- Ensure production environment variables and Supabase function secrets are configured before enabling scheduled jobs.
+
+## Security and operations
+
+- Do not commit real API keys or service role secrets.
+- Protect expensive endpoints with authentication and rate limits.
+- Monitor scheduled jobs and function heartbeats.
+
+## Contributing
+
+1. Create a feature branch.
+2. Make focused changes.
+3. Run lint/tests.
+4. Open a PR with a clear summary and validation steps.
+
+---
+
+If you want, I can also add:
+- an architecture diagram section,
+- local Supabase CLI setup instructions,
+- and a troubleshooting section for common setup/runtime issues.
