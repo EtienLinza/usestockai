@@ -554,9 +554,11 @@ async function fetchYahooData(ticker: string, range: string = "1y"): Promise<Dat
 }
 
 // ============================================================================
-// SCANNING UNIVERSE
+// SCANNING UNIVERSE — fully dynamic (S&P 500 + Nasdaq 100 + Yahoo screeners)
 // ============================================================================
 
+// Sector mapping retained ONLY for sector-tagging in signals (not for universe).
+// The actual scan universe is built dynamically each cycle.
 const SCAN_UNIVERSE: Record<string, string[]> = {
   "Technology": ["AAPL", "MSFT", "NVDA", "GOOGL", "META", "AVGO", "CRM", "AMD", "ADBE", "ORCL"],
   "Healthcare": ["UNH", "JNJ", "LLY", "PFE", "ABBV", "MRK", "TMO", "ABT"],
@@ -571,19 +573,75 @@ const SCAN_UNIVERSE: Record<string, string[]> = {
   "Materials": ["LIN", "APD", "SHW", "FCX"],
 };
 
-const HARDCODED_TICKERS = Object.values(SCAN_UNIVERSE).flat();
+// Tiny emergency fallback if every dynamic source fails (network outage etc.)
+const FALLBACK_TICKERS = Object.values(SCAN_UNIVERSE).flat();
 
 // ============================================================================
 // DYNAMIC TICKER DISCOVERY
 // ============================================================================
 
+// Expanded set of Yahoo predefined screeners — covers momentum, value,
+// growth, small/mid cap, and sector-rotation candidates.
 const SCREENER_IDS = [
   "most_actives",
   "day_gainers",
+  "day_losers",                  // mean-reversion candidates
   "undervalued_growth_stocks",
-  "aggressive_small_caps",
+  "undervalued_large_caps",
   "growth_technology_stocks",
+  "aggressive_small_caps",
+  "small_cap_gainers",
+  "high_yield_bond",             // surfaces credit-sensitive plays
+  "portfolio_anchors",           // mega-cap blue chips
+  "solid_large_growth_funds",
+  "top_mutual_funds",
 ];
+
+// Per-screener fetch size (Yahoo caps at ~250).
+const SCREENER_COUNT = 100;
+
+// In-memory cache for index constituents (refreshed every 24h per warm instance).
+let _indexCache: { tickers: string[]; fetchedAt: number } | null = null;
+const INDEX_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+
+async function fetchIndexConstituents(): Promise<string[]> {
+  if (_indexCache && Date.now() - _indexCache.fetchedAt < INDEX_CACHE_TTL_MS) {
+    return _indexCache.tickers;
+  }
+
+  // Source: datahub.io maintained S&P 500 constituents (CSV, daily-updated).
+  const sources = [
+    "https://raw.githubusercontent.com/datasets/s-and-p-500-companies/main/data/constituents.csv",
+    "https://raw.githubusercontent.com/datasets/nasdaq-listings/main/data/nasdaq-listed-symbols.csv",
+  ];
+
+  const results: string[] = [];
+  for (const url of sources) {
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 8000);
+      const resp = await fetch(url, { signal: controller.signal });
+      clearTimeout(timeout);
+      if (!resp.ok) continue;
+      const text = await resp.text();
+      // First column = symbol in both CSVs
+      const lines = text.split("\n").slice(1);
+      for (const line of lines) {
+        const sym = line.split(",")[0]?.trim().toUpperCase();
+        if (sym && TICKER_REGEX.test(sym)) results.push(sym);
+      }
+    } catch (e) {
+      console.warn(`Index source ${url} failed:`, e);
+    }
+  }
+
+  const unique = Array.from(new Set(results));
+  if (unique.length > 50) {
+    _indexCache = { tickers: unique, fetchedAt: Date.now() };
+    console.log(`Index constituents loaded: ${unique.length} symbols (cached 24h)`);
+  }
+  return unique;
+}
 
 interface ScreenerQuote {
   symbol: string;
