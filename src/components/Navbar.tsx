@@ -20,7 +20,7 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
-import { User, LogOut, LayoutDashboard, Heart, Menu, BarChart3, Brain, Shield, Bot } from "lucide-react";
+import { User, LogOut, LayoutDashboard, Heart, Menu, BarChart3, Brain, Shield, Bot, Layers } from "lucide-react";
 
 export const Navbar = () => {
   const location = useLocation();
@@ -40,6 +40,7 @@ export const Navbar = () => {
   const secondaryLinks = [
     { href: "/calibration", label: "Calibration", icon: Brain },
     { href: "/autotrader-log", label: "AutoTrader Log", icon: Bot },
+    { href: "/scan-universe", label: "Scan Universe", icon: Layers },
   ];
 
   const allLinks = [...navLinks, ...secondaryLinks];

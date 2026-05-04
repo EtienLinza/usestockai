@@ -697,7 +697,19 @@ function preFilterQuotes(quotes: ScreenerQuote[]): string[] {
   return tickers;
 }
 
-async function discoverTickers(): Promise<string[]> {
+interface DiscoveryResult {
+  tickers: string[];
+  breakdown: {
+    indexCount: number;
+    screenerCount: number;
+    overlapCount: number;
+    fallbackUsed: boolean;
+    perScreener: Record<string, number>;
+    sampleTickers: { index: string[]; screeners: Record<string, string[]> };
+  };
+}
+
+async function discoverTickers(): Promise<DiscoveryResult> {
   console.log("Discovering tickers (index constituents + Yahoo screeners)...");
 
   // Run index fetch + all screener fetches in parallel.
@@ -706,24 +718,48 @@ async function discoverTickers(): Promise<string[]> {
     ...SCREENER_IDS.map(id => fetchScreenerTickers(id)),
   ]);
 
+  const perScreener: Record<string, number> = {};
+  const sampleScreeners: Record<string, string[]> = {};
   const allQuotes: ScreenerQuote[] = [];
-  for (const quotes of screenerResults) allQuotes.push(...quotes);
+  SCREENER_IDS.forEach((id, i) => {
+    const quotes = screenerResults[i] || [];
+    const filtered = preFilterQuotes(quotes);
+    perScreener[id] = filtered.length;
+    sampleScreeners[id] = filtered.slice(0, 8);
+    allQuotes.push(...quotes);
+  });
   const screenerTickers = preFilterQuotes(allQuotes);
+
+  const indexSet = new Set(indexTickers);
+  const screenerSet = new Set(screenerTickers);
+  const overlapCount = [...screenerSet].filter(t => indexSet.has(t)).length;
 
   const merged = new Set<string>([...indexTickers, ...screenerTickers]);
   let finalList = Array.from(merged);
+  let fallbackUsed = false;
 
-  // Emergency fallback if everything failed
   if (finalList.length < 50) {
     console.warn(`Dynamic discovery returned only ${finalList.length} tickers — using fallback list`);
     finalList = Array.from(new Set([...finalList, ...FALLBACK_TICKERS]));
+    fallbackUsed = true;
   }
 
   console.log(
     `Final scan universe: ${finalList.length} tickers ` +
-    `(${indexTickers.length} index + ${screenerTickers.length} screener, deduped)`
+    `(${indexTickers.length} index + ${screenerTickers.length} screener, ${overlapCount} overlap)`
   );
-  return finalList;
+
+  return {
+    tickers: finalList,
+    breakdown: {
+      indexCount: indexTickers.length,
+      screenerCount: screenerTickers.length,
+      overlapCount,
+      fallbackUsed,
+      perScreener,
+      sampleTickers: { index: indexTickers.slice(0, 8), screeners: sampleScreeners },
+    },
+  };
 }
 
 // ============================================================================
@@ -743,12 +779,36 @@ serve(async (req) => {
 
     // On first batch, discover full universe; subsequent batches receive tickerList
     let allTickers: string[];
+    let discoveryBreakdown: DiscoveryResult["breakdown"] | null = null;
     if (body.tickerList && Array.isArray(body.tickerList)) {
       allTickers = body.tickerList;
     } else if (batch === 0) {
-      allTickers = await discoverTickers();
+      const discovery = await discoverTickers();
+      allTickers = discovery.tickers;
+      discoveryBreakdown = discovery.breakdown;
     } else {
       allTickers = FALLBACK_TICKERS;
+    }
+
+    // Log universe breakdown on batch 0 (fire-and-forget)
+    if (discoveryBreakdown && batch === 0) {
+      try {
+        const logClient = createClient(
+          Deno.env.get("SUPABASE_URL")!,
+          Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+        );
+        await logClient.from("scan_universe_log").insert({
+          total_tickers: allTickers.length,
+          index_count: discoveryBreakdown.indexCount,
+          screener_count: discoveryBreakdown.screenerCount,
+          overlap_count: discoveryBreakdown.overlapCount,
+          fallback_used: discoveryBreakdown.fallbackUsed,
+          source_breakdown: discoveryBreakdown.perScreener,
+          sample_tickers: discoveryBreakdown.sampleTickers,
+        });
+      } catch (e) {
+        console.warn("scan_universe_log insert failed:", e);
+      }
     }
 
     // Determine which tickers to scan in this batch
