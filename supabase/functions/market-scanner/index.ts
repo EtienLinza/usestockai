@@ -554,9 +554,11 @@ async function fetchYahooData(ticker: string, range: string = "1y"): Promise<Dat
 }
 
 // ============================================================================
-// SCANNING UNIVERSE
+// SCANNING UNIVERSE — fully dynamic (S&P 500 + Nasdaq 100 + Yahoo screeners)
 // ============================================================================
 
+// Sector mapping retained ONLY for sector-tagging in signals (not for universe).
+// The actual scan universe is built dynamically each cycle.
 const SCAN_UNIVERSE: Record<string, string[]> = {
   "Technology": ["AAPL", "MSFT", "NVDA", "GOOGL", "META", "AVGO", "CRM", "AMD", "ADBE", "ORCL"],
   "Healthcare": ["UNH", "JNJ", "LLY", "PFE", "ABBV", "MRK", "TMO", "ABT"],
@@ -571,19 +573,75 @@ const SCAN_UNIVERSE: Record<string, string[]> = {
   "Materials": ["LIN", "APD", "SHW", "FCX"],
 };
 
-const HARDCODED_TICKERS = Object.values(SCAN_UNIVERSE).flat();
+// Tiny emergency fallback if every dynamic source fails (network outage etc.)
+const FALLBACK_TICKERS = Object.values(SCAN_UNIVERSE).flat();
 
 // ============================================================================
 // DYNAMIC TICKER DISCOVERY
 // ============================================================================
 
+// Expanded set of Yahoo predefined screeners — covers momentum, value,
+// growth, small/mid cap, and sector-rotation candidates.
 const SCREENER_IDS = [
   "most_actives",
   "day_gainers",
+  "day_losers",                  // mean-reversion candidates
   "undervalued_growth_stocks",
-  "aggressive_small_caps",
+  "undervalued_large_caps",
   "growth_technology_stocks",
+  "aggressive_small_caps",
+  "small_cap_gainers",
+  "high_yield_bond",             // surfaces credit-sensitive plays
+  "portfolio_anchors",           // mega-cap blue chips
+  "solid_large_growth_funds",
+  "top_mutual_funds",
 ];
+
+// Per-screener fetch size (Yahoo caps at ~250).
+const SCREENER_COUNT = 100;
+
+// In-memory cache for index constituents (refreshed every 24h per warm instance).
+let _indexCache: { tickers: string[]; fetchedAt: number } | null = null;
+const INDEX_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+
+async function fetchIndexConstituents(): Promise<string[]> {
+  if (_indexCache && Date.now() - _indexCache.fetchedAt < INDEX_CACHE_TTL_MS) {
+    return _indexCache.tickers;
+  }
+
+  // Source: datahub.io maintained S&P 500 constituents (CSV, daily-updated).
+  const sources = [
+    "https://raw.githubusercontent.com/datasets/s-and-p-500-companies/main/data/constituents.csv",
+    "https://raw.githubusercontent.com/datasets/nasdaq-listings/main/data/nasdaq-listed-symbols.csv",
+  ];
+
+  const results: string[] = [];
+  for (const url of sources) {
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 8000);
+      const resp = await fetch(url, { signal: controller.signal });
+      clearTimeout(timeout);
+      if (!resp.ok) continue;
+      const text = await resp.text();
+      // First column = symbol in both CSVs
+      const lines = text.split("\n").slice(1);
+      for (const line of lines) {
+        const sym = line.split(",")[0]?.trim().toUpperCase();
+        if (sym && TICKER_REGEX.test(sym)) results.push(sym);
+      }
+    } catch (e) {
+      console.warn(`Index source ${url} failed:`, e);
+    }
+  }
+
+  const unique = Array.from(new Set(results));
+  if (unique.length > 50) {
+    _indexCache = { tickers: unique, fetchedAt: Date.now() };
+    console.log(`Index constituents loaded: ${unique.length} symbols (cached 24h)`);
+  }
+  return unique;
+}
 
 interface ScreenerQuote {
   symbol: string;
@@ -596,7 +654,7 @@ interface ScreenerQuote {
 
 async function fetchScreenerTickers(screenerId: string): Promise<ScreenerQuote[]> {
   try {
-    const url = `https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved?scrIds=${screenerId}&count=50`;
+    const url = `https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved?scrIds=${screenerId}&count=${SCREENER_COUNT}`;
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 10000);
     const resp = await fetch(url, {
@@ -640,17 +698,31 @@ function preFilterQuotes(quotes: ScreenerQuote[]): string[] {
 }
 
 async function discoverTickers(): Promise<string[]> {
-  console.log("Discovering tickers from Yahoo screeners...");
+  console.log("Discovering tickers (index constituents + Yahoo screeners)...");
+
+  // Run index fetch + all screener fetches in parallel.
+  const [indexTickers, ...screenerResults] = await Promise.all([
+    fetchIndexConstituents(),
+    ...SCREENER_IDS.map(id => fetchScreenerTickers(id)),
+  ]);
+
   const allQuotes: ScreenerQuote[] = [];
-  const results = await Promise.all(SCREENER_IDS.map(id => fetchScreenerTickers(id)));
-  for (const quotes of results) allQuotes.push(...quotes);
-
+  for (const quotes of screenerResults) allQuotes.push(...quotes);
   const screenerTickers = preFilterQuotes(allQuotes);
-  console.log(`Screeners returned ${allQuotes.length} raw quotes, pre-filtered to ${screenerTickers.length}`);
 
-  const merged = new Set([...HARDCODED_TICKERS, ...screenerTickers]);
-  const finalList = Array.from(merged);
-  console.log(`Final scan universe: ${finalList.length} tickers (${HARDCODED_TICKERS.length} hardcoded + ${screenerTickers.length} dynamic)`);
+  const merged = new Set<string>([...indexTickers, ...screenerTickers]);
+  let finalList = Array.from(merged);
+
+  // Emergency fallback if everything failed
+  if (finalList.length < 50) {
+    console.warn(`Dynamic discovery returned only ${finalList.length} tickers — using fallback list`);
+    finalList = Array.from(new Set([...finalList, ...FALLBACK_TICKERS]));
+  }
+
+  console.log(
+    `Final scan universe: ${finalList.length} tickers ` +
+    `(${indexTickers.length} index + ${screenerTickers.length} screener, deduped)`
+  );
   return finalList;
 }
 
@@ -676,7 +748,7 @@ serve(async (req) => {
     } else if (batch === 0) {
       allTickers = await discoverTickers();
     } else {
-      allTickers = HARDCODED_TICKERS;
+      allTickers = FALLBACK_TICKERS;
     }
 
     // Determine which tickers to scan in this batch
