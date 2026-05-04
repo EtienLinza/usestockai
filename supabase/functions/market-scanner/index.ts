@@ -748,7 +748,7 @@ serve(async (req) => {
     } else if (batch === 0) {
       allTickers = await discoverTickers();
     } else {
-      allTickers = HARDCODED_TICKERS;
+      allTickers = FALLBACK_TICKERS;
     }
 
     // Determine which tickers to scan in this batch
