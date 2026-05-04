@@ -697,7 +697,19 @@ function preFilterQuotes(quotes: ScreenerQuote[]): string[] {
   return tickers;
 }
 
-async function discoverTickers(): Promise<string[]> {
+interface DiscoveryResult {
+  tickers: string[];
+  breakdown: {
+    indexCount: number;
+    screenerCount: number;
+    overlapCount: number;
+    fallbackUsed: boolean;
+    perScreener: Record<string, number>;
+    sampleTickers: { index: string[]; screeners: Record<string, string[]> };
+  };
+}
+
+async function discoverTickers(): Promise<DiscoveryResult> {
   console.log("Discovering tickers (index constituents + Yahoo screeners)...");
 
   // Run index fetch + all screener fetches in parallel.
@@ -706,24 +718,48 @@ async function discoverTickers(): Promise<string[]> {
     ...SCREENER_IDS.map(id => fetchScreenerTickers(id)),
   ]);
 
+  const perScreener: Record<string, number> = {};
+  const sampleScreeners: Record<string, string[]> = {};
   const allQuotes: ScreenerQuote[] = [];
-  for (const quotes of screenerResults) allQuotes.push(...quotes);
+  SCREENER_IDS.forEach((id, i) => {
+    const quotes = screenerResults[i] || [];
+    const filtered = preFilterQuotes(quotes);
+    perScreener[id] = filtered.length;
+    sampleScreeners[id] = filtered.slice(0, 8);
+    allQuotes.push(...quotes);
+  });
   const screenerTickers = preFilterQuotes(allQuotes);
+
+  const indexSet = new Set(indexTickers);
+  const screenerSet = new Set(screenerTickers);
+  const overlapCount = [...screenerSet].filter(t => indexSet.has(t)).length;
 
   const merged = new Set<string>([...indexTickers, ...screenerTickers]);
   let finalList = Array.from(merged);
+  let fallbackUsed = false;
 
-  // Emergency fallback if everything failed
   if (finalList.length < 50) {
     console.warn(`Dynamic discovery returned only ${finalList.length} tickers — using fallback list`);
     finalList = Array.from(new Set([...finalList, ...FALLBACK_TICKERS]));
+    fallbackUsed = true;
   }
 
   console.log(
     `Final scan universe: ${finalList.length} tickers ` +
-    `(${indexTickers.length} index + ${screenerTickers.length} screener, deduped)`
+    `(${indexTickers.length} index + ${screenerTickers.length} screener, ${overlapCount} overlap)`
   );
-  return finalList;
+
+  return {
+    tickers: finalList,
+    breakdown: {
+      indexCount: indexTickers.length,
+      screenerCount: screenerTickers.length,
+      overlapCount,
+      fallbackUsed,
+      perScreener,
+      sampleTickers: { index: indexTickers.slice(0, 8), screeners: sampleScreeners },
+    },
+  };
 }
 
 // ============================================================================
