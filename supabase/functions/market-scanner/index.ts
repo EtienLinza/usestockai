@@ -779,12 +779,36 @@ serve(async (req) => {
 
     // On first batch, discover full universe; subsequent batches receive tickerList
     let allTickers: string[];
+    let discoveryBreakdown: DiscoveryResult["breakdown"] | null = null;
     if (body.tickerList && Array.isArray(body.tickerList)) {
       allTickers = body.tickerList;
     } else if (batch === 0) {
-      allTickers = await discoverTickers();
+      const discovery = await discoverTickers();
+      allTickers = discovery.tickers;
+      discoveryBreakdown = discovery.breakdown;
     } else {
       allTickers = FALLBACK_TICKERS;
+    }
+
+    // Log universe breakdown on batch 0 (fire-and-forget)
+    if (discoveryBreakdown && batch === 0) {
+      try {
+        const logClient = createClient(
+          Deno.env.get("SUPABASE_URL")!,
+          Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+        );
+        await logClient.from("scan_universe_log").insert({
+          total_tickers: allTickers.length,
+          index_count: discoveryBreakdown.indexCount,
+          screener_count: discoveryBreakdown.screenerCount,
+          overlap_count: discoveryBreakdown.overlapCount,
+          fallback_used: discoveryBreakdown.fallbackUsed,
+          source_breakdown: discoveryBreakdown.perScreener,
+          sample_tickers: discoveryBreakdown.sampleTickers,
+        });
+      } catch (e) {
+        console.warn("scan_universe_log insert failed:", e);
+      }
     }
 
     // Determine which tickers to scan in this batch
