@@ -14,6 +14,7 @@ import Backtest from "./pages/Backtest";
 import Calibration from "./pages/Calibration";
 import Settings from "./pages/Settings";
 import AutotraderLog from "./pages/AutotraderLog";
+import ScanUniverse from "./pages/ScanUniverse";
 import Terms from "./pages/Terms";
 import Privacy from "./pages/Privacy";
 import Disclosure from "./pages/Disclosure";
@@ -40,6 +41,7 @@ const App = () => (
               <Route path="/calibration" element={<Calibration />} />
               <Route path="/settings" element={<Settings />} />
               <Route path="/autotrader-log" element={<AutotraderLog />} />
+              <Route path="/scan-universe" element={<ScanUniverse />} />
               <Route path="/terms" element={<Terms />} />
               <Route path="/privacy" element={<Privacy />} />
               <Route path="/disclosure" element={<Disclosure />} />
