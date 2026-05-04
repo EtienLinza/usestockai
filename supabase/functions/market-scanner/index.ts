@@ -698,17 +698,31 @@ function preFilterQuotes(quotes: ScreenerQuote[]): string[] {
 }
 
 async function discoverTickers(): Promise<string[]> {
-  console.log("Discovering tickers from Yahoo screeners...");
+  console.log("Discovering tickers (index constituents + Yahoo screeners)...");
+
+  // Run index fetch + all screener fetches in parallel.
+  const [indexTickers, ...screenerResults] = await Promise.all([
+    fetchIndexConstituents(),
+    ...SCREENER_IDS.map(id => fetchScreenerTickers(id)),
+  ]);
+
   const allQuotes: ScreenerQuote[] = [];
-  const results = await Promise.all(SCREENER_IDS.map(id => fetchScreenerTickers(id)));
-  for (const quotes of results) allQuotes.push(...quotes);
-
+  for (const quotes of screenerResults) allQuotes.push(...quotes);
   const screenerTickers = preFilterQuotes(allQuotes);
-  console.log(`Screeners returned ${allQuotes.length} raw quotes, pre-filtered to ${screenerTickers.length}`);
 
-  const merged = new Set([...HARDCODED_TICKERS, ...screenerTickers]);
-  const finalList = Array.from(merged);
-  console.log(`Final scan universe: ${finalList.length} tickers (${HARDCODED_TICKERS.length} hardcoded + ${screenerTickers.length} dynamic)`);
+  const merged = new Set<string>([...indexTickers, ...screenerTickers]);
+  let finalList = Array.from(merged);
+
+  // Emergency fallback if everything failed
+  if (finalList.length < 50) {
+    console.warn(`Dynamic discovery returned only ${finalList.length} tickers — using fallback list`);
+    finalList = Array.from(new Set([...finalList, ...FALLBACK_TICKERS]));
+  }
+
+  console.log(
+    `Final scan universe: ${finalList.length} tickers ` +
+    `(${indexTickers.length} index + ${screenerTickers.length} screener, deduped)`
+  );
   return finalList;
 }
 
