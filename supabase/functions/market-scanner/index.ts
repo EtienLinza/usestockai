@@ -654,7 +654,7 @@ interface ScreenerQuote {
 
 async function fetchScreenerTickers(screenerId: string): Promise<ScreenerQuote[]> {
   try {
-    const url = `https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved?scrIds=${screenerId}&count=50`;
+    const url = `https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved?scrIds=${screenerId}&count=${SCREENER_COUNT}`;
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 10000);
     const resp = await fetch(url, {
