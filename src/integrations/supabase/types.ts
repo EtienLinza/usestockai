@@ -469,6 +469,42 @@ export type Database = {
         }
         Relationships: []
       }
+      scan_universe_log: {
+        Row: {
+          created_at: string
+          fallback_used: boolean
+          id: string
+          index_count: number
+          overlap_count: number
+          sample_tickers: Json
+          screener_count: number
+          source_breakdown: Json
+          total_tickers: number
+        }
+        Insert: {
+          created_at?: string
+          fallback_used?: boolean
+          id?: string
+          index_count?: number
+          overlap_count?: number
+          sample_tickers?: Json
+          screener_count?: number
+          source_breakdown?: Json
+          total_tickers?: number
+        }
+        Update: {
+          created_at?: string
+          fallback_used?: boolean
+          id?: string
+          index_count?: number
+          overlap_count?: number
+          sample_tickers?: Json
+          screener_count?: number
+          source_breakdown?: Json
+          total_tickers?: number
+        }
+        Relationships: []
+      }
       sell_alerts: {
         Row: {
           created_at: string | null
