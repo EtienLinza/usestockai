@@ -279,10 +279,18 @@ const Dashboard = () => {
 
   // ── Market scan ──────────────────────────────────────────────────────────────
 
+  // Tick every second while scanning so elapsed/ETA updates live
+  useEffect(() => {
+    if (!scanning) return;
+    const id = setInterval(() => setScanTick(t => t + 1), 1000);
+    return () => clearInterval(id);
+  }, [scanning]);
+
   const runScan = async () => {
     if (!user) { toast.error("Please sign in to scan the market"); return; }
     setScanning(true);
-    setScanProgress({ batch: 0, total: 0 });
+    const startedAt = Date.now();
+    setScanProgress({ batch: 0, total: 0, phase: "discovering", startedAt, universeSize: 0, signalsFound: 0 });
 
     try {
       let batch = 0;
@@ -292,7 +300,12 @@ const Dashboard = () => {
       let totalBatches = 0;
 
       while (!done) {
-        setScanProgress({ batch: batch + 1, total: totalBatches || batch + 2 });
+        setScanProgress(p => ({
+          ...p,
+          batch: batch + 1,
+          total: totalBatches || batch + 2,
+          phase: batch === 0 ? "discovering" : "analyzing",
+        }));
         const invokeBody: any = { batch, batchSize: 25 };
         if (tickerList) invokeBody.tickerList = tickerList;
 
@@ -302,7 +315,14 @@ const Dashboard = () => {
         done = data.done;
         if (data.tickerList && !tickerList) tickerList = data.tickerList;
         if (data.totalBatches) totalBatches = data.totalBatches;
-        setScanProgress({ batch: batch + 1, total: totalBatches });
+        setScanProgress(p => ({
+          ...p,
+          batch: batch + 1,
+          total: totalBatches,
+          phase: done ? "finalizing" : "analyzing",
+          universeSize: tickerList?.length || p.universeSize,
+          signalsFound: totalSignals,
+        }));
         batch++;
         if (!done) await new Promise(r => setTimeout(r, 500));
       }
@@ -316,7 +336,9 @@ const Dashboard = () => {
       toast.error(err.message || "Scan failed");
     }
     setScanning(false);
+    setScanProgress(p => ({ ...p, phase: "idle" }));
   };
+
 
   // ── Buy / Sell handlers ──────────────────────────────────────────────────────
 
