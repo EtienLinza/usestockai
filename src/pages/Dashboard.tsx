@@ -118,7 +118,15 @@ const Dashboard = () => {
   const [positions, setPositions] = useState<Position[]>([]);
   const [signalsLoading, setSignalsLoading] = useState(false);
   const [scanning, setScanning] = useState(false);
-  const [scanProgress, setScanProgress] = useState({ batch: 0, total: 0 });
+  const [scanProgress, setScanProgress] = useState({
+    batch: 0,
+    total: 0,
+    phase: "idle" as "idle" | "discovering" | "analyzing" | "finalizing",
+    startedAt: 0,
+    universeSize: 0,
+    signalsFound: 0,
+  });
+  const [scanTick, setScanTick] = useState(0);
   const [buyDialogOpen, setBuyDialogOpen] = useState(false);
   const [selectedSignal, setSelectedSignal] = useState<Signal | null>(null);
   const [shareAmount, setShareAmount] = useState("");
@@ -271,10 +279,18 @@ const Dashboard = () => {
 
   // ── Market scan ──────────────────────────────────────────────────────────────
 
+  // Tick every second while scanning so elapsed/ETA updates live
+  useEffect(() => {
+    if (!scanning) return;
+    const id = setInterval(() => setScanTick(t => t + 1), 1000);
+    return () => clearInterval(id);
+  }, [scanning]);
+
   const runScan = async () => {
     if (!user) { toast.error("Please sign in to scan the market"); return; }
     setScanning(true);
-    setScanProgress({ batch: 0, total: 0 });
+    const startedAt = Date.now();
+    setScanProgress({ batch: 0, total: 0, phase: "discovering", startedAt, universeSize: 0, signalsFound: 0 });
 
     try {
       let batch = 0;
@@ -284,7 +300,12 @@ const Dashboard = () => {
       let totalBatches = 0;
 
       while (!done) {
-        setScanProgress({ batch: batch + 1, total: totalBatches || batch + 2 });
+        setScanProgress(p => ({
+          ...p,
+          batch: batch + 1,
+          total: totalBatches || batch + 2,
+          phase: batch === 0 ? "discovering" : "analyzing",
+        }));
         const invokeBody: any = { batch, batchSize: 25 };
         if (tickerList) invokeBody.tickerList = tickerList;
 
@@ -294,7 +315,14 @@ const Dashboard = () => {
         done = data.done;
         if (data.tickerList && !tickerList) tickerList = data.tickerList;
         if (data.totalBatches) totalBatches = data.totalBatches;
-        setScanProgress({ batch: batch + 1, total: totalBatches });
+        setScanProgress(p => ({
+          ...p,
+          batch: batch + 1,
+          total: totalBatches,
+          phase: done ? "finalizing" : "analyzing",
+          universeSize: tickerList?.length || p.universeSize,
+          signalsFound: totalSignals,
+        }));
         batch++;
         if (!done) await new Promise(r => setTimeout(r, 500));
       }
@@ -308,7 +336,9 @@ const Dashboard = () => {
       toast.error(err.message || "Scan failed");
     }
     setScanning(false);
+    setScanProgress(p => ({ ...p, phase: "idle" }));
   };
+
 
   // ── Buy / Sell handlers ──────────────────────────────────────────────────────
 
@@ -521,14 +551,44 @@ const Dashboard = () => {
                   <p className="text-xs text-muted-foreground leading-relaxed">
                     Scan 75+ stocks across all sectors using the quantitative algorithm to find high-conviction trade signals.
                   </p>
-                  {scanning && (
-                    <div className="space-y-2">
-                      <Progress value={(scanProgress.batch / scanProgress.total) * 100} className="h-1.5" />
-                      <p className="text-[10px] text-muted-foreground text-center">
-                        Batch {scanProgress.batch} of {scanProgress.total}
-                      </p>
-                    </div>
-                  )}
+                  {scanning && (() => {
+                    void scanTick; // re-render every second
+                    const elapsedMs = Date.now() - scanProgress.startedAt;
+                    const elapsedS = Math.max(1, Math.floor(elapsedMs / 1000));
+                    const pct = scanProgress.total > 0
+                      ? Math.min(99, (scanProgress.batch / scanProgress.total) * 100)
+                      : 5;
+                    const etaS = scanProgress.batch > 0 && scanProgress.total > 0
+                      ? Math.max(0, Math.round((elapsedMs / scanProgress.batch) * (scanProgress.total - scanProgress.batch) / 1000))
+                      : null;
+                    const fmt = (s: number) => s >= 60 ? `${Math.floor(s / 60)}m ${s % 60}s` : `${s}s`;
+                    const phaseLabel = scanProgress.phase === "discovering"
+                      ? "Discovering universe…"
+                      : scanProgress.phase === "analyzing"
+                        ? "Analyzing tickers…"
+                        : scanProgress.phase === "finalizing"
+                          ? "Finalizing signals…"
+                          : "Working…";
+                    return (
+                      <div className="space-y-2.5 rounded-md border border-border/40 bg-muted/10 p-3">
+                        <div className="flex items-center justify-between text-[11px]">
+                          <span className="flex items-center gap-1.5 text-foreground font-medium">
+                            <Loader2 className="w-3 h-3 animate-spin text-primary" />
+                            {phaseLabel}
+                          </span>
+                          <span className="font-mono text-muted-foreground tabular-nums">{Math.round(pct)}%</span>
+                        </div>
+                        <Progress value={pct} className="h-1.5" />
+                        <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-[10px] text-muted-foreground tabular-nums">
+                          <span>Batch <span className="text-foreground">{scanProgress.batch}{scanProgress.total ? `/${scanProgress.total}` : ""}</span></span>
+                          <span className="text-right">Universe <span className="text-foreground">{scanProgress.universeSize || "…"}</span></span>
+                          <span>Elapsed <span className="text-foreground">{fmt(elapsedS)}</span></span>
+                          <span className="text-right">ETA <span className="text-foreground">{etaS != null ? fmt(etaS) : "…"}</span></span>
+                          <span className="col-span-2">Signals found <span className="text-success">{scanProgress.signalsFound}</span></span>
+                        </div>
+                      </div>
+                    );
+                  })()}
                   <Button onClick={runScan} disabled={scanning || !user} className="w-full gap-2">
                     {scanning ? (
                       <><Loader2 className="w-4 h-4 animate-spin" />Scanning...</>
