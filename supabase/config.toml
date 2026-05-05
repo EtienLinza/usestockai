@@ -35,3 +35,6 @@ verify_jwt = false
 
 [functions.news-sentiment]
 verify_jwt = false
+
+[functions.roll-calibration]
+verify_jwt = false
