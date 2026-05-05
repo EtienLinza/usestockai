@@ -118,7 +118,15 @@ const Dashboard = () => {
   const [positions, setPositions] = useState<Position[]>([]);
   const [signalsLoading, setSignalsLoading] = useState(false);
   const [scanning, setScanning] = useState(false);
-  const [scanProgress, setScanProgress] = useState({ batch: 0, total: 0 });
+  const [scanProgress, setScanProgress] = useState({
+    batch: 0,
+    total: 0,
+    phase: "idle" as "idle" | "discovering" | "analyzing" | "finalizing",
+    startedAt: 0,
+    universeSize: 0,
+    signalsFound: 0,
+  });
+  const [scanTick, setScanTick] = useState(0);
   const [buyDialogOpen, setBuyDialogOpen] = useState(false);
   const [selectedSignal, setSelectedSignal] = useState<Signal | null>(null);
   const [shareAmount, setShareAmount] = useState("");
