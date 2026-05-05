@@ -197,6 +197,63 @@ export type Database = {
         }
         Relationships: []
       }
+      calibration_snapshots: {
+        Row: {
+          avg_return_pct: number
+          closed_count: number
+          conviction_buckets: Json
+          created_at: string
+          id: string
+          open_count: number
+          projected_daily_pct: number
+          projected_monthly_pct: number
+          projected_quarterly_pct: number
+          projected_weekly_pct: number
+          projected_yearly_pct: number
+          sharpe: number
+          snapshot_date: string
+          trades_per_week: number
+          win_rate: number
+          window_days: number
+        }
+        Insert: {
+          avg_return_pct?: number
+          closed_count?: number
+          conviction_buckets?: Json
+          created_at?: string
+          id?: string
+          open_count?: number
+          projected_daily_pct?: number
+          projected_monthly_pct?: number
+          projected_quarterly_pct?: number
+          projected_weekly_pct?: number
+          projected_yearly_pct?: number
+          sharpe?: number
+          snapshot_date: string
+          trades_per_week?: number
+          win_rate?: number
+          window_days?: number
+        }
+        Update: {
+          avg_return_pct?: number
+          closed_count?: number
+          conviction_buckets?: Json
+          created_at?: string
+          id?: string
+          open_count?: number
+          projected_daily_pct?: number
+          projected_monthly_pct?: number
+          projected_quarterly_pct?: number
+          projected_weekly_pct?: number
+          projected_yearly_pct?: number
+          sharpe?: number
+          snapshot_date?: string
+          trades_per_week?: number
+          win_rate?: number
+          window_days?: number
+        }
+        Relationships: []
+      }
       cron_heartbeat: {
         Row: {
           duration_ms: number | null
