@@ -12,6 +12,7 @@ import {
   ReferenceLine, Cell, LineChart, Line, Legend,
 } from "recharts";
 import { Brain, Target, Activity, TrendingUp, Loader2, RefreshCw, AlertCircle } from "lucide-react";
+import { ForecastEvolution } from "@/components/calibration/ForecastEvolution";
 import { toast } from "sonner";
 
 interface CalibrationData {
@@ -216,6 +217,9 @@ export default function Calibration() {
               </div>
             )}
           </Card>
+
+          {/* Rolling-calibration evolution */}
+          <ForecastEvolution />
 
           {loading && !data && (
             <div className="flex items-center justify-center py-24 text-muted-foreground gap-2">
