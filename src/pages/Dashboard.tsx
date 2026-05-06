@@ -292,48 +292,47 @@ const Dashboard = () => {
     const startedAt = Date.now();
     setScanProgress({ batch: 0, total: 0, phase: "discovering", startedAt, universeSize: 0, signalsFound: 0 });
 
+    let pollTimer: ReturnType<typeof setInterval> | null = null;
     try {
-      let batch = 0;
-      let done = false;
-      let totalSignals = 0;
-      let tickerList: string[] | undefined;
-      let totalBatches = 0;
+      // Kick off the orchestrator (single invoke; fans out workers internally)
+      const invocation = supabase.functions.invoke("scan-orchestrator", { body: {} });
 
-      while (!done) {
+      // Poll the most recent scan_runs row for live progress
+      pollTimer = setInterval(async () => {
+        const { data } = await supabase
+          .from("scan_runs")
+          .select("phase, processed, total, signals_found, universe_size, survivors")
+          .order("started_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (!data) return;
+        const phase = (data as any).phase as string;
         setScanProgress(p => ({
           ...p,
-          batch: batch + 1,
-          total: totalBatches || batch + 2,
-          phase: batch === 0 ? "discovering" : "analyzing",
+          phase: phase === "done" ? "finalizing"
+                : phase === "analyzing" ? "analyzing"
+                : "discovering",
+          universeSize: (data as any).universe_size ?? p.universeSize,
+          signalsFound: (data as any).signals_found ?? p.signalsFound,
+          batch: (data as any).processed ?? p.batch,
+          total: (data as any).total ?? p.total,
         }));
-        const invokeBody: any = { batch, batchSize: 25 };
-        if (tickerList) invokeBody.tickerList = tickerList;
+      }, 1000);
 
-        const { data, error } = await supabase.functions.invoke("market-scanner", { body: invokeBody });
-        if (error) throw error;
-        totalSignals += data.signals?.length || 0;
-        done = data.done;
-        if (data.tickerList && !tickerList) tickerList = data.tickerList;
-        if (data.totalBatches) totalBatches = data.totalBatches;
-        setScanProgress(p => ({
-          ...p,
-          batch: batch + 1,
-          total: totalBatches,
-          phase: done ? "finalizing" : "analyzing",
-          universeSize: tickerList?.length || p.universeSize,
-          signalsFound: totalSignals,
-        }));
-        batch++;
-        if (!done) await new Promise(r => setTimeout(r, 500));
-      }
+      const { data, error } = await invocation;
+      if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+      if (error) throw error;
 
+      const totalSignals = (data as any)?.signals ?? 0;
+      const universe = (data as any)?.universe ?? 0;
       setLastScanTime(new Date().toISOString());
-      const tickerCount = tickerList?.length || batch * 25;
-      toast.success(`Scan complete! Found ${totalSignals} signals across ${tickerCount} stocks`);
+      toast.success(`Scan complete! Found ${totalSignals} signals across ${universe} stocks in ${Math.round(((data as any)?.elapsed ?? (Date.now() - startedAt)) / 1000)}s`);
       await loadSignalData();
       if (openPositions.length > 0) fetchCurrentPrices();
     } catch (err: any) {
       toast.error(err.message || "Scan failed");
+    } finally {
+      if (pollTimer) clearInterval(pollTimer);
     }
     setScanning(false);
     setScanProgress(p => ({ ...p, phase: "idle" }));
