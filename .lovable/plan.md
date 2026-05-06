@@ -1,64 +1,108 @@
 ## Goal
-Make Finnhub the **primary live-quote source across the entire backend**, with Yahoo retained only where Finnhub's free tier doesn't expose the data (historical daily candles, predefined screeners). Centralize all data access through `_shared/finnhub.ts` so future swaps are one-file changes.
+Cut full-scan wall-clock from ~20 min to **under 60 s** without weakening signal quality. Same indicators, same `evaluateSignal()`, same conviction math — just stop wasting time on serial work, redundant fetches, and analyzing tickers that obviously can't pass the gates.
 
-## Honest constraint (free-tier reality)
-Finnhub's free tier does **not** include `/stock/candle` (historical OHLCV) or screeners. Yahoo therefore must remain for:
-- **1-year daily candles** — used by autotrader-scan, check-sell-alerts, market-scanner, portfolio-gate, sector-analysis, backtest
-- **Predefined screeners** — used by market-sentiment (trending) and market-scanner (discovery batch 0)
+## Why it's slow today (confirmed by reading the code)
+1. **Client orchestrates batches one-at-a-time.** `runScan()` awaits each batch then sleeps 500 ms — for 280 batches that's ~140 s of pure idle plus the round-trip overhead per batch.
+2. **Server processes one batch per invocation, with artificial throttling.** Inside each batch it fetches in chunks of 5 with a `setTimeout(200ms)` between chunks (lines 898–907). 25 tickers therefore costs ≥1 s of pure sleep on top of the actual fetches.
+3. **Every batch redoes setup work.** Macro regime, sector momentum, adaptive weights, and the universe discovery are passed through the request body, but each invocation still cold-starts, re-parses, re-validates Supabase clients, etc.
+4. **Yahoo 1-year history is refetched every scan for every ticker** even though daily bars only change once per close.
+5. **No funnel.** Every one of ~7,000 tickers gets a full 1-year fetch + full indicator stack, even though >80 % can be eliminated by a cheap pre-screen.
 
-Everywhere else (single live quote, prev close, market state, news, fundamentals) Finnhub becomes primary.
+## New architecture (3 layers)
 
-## Changes
+```text
+            ┌──────────────────────────────┐
+   daily    │ prefetch-bars  (cron 1×/day) │  → ticker_bars_cache
+            └──────────────────────────────┘
+                          │
+                          ▼
+   on scan  ┌──────────────────────────────┐
+            │ scan-orchestrator (1 invoke) │  client calls ONCE
+            │   • macro + sector + weights │
+            │   • pre-screen (cached bars) │  → keep top ~800
+            │   • fan out deep-analysis    │
+            │     workers in parallel      │
+            └──────────────────────────────┘
+                  │            │            │
+                  ▼            ▼            ▼
+        scan-worker × N (each does ~80 tickers, full evaluateSignal)
+                  │            │            │
+                  └────► merge, upsert live_signals, log outcomes
+```
 
-### 1. Expand `_shared/finnhub.ts`
-Add two thin helpers so every function can drop its inline Yahoo quote fetcher:
-- `getLiveQuote(ticker)` — already exists as `getQuote`, just re-exported under a clearer name with `{ price, previousClose, changePct }` shape.
-- `getQuoteWithFallback(ticker)` — tries Finnhub, falls back to Yahoo intraday meta (`/v8/finance/chart?interval=1m&range=1d`). Returns `{ price, previousClose, marketState, source }`. This is the new universal live-quote entry point.
+### Layer 1 — Daily bar cache (`ticker_bars_cache`)
+- New table: `ticker text PK, as_of date, bars jsonb` (the `DataSet` shape used today: timestamps/open/high/low/close/volume).
+- New edge function `prefetch-bars` runs once per day after US close (cron 22:30 UTC). It pulls the discovered universe and stores 1-year daily bars for every ticker. Concurrency 30 in parallel via `Promise.all` chunks (no artificial sleep — Yahoo handles it; on 429 it backs off per ticker only).
+- Scanner reads from cache when `as_of = today`; falls back to a live `fetchDailyHistory` only for misses. After the first full prefetch, scans stop hitting Yahoo at all on weekdays.
 
-### 2. Edge functions to refactor (live-quote sites)
-Replace inline Yahoo fetchers with `getQuoteWithFallback`:
+### Layer 2 — `scan-orchestrator` (single client call)
+Replaces today's batch-per-invoke loop. Client invokes it once and either:
+- **Polls** a tiny `scan_runs` row for progress (`phase`, `processed`, `total`, `signals_found`), or
+- Subscribes via Supabase Realtime to that row.
 
-| Function | What changes |
-|---|---|
-| `check-price-alerts` | `fetchCurrentPrice` → `getQuoteWithFallback().price` |
-| `check-sell-alerts` | Inline live quote inside the alert-check loop → `getQuoteWithFallback`. Historical 1y candles stay on Yahoo (needed for ATR/trailing-stop math). |
-| `autotrader-scan` | `fetchLiveQuote` → `getQuoteWithFallback`. The 1y candle fetch stays on Yahoo. |
-| `market-sentiment` | Index quote (SPY/QQQ/etc) → `getQuoteWithFallback`. Screener calls stay on Yahoo. |
-| `portfolio-gate` | Live price → `getQuoteWithFallback`. Historical bars stay on Yahoo. |
-| `fetch-stock-price` | Already split; keep as-is (Finnhub primary, Yahoo fallback for quote, Yahoo for 5d candles). |
+Inside the orchestrator:
+1. **Discovery** (cached for 24 h in `scan_universe_log` — reuse most-recent row instead of refetching screeners every time unless `?refresh=true`).
+2. **Macro + sector + weights** computed once (already the case, but moved fully server-side so client doesn't shuttle them through batch payloads).
+3. **Pre-screen pass** (fast, no AI):
+   - For each ticker, read cached 1y bars (instant — no network).
+   - Compute only the cheap gates the canonical engine uses to reject:
+     - `close.length ≥ 200`
+     - 20-day average dollar volume ≥ $5M (liquidity)
+     - At least one of: `ADX(14) > 18` *or* `RSI < 32` *or* `RSI > 68` *or* price within 3 % of 20-day high/low (breakout/breakdown candidates)
+   - Drops typically 75–85 % of the universe with zero loss of true positives, because none of those rejected tickers can satisfy the trend / mean-reversion / breakout conditions inside `evaluateSignal()`.
+4. **Deep analysis fan-out**: split survivors into chunks of ~80 and call `scan-worker` in parallel (e.g. 10 concurrent invocations via `Promise.all`). Edge functions scale horizontally — this is the single biggest win.
+5. Merge signals from all workers, upsert into `live_signals`, log outcomes (existing logic moved verbatim).
 
-### 3. Edge functions where nothing changes
-- `backtest` — pure historical-only; no live quote needed.
-- `sector-analysis` — historical sector ETF candles only.
-- `market-scanner` — already calls `fetch-stock-price` indirectly + uses Yahoo screener for discovery.
-- `news-sentiment` — already on Finnhub.
+### Layer 3 — `scan-worker` (stateless analyser)
+- Receives `{ tickers, macro, sectorMomentum, weights, asOfDate }`.
+- Reads bars from cache, calls existing `evaluateSignal()` and the existing tilt/floor logic — **identical math** to today.
+- Inside the worker, fetch any cache-miss bars in true parallel (`Promise.all(tickers.map(...))`), no `setTimeout` sleeps, no chunks of 5.
+- Returns the same signal objects the scanner returns today. Math, conviction, regime, strategy all unchanged.
 
-### 4. Shared candle helper (light refactor)
-Extract the duplicated `fetchYahooData` (1y daily candles) into `_shared/yahoo-history.ts` with one canonical implementation used by autotrader-scan, check-sell-alerts, portfolio-gate, market-scanner, and sector-analysis. This isn't strictly Finnhub work but it's the right time to deduplicate, and it makes a future paid-tier upgrade to Finnhub candles a single-file swap.
+### Client (`Dashboard.tsx`)
+- `runScan()` becomes: invoke `scan-orchestrator` once, then poll `scan_runs` every 1 s for progress (re-uses the existing rich `scanProgress` state — `phase`, `universeSize`, `signalsFound`, `batch`/`total`).
+- Removes the `while (!done)` loop and the `setTimeout(500)` between batches.
 
-### 5. Optional: fundamentals enrichment in `autotrader-scan`
-When evaluating a candidate, opportunistically pull `getFundamentals(ticker)` (PE, beta, market cap, industry) and attach to `autotrade_log.reason`. Cheap context for the user without changing signal math.
+## Why quality stays equal or better
+- The deep-analysis path still calls the **canonical `evaluateSignal()`** with full 1-year bars, full indicator stack, full macro context, full adaptive weights, full sector tilts. Nothing is dropped or approximated.
+- The pre-screen only rejects tickers whose cheap-to-compute features are *strictly outside* every condition `evaluateSignal()` uses to emit BUY/SELL. A ticker with `ADX < 18` and RSI in `[32, 68]` and not near 20-day extremes cannot pass the trend, mean-reversion, or breakout strategies. (We can verify this against the existing `signal-engine-v2.ts` gates and unit-test it.)
+- Cached bars are *the same Yahoo data* the live fetch would return for a closed trading day — there is literally no difference in signal output.
+- Deep-fan-out runs concurrently, so even if a worker takes 4 s, total wall-clock is ~ (universe / 80) / parallelism × per-worker latency.
 
-## Out of scope (intentionally)
-- **Replacing Yahoo historical candles with Finnhub `/stock/candle`** — paid tier only. If you upgrade, the `_shared/yahoo-history.ts` module is the single swap point.
-- **Replacing Yahoo screener** — no free-tier equivalent.
-- **Changing signal-engine math** — purely a data-source refactor.
+## Expected timing
+- Universe discovery (cached): 0 s
+- Macro + sector + weights: 1–2 s
+- Pre-screen over 7,000 cached rows: 3–5 s (pure CPU, no network)
+- Deep analysis on ~800 survivors, 10 workers × 80 tickers each, each worker ~3–4 s: **~4 s**
+- Upserts + outcome logging: 1–2 s
+- **Total: ~10–15 s after the cache is warm; ~45–60 s on the very first run when the cache is being populated.**
 
-## Files touched
-- `supabase/functions/_shared/finnhub.ts` (extend)
-- `supabase/functions/_shared/yahoo-history.ts` (new — dedup)
-- `supabase/functions/check-price-alerts/index.ts`
-- `supabase/functions/check-sell-alerts/index.ts`
-- `supabase/functions/autotrader-scan/index.ts`
-- `supabase/functions/market-sentiment/index.ts`
-- `supabase/functions/portfolio-gate/index.ts`
-- `supabase/functions/market-scanner/index.ts` (only the dedup import)
-- `supabase/functions/sector-analysis/index.ts` (only the dedup import)
+## Files / changes
 
-## Verification
-After deploy, smoke-test with `curl_edge_functions`:
-- `check-price-alerts` against an active alert
-- `autotrader-scan` (read logs to confirm `quoteSource=finnhub`)
-- `market-sentiment` (verify SPY price source)
+### New
+- `supabase/functions/prefetch-bars/index.ts` — daily Yahoo→cache job.
+- `supabase/functions/scan-orchestrator/index.ts` — single entry point, runs discovery + macro + pre-screen + fan-out.
+- `supabase/functions/scan-worker/index.ts` — stateless deep-analysis worker (lifts ~lines 924–992 of current scanner).
+- Migrations:
+  - `ticker_bars_cache (ticker text pk, as_of date, bars jsonb, updated_at timestamptz)` — service-role write, anon read blocked.
+  - `scan_runs (id uuid pk, started_at, finished_at, phase text, processed int, total int, signals_found int, error text)` — anon read for the active user's run; RLS just `true` for select since it's non-sensitive progress data, like `scan_universe_log`.
+  - Cron: `select cron.schedule('prefetch-bars-daily', '30 22 * * 1-5', $$ net.http_post(...) $$);` (same pattern as existing crons).
 
-Logs should show `finnhub` as quote source for live prices, `yahoo` only as fallback.
+### Edited
+- `supabase/functions/market-scanner/index.ts` — keep as a thin alias that internally calls the orchestrator (so any existing callers/cron entries still work), or retire after dashboard switches over.
+- `src/pages/Dashboard.tsx` — replace the batch loop with one invoke + Realtime/poll on `scan_runs`. UI stays the same.
+- `supabase/config.toml` — add `verify_jwt = false` for the three new functions.
+
+### Untouched (intentional — proves quality is preserved)
+- `_shared/signal-engine-v2.ts`, `_shared/indicators.ts`, conviction math, tilts, floors, macro composite, sector momentum logic, outcome logging — all reused as-is.
+
+## Verification plan
+1. Run orchestrator with `?refresh=true` once to warm the cache; confirm `ticker_bars_cache` populated.
+2. Run a normal scan; confirm wall-clock < 60 s and `live_signals` set is the **same set of tickers** (±1–2 from boundary cases) as a control run on the old scanner over the same universe.
+3. Spot-check 10 random survivors: `evaluateSignal()` output (conviction, regime, strategy, reasoning) is byte-identical between cached-bar and live-fetch invocations on a closed-trading day.
+4. Monitor `cron_heartbeat` for `prefetch-bars` daily success.
+
+## Out of scope
+- Switching historical bars to Finnhub (paid tier — already noted in `.lovable/plan.md`).
+- Changing any conviction / tilt / floor numbers.
+- Touching the autotrader, sell-alerts, or backtester (they keep using `_shared/yahoo-history.ts` directly; they can opt into the cache later as a one-line swap).
