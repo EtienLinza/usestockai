@@ -526,6 +526,45 @@ export type Database = {
         }
         Relationships: []
       }
+      scan_runs: {
+        Row: {
+          error: string | null
+          finished_at: string | null
+          id: string
+          phase: string
+          processed: number
+          signals_found: number
+          started_at: string
+          survivors: number
+          total: number
+          universe_size: number
+        }
+        Insert: {
+          error?: string | null
+          finished_at?: string | null
+          id?: string
+          phase?: string
+          processed?: number
+          signals_found?: number
+          started_at?: string
+          survivors?: number
+          total?: number
+          universe_size?: number
+        }
+        Update: {
+          error?: string | null
+          finished_at?: string | null
+          id?: string
+          phase?: string
+          processed?: number
+          signals_found?: number
+          started_at?: string
+          survivors?: number
+          total?: number
+          universe_size?: number
+        }
+        Relationships: []
+      }
       scan_universe_log: {
         Row: {
           created_at: string
@@ -740,6 +779,27 @@ export type Database = {
           sample_size?: number
           strategy_tilts?: Json
           window_days?: number
+        }
+        Relationships: []
+      }
+      ticker_bars_cache: {
+        Row: {
+          as_of: string
+          bars: Json
+          ticker: string
+          updated_at: string
+        }
+        Insert: {
+          as_of: string
+          bars: Json
+          ticker: string
+          updated_at?: string
+        }
+        Update: {
+          as_of?: string
+          bars?: Json
+          ticker?: string
+          updated_at?: string
         }
         Relationships: []
       }
