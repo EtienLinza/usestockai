@@ -140,6 +140,7 @@ serve(async (req) => {
                   headers: {
                     "Content-Type": "application/json",
                     Authorization: `Bearer ${supabaseServiceKey}`,
+                    ...cronSecretHeader(),
                   },
                   body: JSON.stringify({
                     userId: alert.user_id,
