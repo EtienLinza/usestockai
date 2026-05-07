@@ -1027,6 +1027,20 @@ async function processUser(
   }
 
   // ── ENTRIES ─────────────────────────────────────────────────────────────
+  // Only users with autotrader enabled get new entries. Users with disabled
+  // autotrader still benefit from the exit pass above (manual buys auto-close).
+  if (!settings.enabled) {
+    await supabase.from("virtual_portfolio_log").upsert(
+      {
+        user_id: userId, date: today,
+        total_value: settings.starting_nav + unrealizedToday,
+        cash: settings.starting_nav - totalNavExposureDollars,
+        positions_value: totalNavExposureDollars,
+      },
+      { onConflict: "user_id,date" },
+    );
+    return;
+  }
   // Per-user open count: positions that survived the exit pass above.
   // (Was previously using global summary.exits which contaminated user B with user A's exits.)
   const refreshedOpenCount = positions.length - userSummary.exits;
