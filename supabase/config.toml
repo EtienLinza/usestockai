@@ -44,5 +44,3 @@ verify_jwt = false
 
 [functions.scan-worker]
 verify_jwt = false
-[functions.sync-cron-secret]
-verify_jwt = false
