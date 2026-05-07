@@ -563,12 +563,25 @@ serve(async (req) => {
   const summary = { users: 0, entries: 0, exits: 0, partials: 0, holds: 0, blocked: 0, errors: 0 };
 
   try {
-    // 1. Active users
-    const { data: settingsRows, error: sErr } = await supabase
+    // 1. Load all autotrade_settings rows. We process every user that has either
+    //    autotrader enabled (entries+exits) OR any open virtual_position (exits only,
+    //    so manual buys also benefit from the autotrader's exit brain).
+    const { data: allSettings, error: sErr } = await supabase
       .from("autotrade_settings")
-      .select("*")
-      .eq("enabled", true);
+      .select("*");
     if (sErr) throw sErr;
+
+    // Find users with open positions (manual or otherwise)
+    const { data: openPosUsers } = await supabase
+      .from("virtual_positions")
+      .select("user_id")
+      .eq("status", "open");
+    const userIdsWithOpen = new Set((openPosUsers ?? []).map((r: any) => r.user_id));
+
+    const settingsRows = (allSettings ?? []).filter((s: any) =>
+      s.enabled === true || userIdsWithOpen.has(s.user_id)
+    );
+
     if (!settingsRows || settingsRows.length === 0) {
       await recordHeartbeat("autotrader-scan", startedAt, "ok", "no-active-users");
       return json({ status: "no-active-users", summary });
@@ -1014,6 +1027,20 @@ async function processUser(
   }
 
   // ── ENTRIES ─────────────────────────────────────────────────────────────
+  // Only users with autotrader enabled get new entries. Users with disabled
+  // autotrader still benefit from the exit pass above (manual buys auto-close).
+  if (!settings.enabled) {
+    await supabase.from("virtual_portfolio_log").upsert(
+      {
+        user_id: userId, date: today,
+        total_value: settings.starting_nav + unrealizedToday,
+        cash: settings.starting_nav - totalNavExposureDollars,
+        positions_value: totalNavExposureDollars,
+      },
+      { onConflict: "user_id,date" },
+    );
+    return;
+  }
   // Per-user open count: positions that survived the exit pass above.
   // (Was previously using global summary.exits which contaminated user B with user A's exits.)
   const refreshedOpenCount = positions.length - userSummary.exits;
