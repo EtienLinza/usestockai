@@ -129,7 +129,13 @@ serve(async (req) => {
     console.log(`pre-screen: hit=${cacheHit} survivors=${survivors.length} rejected=${prescreenRejected} misses-deferred=${allTickers.length - cacheHit}`);
 
     // Fire-and-forget: warm the cache for next run (don't await).
-    try { supabase.functions.invoke("prefetch-bars", { body: {} }).catch(() => {}); } catch (_) {}
+    try {
+      const cs = Deno.env.get("CRON_SECRET");
+      supabase.functions.invoke("prefetch-bars", {
+        body: {},
+        headers: cs ? { "x-cron-secret": cs } : {},
+      }).catch(() => {});
+    } catch (_) {}
 
     await setProgress({
       survivors: survivors.length, total: survivors.length,
