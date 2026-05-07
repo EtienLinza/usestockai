@@ -1,62 +1,59 @@
 ## Goal
 
-Three cleanups:
-1. Remove the **Scan Universe** page/route/nav entry.
-2. Remove the **Rolling Calibration** feature end-to-end (page, nav, edge function, table, cron, UI components).
-3. Make the **autotrader's exit brain** also auto-close **manual positions** (not just its own).
+Let big winners run. Today the autotrader force-exits at the hard take-profit ceiling (`takeProfitPct × 1.5`) and on 3-of-5 peak signals — even when the trend is still strongly intact. Add a **"runner mode"** that overrides those exits when a position is clearly still in a healthy uptrend, and only releases when the move actually breaks down.
 
----
+## Where this lives
 
-## 1. Remove Scan Universe tab
+`supabase/functions/autotrader-scan/index.ts` → `runWinExit()`. No DB changes, no UI changes, no new positions table fields.
 
-- Delete `src/pages/ScanUniverse.tsx`.
-- Remove the `Scan Universe` entry in `src/components/Navbar.tsx` (line ~43) and the `Layers` import if unused.
-- Remove the route + import in `src/App.tsx` (lines 17, 44).
-- Keep the `scan_universe_log` table (still written by `market-scanner` and useful as background telemetry). No DB change.
+## What "running it dry" means (objective gates)
 
-## 2. Remove Rolling Calibration fully
+Runner mode activates **only** when the position is meaningfully profitable AND momentum is still alive. We require **all** of:
 
-Frontend
-- Delete `src/pages/Calibration.tsx`.
-- Delete `src/components/calibration/ForecastEvolution.tsx` (and the empty `calibration/` dir).
-- Remove the `Calibration` route + import in `src/App.tsx` (lines 14, 41).
-- Remove the `Calibration` nav entry in `src/components/Navbar.tsx` (line 41) and the `Brain` icon if unused.
+1. **Profitable enough to be a real winner** — `pnlPct >= max(profile.takeProfitPct × 1.5, 12%)`. (Below the existing ceiling we don't even consider it; we already have peak detection.)
+2. **Trend intact** — close > 20-EMA > 50-SMA (long) / inverse for short. Confirms the structure that made it a winner is still standing.
+3. **Higher highs holding** — current price is within 1.5 × ATR of the all-time `peak_price`. We're not in a deep pullback.
+4. **No exhaustion** — RSI is **not** > 80 with bearish RSI divergence (long), and the volume-climax + MACD-rollover signals are **not both** firing.
+5. **Thesis still alive** — for `trend` strategy, `liveWeeklyAlloc` direction still matches entry; for `breakout`, price still > breakout level (entry × 1.02 long); for `mean_reversion`, runner mode does **not** apply (MR thesis is mean-revert, not "ride a trend").
 
-Backend
-- Delete edge function `supabase/functions/roll-calibration/` (call `delete_edge_functions`).
-- Remove its block from `supabase/config.toml`.
-- Migration:
-  - `DROP TABLE public.calibration_snapshots;`
-  - `SELECT cron.unschedule('<roll-calibration job name>');` (look up the actual name in the existing cron migration first).
+If all 5 hold → **runner mode active**. The hard ceiling and the 3-of-5 peak rule are both **suppressed**. Trailing stop continues to ratchet (tightened — see below) and is the **only** exit path while runner mode is on.
 
-Note: `calibration-stats` edge function is a different thing (used elsewhere). Confirm before touching — current plan leaves it alone.
+## Tighter trail while running
 
-## 3. Autotrader sell logic for manual buys
+Once runner mode kicks in, replace `profile.trailingStopATRMult` with a tighter Chandelier-style trail: `peak − 2.5 × ATR` (or `profile.trailingStopATRMult`, whichever is tighter). This locks in gains as the move extends and is the "ran it dry" exit — when the trend finally breaks, the trail catches it.
 
-Today: `autotrader-scan` runs **only for users with `autotrade_settings.enabled = true`** and only manages positions where `opened_by = 'autotrader'` for entries; on exits it actually evaluates **all** open positions for the user (no `opened_by` filter on the exit path — verified in `processUser`). The duplicate brain lives in `check-sell-alerts`, which posts non-actionable alerts for manual positions.
+## Exit conditions while in runner mode
 
-Change:
-- **Decouple exit-management from `enabled`.** Split the scan into two phases per user:
-  - **Exits phase** runs for every user that has any open `virtual_positions`, regardless of `enabled` / `kill_switch=false`. Uses the existing `runWinExit` + `runLossExit` and **executes the close** (writes `status='closed'`, fills exit fields, logs to `autotrade_log` with `action='EXIT'` and a `reason` like "Manual position auto-closed: …").
-  - **Entries phase** continues to require `enabled = true` (unchanged).
-- `kill_switch = true` still freezes automated exits (current behavior preserved for safety).
-- For manual-position closes, also insert a `sell_alerts` row so the user gets a notification of what was auto-sold (UX continuity with today's notifications).
-- **Delete `check-sell-alerts/`** edge function and unschedule its cron job in a migration. Remove its config block from `supabase/config.toml`. The autotrader brain is now the single source of exit truth.
-- Cron: `autotrader-scan` already runs on its own schedule. Confirm it ticks frequently enough (current default `scan_interval_minutes = 10`, with adaptive overrides) — that matches or beats the prior 15-minute `check-sell-alerts` cadence, so manual exits get checked at least as often.
+Runner mode releases (i.e., normal exit logic resumes for that scan) the moment **any** of:
+- Trailing-stop hit → `FULL_EXIT` with reason "Runner trailing-stop hit (+X%)"
+- Trend structure breaks (close < 50-SMA on long) → `FULL_EXIT` with reason "Runner trend break (close lost 50-SMA)"
+- 4-of-5 peak signals fire (stricter than the normal 3-of-5) → `FULL_EXIT` with reason "Runner exhaustion (4/5 peak signals)"
 
-### User-visible behavior after change
-- Open a manual buy → autotrader watches it on every scan → when any of T1–T6 fires, it closes the position and notifies you (instead of just posting an alert you had to action yourself).
-- Users who never enable the autotrader still get **automatic exits** on manual positions, because exits are now decoupled from `enabled`. (If you'd rather gate this behind a separate toggle like `auto_exit_manual_positions`, say so and I'll add it — default plan is "always on for safety".)
+Loss-exit logic (`runLossExit`) still runs first and is unaffected — hard stop and thesis invalidation always win.
+
+## Code shape
+
+Inside `runWinExit`, after the trailing/peak update and **before** the hard-ceiling check at line 334, compute `runnerActive` from the 5 gates above. If `runnerActive`:
+
+- Tighten `trailing` to `max(trailing, newPeak − 2.5 × ATR)` (long) / inverse for short.
+- If `trailingHit` (using the tightened trail) → `FULL_EXIT`.
+- If trend-break or 4-of-5 peak signals → `FULL_EXIT`.
+- Otherwise → `HOLD` with reason `runner-mode (+X%, peak Y)`, persisting `trailing` and `newPeak`.
+- **Skip** the existing hard-ceiling and 3-of-5 blocks for this position this scan.
+
+If `!runnerActive` → existing logic runs unchanged.
+
+## What does NOT change
+
+- `runLossExit` — untouched.
+- Hard stop, ATR stop, time stop — untouched.
+- Peak/trailing ratchet math — same formulas, just applied with a tighter mult while runner is active.
+- Manual-position handling — runner mode applies to every position the autotrader manages (which now includes manual buys, per the previous change).
+- DB schema — no new columns. `peak_price` and `trailing_stop_price` already exist and are sufficient.
 
 ## Verification
 
-1. After deploy, open `/scan-universe` and `/calibration` → 404.
-2. Run `autotrader-scan` manually with a test user that has `enabled=false` + 1 open manual position whose hard stop is already hit → confirm the position flips to `closed`, an `autotrade_log` EXIT row appears, and a `sell_alerts` row is inserted.
-3. `select * from cron.job` shows no `roll-calibration` or `check-sell-alerts` jobs.
-4. `calibration_snapshots` table is gone; no console errors on dashboard.
-
-## Out of scope
-
-- No changes to entry logic, conviction math, or signal engine.
-- `calibration-stats` edge function (separate utility) is left alone.
-- `scan_universe_log` table kept (cheap telemetry, no UI now).
+1. Pick an open position with > 15% profit and clean uptrend (close > 20-EMA > 50-SMA, near peak). Run autotrader-scan → expect `HOLD` with `reason` containing "runner-mode" instead of `FULL_EXIT` at the ceiling.
+2. Simulate a trend break (or wait for one) → expect `FULL_EXIT` with reason "Runner trend break" or "Runner trailing-stop hit".
+3. Position with > 15% profit but RSI > 80 + bearish divergence → runner mode does NOT activate, normal peak detection fires.
+4. Mean-reversion winner at +20% → runner mode does NOT apply, normal ceiling fires.
