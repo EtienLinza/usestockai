@@ -1,0 +1,1 @@
+DROP FUNCTION IF EXISTS public.sync_cron_secret_to_vault(text);
