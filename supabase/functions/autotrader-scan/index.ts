@@ -17,6 +17,7 @@ import {
   calculateRSI,
   calculateMACD,
   calculateSMA,
+  calculateEMA,
   safeGet,
 } from "../_shared/indicators.ts";
 import {
