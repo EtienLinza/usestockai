@@ -482,7 +482,6 @@ function runWinExit(
   // SIGNAL 5: Thesis completion (strategy-aware)
   let thesisDone = false;
   const lastRsi = safeGet(rsi, 50);
-  const strat = pos.entry_strategy ?? "trend";
   if (strat === "mean_reversion") {
     thesisDone = lastRsi >= 48 && lastRsi <= 58;
   } else if (strat === "trend") {
