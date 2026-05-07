@@ -442,7 +442,6 @@ function runWinExit(
 
   // SIGNAL 2: RSI bearish divergence (long) / bullish divergence (short)
   let rsiDivergence = false;
-  const rsi = calculateRSI(close, 14);
   if (n >= 6 && !isNaN(rsi[n - 1]) && !isNaN(rsi[n - 6])) {
     if (isLong) {
       rsiDivergence = close[n - 1] > close[n - 6] && rsi[n - 1] < rsi[n - 6] && rsi[n - 1] > 65;
