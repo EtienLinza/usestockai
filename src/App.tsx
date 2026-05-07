@@ -36,10 +36,8 @@ const App = () => (
               <Route path="/watchlist" element={<Watchlist />} />
               
               <Route path="/backtest" element={<Backtest />} />
-              <Route path="/calibration" element={<Calibration />} />
               <Route path="/settings" element={<Settings />} />
               <Route path="/autotrader-log" element={<AutotraderLog />} />
-              <Route path="/scan-universe" element={<ScanUniverse />} />
               <Route path="/terms" element={<Terms />} />
               <Route path="/privacy" element={<Privacy />} />
               <Route path="/disclosure" element={<Disclosure />} />
