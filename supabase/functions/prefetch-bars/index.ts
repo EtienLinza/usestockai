@@ -7,16 +7,19 @@ import { fetchDailyHistory } from "../_shared/yahoo-history.ts";
 import { discoverTickers } from "../_shared/scan-pipeline.ts";
 import { upsertBars } from "../_shared/bars-cache.ts";
 import { recordHeartbeat } from "../_shared/heartbeat.ts";
+import { requireCronOrUser } from "../_shared/cron-auth.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-cron-secret",
 };
 
 const PARALLELISM = 30;
 
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+  const denied = await requireCronOrUser(req);
+  if (denied) return denied;
   const startedAt = Date.now();
   try {
     const disco = await discoverTickers();

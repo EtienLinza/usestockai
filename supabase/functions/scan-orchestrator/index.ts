@@ -16,11 +16,12 @@ import {
   type MacroRegime, type SectorMomentum,
 } from "../_shared/scan-pipeline.ts";
 import { loadCachedBars } from "../_shared/bars-cache.ts";
+import { requireCronOrUser } from "../_shared/cron-auth.ts";
 
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-cron-secret",
 };
 
 const WORKER_CHUNK = 80;        // tickers per worker call
@@ -29,6 +30,9 @@ const DISCOVERY_TTL_MS = 24 * 60 * 60 * 1000;
 
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+
+  const denied = await requireCronOrUser(req, { allowAuthenticatedUser: true });
+  if (denied) return denied;
 
   const heartbeatStart = Date.now();
   const supabase = createClient(
@@ -125,7 +129,13 @@ serve(async (req) => {
     console.log(`pre-screen: hit=${cacheHit} survivors=${survivors.length} rejected=${prescreenRejected} misses-deferred=${allTickers.length - cacheHit}`);
 
     // Fire-and-forget: warm the cache for next run (don't await).
-    try { supabase.functions.invoke("prefetch-bars", { body: {} }).catch(() => {}); } catch (_) {}
+    try {
+      const cs = Deno.env.get("CRON_SECRET");
+      supabase.functions.invoke("prefetch-bars", {
+        body: {},
+        headers: cs ? { "x-cron-secret": cs } : {},
+      }).catch(() => {});
+    } catch (_) {}
 
     await setProgress({
       survivors: survivors.length, total: survivors.length,
