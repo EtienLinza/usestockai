@@ -330,16 +330,109 @@ function runWinExit(
   }
   const trailingHit = isLong ? currentPrice <= trailing : currentPrice >= trailing;
 
-  // Hard ceiling: take-profit × 1.5 — always exits regardless of signals
-  if (pnlPct >= profile.takeProfitPct / 100 * 1.5) {
-    return { kind: "FULL_EXIT", reason: `Hard take-profit ceiling hit (+${(pnlPct * 100).toFixed(1)}%)`, price: currentPrice };
-  }
-
   // Below +6% we don't try to time a peak — hold or let loss-engine cut
   const MIN_PROFIT_FOR_PEAK = 0.06;
   if (pnlPct < MIN_PROFIT_FOR_PEAK) {
     return { kind: "HOLD", reason: "below peak-detection floor", trailingUpdate: trailing, peakUpdate: newPeak };
   }
+
+  const n = data.close.length;
+  const close = data.close, vol = data.volume;
+
+  // ── Pre-compute indicators we need for both runner-mode + peak detection ──
+  const rsi = calculateRSI(close, 14);
+  const ema20 = calculateEMA(close, 20);
+  const sma50 = calculateSMA(close, 50);
+  const lastClose = close[n - 1];
+  const lastEma20 = ema20[n - 1];
+  const lastSma50 = sma50[n - 1];
+
+  // ── RUNNER MODE — let big winners ride until the trend actually breaks ──
+  // Activates only when the position is meaningfully profitable AND every
+  // momentum/structure check still confirms the move. Suppresses the hard
+  // ceiling and 3-of-5 peak rule; only a tighter trail, trend break, or
+  // 4-of-5 exhaustion can release the runner.
+  const ceilingPnl = profile.takeProfitPct / 100 * 1.5;
+  const RUNNER_FLOOR = Math.max(ceilingPnl, 0.12);
+  const strat = pos.entry_strategy ?? "trend";
+  const isMR = strat === "mean_reversion";
+
+  // Gate 1: profitable enough
+  let runnerActive = pnlPct >= RUNNER_FLOOR && !isMR;
+
+  // Gate 2: trend structure intact (close > 20-EMA > 50-SMA for long)
+  if (runnerActive && Number.isFinite(lastEma20) && Number.isFinite(lastSma50)) {
+    runnerActive = isLong
+      ? lastClose > lastEma20 && lastEma20 > lastSma50
+      : lastClose < lastEma20 && lastEma20 < lastSma50;
+  } else {
+    runnerActive = false;
+  }
+
+  // Gate 3: still near the peak (within 1.5 × ATR)
+  if (runnerActive && atr > 0) {
+    const distFromPeak = isLong ? newPeak - currentPrice : currentPrice - newPeak;
+    runnerActive = distFromPeak <= atr * 1.5;
+  }
+
+  // Gate 4: no exhaustion — RSI not extreme + diverging
+  if (runnerActive && n >= 6 && !isNaN(rsi[n - 1]) && !isNaN(rsi[n - 6])) {
+    const extremeRsi = isLong ? rsi[n - 1] > 80 : rsi[n - 1] < 20;
+    const diverging = isLong
+      ? close[n - 1] > close[n - 6] && rsi[n - 1] < rsi[n - 6]
+      : close[n - 1] < close[n - 6] && rsi[n - 1] > rsi[n - 6];
+    if (extremeRsi && diverging) runnerActive = false;
+  }
+
+  // Gate 5: thesis still alive (strategy-aware)
+  if (runnerActive) {
+    if (strat === "trend") {
+      const entryAlloc = pos.entry_weekly_alloc ?? 0;
+      // Direction must still match — if entry was long-bias, live alloc must still be > 0
+      if (entryAlloc !== 0 && Math.sign(liveWeeklyAlloc) !== Math.sign(entryAlloc)) {
+        runnerActive = false;
+      }
+    } else if (strat === "breakout") {
+      const breakout = isLong ? entry * 1.02 : entry * 0.98;
+      runnerActive = isLong ? currentPrice > breakout : currentPrice < breakout;
+    }
+  }
+
+  if (runnerActive) {
+    // Tighter Chandelier-style trail while running
+    const chandelier = isLong ? newPeak - 2.5 * atr : newPeak + 2.5 * atr;
+    const runnerTrail = isLong ? Math.max(trailing, chandelier) : Math.min(trailing, chandelier);
+    const runnerHit = isLong ? currentPrice <= runnerTrail : currentPrice >= runnerTrail;
+
+    if (runnerHit) {
+      return { kind: "FULL_EXIT", reason: `Runner trailing-stop hit (+${(pnlPct * 100).toFixed(1)}%)`, price: currentPrice };
+    }
+    // Trend break — close lost the 50-SMA
+    const trendBreak = isLong ? lastClose < lastSma50 : lastClose > lastSma50;
+    if (trendBreak) {
+      return { kind: "FULL_EXIT", reason: `Runner trend break (close lost 50-SMA, +${(pnlPct * 100).toFixed(1)}%)`, price: currentPrice };
+    }
+    // 4-of-5 exhaustion check happens below after signals are computed.
+    // Mark runner state and continue to compute peak signals.
+    // (We re-enter the signal block below but with stricter exit threshold.)
+    // Compute peak signals inline:
+    const sigsR = computePeakSignals(pos, data, currentPrice, runnerTrail, rsi);
+    if (sigsR.fired >= 4) {
+      return { kind: "FULL_EXIT", reason: `Runner exhaustion (${sigsR.fired}/5: ${sigsR.firedLabels.join(" + ")}, +${(pnlPct * 100).toFixed(1)}%)`, price: currentPrice };
+    }
+    return {
+      kind: "HOLD",
+      reason: `runner-mode (+${(pnlPct * 100).toFixed(1)}%, peak ${newPeak.toFixed(2)}, ${sigsR.fired}/5 sig)`,
+      trailingUpdate: runnerTrail,
+      peakUpdate: newPeak,
+    };
+  }
+
+  // Hard ceiling: take-profit × 1.5 — always exits regardless of signals
+  if (pnlPct >= ceilingPnl) {
+    return { kind: "FULL_EXIT", reason: `Hard take-profit ceiling hit (+${(pnlPct * 100).toFixed(1)}%)`, price: currentPrice };
+  }
+
 
   const n = data.close.length;
   const close = data.close, vol = data.volume;
