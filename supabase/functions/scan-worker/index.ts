@@ -7,8 +7,8 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { evaluateSignal, type DataSet, type MacroContext } from "../_shared/signal-engine-v2.ts";
 import { fetchDailyHistory } from "../_shared/yahoo-history.ts";
-import { loadCachedBars } from "../_shared/bars-cache.ts";
-import { getSectorConvictionModifier, macroFloorAdjust, type SectorMomentum, type MacroRegime } from "../_shared/scan-pipeline.ts";
+import { loadCachedBars, upsertBars } from "../_shared/bars-cache.ts";
+import { getSectorConvictionModifier, macroFloorAdjust, preScreen, type SectorMomentum, type MacroRegime } from "../_shared/scan-pipeline.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -47,12 +47,24 @@ serve(async (req) => {
       });
     }
 
-    // Load cached bars in one query, fetch misses in parallel
+    // Load cached bars; fetch misses with bounded parallelism, pre-screen, and warm cache.
     const cache = await loadCachedBars(tickers);
     const misses = tickers.filter(t => !cache.has(t));
     if (misses.length > 0) {
-      const fetched = await Promise.all(misses.map(t => fetchDailyHistory(t, "1y")));
-      misses.forEach((t, i) => { if (fetched[i]) cache.set(t, fetched[i]!); });
+      const PAR = 20;
+      const warm: { ticker: string; bars: DataSet }[] = [];
+      for (let i = 0; i < misses.length; i += PAR) {
+        const slice = misses.slice(i, i + PAR);
+        const fetched = await Promise.all(slice.map(t => fetchDailyHistory(t, "1y")));
+        slice.forEach((t, k) => {
+          const d = fetched[k];
+          if (d && d.close.length >= 200 && preScreen(d)) {
+            cache.set(t, d);
+            warm.push({ ticker: t, bars: d });
+          }
+        });
+      }
+      if (warm.length > 0) { upsertBars(warm).catch(() => {}); }
     }
 
     const signals: any[] = [];
