@@ -563,12 +563,25 @@ serve(async (req) => {
   const summary = { users: 0, entries: 0, exits: 0, partials: 0, holds: 0, blocked: 0, errors: 0 };
 
   try {
-    // 1. Active users
-    const { data: settingsRows, error: sErr } = await supabase
+    // 1. Load all autotrade_settings rows. We process every user that has either
+    //    autotrader enabled (entries+exits) OR any open virtual_position (exits only,
+    //    so manual buys also benefit from the autotrader's exit brain).
+    const { data: allSettings, error: sErr } = await supabase
       .from("autotrade_settings")
-      .select("*")
-      .eq("enabled", true);
+      .select("*");
     if (sErr) throw sErr;
+
+    // Find users with open positions (manual or otherwise)
+    const { data: openPosUsers } = await supabase
+      .from("virtual_positions")
+      .select("user_id")
+      .eq("status", "open");
+    const userIdsWithOpen = new Set((openPosUsers ?? []).map((r: any) => r.user_id));
+
+    const settingsRows = (allSettings ?? []).filter((s: any) =>
+      s.enabled === true || userIdsWithOpen.has(s.user_id)
+    );
+
     if (!settingsRows || settingsRows.length === 0) {
       await recordHeartbeat("autotrader-scan", startedAt, "ok", "no-active-users");
       return json({ status: "no-active-users", summary });
