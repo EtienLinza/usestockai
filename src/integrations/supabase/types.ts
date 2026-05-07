@@ -912,7 +912,10 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      sync_cron_secret_to_vault: {
+        Args: { p_secret: string }
+        Returns: undefined
+      }
     }
     Enums: {
       [_ in never]: never
