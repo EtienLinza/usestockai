@@ -63,6 +63,7 @@ serve(async (req) => {
           headers: {
             "Content-Type": "application/json",
             "Authorization": `Bearer ${anonKey}`,
+            ...cronSecretHeader(),
           },
           body: JSON.stringify(invokeBody),
         });
