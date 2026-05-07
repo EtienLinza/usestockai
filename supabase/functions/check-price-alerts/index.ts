@@ -31,6 +31,9 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  const denied = await requireCronOrUser(req, { allowAuthenticatedUser: true });
+  if (denied) return denied;
+
   const startedAt = Date.now();
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
