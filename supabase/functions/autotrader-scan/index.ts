@@ -299,6 +299,67 @@ type EntryAction =
   | { kind: "HOLD" | "BLOCKED"; reason: string };
 
 // ============================================================================
+// Helper: compute the 4 non-trailing peak signals (RSI div, climax, MACD roll,
+// thesis done) — used by runner-mode exhaustion check. Returns trailing as a
+// 5th signal based on the supplied trailing price.
+// ============================================================================
+function computePeakSignals(
+  pos: Position, data: DataSet, currentPrice: number, trailing: number, rsi: number[],
+): { fired: number; firedLabels: string[] } {
+  const isLong = pos.position_type === "long";
+  const n = data.close.length;
+  const close = data.close, vol = data.volume;
+  const trailingHit = isLong ? currentPrice <= trailing : currentPrice >= trailing;
+
+  let rsiDivergence = false;
+  if (n >= 6 && !isNaN(rsi[n - 1]) && !isNaN(rsi[n - 6])) {
+    rsiDivergence = isLong
+      ? close[n - 1] > close[n - 6] && rsi[n - 1] < rsi[n - 6] && rsi[n - 1] > 65
+      : close[n - 1] < close[n - 6] && rsi[n - 1] > rsi[n - 6] && rsi[n - 1] < 35;
+  }
+
+  let climax = false;
+  if (n >= 21) {
+    let avgV = 0;
+    for (let i = n - 21; i < n - 1; i++) avgV += vol[i];
+    avgV /= 20;
+    const hi = data.high[n - 1], lo = data.low[n - 1], cl = close[n - 1];
+    const range = hi - lo;
+    const closePos = range > 0 ? (cl - lo) / range : 0.5;
+    const volSpike = vol[n - 1] > avgV * 1.8;
+    climax = isLong ? volSpike && closePos < 0.35 : volSpike && closePos > 0.65;
+  }
+
+  let macdRoll = false;
+  if (n >= 35) {
+    const m = calculateMACD(close);
+    const h = m.histogram;
+    if (n >= 3) {
+      macdRoll = isLong
+        ? h[n - 1] > 0 && h[n - 1] < h[n - 2] && h[n - 2] < h[n - 3]
+        : h[n - 1] < 0 && h[n - 1] > h[n - 2] && h[n - 2] > h[n - 3];
+    }
+  }
+
+  // Thesis completion (lighter check — runner mode already gates on thesis)
+  const lastRsi = safeGet(rsi, 50);
+  const strat = pos.entry_strategy ?? "trend";
+  let thesisDone = false;
+  if (strat === "mean_reversion") thesisDone = lastRsi >= 48 && lastRsi <= 58;
+  else if (strat === "breakout") {
+    const entry = Number(pos.entry_price);
+    thesisDone = isLong ? currentPrice < entry * 1.01 : currentPrice > entry * 0.99;
+  }
+
+  const signals = [trailingHit, rsiDivergence, climax, macdRoll, thesisDone];
+  const labels = ["trailing-stop", "RSI divergence", "volume climax", "MACD rollover", "thesis complete"];
+  return {
+    fired: signals.filter(Boolean).length,
+    firedLabels: labels.filter((_, i) => signals[i]),
+  };
+}
+
+// ============================================================================
 // WIN EXIT — peak detection (5 signals, 3-of-5 fires FULL_EXIT)
 // Improvements over the basic ATR-trail:
 //   • RSI bearish divergence (5-bar lookback)
@@ -306,6 +367,7 @@ type EntryAction =
 //   • MACD histogram rollover (2-bar decline)
 //   • Strategy-aware thesis completion
 //   • Peak detection only kicks in after +6% — below that, just hold/cut
+//   • Runner mode: lets clean uptrends ride past the hard ceiling
 // ============================================================================
 function runWinExit(
   pos: Position, data: DataSet, currentPrice: number, profile: ProfileParams,
