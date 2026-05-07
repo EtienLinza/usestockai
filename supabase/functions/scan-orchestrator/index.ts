@@ -16,7 +16,7 @@ import {
   type MacroRegime, type SectorMomentum,
 } from "../_shared/scan-pipeline.ts";
 import { loadCachedBars } from "../_shared/bars-cache.ts";
-import { fetchDailyHistory } from "../_shared/yahoo-history.ts";
+
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
