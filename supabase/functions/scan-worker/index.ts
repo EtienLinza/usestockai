@@ -7,8 +7,8 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { evaluateSignal, type DataSet, type MacroContext } from "../_shared/signal-engine-v2.ts";
 import { fetchDailyHistory } from "../_shared/yahoo-history.ts";
-import { loadCachedBars } from "../_shared/bars-cache.ts";
-import { getSectorConvictionModifier, macroFloorAdjust, type SectorMomentum, type MacroRegime } from "../_shared/scan-pipeline.ts";
+import { loadCachedBars, upsertBars } from "../_shared/bars-cache.ts";
+import { getSectorConvictionModifier, macroFloorAdjust, preScreen, type SectorMomentum, type MacroRegime } from "../_shared/scan-pipeline.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
