@@ -60,6 +60,9 @@ function bucketCenter(label: string): number {
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
+  const denied = await requireCronOrUser(req);
+  if (denied) return denied;
+
   const startedAt = Date.now();
   try {
     const supabase = createClient(
