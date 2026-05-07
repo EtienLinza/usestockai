@@ -38,9 +38,7 @@ export const Navbar = () => {
 
   // Secondary nav (in user dropdown on desktop, full list in mobile sheet)
   const secondaryLinks = [
-    { href: "/calibration", label: "Calibration", icon: Brain },
     { href: "/autotrader-log", label: "AutoTrader Log", icon: Bot },
-    { href: "/scan-universe", label: "Scan Universe", icon: Layers },
   ];
 
   const allLinks = [...navLinks, ...secondaryLinks];
