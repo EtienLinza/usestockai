@@ -107,34 +107,25 @@ serve(async (req) => {
 
     await setProgress({ phase: "prescreening" });
 
-    // ─── 3. Pre-screen using cached bars ───────────────────────────────────
+    // ─── 3. Pre-screen using cached bars (no inline fetch — defer misses to workers) ──
     const cache = await loadCachedBars(allTickers);
     const cacheHit = cache.size;
     const survivors: string[] = [];
-    const cacheMissesNeeded: string[] = [];
+    let prescreenRejected = 0;
     for (const t of allTickers) {
       const data = cache.get(t);
       if (!data) {
-        // Defer: include for live-fetch path during analysis (worker will fetch)
-        cacheMissesNeeded.push(t);
+        // Cache miss: forward to workers; they'll fetch + pre-screen + evaluate.
+        survivors.push(t);
         continue;
       }
       if (preScreen(data)) survivors.push(t);
+      else prescreenRejected++;
     }
-    console.log(`pre-screen: ${survivors.length}/${cache.size} hit, ${cacheMissesNeeded.length} miss`);
+    console.log(`pre-screen: hit=${cacheHit} survivors=${survivors.length} rejected=${prescreenRejected} misses-deferred=${allTickers.length - cacheHit}`);
 
-    // For cache misses, fetch in parallel and pre-screen on the fly
-    if (cacheMissesNeeded.length > 0) {
-      const PAR = 30;
-      for (let i = 0; i < cacheMissesNeeded.length; i += PAR) {
-        const slice = cacheMissesNeeded.slice(i, i + PAR);
-        const fetched = await Promise.all(slice.map(t => fetchDailyHistory(t, "1y")));
-        slice.forEach((t, k) => {
-          const d = fetched[k];
-          if (d) { cache.set(t, d); if (preScreen(d)) survivors.push(t); }
-        });
-      }
-    }
+    // Fire-and-forget: warm the cache for next run (don't await).
+    try { supabase.functions.invoke("prefetch-bars", { body: {} }).catch(() => {}); } catch (_) {}
 
     await setProgress({
       survivors: survivors.length, total: survivors.length,
