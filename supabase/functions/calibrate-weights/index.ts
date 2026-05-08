@@ -318,7 +318,9 @@ serve(async (req) => {
       activeWeightsId: inserted?.id,
       calibration_curve,
       strategy_tilts,
+      strategy_regime_tilts,
       regime_floors: regimeFloors,
+      exit_calibration,
     }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
   } catch (e: any) {
