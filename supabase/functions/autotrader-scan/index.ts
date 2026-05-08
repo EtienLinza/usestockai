@@ -723,13 +723,31 @@ function runLossExit(
     }
   }
 
-  // T3: Time stop
+  // T2.5: R-progress time stop (Phase 2 #8)
+  // If half the strategy's max-hold has elapsed and the trade hasn't shown
+  // ≥ 0.5R of unrealized progress, the thesis is stalling — cut early to
+  // free capital for fresher setups. Uses initial risk = |entry − hard_stop|.
   const maxHold = pos.entry_strategy === "mean_reversion"
     ? profile.maxHoldMR
     : pos.entry_strategy === "breakout"
     ? profile.maxHoldBreakout
     : profile.maxHoldTrend;
   const barsHeld = businessDaysSince(pos.created_at);
+  if (pos.hard_stop_price != null && entry > 0 && barsHeld >= Math.max(3, Math.floor(maxHold / 2))) {
+    const initRiskPerShare = Math.abs(entry - Number(pos.hard_stop_price));
+    if (initRiskPerShare > 0) {
+      const progressR = (isLong ? currentPrice - entry : entry - currentPrice) / initRiskPerShare;
+      if (progressR < 0.5) {
+        return {
+          kind: "FULL_EXIT",
+          reason: `R-progress stall: only ${progressR.toFixed(2)}R after ${barsHeld}/${maxHold} bars`,
+          price: currentPrice,
+        };
+      }
+    }
+  }
+
+  // T3: Time stop
   if (barsHeld >= maxHold) {
     return {
       kind: "FULL_EXIT",
