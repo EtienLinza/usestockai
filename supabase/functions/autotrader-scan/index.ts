@@ -159,6 +159,42 @@ function isBearishMacro(macro: MacroContext | null): boolean {
   return spyTrendOf(macro) === "down";
 }
 
+// ── Vol-targeting scalar (improvement #7) ─────────────────────────────────
+// Continuous portfolio-level position-size scalar based on SPY's recent
+// realized volatility. We target ~16% annualized portfolio vol — a common
+// risk-parity anchor. When SPY realized vol > target, scale sizes down;
+// when < target, scale up modestly. Continuous (not regime-bucketed) so
+// sizing reacts smoothly as conditions evolve.
+const VOL_TARGET_ANNUAL = 0.16;
+const VOL_LOOKBACK = 20;
+const VOL_SCALAR_MIN = 0.5;
+const VOL_SCALAR_MAX = 1.25;
+
+function realizedVolAnnualized(close: number[], lookback: number): number | null {
+  if (close.length < lookback + 1) return null;
+  let sum = 0; const rets: number[] = [];
+  for (let i = close.length - lookback; i < close.length; i++) {
+    const a = close[i - 1], b = close[i];
+    if (!(a > 0 && b > 0)) continue;
+    const r = Math.log(b / a);
+    rets.push(r); sum += r;
+  }
+  if (rets.length < 5) return null;
+  const m = sum / rets.length;
+  let v = 0; for (const r of rets) v += (r - m) * (r - m);
+  v /= Math.max(1, rets.length - 1);
+  return Math.sqrt(v) * Math.sqrt(252);
+}
+
+function volTargetScalar(macro: MacroContext | null): { scalar: number; spyVol: number | null } {
+  if (!macro) return { scalar: 1, spyVol: null };
+  const spyVol = realizedVolAnnualized(macro.spyClose, VOL_LOOKBACK);
+  if (spyVol == null || spyVol <= 0) return { scalar: 1, spyVol: null };
+  const raw = VOL_TARGET_ANNUAL / spyVol;
+  const scalar = Math.max(VOL_SCALAR_MIN, Math.min(VOL_SCALAR_MAX, raw));
+  return { scalar, spyVol };
+}
+
 // VIX regime classifier
 function vixRegimeOf(vix: number | null): "calm" | "normal" | "elevated" | "crisis" {
   if (vix == null || !Number.isFinite(vix)) return "normal";
