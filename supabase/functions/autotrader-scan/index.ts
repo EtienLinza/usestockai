@@ -723,13 +723,31 @@ function runLossExit(
     }
   }
 
-  // T3: Time stop
+  // T2.5: R-progress time stop (Phase 2 #8)
+  // If half the strategy's max-hold has elapsed and the trade hasn't shown
+  // ≥ 0.5R of unrealized progress, the thesis is stalling — cut early to
+  // free capital for fresher setups. Uses initial risk = |entry − hard_stop|.
   const maxHold = pos.entry_strategy === "mean_reversion"
     ? profile.maxHoldMR
     : pos.entry_strategy === "breakout"
     ? profile.maxHoldBreakout
     : profile.maxHoldTrend;
   const barsHeld = businessDaysSince(pos.created_at);
+  if (pos.hard_stop_price != null && entry > 0 && barsHeld >= Math.max(3, Math.floor(maxHold / 2))) {
+    const initRiskPerShare = Math.abs(entry - Number(pos.hard_stop_price));
+    if (initRiskPerShare > 0) {
+      const progressR = (isLong ? currentPrice - entry : entry - currentPrice) / initRiskPerShare;
+      if (progressR < 0.5) {
+        return {
+          kind: "FULL_EXIT",
+          reason: `R-progress stall: only ${progressR.toFixed(2)}R after ${barsHeld}/${maxHold} bars`,
+          price: currentPrice,
+        };
+      }
+    }
+  }
+
+  // T3: Time stop
   if (barsHeld >= maxHold) {
     return {
       kind: "FULL_EXIT",
@@ -811,14 +829,39 @@ async function runEntryDecision(
     return { kind: "HOLD", reason: "Position too small after caps" };
   }
 
-  // Hard stop at entry
+  // Hard stop at entry — STRUCTURAL (Phase 2 #10)
+  // Pure-ATR stops fire on noise. We anchor the stop to actual market
+  // structure: the more conservative (tighter) of swing-low / EMA20 buffer,
+  // then clamp the resulting risk into [0.8·ATR, hardStopATRMult·ATR] so
+  // we neither stop on a tick nor blow our risk budget.
   const profile = PROFILE_PARAMS[sig.profile];
   const params = sig.blendedParams ?? profile;
   const atr = sig.atr;
   const isLong = sig.decision === "BUY";
-  const hardStop = isLong
-    ? currentPrice - atr * params.hardStopATRMult
-    : currentPrice + atr * params.hardStopATRMult;
+  const atrStopDist = atr * params.hardStopATRMult;
+  const minDist = atr * 0.8;
+  let stopDist = atrStopDist;
+  if (atr > 0 && data.close.length >= 22) {
+    const lookback = 10;
+    const n = data.close.length;
+    let swing = isLong ? Infinity : -Infinity;
+    for (let i = n - 1 - lookback; i < n - 1; i++) {
+      if (i < 0) continue;
+      swing = isLong ? Math.min(swing, data.low[i]) : Math.max(swing, data.high[i]);
+    }
+    const ema20Arr = calculateEMA(data.close, 20);
+    const lastEma20 = ema20Arr[n - 1];
+    const emaAnchor = Number.isFinite(lastEma20)
+      ? (isLong ? lastEma20 - 0.25 * atr : lastEma20 + 0.25 * atr)
+      : (isLong ? -Infinity : Infinity);
+    // Structural anchor = tighter of swing/EMA (closer to entry)
+    const structAnchor = isLong ? Math.max(swing, emaAnchor) : Math.min(swing, emaAnchor);
+    const structDist = isLong ? currentPrice - structAnchor : structAnchor - currentPrice;
+    if (Number.isFinite(structDist) && structDist > 0) {
+      stopDist = Math.min(atrStopDist, Math.max(minDist, structDist));
+    }
+  }
+  const hardStop = isLong ? currentPrice - stopDist : currentPrice + stopDist;
 
   return {
     kind: "ENTER",
