@@ -1112,12 +1112,38 @@ serve(async (req) => {
       );
       const recentPnlPct = (recentPnlDollars / Number(rawSettings.starting_nav || 100000)) * 100;
 
+      // 30-day rolling NAV drawdown — peak-to-current from virtual_portfolio_log.
+      // Stale-data safe: if we can't compute it, treat as 0 so we never falsely block.
+      let rollingDrawdownPct = 0;
+      try {
+        const thirtyDaysAgo = new Date(Date.now() - 30 * 86400000).toISOString();
+        const { data: navHistory } = await supabase
+          .from("virtual_portfolio_log")
+          .select("total_value, date")
+          .eq("user_id", rawSettings.user_id)
+          .gte("date", thirtyDaysAgo)
+          .order("date", { ascending: true });
+        const values = (navHistory ?? [])
+          .map((r: any) => Number(r.total_value))
+          .filter((v: number) => Number.isFinite(v) && v > 0);
+        if (values.length >= 2) {
+          const peak = Math.max(...values);
+          const current = values[values.length - 1];
+          if (peak > 0 && current < peak) {
+            rollingDrawdownPct = ((peak - current) / peak) * 100;
+          }
+        }
+      } catch (e) {
+        console.warn("[rolling-dd] compute failed", e);
+      }
+
       const adaptiveCtx: AdaptiveContext = {
         vix: vixValue,
         vixRegime,
         spyTrend,
         recentPnlPct,
         windowDays: 7,
+        rollingDrawdownPct,
         adjustments: [],
       };
 
