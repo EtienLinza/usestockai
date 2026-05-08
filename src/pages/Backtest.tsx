@@ -444,94 +444,7 @@ const Backtest = () => {
                       </div>
                     )}
                   </div>
-                  </>)}
 
-                  {btMode === "autotrader" && (
-                    <div className="space-y-5">
-                      <div className="grid grid-cols-2 gap-3">
-                        <div className="space-y-2">
-                          <Label className="text-xs text-muted-foreground">Start Year</Label>
-                          <Input type="number" value={startYear} onChange={e => setStartYear(Number(e.target.value))} min={2000} max={2026} variant="glass" />
-                        </div>
-                        <div className="space-y-2">
-                          <Label className="text-xs text-muted-foreground">End Year</Label>
-                          <Input type="number" value={endYear} onChange={e => setEndYear(Number(e.target.value))} min={2000} max={2026} variant="glass" />
-                        </div>
-                      </div>
-
-                      <div className="space-y-2">
-                        <Label className="text-[10px] text-muted-foreground uppercase tracking-wide">Risk Profile</Label>
-                        <div className="grid grid-cols-3 gap-2">
-                          {(["conservative", "balanced", "aggressive"] as const).map(p => (
-                            <button
-                              key={p}
-                              onClick={() => setAtRiskProfile(p)}
-                              className={`p-2 rounded-lg border text-[11px] capitalize transition-all ${
-                                atRiskProfile === p
-                                  ? "border-primary bg-primary/10 text-primary"
-                                  : "border-border/50 bg-card/30 text-muted-foreground hover:border-border"
-                              }`}
-                            >
-                              {p}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-
-                      <div className="flex items-center justify-between">
-                        <Label className="text-xs text-muted-foreground flex items-center gap-1.5">
-                          <Sparkles className="w-3 h-3" />
-                          Adaptive Mode
-                        </Label>
-                        <Switch checked={atAdaptive} onCheckedChange={setAtAdaptive} />
-                      </div>
-
-                      <div className="space-y-2">
-                        <Label className="text-xs text-muted-foreground">Min Conviction: {atMinConv}</Label>
-                        <Slider value={[atMinConv]} onValueChange={v => setAtMinConv(v[0])} min={50} max={95} step={1} />
-                      </div>
-
-                      <div className="space-y-2">
-                        <Label className="text-xs text-muted-foreground">Max Positions: {atMaxPos}</Label>
-                        <Slider value={[atMaxPos]} onValueChange={v => setAtMaxPos(v[0])} min={1} max={20} step={1} />
-                      </div>
-
-                      <div className="space-y-2">
-                        <Label className="text-xs text-muted-foreground">Max NAV Exposure: {atMaxNav}%</Label>
-                        <Slider value={[atMaxNav]} onValueChange={v => setAtMaxNav(v[0])} min={20} max={100} step={5} />
-                      </div>
-
-                      <div className="space-y-2">
-                        <Label className="text-xs text-muted-foreground">Max Single Name: {atMaxSingle}%</Label>
-                        <Slider value={[atMaxSingle]} onValueChange={v => setAtMaxSingle(v[0])} min={5} max={50} step={1} />
-                      </div>
-
-                      <div className="space-y-2">
-                        <Label className="text-xs text-muted-foreground">Daily Loss Limit: {atDailyLoss}%</Label>
-                        <Slider value={[atDailyLoss]} onValueChange={v => setAtDailyLoss(v[0])} min={1} max={10} step={0.5} />
-                      </div>
-
-                      <div className="space-y-2">
-                        <Label className="text-xs text-muted-foreground">Starting NAV: ${atStartingNav.toLocaleString()}</Label>
-                        <Slider value={[atStartingNav]} onValueChange={v => setAtStartingNav(v[0])} min={10000} max={1000000} step={10000} />
-                      </div>
-
-                      <div className="space-y-2">
-                        <Label className="text-xs text-muted-foreground">Universe Cap: {atUniverseCap} tickers</Label>
-                        <Slider value={[atUniverseCap]} onValueChange={v => setAtUniverseCap(v[0])} min={5} max={20} step={5} />
-                        <p className="text-[10px] text-muted-foreground/60">Top N by volume from live scanner universe</p>
-                      </div>
-
-                      <div className="flex items-start gap-2 p-3 rounded-lg bg-primary/5 border border-primary/10">
-                        <Sparkles className="w-3.5 h-3.5 text-primary mt-0.5 shrink-0" />
-                        <p className="text-[10px] text-muted-foreground leading-relaxed">
-                          Replays the live autotrader's full decision loop (entry gates, correlation, vol-target sizing, exits) over historical bars. Sentiment skipped.
-                        </p>
-                      </div>
-                    </div>
-                  )}
-
-                  {btMode === "single" && (
                   <div className="flex items-center justify-between">
                     <Label className="text-xs text-muted-foreground flex items-center gap-1.5">
                       <Shuffle className="w-3 h-3" />
@@ -539,7 +452,6 @@ const Backtest = () => {
                     </Label>
                     <Switch checked={includeMonteCarlo} onCheckedChange={setIncludeMonteCarlo} />
                   </div>
-                  )}
 
                   <Button onClick={handleRunBacktest} disabled={isLoading} className="w-full gap-2">
                     {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
