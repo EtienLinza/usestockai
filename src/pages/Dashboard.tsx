@@ -74,7 +74,7 @@ interface Signal {
   created_at: string;
   expires_at: string;
   sector?: string;
-  forecasts?: any;
+  
 }
 
 interface Position {
