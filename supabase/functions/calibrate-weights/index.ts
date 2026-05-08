@@ -285,11 +285,15 @@ serve(async (req) => {
       calibration_curve,
       strategy_tilts,
       regime_floors: regimeFloors,
+      exit_calibration,
       notes: {
         universeAvgReturnPct: universeAvgRet,
+        strategy_regime_tilts,
         thresholds: {
           MIN_SAMPLES_BUCKET, MIN_SAMPLES_STRATEGY, MIN_SAMPLES_REGIME,
+          MIN_SAMPLES_STRATEGY_REGIME, MIN_SAMPLES_EXIT,
           TILT_MIN, TILT_MAX, FLOOR_MIN, FLOOR_MAX, DEFAULT_FLOOR,
+          TRAIL_MULT_MIN, TRAIL_MULT_MAX,
         },
       },
     };
