@@ -1245,6 +1245,9 @@ async function processUser(
   userSummary: UserSummary,
   exitCalibration: Record<string, { trailMultAdjust: number }> | null,
   volScalar: number,
+  calibrationCurve: Record<string, { adjust: number }>,
+  strategyTilts: Record<string, { multiplier: number }>,
+  tickerCalibration: Record<string, { adjust: number }>,
 ) {
   const userId = settings.user_id;
 
