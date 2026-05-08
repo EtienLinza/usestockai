@@ -1179,6 +1179,7 @@ async function processUser(
   summary: { entries: number; exits: number; partials: number; holds: number; blocked: number; errors: number },
   userSummary: UserSummary,
   exitCalibration: Record<string, { trailMultAdjust: number }> | null,
+  volScalar: number,
 ) {
   const userId = settings.user_id;
 
