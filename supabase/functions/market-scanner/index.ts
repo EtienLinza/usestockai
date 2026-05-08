@@ -956,7 +956,9 @@ serve(async (req) => {
           : (strategyTilts[strategy]?.multiplier ?? 1.0);
         conviction = conviction * tilt;
         const adj = calibrationCurve[bucketKey(conviction)]?.adjust ?? 0;
-        conviction = Math.max(0, Math.min(100, Math.round(conviction + adj)));
+        conviction = conviction + adj;
+        const tickAdj = tickerCalibration[ticker.toUpperCase()]?.adjust ?? 0;
+        conviction = Math.max(0, Math.min(100, Math.round(conviction + tickAdj)));
 
         // ─── Sector-momentum tilt (small, bounded) ─────────────────────────
         const sectorMod = getSectorConvictionModifier(ticker, sectorMomentum);
