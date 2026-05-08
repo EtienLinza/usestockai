@@ -29,8 +29,8 @@ export async function requireCronOrUser(
           Deno.env.get("SUPABASE_ANON_KEY")!,
         );
         const token = authHeader.replace("Bearer ", "");
-        const { data, error } = await supabase.auth.getClaims(token);
-        if (!error && data?.claims?.sub) return null;
+        const { data, error } = await supabase.auth.getUser(token);
+        if (!error && data?.user?.id) return null;
       } catch (_) { /* fall through to 401 */ }
     }
   }
