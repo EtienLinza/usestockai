@@ -1058,6 +1058,7 @@ async function processUser(
   macro: MacroContext | null,
   summary: { entries: number; exits: number; partials: number; holds: number; blocked: number; errors: number },
   userSummary: UserSummary,
+  exitCalibration: Record<string, { trailMultAdjust: number }> | null,
 ) {
   const userId = settings.user_id;
 
