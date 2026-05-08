@@ -996,7 +996,6 @@ serve(async (req) => {
           strategy,
           sector,
           qualityScore,
-          forecasts: computeReturnForecasts(data.close),
         });
       } catch (err) {
         console.error(`Error analyzing ${ticker}:`, err);
