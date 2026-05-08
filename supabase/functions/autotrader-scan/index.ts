@@ -1166,9 +1166,17 @@ async function processUser(
 
     // Profile
     const cls = classifyStock(data.close, data.high, data.low, pos.ticker);
-    const profile = cls.blendedParams ?? PROFILE_PARAMS[
+    const baseProfile = cls.blendedParams ?? PROFILE_PARAMS[
       (pos.entry_profile as StockProfile) ?? cls.classification
     ];
+
+    // ── Exit calibration: nightly job learns per-strategy MFE-vs-realized capture
+    //    and outputs a trailing-stop multiplier adjustment. Apply it here.
+    const stratKey = pos.entry_strategy ?? "unknown";
+    const trailAdj = exitCalibration?.[stratKey]?.trailMultAdjust ?? 1.0;
+    const profile: ProfileParams = trailAdj !== 1.0
+      ? { ...baseProfile, trailingStopATRMult: baseProfile.trailingStopATRMult * trailAdj }
+      : baseProfile;
 
     // Run loss + win in priority order (loss wins ties)
     const lossAct = runLossExit(pos, data, currentPrice, profile, liveDecision, liveBias, liveRsi);
