@@ -156,7 +156,7 @@ const Backtest = () => {
   const [atMaxSingle, setAtMaxSingle] = useState(20);
   const [atDailyLoss, setAtDailyLoss] = useState(3);
   const [atStartingNav, setAtStartingNav] = useState(100000);
-  const [atUniverseCap, setAtUniverseCap] = useState(50);
+  const [atUniverseCap, setAtUniverseCap] = useState(30);
 
   const [tickerInput, setTickerInput] = useState("AAPL");
   const [startYear, setStartYear] = useState(2020);
@@ -591,7 +591,7 @@ const Backtest = () => {
 
                       <div className="space-y-2">
                         <Label className="text-xs text-muted-foreground">Universe Cap: {atUniverseCap} tickers</Label>
-                        <Slider value={[atUniverseCap]} onValueChange={v => setAtUniverseCap(v[0])} min={20} max={150} step={10} />
+                        <Slider value={[atUniverseCap]} onValueChange={v => setAtUniverseCap(v[0])} min={10} max={60} step={5} />
                         <p className="text-[10px] text-muted-foreground/60">Top N by volume from live scanner universe</p>
                       </div>
 
