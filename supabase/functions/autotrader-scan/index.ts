@@ -159,6 +159,42 @@ function isBearishMacro(macro: MacroContext | null): boolean {
   return spyTrendOf(macro) === "down";
 }
 
+// ── Vol-targeting scalar (improvement #7) ─────────────────────────────────
+// Continuous portfolio-level position-size scalar based on SPY's recent
+// realized volatility. We target ~16% annualized portfolio vol — a common
+// risk-parity anchor. When SPY realized vol > target, scale sizes down;
+// when < target, scale up modestly. Continuous (not regime-bucketed) so
+// sizing reacts smoothly as conditions evolve.
+const VOL_TARGET_ANNUAL = 0.16;
+const VOL_LOOKBACK = 20;
+const VOL_SCALAR_MIN = 0.5;
+const VOL_SCALAR_MAX = 1.25;
+
+function realizedVolAnnualized(close: number[], lookback: number): number | null {
+  if (close.length < lookback + 1) return null;
+  let sum = 0; const rets: number[] = [];
+  for (let i = close.length - lookback; i < close.length; i++) {
+    const a = close[i - 1], b = close[i];
+    if (!(a > 0 && b > 0)) continue;
+    const r = Math.log(b / a);
+    rets.push(r); sum += r;
+  }
+  if (rets.length < 5) return null;
+  const m = sum / rets.length;
+  let v = 0; for (const r of rets) v += (r - m) * (r - m);
+  v /= Math.max(1, rets.length - 1);
+  return Math.sqrt(v) * Math.sqrt(252);
+}
+
+function volTargetScalar(macro: MacroContext | null): { scalar: number; spyVol: number | null } {
+  if (!macro) return { scalar: 1, spyVol: null };
+  const spyVol = realizedVolAnnualized(macro.spyClose, VOL_LOOKBACK);
+  if (spyVol == null || spyVol <= 0) return { scalar: 1, spyVol: null };
+  const raw = VOL_TARGET_ANNUAL / spyVol;
+  const scalar = Math.max(VOL_SCALAR_MIN, Math.min(VOL_SCALAR_MAX, raw));
+  return { scalar, spyVol };
+}
+
 // VIX regime classifier
 function vixRegimeOf(vix: number | null): "calm" | "normal" | "elevated" | "crisis" {
   if (vix == null || !Number.isFinite(vix)) return "normal";
@@ -708,6 +744,7 @@ async function runEntryDecision(
   totalNavExposurePct: number,
   todayPnlPct: number,
   openTickers: string[],
+  volScalar: number,
 ): Promise<EntryAction> {
   // Daily loss limit — block all new entries
   if (todayPnlPct <= -settings.daily_loss_limit_pct) {
@@ -744,9 +781,11 @@ async function runEntryDecision(
   // (News-sentiment layer removed — pure deterministic conviction now.)
   const effectiveConviction = sig.conviction;
 
-  // Size
+  // Size — apply portfolio-level vol-target scalar (improvement #7) BEFORE
+  // single-name and headroom caps so the user-facing caps remain absolute
+  // ceilings while sizing breathes with realized SPY vol.
   const headroom = (settings.max_nav_exposure_pct - totalNavExposurePct) / 100;
-  const baseFrac = sig.kellyFraction;
+  const baseFrac = sig.kellyFraction * volScalar;
   const cappedFrac = Math.min(baseFrac, settings.max_single_name_pct / 100, headroom);
   const currentPrice = data.close[data.close.length - 1];
   const targetDollars = settings.starting_nav * cappedFrac;
@@ -832,6 +871,10 @@ serve(async (req) => {
       : null;
     const vixRegime = vixRegimeOf(vixValue);
     const spyTrend = spyTrendOf(macro);
+    const { scalar: volScalar, spyVol } = volTargetScalar(macro);
+    if (spyVol != null) {
+      console.log(`[autotrader-scan] vol-target: SPY ${VOL_LOOKBACK}d realized vol=${(spyVol*100).toFixed(1)}% → sizing scalar ${volScalar.toFixed(2)}`);
+    }
     const regimeFloors = (weightsRes.data?.regime_floors as Record<string, number> | null) ?? null;
     const exitCalibration = (weightsRes.data?.exit_calibration as Record<string, { trailMultAdjust: number }> | null) ?? null;
 
@@ -910,7 +953,7 @@ serve(async (req) => {
 
       try {
         const userSummary = { entries: 0, exits: 0, partials: 0, holds: 0, blocked: 0, errors: 0, watchlistSize: 0, openPositions: 0, evaluated: 0 };
-        await processUser(supabase, settings, macro, summary, userSummary, exitCalibration);
+        await processUser(supabase, settings, macro, summary, userSummary, exitCalibration, volScalar);
 
         // Always write a per-scan rollup so users see the bot is alive even when
         // no trades fire. This is the single source of "scan happened" visibility.
@@ -1136,6 +1179,7 @@ async function processUser(
   summary: { entries: number; exits: number; partials: number; holds: number; blocked: number; errors: number },
   userSummary: UserSummary,
   exitCalibration: Record<string, { trailMultAdjust: number }> | null,
+  volScalar: number,
 ) {
   const userId = settings.user_id;
 
@@ -1337,6 +1381,7 @@ async function processUser(
       navExposurePct,
       todayPnlPct,
       Array.from(heldTickers),
+      volScalar,
     );
 
     if (decision.kind === "ENTER") pending.push({ kind: "enter", ticker, decision });
