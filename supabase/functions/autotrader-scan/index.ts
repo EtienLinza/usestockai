@@ -1381,6 +1381,7 @@ async function processUser(
       navExposurePct,
       todayPnlPct,
       Array.from(heldTickers),
+      volScalar,
     );
 
     if (decision.kind === "ENTER") pending.push({ kind: "enter", ticker, decision });
