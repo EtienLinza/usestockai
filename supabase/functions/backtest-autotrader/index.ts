@@ -632,7 +632,9 @@ serve(async (req) => {
 
     // Build a per-ticker timestamp→bar index map for fast lookup
     const tIdx: Map<string, Map<string, number>> = new Map();
+    const dataByTicker = new Map<string, DataSet>();
     for (const e of valid) {
+      dataByTicker.set(e.ticker, e.data);
       const m = new Map<string, number>();
       for (let i = 0; i < e.data.timestamps.length; i++) m.set(e.data.timestamps[i], i);
       tIdx.set(e.ticker, m);
@@ -675,7 +677,7 @@ serve(async (req) => {
       if (sIdx == null || sIdx < 50) { equityCurve.push({ date: today, value: cash }); continue; }
 
       // Macro context (slice up to today)
-      const macro: MacroContext = { spyClose: spyData.close.slice(0, sIdx + 1) };
+      const macro: MacroContext = { spyClose: spyData.close.slice(Math.max(0, sIdx - SIM_LOOKBACK_BARS + 1), sIdx + 1) };
       const spyTrend = spyTrendOf(macro);
       const vIdx = vixData ? vixIdx.get(today) : null;
       const vixVal = vixData && vIdx != null ? vixData.close[vIdx] : null;
@@ -693,7 +695,7 @@ serve(async (req) => {
       const priceAt = (ticker: string): number | null => {
         const m = tIdx.get(ticker); if (!m) return null;
         const bi = m.get(today); if (bi == null) return null;
-        return valid.find(v => v.ticker === ticker)!.data.close[bi];
+        return dataByTicker.get(ticker)!.close[bi];
       };
       const openAt = (ticker: string, dateIdx: number): number | null => {
         // Get open price for `dateIdx` position in masterDates (i.e. NEXT bar)
@@ -701,7 +703,7 @@ serve(async (req) => {
         const d = masterDates[dateIdx];
         const m = tIdx.get(ticker); if (!m) return null;
         const bi = m.get(d); if (bi == null) return null;
-        return valid.find(v => v.ticker === ticker)!.data.open[bi];
+        return dataByTicker.get(ticker)!.open[bi];
       };
 
       // ── Update MFE/MAE for open positions, run exits ──
