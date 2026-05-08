@@ -833,7 +833,7 @@ serve(async (req) => {
 
       try {
         const userSummary = { entries: 0, exits: 0, partials: 0, holds: 0, blocked: 0, errors: 0, watchlistSize: 0, openPositions: 0, evaluated: 0 };
-        await processUser(supabase, settings, macro, summary, userSummary);
+        await processUser(supabase, settings, macro, summary, userSummary, exitCalibration);
 
         // Always write a per-scan rollup so users see the bot is alive even when
         // no trades fire. This is the single source of "scan happened" visibility.
