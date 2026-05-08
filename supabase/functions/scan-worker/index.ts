@@ -125,7 +125,6 @@ serve(async (req) => {
           reasoning: sig.reasoning,
           strategy,
           qualityScore,
-          forecasts: computeReturnForecasts(data.close),
         });
       } catch (err) {
         console.error(`worker ${ticker}:`, err);
