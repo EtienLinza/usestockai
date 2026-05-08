@@ -32,6 +32,9 @@ import {
 import { fetchDailyHistory } from "../_shared/yahoo-history.ts";
 import { discoverTickers } from "../_shared/scan-pipeline.ts";
 
+const MAX_BACKTEST_YEARS = 3;
+const SIM_LOOKBACK_BARS = 260; // mirrors the live scanner's 1y technical window
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -194,6 +197,16 @@ function dailyReturns(close: number[], lookback: number): number[] {
   if (n < lookback + 1) return [];
   const out: number[] = [];
   for (let i = n - lookback; i < n; i++) {
+    const a = close[i - 1], b = close[i];
+    if (a > 0 && b > 0) out.push(Math.log(b / a));
+  }
+  return out;
+}
+
+function dailyReturnsWindow(close: number[], endIdx: number, lookback: number): number[] {
+  if (endIdx < lookback) return [];
+  const out: number[] = [];
+  for (let i = endIdx - lookback + 1; i <= endIdx; i++) {
     const a = close[i - 1], b = close[i];
     if (a > 0 && b > 0) out.push(Math.log(b / a));
   }
