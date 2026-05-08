@@ -695,23 +695,27 @@ serve(async (req) => {
         if (pnlPct < pos.mae) pos.mae = pnlPct;
         if (pnlPct > pos.mfe) pos.mfe = pnlPct;
 
-        // Live signal (for liveBias / liveAlloc / liveRsi)
-        const tEntryData = dataByTicker.get(pos.ticker)!;
-        const sliced = sliceWindow(tEntryData, tIdx.get(pos.ticker)!.get(today)!);
         let liveBias: "long" | "short" | "flat" | null = null;
         let liveAlloc = 0;
         let liveRsi = 50;
-        try {
-          const sig = evaluateSignal(sliced, pos.ticker, undefined, macro);
-          if (sig) { liveBias = sig.weeklyBias.bias; liveAlloc = sig.weeklyBias.targetAllocation; }
-          const rsiArr = calculateRSI(sliced.close, 14);
-          liveRsi = safeGet(rsiArr, 50);
-        } catch (_e) { /* ignore */ }
+        const needsLiveSignal = pnlPct < -3 || pnlPct >= 6;
+        const tEntryData = dataByTicker.get(pos.ticker)!;
+        const sliced = needsLiveSignal ? sliceWindow(tEntryData, tIdx.get(pos.ticker)!.get(today)!) : null;
+        if (sliced) {
+          try {
+            const sig = evaluateSignal(sliced, pos.ticker, undefined, macro);
+            if (sig) { liveBias = sig.weeklyBias.bias; liveAlloc = sig.weeklyBias.targetAllocation; }
+            if (pnlPct < -3) {
+              const rsiArr = calculateRSI(sliced.close, 14);
+              liveRsi = safeGet(rsiArr, 50);
+            }
+          } catch (_e) { /* ignore */ }
+        }
 
         const profile = PROFILE_PARAMS[pos.profile as keyof typeof PROFILE_PARAMS] ?? PROFILE_PARAMS.momentum;
 
         const lossExit = runLossExit(pos, px, profile, liveBias, liveRsi, mi);
-        const winExit = lossExit ?? runWinExit(pos, sliced, px, profile, liveAlloc);
+        const winExit = lossExit ?? runWinExit(pos, sliced ?? { ...tEntryData, close: [px], high: [px], low: [px], open: [px], volume: [0], timestamps: [today] }, px, profile, liveAlloc);
 
         if (winExit.kind === "FULL") {
           // Execute at next bar's open
