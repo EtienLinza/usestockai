@@ -698,6 +698,7 @@ export type Database = {
           regime_floors: Json
           sample_size: number
           strategy_tilts: Json
+          ticker_calibration: Json
           window_days: number
         }
         Insert: {
@@ -711,6 +712,7 @@ export type Database = {
           regime_floors?: Json
           sample_size?: number
           strategy_tilts?: Json
+          ticker_calibration?: Json
           window_days?: number
         }
         Update: {
@@ -724,6 +726,7 @@ export type Database = {
           regime_floors?: Json
           sample_size?: number
           strategy_tilts?: Json
+          ticker_calibration?: Json
           window_days?: number
         }
         Relationships: []

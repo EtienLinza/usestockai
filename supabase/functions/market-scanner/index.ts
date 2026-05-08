@@ -870,11 +870,12 @@ serve(async (req) => {
     let strategyTilts: Record<string, { multiplier: number }> = {};
     let strategyRegimeTilts: Record<string, { multiplier: number; count: number }> = {};
     let regimeFloors: Record<string, { floor: number }> = {};
+    let tickerCalibration: Record<string, { adjust: number }> = {};
     let activeWeightsId: string | null = null;
     try {
       const { data: weights } = await supabasePre
         .from("strategy_weights")
-        .select("id, calibration_curve, strategy_tilts, regime_floors, notes")
+        .select("id, calibration_curve, strategy_tilts, regime_floors, ticker_calibration, notes")
         .eq("is_active", true)
         .maybeSingle();
       if (weights) {
@@ -883,6 +884,7 @@ serve(async (req) => {
         strategyTilts = (weights.strategy_tilts as any) ?? {};
         strategyRegimeTilts = ((weights as any).notes?.strategy_regime_tilts as any) ?? {};
         regimeFloors = (weights.regime_floors as any) ?? {};
+        tickerCalibration = ((weights as any).ticker_calibration as any) ?? {};
       }
     } catch (e) {
       console.warn("Could not load adaptive weights, using defaults:", e);
@@ -954,7 +956,9 @@ serve(async (req) => {
           : (strategyTilts[strategy]?.multiplier ?? 1.0);
         conviction = conviction * tilt;
         const adj = calibrationCurve[bucketKey(conviction)]?.adjust ?? 0;
-        conviction = Math.max(0, Math.min(100, Math.round(conviction + adj)));
+        conviction = conviction + adj;
+        const tickAdj = tickerCalibration[ticker.toUpperCase()]?.adjust ?? 0;
+        conviction = Math.max(0, Math.min(100, Math.round(conviction + tickAdj)));
 
         // ─── Sector-momentum tilt (small, bounded) ─────────────────────────
         const sectorMod = getSectorConvictionModifier(ticker, sectorMomentum);

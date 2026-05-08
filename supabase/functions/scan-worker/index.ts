@@ -27,6 +27,7 @@ interface Body {
     strategyRegimeTilts?: Record<string, { multiplier: number; count: number }>;
     regimeFloors: Record<string, { floor: number }>;
     exitCalibration?: Record<string, { trailMultAdjust: number }>;
+    tickerCalibration?: Record<string, { adjust: number }>;
   };
 }
 
@@ -93,7 +94,10 @@ serve(async (req) => {
           : (weights.strategyTilts[strategy]?.multiplier ?? 1.0);
         conviction = conviction * tilt;
         const adj = weights.calibrationCurve[bucketKey(conviction)]?.adjust ?? 0;
-        conviction = Math.max(0, Math.min(100, Math.round(conviction + adj)));
+        conviction = conviction + adj;
+        // Per-ticker calibration (Bayesian-shrunk vs global curve).
+        const tickAdj = weights.tickerCalibration?.[ticker.toUpperCase()]?.adjust ?? 0;
+        conviction = Math.max(0, Math.min(100, Math.round(conviction + tickAdj)));
 
         const sectorMod = getSectorConvictionModifier(ticker, sectorMomentum);
         if (sectorMod.bonus !== 0) {
