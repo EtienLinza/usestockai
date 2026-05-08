@@ -223,15 +223,23 @@ const Backtest = () => {
     setReport(null);
 
     try {
-      const resp = await fetchWithErrorHandling(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/backtest`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${session.access_token}`,
-          },
-          body: JSON.stringify({
+      const isAt = btMode === "autotrader";
+      const endpoint = isAt ? "backtest-autotrader" : "backtest";
+      const body = isAt
+        ? {
+            startYear,
+            endYear,
+            riskProfile: atRiskProfile,
+            adaptiveMode: atAdaptive,
+            minConviction: atMinConv,
+            maxPositions: atMaxPos,
+            maxNavExposurePct: atMaxNav,
+            maxSingleNamePct: atMaxSingle,
+            dailyLossLimitPct: atDailyLoss,
+            startingNav: atStartingNav,
+            universeCap: atUniverseCap,
+          }
+        : {
             tickers,
             startYear,
             endYear,
@@ -252,8 +260,18 @@ const Backtest = () => {
               maxHoldBars,
             } : {}),
             riskPerTrade: riskPerTrade / 100,
-          }),
-          timeoutMs: 120000,
+          };
+
+      const resp = await fetchWithErrorHandling(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/${endpoint}`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${session.access_token}`,
+          },
+          body: JSON.stringify(body),
+          timeoutMs: 180000,
           retries: 1,
         }
       );
