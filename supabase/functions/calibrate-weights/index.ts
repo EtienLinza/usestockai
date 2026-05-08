@@ -365,6 +365,7 @@ serve(async (req) => {
       strategy_regime_tilts,
       regime_floors: regimeFloors,
       exit_calibration,
+      ticker_calibration_count: Object.keys(ticker_calibration).length,
     }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
   } catch (e: any) {
