@@ -17,13 +17,12 @@ import {
 import {
   Brain, Loader2, AlertTriangle, RefreshCw, Zap, DollarSign,
   ArrowUpRight, ArrowDownRight, Package, BarChart3, Bell,
-  Trophy, Percent, Globe, CheckCircle2, Telescope,
+  Trophy, Percent, Globe, CheckCircle2,
 } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import { MarketTab } from "@/components/dashboard/MarketTab";
 import { TradingTab } from "@/components/dashboard/TradingTab";
-import { ReturnForecastPanel } from "@/components/ReturnForecastPanel";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
