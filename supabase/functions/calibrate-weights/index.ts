@@ -326,12 +326,16 @@ serve(async (req) => {
       strategy_tilts,
       regime_floors: regimeFloors,
       exit_calibration,
+      ticker_calibration,
       notes: {
         universeAvgReturnPct: universeAvgRet,
         strategy_regime_tilts,
+        walkForwardWeights: { "0-30d": 2.0, "30-60d": 1.5, "60-90d": 1.0 },
+        tickerCalibrationCount: Object.keys(ticker_calibration).length,
         thresholds: {
           MIN_SAMPLES_BUCKET, MIN_SAMPLES_STRATEGY, MIN_SAMPLES_REGIME,
-          MIN_SAMPLES_STRATEGY_REGIME, MIN_SAMPLES_EXIT,
+          MIN_SAMPLES_STRATEGY_REGIME, MIN_SAMPLES_EXIT, MIN_SAMPLES_TICKER,
+          TICKER_PRIOR_STRENGTH,
           TILT_MIN, TILT_MAX, FLOOR_MIN, FLOOR_MAX, DEFAULT_FLOOR,
           TRAIL_MULT_MIN, TRAIL_MULT_MAX,
         },
