@@ -705,9 +705,6 @@ const Dashboard = () => {
                   />
                 </TabsContent>
 
-                <TabsContent value="forecasts">
-                  <ReturnForecastPanel />
-                </TabsContent>
 
                 <TabsContent value="market">
                   <MarketTab />
