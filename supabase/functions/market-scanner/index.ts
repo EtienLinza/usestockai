@@ -947,7 +947,11 @@ serve(async (req) => {
 
         // ─── PHASE B: apply adaptive weights on top of the canonical conviction ─
         let conviction = sig.conviction;
-        const tilt = strategyTilts[strategy]?.multiplier ?? 1.0;
+        const cellKey = `${strategy}|${regime}`;
+        const cell = strategyRegimeTilts[cellKey];
+        const tilt = (cell && cell.count >= 10)
+          ? cell.multiplier
+          : (strategyTilts[strategy]?.multiplier ?? 1.0);
         conviction = conviction * tilt;
         const adj = calibrationCurve[bucketKey(conviction)]?.adjust ?? 0;
         conviction = Math.max(0, Math.min(100, Math.round(conviction + adj)));
