@@ -32,12 +32,12 @@ interface Forecast {
   yearly: ForecastEntry;
 }
 
-const HORIZONS: { key: Horizon; label: string }[] = [
-  { key: "daily", label: "1 Day" },
-  { key: "weekly", label: "1 Week" },
-  { key: "monthly", label: "1 Month" },
-  { key: "quarterly", label: "1 Quarter" },
-  { key: "yearly", label: "1 Year" },
+const HORIZONS: { key: Horizon; label: string; short: string }[] = [
+  { key: "daily", label: "1 Day", short: "1D" },
+  { key: "weekly", label: "1 Week", short: "1W" },
+  { key: "monthly", label: "1 Month", short: "1M" },
+  { key: "quarterly", label: "1 Quarter", short: "1Q" },
+  { key: "yearly", label: "1 Year", short: "1Y" },
 ];
 
 const TICKER_RE = /^[A-Z]{1,10}(-[A-Z]{2,4})?$/;
@@ -79,36 +79,38 @@ export const ReturnForecastPanel = ({ initialTicker = "" }: Props) => {
   };
 
   return (
-    <Card className="glass-card p-4 sm:p-6">
-      <div className="flex items-center gap-2 mb-4">
-        <Telescope className="w-4 h-4 text-primary" />
-        <h3 className="text-sm font-medium tracking-wide uppercase">Return Forecasts</h3>
+    <Card className="glass-card p-3 sm:p-6">
+      {/* Header */}
+      <div className="flex items-center gap-2 mb-3 sm:mb-4">
+        <Telescope className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-primary shrink-0" />
+        <h3 className="text-xs sm:text-sm font-medium tracking-wide uppercase">Return Forecasts</h3>
       </div>
 
-      <div className="flex gap-2 mb-5">
+      {/* Search */}
+      <div className="flex gap-2 mb-4 sm:mb-5">
         <Input
           value={ticker}
           onChange={(e) => setTicker(e.target.value.toUpperCase())}
           onKeyDown={handleKeyDown}
-          placeholder="Ticker (AAPL, BTC-USD)"
-          className="font-mono text-sm"
+          placeholder="AAPL, BTC-USD"
+          className="font-mono text-sm h-9"
           maxLength={15}
         />
-        <Button onClick={runForecast} disabled={loading} size="sm" className="gap-1.5">
+        <Button onClick={runForecast} disabled={loading} size="sm" className="gap-1.5 h-9 shrink-0">
           {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Search className="w-3.5 h-3.5" />}
-          Forecast
+          <span className="hidden sm:inline">Forecast</span>
         </Button>
       </div>
 
       {loading && (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
-          {HORIZONS.map((h) => <Skeleton key={h.key} className="h-24" />)}
+          {HORIZONS.map((h) => <Skeleton key={h.key} className="h-[88px]" />)}
         </div>
       )}
 
       {!loading && !forecast && (
-        <div className="text-xs text-muted-foreground py-8 text-center">
-          Enter a ticker to project expected returns across 1d, 1w, 1m, 1q, and 1y horizons.
+        <div className="text-[11px] sm:text-xs text-muted-foreground py-8 text-center px-4 leading-relaxed">
+          Enter a ticker to project expected returns across 1D, 1W, 1M, 1Q, and 1Y horizons.
         </div>
       )}
 
@@ -118,38 +120,52 @@ export const ReturnForecastPanel = ({ initialTicker = "" }: Props) => {
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.3 }}
         >
-          <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 mb-3 text-[11px] text-muted-foreground">
-            <span className="font-mono text-foreground">{forecast.ticker}</span>
-            <span>${forecast.asOfPrice.toFixed(2)}</span>
-            <span>μ ann: <span className={cn("font-mono", forecast.driftAnnualPct >= 0 ? "text-primary" : "text-destructive")}>{forecast.driftAnnualPct >= 0 ? "+" : ""}{forecast.driftAnnualPct.toFixed(2)}%</span></span>
-            <span>σ ann: <span className="font-mono text-foreground">{forecast.daily.annualizedVolPct.toFixed(1)}%</span></span>
-            <span>n={forecast.sampleSize}</span>
+          {/* Summary header — matches MetricCard aesthetic */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3">
+            <SummaryStat label="Ticker" value={forecast.ticker} mono />
+            <SummaryStat label="Price" value={`$${forecast.asOfPrice.toFixed(2)}`} mono />
+            <SummaryStat
+              label="μ Annual"
+              value={`${forecast.driftAnnualPct >= 0 ? "+" : ""}${forecast.driftAnnualPct.toFixed(1)}%`}
+              mono
+              color={forecast.driftAnnualPct >= 0 ? "text-primary" : "text-destructive"}
+            />
+            <SummaryStat
+              label="σ Annual"
+              value={`${forecast.daily.annualizedVolPct.toFixed(1)}%`}
+              mono
+              subtext={`n=${forecast.sampleSize}`}
+            />
           </div>
 
+          {/* Horizon grid */}
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
-            {HORIZONS.map(({ key, label }) => {
+            {HORIZONS.map(({ key, label, short }) => {
               const f = forecast[key];
               const positive = f.expectedPct >= 0;
               return (
-                <Card key={key} className="p-3 bg-secondary/20 border-border/40">
-                  <div className="text-[10px] text-muted-foreground uppercase tracking-wide mb-1.5">
-                    {label}
+                <Card key={key} className="glass-card p-2.5 sm:p-3 min-w-0">
+                  <div className="text-[9px] sm:text-[10px] text-muted-foreground uppercase tracking-wide mb-1 flex items-center justify-between">
+                    <span className="truncate">{label}</span>
+                    <span className="font-mono opacity-60 sm:hidden">{short}</span>
                   </div>
                   <div className={cn(
-                    "text-lg font-mono font-medium flex items-center gap-1",
+                    "text-base sm:text-lg font-mono font-medium flex items-center gap-1 truncate",
                     positive ? "text-primary" : "text-destructive"
                   )}>
-                    {positive ? <TrendingUp className="w-3.5 h-3.5" /> : <TrendingDown className="w-3.5 h-3.5" />}
-                    {positive ? "+" : ""}{f.expectedPct.toFixed(2)}%
+                    {positive
+                      ? <TrendingUp className="w-3 h-3 sm:w-3.5 sm:h-3.5 shrink-0" />
+                      : <TrendingDown className="w-3 h-3 sm:w-3.5 sm:h-3.5 shrink-0" />}
+                    <span className="truncate">{positive ? "+" : ""}{f.expectedPct.toFixed(2)}%</span>
                   </div>
                   {f.probUpPct != null && (
-                    <div className="text-[10px] text-muted-foreground mt-1 font-mono">
+                    <div className="text-[9px] sm:text-[10px] text-muted-foreground mt-1 font-mono truncate">
                       P(up): <span className={cn(f.probUpPct >= 50 ? "text-primary" : "text-destructive")}>
                         {f.probUpPct.toFixed(0)}%
                       </span>
                     </div>
                   )}
-                  <div className="text-[10px] text-muted-foreground mt-0.5 font-mono">
+                  <div className="text-[9px] sm:text-[10px] text-muted-foreground mt-0.5 font-mono truncate">
                     1σ: {f.lowPct.toFixed(1)}% / +{f.highPct.toFixed(1)}%
                   </div>
                 </Card>
@@ -158,7 +174,7 @@ export const ReturnForecastPanel = ({ initialTicker = "" }: Props) => {
           </div>
 
           <p className="text-[10px] text-muted-foreground mt-3 leading-relaxed">
-            GBM projection: blended-window drift (60d/252d, Bayesian-shrunk) with EWMA volatility (λ=0.94).
+            GBM projection — blended-window drift (60d/252d, Bayesian-shrunk) with EWMA volatility (λ=0.94).
             P(up) is the model probability of a positive return; the 1σ band covers ~68% of outcomes. Not investment advice.
           </p>
         </motion.div>
@@ -166,3 +182,19 @@ export const ReturnForecastPanel = ({ initialTicker = "" }: Props) => {
     </Card>
   );
 };
+
+const SummaryStat = ({
+  label, value, mono, color, subtext,
+}: { label: string; value: string; mono?: boolean; color?: string; subtext?: string }) => (
+  <Card className="glass-card p-2.5 min-w-0">
+    <div className="text-[9px] sm:text-[10px] text-muted-foreground uppercase tracking-wide mb-1 truncate">
+      {label}
+    </div>
+    <div className={cn("text-sm sm:text-base font-medium truncate", mono && "font-mono", color)}>
+      {value}
+    </div>
+    {subtext && (
+      <div className="text-[9px] sm:text-[10px] text-muted-foreground mt-0.5 truncate font-mono">{subtext}</div>
+    )}
+  </Card>
+);
