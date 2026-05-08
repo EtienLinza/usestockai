@@ -161,28 +161,6 @@ const Backtest = () => {
   const [maxHoldBars, setMaxHoldBars] = useState(20);
   const [riskPerTrade, setRiskPerTrade] = useState(1);
 
-  // Prefill autotrader settings from live config
-  useEffect(() => {
-    if (!session?.user?.id) return;
-    (async () => {
-      const { data } = await supabase
-        .from("autotrade_settings")
-        .select("risk_profile, adaptive_mode, min_conviction, max_positions, max_nav_exposure_pct, max_single_name_pct, daily_loss_limit_pct, starting_nav")
-        .eq("user_id", session.user.id)
-        .maybeSingle();
-      if (data) {
-        setAtRiskProfile((data.risk_profile as any) || "balanced");
-        setAtAdaptive(data.adaptive_mode ?? true);
-        setAtMinConv(data.min_conviction ?? 70);
-        setAtMaxPos(data.max_positions ?? 8);
-        setAtMaxNav(Number(data.max_nav_exposure_pct ?? 80));
-        setAtMaxSingle(Number(data.max_single_name_pct ?? 20));
-        setAtDailyLoss(Number(data.daily_loss_limit_pct ?? 3));
-        setAtStartingNav(Number(data.starting_nav ?? 100000));
-      }
-    })();
-  }, [session?.user?.id]);
-
   const handleRunBacktest = async () => {
     if (!session?.access_token) {
       toast.error("Please sign in to run backtests");
@@ -190,10 +168,8 @@ const Backtest = () => {
       return;
     }
 
-    const tickers = btMode === "autotrader"
-      ? []
-      : tickerInput.split(",").map(t => t.trim().toUpperCase()).filter(Boolean).slice(0, 5);
-    if (btMode === "single" && tickers.length === 0) { toast.error("Enter at least one ticker"); return; }
+    const tickers = tickerInput.split(",").map(t => t.trim().toUpperCase()).filter(Boolean).slice(0, 5);
+    if (tickers.length === 0) { toast.error("Enter at least one ticker"); return; }
 
     if (startYear < 2000 || startYear > 2026) {
       toast.error("Start year must be between 2000 and 2026");
@@ -212,44 +188,29 @@ const Backtest = () => {
     setReport(null);
 
     try {
-      const isAt = btMode === "autotrader";
-      const endpoint = isAt ? "backtest-autotrader" : "backtest";
-      const body = isAt
-        ? {
-            startYear,
-            endYear,
-            riskProfile: atRiskProfile,
-            adaptiveMode: atAdaptive,
-            minConviction: atMinConv,
-            maxPositions: atMaxPos,
-            maxNavExposurePct: atMaxNav,
-            maxSingleNamePct: atMaxSingle,
-            dailyLossLimitPct: atDailyLoss,
-            startingNav: atStartingNav,
-            universeCap: atUniverseCap,
-          }
-        : {
-            tickers,
-            startYear,
-            endYear,
-            initialCapital,
-            positionSizePct: positionSize,
-            stopLossPct: stopLoss,
-            takeProfitPct: takeProfit,
-            includeMonteCarlo,
-            strategyMode,
-            explicitOverride: strategyMode === "custom",
-            ...(strategyMode === "custom" ? {
-              buyThreshold,
-              shortThreshold: -buyThreshold,
-              adxThreshold,
-              rsiOversold,
-              rsiOverbought,
-              trailingStopATRMult,
-              maxHoldBars,
-            } : {}),
-            riskPerTrade: riskPerTrade / 100,
-          };
+      const endpoint = "backtest";
+      const body = {
+        tickers,
+        startYear,
+        endYear,
+        initialCapital,
+        positionSizePct: positionSize,
+        stopLossPct: stopLoss,
+        takeProfitPct: takeProfit,
+        includeMonteCarlo,
+        strategyMode,
+        explicitOverride: strategyMode === "custom",
+        ...(strategyMode === "custom" ? {
+          buyThreshold,
+          shortThreshold: -buyThreshold,
+          adxThreshold,
+          rsiOversold,
+          rsiOverbought,
+          trailingStopATRMult,
+          maxHoldBars,
+        } : {}),
+        riskPerTrade: riskPerTrade / 100,
+      };
 
       const resp = await fetchWithErrorHandling(
         `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/${endpoint}`,
