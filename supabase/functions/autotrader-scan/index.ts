@@ -32,7 +32,7 @@ import {
 import { isMarketHoliday, nyseCloseMinute } from "../_shared/market-calendar.ts";
 import { evaluateScanHealth, type TickerHealth } from "../_shared/circuit-breaker.ts";
 import { fetchDailyHistory } from "../_shared/yahoo-history.ts";
-import { getQuoteWithFallback } from "../_shared/finnhub.ts";
+import { getQuoteWithFallback, getEarningsBlackoutDays } from "../_shared/finnhub.ts";
 import { recordHeartbeat } from "../_shared/heartbeat.ts";
 
 /** Thrown by the circuit breaker to abort the entire scan immediately. */
