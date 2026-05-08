@@ -255,3 +255,80 @@ export async function getEarningsBlackoutDays(ticker: string): Promise<number | 
   // Approximate trading days (5/7 of calendar)
   return Math.max(0, Math.round(calDays * (5 / 7)));
 }
+
+// ── Sector classification (Phase 3 #14) ──────────────────────────────────────
+// Maps a ticker to a broad sector bucket (~GICS Level 1) using Finnhub's
+// `finnhubIndustry` field. Cached in-memory for 24 h. Returns null only if
+// Finnhub is unconfigured or both the cache and API miss.
+const sectorCache = new Map<string, { sector: string | null; cachedAt: number }>();
+const SECTOR_TTL_MS = 24 * 60 * 60 * 1000;
+
+const INDUSTRY_TO_SECTOR: Record<string, string> = {
+  // Technology
+  "Technology": "Technology",
+  "Semiconductors": "Technology",
+  "Software": "Technology",
+  "Hardware Equipment & Parts": "Technology",
+  "Communications": "Technology",
+  "Telecommunication": "Technology",
+  // Financials
+  "Banking": "Financials",
+  "Finance": "Financials",
+  "Insurance": "Financials",
+  "Real Estate": "Real Estate",
+  "Holding Companies": "Financials",
+  // Healthcare
+  "Health Care": "Healthcare",
+  "Pharmaceuticals": "Healthcare",
+  "Biotechnology": "Healthcare",
+  "Medical Devices": "Healthcare",
+  // Consumer
+  "Retail": "Consumer Discretionary",
+  "Consumer products": "Consumer Discretionary",
+  "Automobiles": "Consumer Discretionary",
+  "Hotels, Restaurants & Leisure": "Consumer Discretionary",
+  "Textiles, Apparel & Luxury Goods": "Consumer Discretionary",
+  "Beverages": "Consumer Staples",
+  "Food Products": "Consumer Staples",
+  "Tobacco": "Consumer Staples",
+  // Energy / materials / industrial
+  "Energy": "Energy",
+  "Oil & Gas": "Energy",
+  "Utilities": "Utilities",
+  "Chemicals": "Materials",
+  "Metals & Mining": "Materials",
+  "Materials": "Materials",
+  "Industrials": "Industrials",
+  "Aerospace & Defense": "Industrials",
+  "Transportation": "Industrials",
+  "Logistics & Transportation": "Industrials",
+  "Construction": "Industrials",
+  "Machinery": "Industrials",
+  // Misc / fallback
+  "Media": "Communication Services",
+  "Internet": "Communication Services",
+};
+
+function bucketIndustry(industry: string | null): string | null {
+  if (!industry) return null;
+  if (INDUSTRY_TO_SECTOR[industry]) return INDUSTRY_TO_SECTOR[industry];
+  // Fuzzy contains-match
+  const lower = industry.toLowerCase();
+  for (const [k, v] of Object.entries(INDUSTRY_TO_SECTOR)) {
+    if (lower.includes(k.toLowerCase())) return v;
+  }
+  return "Other";
+}
+
+export async function getSector(ticker: string): Promise<string | null> {
+  const t = ticker.toUpperCase();
+  const cached = sectorCache.get(t);
+  if (cached && Date.now() - cached.cachedAt < SECTOR_TTL_MS) return cached.sector;
+
+  const profile = await finnhubFetch(
+    `/stock/profile2?symbol=${encodeURIComponent(t)}`,
+  ) as { finnhubIndustry?: string } | null;
+  const sector = bucketIndustry(profile?.finnhubIndustry ?? null);
+  sectorCache.set(t, { sector, cachedAt: Date.now() });
+  return sector;
+}
