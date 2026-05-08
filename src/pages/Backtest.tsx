@@ -156,7 +156,7 @@ const Backtest = () => {
   const [atMaxSingle, setAtMaxSingle] = useState(20);
   const [atDailyLoss, setAtDailyLoss] = useState(3);
   const [atStartingNav, setAtStartingNav] = useState(100000);
-  const [atUniverseCap, setAtUniverseCap] = useState(50);
+  const [atUniverseCap, setAtUniverseCap] = useState(30);
 
   const [tickerInput, setTickerInput] = useState("AAPL");
   const [startYear, setStartYear] = useState(2020);
