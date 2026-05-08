@@ -174,6 +174,28 @@ const Backtest = () => {
   const [maxHoldBars, setMaxHoldBars] = useState(20);
   const [riskPerTrade, setRiskPerTrade] = useState(1);
 
+  // Prefill autotrader settings from live config
+  useEffect(() => {
+    if (!session?.user?.id) return;
+    (async () => {
+      const { data } = await supabase
+        .from("autotrade_settings")
+        .select("risk_profile, adaptive_mode, min_conviction, max_positions, max_nav_exposure_pct, max_single_name_pct, daily_loss_limit_pct, starting_nav")
+        .eq("user_id", session.user.id)
+        .maybeSingle();
+      if (data) {
+        setAtRiskProfile((data.risk_profile as any) || "balanced");
+        setAtAdaptive(data.adaptive_mode ?? true);
+        setAtMinConv(data.min_conviction ?? 70);
+        setAtMaxPos(data.max_positions ?? 8);
+        setAtMaxNav(Number(data.max_nav_exposure_pct ?? 80));
+        setAtMaxSingle(Number(data.max_single_name_pct ?? 20));
+        setAtDailyLoss(Number(data.daily_loss_limit_pct ?? 3));
+        setAtStartingNav(Number(data.starting_nav ?? 100000));
+      }
+    })();
+  }, [session?.user?.id]);
+
   const handleRunBacktest = async () => {
     if (!session?.access_token) {
       toast.error("Please sign in to run backtests");
