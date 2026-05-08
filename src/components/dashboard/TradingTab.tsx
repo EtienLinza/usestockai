@@ -257,6 +257,31 @@ export function TradingTab({
     return avgDays;
   }, [closedPositions]);
 
+  // Period return estimates (compounded from realized equity curve)
+  const returnEstimates = useMemo(() => {
+    if (portfolioHistory.length < 2) return null;
+    const first = portfolioHistory[0];
+    const last = portfolioHistory[portfolioHistory.length - 1];
+    const startVal = Number(first.total_value);
+    const endVal = Number(last.total_value);
+    if (!startVal || !endVal) return null;
+    const totalReturn = (endVal - startVal) / startVal;
+    const calDays = Math.max(1, (new Date(last.date).getTime() - new Date(first.date).getTime()) / 86400000);
+    // Convert to per-trading-day compounded rate (assume ~252/365 trading days)
+    const tradingDays = Math.max(1, calDays * (252 / 365));
+    const dailyRate = Math.pow(1 + totalReturn, 1 / tradingDays) - 1;
+    const proj = (n: number) => (Math.pow(1 + dailyRate, n) - 1) * 100;
+    return {
+      sampleDays: Math.round(calDays),
+      realizedPct: totalReturn * 100,
+      daily: proj(1),
+      weekly: proj(5),
+      monthly: proj(21),
+      quarterly: proj(63),
+      yearly: proj(252),
+    };
+  }, [portfolioHistory]);
+
   return (
     <AnimatePresence mode="wait">
       {signalsLoading ? (
@@ -335,6 +360,40 @@ export function TradingTab({
                   </div>
                 </div>
               </div>
+            </Card>
+          )}
+
+          {/* Projected Returns (compounded from realized equity) */}
+          {returnEstimates && (
+            <Card className="glass-card p-4 sm:p-5">
+              <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-primary" />
+                  <span className="text-sm font-medium">Projected Returns</span>
+                </div>
+                <span className="text-[10px] text-muted-foreground">
+                  Compounded from {returnEstimates.sampleDays}d realized · {returnEstimates.realizedPct >= 0 ? "+" : ""}{returnEstimates.realizedPct.toFixed(2)}%
+                </span>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 sm:gap-3">
+                {([
+                  ["Daily", returnEstimates.daily],
+                  ["Weekly", returnEstimates.weekly],
+                  ["Monthly", returnEstimates.monthly],
+                  ["Quarterly", returnEstimates.quarterly],
+                  ["Yearly", returnEstimates.yearly],
+                ] as const).map(([label, v]) => (
+                  <div key={label} className="rounded-md border border-border/30 bg-secondary/20 p-2.5">
+                    <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">{label}</div>
+                    <div className={cn("font-mono text-sm sm:text-base font-semibold", v >= 0 ? "text-success" : "text-destructive")}>
+                      {v >= 0 ? "+" : ""}{v.toFixed(2)}%
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <p className="mt-3 text-[10px] text-muted-foreground leading-relaxed">
+                Estimates extrapolate the current realized daily compounded rate. Small samples (&lt;30d) are highly noisy — treat as directional, not predictive.
+              </p>
             </Card>
           )}
 
