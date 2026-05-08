@@ -27,6 +27,7 @@ interface Body {
     strategyRegimeTilts?: Record<string, { multiplier: number; count: number }>;
     regimeFloors: Record<string, { floor: number }>;
     exitCalibration?: Record<string, { trailMultAdjust: number }>;
+    tickerCalibration?: Record<string, { adjust: number }>;
   };
 }
 
