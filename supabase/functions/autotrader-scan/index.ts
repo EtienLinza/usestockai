@@ -245,28 +245,47 @@ function computeEffectiveSettings(
 
   // ── Layer 1: VIX regime modulation (only when adaptive) ──
   if (s.adaptive_mode) {
+    // Conviction/position deltas stay discrete (cliff edges read better in
+    // logs), but NAV exposure now follows a CONTINUOUS regime curve
+    // (Phase 3 #13) so we don't whipsaw between, say, 80% → 70% → 80% as VIX
+    // crosses 19.5. Curve: maxNav = baseline × (0.4 + 0.6 × regimeScore),
+    // floored at 30. regimeScore ∈ [0,1] blends VIX (60%) + SPY trend (40%).
+    const baselineMaxNav = maxNav;
+    const vixVal = ctx.vix ?? 18;
+    // Piecewise-linear VIX score: 1 at ≤14, 0.7 at 18, 0.4 at 25, 0.1 at 35, 0 at ≥45
+    const vixScore = vixVal <= 14 ? 1.0
+      : vixVal <= 18 ? 1.0 - 0.3 * ((vixVal - 14) / 4)
+      : vixVal <= 25 ? 0.7 - 0.3 * ((vixVal - 18) / 7)
+      : vixVal <= 35 ? 0.4 - 0.3 * ((vixVal - 25) / 10)
+      : vixVal <= 45 ? 0.1 - 0.1 * ((vixVal - 35) / 10)
+      : 0;
+    const spyScore = ctx.spyTrend === "up" ? 1.0 : ctx.spyTrend === "flat" ? 0.7 : 0.3;
+    const regimeScore = Math.max(0, Math.min(1, 0.6 * vixScore + 0.4 * spyScore));
+    maxNav = Math.max(30, Math.min(baselineMaxNav, baselineMaxNav * (0.4 + 0.6 * regimeScore)));
+    adjustments.push(`continuous regime NAV: vix=${vixVal.toFixed(1)} spy=${ctx.spyTrend} score=${regimeScore.toFixed(2)} → ${maxNav.toFixed(0)}% (base ${baselineMaxNav})`);
+
+    // Discrete conviction/position deltas (kept for clarity in logs)
     switch (ctx.vixRegime) {
       case "calm":
-        minConv -= 2; maxPos += 1; maxNav += 5;
-        adjustments.push(`calm VIX (${ctx.vix?.toFixed(1) ?? "?"}): −2 conv, +1 pos, +5% NAV`);
+        minConv -= 2; maxPos += 1;
+        adjustments.push(`calm VIX (${ctx.vix?.toFixed(1) ?? "?"}): −2 conv, +1 pos`);
         break;
       case "normal":
-        // no adjustment
         break;
       case "elevated":
-        minConv += 4; maxPos -= 1; maxNav -= 10; maxSingle -= 3;
-        adjustments.push(`elevated VIX (${ctx.vix?.toFixed(1) ?? "?"}): +4 conv, −1 pos, −10% NAV`);
+        minConv += 4; maxPos -= 1; maxSingle -= 3;
+        adjustments.push(`elevated VIX (${ctx.vix?.toFixed(1) ?? "?"}): +4 conv, −1 pos, −3 single`);
         break;
       case "crisis":
-        minConv += 10; maxPos = Math.min(maxPos, 3); maxNav = Math.min(maxNav, 40); maxSingle = Math.min(maxSingle, 10);
+        minConv += 10; maxPos = Math.min(maxPos, 3); maxSingle = Math.min(maxSingle, 10);
         adjustments.push(`crisis VIX (${ctx.vix?.toFixed(1) ?? "?"}): +10 conv, hard caps applied`);
         break;
     }
 
-    // ── Layer 2: SPY trend ──
+    // ── Layer 2: SPY trend (conviction only — NAV handled by regime curve) ──
     if (ctx.spyTrend === "down") {
-      minConv += 4; maxNav -= 10;
-      adjustments.push(`SPY downtrend: +4 conv, −10% NAV`);
+      minConv += 4;
+      adjustments.push(`SPY downtrend: +4 conv`);
     } else if (ctx.spyTrend === "up") {
       minConv -= 1;
       adjustments.push(`SPY uptrend: −1 conv`);
