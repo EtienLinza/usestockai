@@ -145,6 +145,18 @@ const Backtest = () => {
   const [showTradeLog, setShowTradeLog] = useState(false);
   const [strategyMode, setStrategyMode] = useState<"adaptive" | "conservative" | "aggressive" | "custom">("adaptive");
 
+  // Backtest mode: classic single/multi-stock vs full-autotrader replay
+  const [btMode, setBtMode] = useState<"single" | "autotrader">("single");
+  const [atRiskProfile, setAtRiskProfile] = useState<"conservative" | "balanced" | "aggressive">("balanced");
+  const [atAdaptive, setAtAdaptive] = useState(true);
+  const [atMinConv, setAtMinConv] = useState(70);
+  const [atMaxPos, setAtMaxPos] = useState(8);
+  const [atMaxNav, setAtMaxNav] = useState(80);
+  const [atMaxSingle, setAtMaxSingle] = useState(20);
+  const [atDailyLoss, setAtDailyLoss] = useState(3);
+  const [atStartingNav, setAtStartingNav] = useState(100000);
+  const [atUniverseCap, setAtUniverseCap] = useState(50);
+
   const [tickerInput, setTickerInput] = useState("AAPL");
   const [startYear, setStartYear] = useState(2020);
   const [endYear, setEndYear] = useState(2025);
