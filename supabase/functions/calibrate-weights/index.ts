@@ -83,7 +83,7 @@ serve(async (req) => {
 
     const { data: closed, error } = await supabase
       .from("signal_outcomes")
-      .select("conviction, realized_pnl_pct, strategy, regime, signal_type")
+      .select("conviction, realized_pnl_pct, strategy, regime, signal_type, max_favorable_excursion_pct, max_adverse_excursion_pct")
       .eq("status", "closed")
       .gte("entry_date", sinceISO)
       .limit(10000);
