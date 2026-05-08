@@ -570,8 +570,9 @@ serve(async (req) => {
   try {
     const body = await req.json();
     const startYear = Math.max(2000, Math.min(2026, Number(body.startYear ?? 2023)));
-    const endYear = Math.max(startYear + 1, Math.min(2026, Number(body.endYear ?? 2025)));
-    const universeCap = Math.max(10, Math.min(60, Number(body.universeCap ?? body.universe_cap ?? 30)));
+    const requestedEndYear = Math.max(startYear + 1, Math.min(2026, Number(body.endYear ?? 2025)));
+    const endYear = Math.min(requestedEndYear, startYear + MAX_BACKTEST_YEARS - 1);
+    const universeCap = Math.max(5, Math.min(25, Number(body.universeCap ?? body.universe_cap ?? 20)));
 
     const pick = (a: any, b: any, d: any) => (a ?? b ?? d);
     const settings: ATSettings = {
