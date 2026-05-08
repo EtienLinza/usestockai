@@ -1663,7 +1663,10 @@ async function executeExit(
       : (entry - action.price) * sharesToClose;
 
     // Reduce shares on the open row
-    await supabase.from("virtual_positions").update({ shares: remaining }).eq("id", pos.id);
+    const partialUpdates: Record<string, unknown> = { shares: remaining };
+    if (action.nextRung != null) partialUpdates.partial_exits_taken = action.nextRung;
+    if (action.trailingUpdate != null) partialUpdates.trailing_stop_price = action.trailingUpdate;
+    await supabase.from("virtual_positions").update(partialUpdates).eq("id", pos.id);
     // Insert paired closed row for accounting
     await supabase.from("virtual_positions").insert({
       user_id: pos.user_id, ticker: pos.ticker,
