@@ -338,10 +338,33 @@ const Backtest = () => {
                     Configuration
                   </div>
 
+                  {/* Mode toggle */}
+                  <div className="grid grid-cols-2 gap-2">
+                    {([
+                      { value: "single" as const, label: "Single Stock", desc: "Manual tickers" },
+                      { value: "autotrader" as const, label: "Autotrader", desc: "Replays live engine" },
+                    ]).map(m => (
+                      <button
+                        key={m.value}
+                        onClick={() => setBtMode(m.value)}
+                        className={`flex flex-col items-center gap-0.5 p-2.5 rounded-lg border text-xs transition-all ${
+                          btMode === m.value
+                            ? "border-primary bg-primary/10 text-primary"
+                            : "border-border/50 bg-card/30 text-muted-foreground hover:border-border"
+                        }`}
+                      >
+                        <span className="font-medium">{m.label}</span>
+                        <span className="text-[9px] opacity-70">{m.desc}</span>
+                      </button>
+                    ))}
+                  </div>
+
+                  {btMode === "single" && (<>
                   <div className="space-y-2">
                     <Label className="text-xs text-muted-foreground">Tickers (comma-separated, max 5)</Label>
                     <Input value={tickerInput} onChange={e => setTickerInput(e.target.value.toUpperCase())} placeholder="AAPL, MSFT, GOOGL" variant="glass" />
                   </div>
+
 
                   <div className="grid grid-cols-2 gap-3">
                     <div className="space-y-2">
