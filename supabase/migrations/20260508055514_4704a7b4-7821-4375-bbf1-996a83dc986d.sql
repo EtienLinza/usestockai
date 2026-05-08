@@ -1,0 +1,1 @@
+ALTER TABLE public.live_signals ADD COLUMN IF NOT EXISTS forecasts jsonb;

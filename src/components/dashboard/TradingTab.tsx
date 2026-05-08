@@ -38,6 +38,15 @@ interface Signal {
   created_at: string;
   expires_at: string;
   sector?: string;
+  forecasts?: {
+    asOfPrice?: number;
+    driftAnnualPct?: number;
+    daily?: { expectedPct: number };
+    weekly?: { expectedPct: number };
+    monthly?: { expectedPct: number };
+    quarterly?: { expectedPct: number };
+    yearly?: { expectedPct: number };
+  } | null;
 }
 
 interface Position {
@@ -489,6 +498,24 @@ export function TradingTab({
 
                     {signal.reasoning && (
                       <p className="text-[11px] sm:text-xs text-muted-foreground mt-2 border-t border-border/10 pt-2 ml-6 sm:ml-0 line-clamp-2 sm:line-clamp-none">{signal.reasoning}</p>
+                    )}
+
+                    {signal.forecasts && (
+                      <div className="mt-2 ml-6 sm:ml-0 flex flex-wrap gap-x-3 gap-y-1 text-[10px] font-mono">
+                        {([
+                          ["1d", signal.forecasts.daily?.expectedPct],
+                          ["1w", signal.forecasts.weekly?.expectedPct],
+                          ["1m", signal.forecasts.monthly?.expectedPct],
+                          ["1q", signal.forecasts.quarterly?.expectedPct],
+                          ["1y", signal.forecasts.yearly?.expectedPct],
+                        ] as const).map(([k, v]) => v == null ? null : (
+                          <span key={k} className="text-muted-foreground">
+                            {k}: <span className={cn(v >= 0 ? "text-primary" : "text-destructive")}>
+                              {v >= 0 ? "+" : ""}{v.toFixed(2)}%
+                            </span>
+                          </span>
+                        ))}
+                      </div>
                     )}
                   </motion.div>
                 ))}

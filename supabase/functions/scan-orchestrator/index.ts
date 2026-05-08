@@ -186,6 +186,7 @@ serve(async (req) => {
         regime: s.regime, stock_profile: s.stock_profile,
         weekly_bias: s.weekly_bias, target_allocation: s.target_allocation,
         reasoning: s.reasoning, strategy: s.strategy,
+        forecasts: s.forecasts ?? null,
         expires_at: expiresAt,
       }));
       const { data: upserted, error } = await supabase
