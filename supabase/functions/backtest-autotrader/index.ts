@@ -635,7 +635,7 @@ serve(async (req) => {
     let truncated = false;
     let entriesEvaluated = 0;
 
-    const ENTRY_STEP = 2; // check entries every 2 bars
+    const ENTRY_STEP = 5; // check entries every 5 bars (weekly cadence) for CPU budget
 
     for (let mi = 0; mi < masterDates.length; mi++) {
       if (Date.now() - t0 > TIME_BUDGET_MS) {
