@@ -1,59 +1,84 @@
 ## Goal
 
-Let big winners run. Today the autotrader force-exits at the hard take-profit ceiling (`takeProfitPct × 1.5`) and on 3-of-5 peak signals — even when the trend is still strongly intact. Add a **"runner mode"** that overrides those exits when a position is clearly still in a healthy uptrend, and only releases when the move actually breaks down.
+Add a second mode to the backtester: **Autotrader Mode**. Today's backtester is single/multi-ticker pure-math. The new mode replays the **live autotrader's full decision loop** over historical bars across the same universe the live scanner uses — same entry gates, same exits, same sizing — so the user can see how the actual bot would have performed.
 
-## Where this lives
+UI becomes a 2-mode toggle at the top of the config panel: **Single Stock** (current behavior, untouched) and **Autotrader**.
 
-`supabase/functions/autotrader-scan/index.ts` → `runWinExit()`. No DB changes, no UI changes, no new positions table fields.
+## Universe & sentiment (already decided)
 
-## What "running it dry" means (objective gates)
+- Universe: same as live scanner — `discoverTickers()` from `_shared/scan-pipeline.ts` (~150-200 tickers).
+- Sentiment: **skipped**. Live autotrader already removed sentiment from the loop, so this matches reality.
 
-Runner mode activates **only** when the position is meaningfully profitable AND momentum is still alive. We require **all** of:
+## Settings panel (Autotrader mode)
 
-1. **Profitable enough to be a real winner** — `pnlPct >= max(profile.takeProfitPct × 1.5, 12%)`. (Below the existing ceiling we don't even consider it; we already have peak detection.)
-2. **Trend intact** — close > 20-EMA > 50-SMA (long) / inverse for short. Confirms the structure that made it a winner is still standing.
-3. **Higher highs holding** — current price is within 1.5 × ATR of the all-time `peak_price`. We're not in a deep pullback.
-4. **No exhaustion** — RSI is **not** > 80 with bearish RSI divergence (long), and the volume-climax + MACD-rollover signals are **not both** firing.
-5. **Thesis still alive** — for `trend` strategy, `liveWeeklyAlloc` direction still matches entry; for `breakout`, price still > breakout level (entry × 1.02 long); for `mean_reversion`, runner mode does **not** apply (MR thesis is mean-revert, not "ride a trend").
+Prefill from the user's live config (`autotrade_settings` + `portfolio_caps`) on page load, then allow overrides:
 
-If all 5 hold → **runner mode active**. The hard ceiling and the 3-of-5 peak rule are both **suppressed**. Trailing stop continues to ratchet (tightened — see below) and is the **only** exit path while runner mode is on.
+- Risk profile (conservative / balanced / aggressive)
+- Min conviction
+- Max positions
+- Max NAV exposure %
+- Max single-name %
+- Daily loss limit %
+- Starting NAV
+- Adaptive mode on/off (whether to layer VIX/SPY/PnL adjustments like the live bot)
+- Date range (start/end year, same as today)
 
-## Tighter trail while running
+A "Reset to live settings" button reverts overrides.
 
-Once runner mode kicks in, replace `profile.trailingStopATRMult` with a tighter Chandelier-style trail: `peak − 2.5 × ATR` (or `profile.trailingStopATRMult`, whichever is tighter). This locks in gains as the move extends and is the "ran it dry" exit — when the trend finally breaks, the trail catches it.
+## Backend: new edge function `backtest-autotrader`
 
-## Exit conditions while in runner mode
+Lives at `supabase/functions/backtest-autotrader/index.ts`. Auth-required (same JWT check as the existing `backtest`).
 
-Runner mode releases (i.e., normal exit logic resumes for that scan) the moment **any** of:
-- Trailing-stop hit → `FULL_EXIT` with reason "Runner trailing-stop hit (+X%)"
-- Trend structure breaks (close < 50-SMA on long) → `FULL_EXIT` with reason "Runner trend break (close lost 50-SMA)"
-- 4-of-5 peak signals fire (stricter than the normal 3-of-5) → `FULL_EXIT` with reason "Runner exhaustion (4/5 peak signals)"
+### Pipeline
 
-Loss-exit logic (`runLossExit`) still runs first and is unaffected — hard stop and thesis invalidation always win.
+1. **Discover universe** via `discoverTickers()`. Cap to top 100 by liquidity if cost requires it (configurable).
+2. **Fetch history** for universe + SPY + ^VIX over the requested date range. Bounded parallelism, same Yahoo path as today's backtester.
+3. **Day-by-day walk** from the first bar where every required indicator is warm (~250 bars in):
+   - Slice each ticker's series to bars `[0..t]`.
+   - **Update macro** (`MacroContext` from SPY slice, VIX value, vol scalar, regime).
+   - **For each open position**: call the same `runWinExit` / `runLossExit` extracted from `autotrader-scan`. Apply trailing/peak updates. Execute exits at next bar's open.
+   - **For each non-open ticker**: call `evaluateSignal()` (canonical engine). If `BUY/SHORT` and conviction ≥ effective min_conviction, run entry gates in this order: daily-loss limit → max_positions → max_nav_exposure → correlation gate (60d vs open book, |ρ|≥0.75) → single-name cap → vol-target sizing. Enter at next bar's open.
+   - Mark-to-market portfolio, append to equity curve.
+4. **Build report** in the existing `BacktestReport` shape so the current dashboard renders it unchanged. Trade log, equity curve, drawdown, Sharpe/Sortino/Calmar, monthly returns, regime breakdown, strategy attribution.
+5. Skip Monte Carlo robustness/noise tests for v1 (computationally expensive at universe scale).
 
-## Code shape
+### Code reuse strategy
 
-Inside `runWinExit`, after the trailing/peak update and **before** the hard-ceiling check at line 334, compute `runnerActive` from the 5 gates above. If `runnerActive`:
+Per the project's "Edge Function Replication" memory (subdirectory isolation), I will **copy the exit/entry/effective-settings/correlation/vol-target helpers** from `autotrader-scan/index.ts` into the new function rather than refactor live code. The `_shared/signal-engine-v2.ts` and `_shared/scan-pipeline.ts` are already shared and will be imported directly.
 
-- Tighten `trailing` to `max(trailing, newPeak − 2.5 × ATR)` (long) / inverse for short.
-- If `trailingHit` (using the tightened trail) → `FULL_EXIT`.
-- If trend-break or 4-of-5 peak signals → `FULL_EXIT`.
-- Otherwise → `HOLD` with reason `runner-mode (+X%, peak Y)`, persisting `trailing` and `newPeak`.
-- **Skip** the existing hard-ceiling and 3-of-5 blocks for this position this scan.
+### Performance guards
 
-If `!runnerActive` → existing logic runs unchanged.
+- Hard cap universe at 100 tickers (configurable in body, default 100).
+- Default range capped at 3 years to keep CPU under Deno edge limit.
+- Step rate = 1 bar/day (no sub-stepping).
+- Early-exit if wall time > 110 s; return partial results with a `truncated: true` flag.
 
-## What does NOT change
+## UI changes
 
-- `runLossExit` — untouched.
-- Hard stop, ATR stop, time stop — untouched.
-- Peak/trailing ratchet math — same formulas, just applied with a tighter mult while runner is active.
-- Manual-position handling — runner mode applies to every position the autotrader manages (which now includes manual buys, per the previous change).
-- DB schema — no new columns. `peak_price` and `trailing_stop_price` already exist and are sufficient.
+`src/pages/Backtest.tsx`:
+- Add `mode: "single" | "autotrader"` toggle at top of config panel.
+- Conditionally render the existing config form vs the new autotrader settings form.
+- New autotrader form fetches `/autotrade_settings` + `/portfolio_caps` for the current user on mount (read directly via supabase client) and prefills.
+- On run, dispatch to `/backtest` (existing) or `/backtest-autotrader` (new) based on mode.
+- Results dashboard is unchanged — both endpoints return the same `BacktestReport`.
+- Add a small badge on the results header showing "Autotrader replay over N tickers" when applicable.
+
+## Files
+
+- New: `supabase/functions/backtest-autotrader/index.ts` (~800-1000 lines: full simulator + helpers copy)
+- Edit: `src/pages/Backtest.tsx` (mode toggle, autotrader settings panel, dispatch logic)
+- No DB migrations. No live-engine changes. No changes to existing `/backtest` function.
+
+## Out of scope for v1
+
+- News sentiment replay (intentional — answered).
+- Kill-switch / cron / multi-user replay (single user, the caller).
+- Auto-watchlist sync.
+- Per-position partial exits scaling out across multiple bars (we'll execute partials as 50% reduction at next open, same as live).
+- Storing replay results in DB (one-shot response only).
 
 ## Verification
 
-1. Pick an open position with > 15% profit and clean uptrend (close > 20-EMA > 50-SMA, near peak). Run autotrader-scan → expect `HOLD` with `reason` containing "runner-mode" instead of `FULL_EXIT` at the ceiling.
-2. Simulate a trend break (or wait for one) → expect `FULL_EXIT` with reason "Runner trend break" or "Runner trailing-stop hit".
-3. Position with > 15% profit but RSI > 80 + bearish divergence → runner mode does NOT activate, normal peak detection fires.
-4. Mean-reversion winner at +20% → runner mode does NOT apply, normal ceiling fires.
+1. Run autotrader mode over 2023-2024 with default balanced profile → expect a populated trade log, equity curve, win rate within 5pp of the user's live realized win rate.
+2. Toggle adaptive mode off → expect more aggressive/looser results matching the chosen risk profile baseline.
+3. Toggle mode back to Single Stock → existing flow works unchanged.
