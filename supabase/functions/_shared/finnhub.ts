@@ -213,3 +213,45 @@ export async function getQuoteWithFallback(ticker: string): Promise<LiveQuote | 
   // Fallback to Yahoo
   return await yahooIntradayQuote(ticker);
 }
+
+// ── Earnings Calendar (Phase 1 #4) ──────────────────────────────────────────
+// Returns the next earnings date (YYYY-MM-DD) within the next 21 days for the
+// given ticker, or null if none scheduled / API unavailable. Cached in-memory
+// for 6 hours per ticker to stay well under Finnhub's 60 req/min free tier.
+const earningsCache = new Map<string, { date: string | null; cachedAt: number }>();
+const EARNINGS_TTL_MS = 6 * 60 * 60 * 1000;
+
+export async function getNextEarningsDate(ticker: string): Promise<string | null> {
+  const t = ticker.toUpperCase();
+  const cached = earningsCache.get(t);
+  if (cached && Date.now() - cached.cachedAt < EARNINGS_TTL_MS) return cached.date;
+
+  const today = new Date();
+  const horizon = new Date(today.getTime() + 21 * 86400000);
+  const fmt = (d: Date) => d.toISOString().slice(0, 10);
+  const j = await finnhubFetch(
+    `/calendar/earnings?from=${fmt(today)}&to=${fmt(horizon)}&symbol=${encodeURIComponent(t)}`,
+  ) as { earningsCalendar?: Array<{ date?: string; symbol?: string }> } | null;
+
+  let next: string | null = null;
+  if (j?.earningsCalendar?.length) {
+    const dates = j.earningsCalendar
+      .filter(e => (e.symbol ?? "").toUpperCase() === t && typeof e.date === "string")
+      .map(e => e.date as string)
+      .sort();
+    next = dates[0] ?? null;
+  }
+  earningsCache.set(t, { date: next, cachedAt: Date.now() });
+  return next;
+}
+
+// Returns trading-days-until-earnings (rounded), or null if none in horizon.
+export async function getEarningsBlackoutDays(ticker: string): Promise<number | null> {
+  const date = await getNextEarningsDate(ticker);
+  if (!date) return null;
+  const ms = new Date(date + "T00:00:00Z").getTime() - Date.now();
+  if (ms < 0) return null;
+  const calDays = Math.ceil(ms / 86400000);
+  // Approximate trading days (5/7 of calendar)
+  return Math.max(0, Math.round(calDays * (5 / 7)));
+}
