@@ -781,9 +781,11 @@ async function runEntryDecision(
   // (News-sentiment layer removed — pure deterministic conviction now.)
   const effectiveConviction = sig.conviction;
 
-  // Size
+  // Size — apply portfolio-level vol-target scalar (improvement #7) BEFORE
+  // single-name and headroom caps so the user-facing caps remain absolute
+  // ceilings while sizing breathes with realized SPY vol.
   const headroom = (settings.max_nav_exposure_pct - totalNavExposurePct) / 100;
-  const baseFrac = sig.kellyFraction;
+  const baseFrac = sig.kellyFraction * volScalar;
   const cappedFrac = Math.min(baseFrac, settings.max_single_name_pct / 100, headroom);
   const currentPrice = data.close[data.close.length - 1];
   const targetDollars = settings.starting_nav * cappedFrac;
