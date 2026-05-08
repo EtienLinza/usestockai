@@ -286,14 +286,11 @@ const Backtest = () => {
                     Configuration
                   </div>
 
-                  <></>
-
-                  {true && (<></>
-
                   <div className="space-y-2">
                     <Label className="text-xs text-muted-foreground">Tickers (comma-separated, max 5)</Label>
                     <Input value={tickerInput} onChange={e => setTickerInput(e.target.value.toUpperCase())} placeholder="AAPL, MSFT, GOOGL" variant="glass" />
                   </div>
+
 
 
                   <div className="grid grid-cols-2 gap-3">
