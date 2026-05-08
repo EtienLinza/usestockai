@@ -501,19 +501,24 @@ export function TradingTab({
                     )}
 
                     {signal.forecasts && (
-                      <div className="mt-2 ml-6 sm:ml-0 flex flex-wrap gap-x-3 gap-y-1 text-[10px] font-mono">
+                      <div className="mt-2 ml-6 sm:ml-0 grid grid-cols-5 gap-1 text-[10px] font-mono border-t border-border/10 pt-2">
                         {([
-                          ["1d", signal.forecasts.daily?.expectedPct],
-                          ["1w", signal.forecasts.weekly?.expectedPct],
-                          ["1m", signal.forecasts.monthly?.expectedPct],
-                          ["1q", signal.forecasts.quarterly?.expectedPct],
-                          ["1y", signal.forecasts.yearly?.expectedPct],
-                        ] as const).map(([k, v]) => v == null ? null : (
-                          <span key={k} className="text-muted-foreground">
-                            {k}: <span className={cn(v >= 0 ? "text-primary" : "text-destructive")}>
-                              {v >= 0 ? "+" : ""}{v.toFixed(2)}%
-                            </span>
-                          </span>
+                          ["1D", signal.forecasts.daily?.expectedPct],
+                          ["1W", signal.forecasts.weekly?.expectedPct],
+                          ["1M", signal.forecasts.monthly?.expectedPct],
+                          ["1Q", signal.forecasts.quarterly?.expectedPct],
+                          ["1Y", signal.forecasts.yearly?.expectedPct],
+                        ] as const).map(([k, v]) => (
+                          <div key={k} className="flex flex-col items-center min-w-0 px-1 py-1 rounded bg-secondary/20 border border-border/30">
+                            <span className="text-[9px] text-muted-foreground uppercase tracking-wide">{k}</span>
+                            {v == null ? (
+                              <span className="text-muted-foreground">—</span>
+                            ) : (
+                              <span className={cn("truncate text-[10px]", v >= 0 ? "text-primary" : "text-destructive")}>
+                                {v >= 0 ? "+" : ""}{v.toFixed(1)}%
+                              </span>
+                            )}
+                          </div>
                         ))}
                       </div>
                     )}
