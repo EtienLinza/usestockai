@@ -1450,6 +1450,7 @@ async function processUser(
       todayPnlPct,
       Array.from(heldTickers),
       volScalar,
+      calibrationCurve, strategyTilts, tickerCalibration,
     );
 
     if (decision.kind === "ENTER") pending.push({ kind: "enter", ticker, decision });
