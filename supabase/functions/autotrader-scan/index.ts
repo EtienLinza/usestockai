@@ -313,6 +313,18 @@ function computeEffectiveSettings(
       adjustments.push(`strong P&L +${ctx.recentPnlPct.toFixed(1)}%: −2 conv`);
     }
 
+    // ── Layer 3b: 30-day rolling drawdown (Phase 3 #16) ──
+    // Slow-bleed protection — graduated tightening; hard block enforced in
+    // runEntryDecision at ROLLING_DD_HARD_BLOCK_PCT regardless of adaptive_mode.
+    const dd = ctx.rollingDrawdownPct;
+    if (dd >= 8) {
+      minConv += 6; maxPos = Math.max(1, maxPos - 2); maxNav = Math.min(maxNav, maxNav * 0.6);
+      adjustments.push(`30d drawdown ${dd.toFixed(1)}%: +6 conv, NAV×0.6`);
+    } else if (dd >= 5) {
+      minConv += 3; maxNav = Math.min(maxNav, maxNav * 0.8);
+      adjustments.push(`30d drawdown ${dd.toFixed(1)}%: +3 conv, NAV×0.8`);
+    }
+
     // ── Layer 4: Calibration floor (from nightly strategy_weights.regime_floors) ──
     if (regimeFloors) {
       const regimeKey = ctx.spyTrend === "down" ? "bear" : ctx.vixRegime === "calm" ? "bull" : "neutral";
@@ -339,6 +351,7 @@ function computeEffectiveSettings(
     max_nav_exposure_pct: maxNav,
     max_single_name_pct: maxSingle,
     daily_loss_limit_pct: s.daily_loss_limit_pct, // always user-controlled / 3% default
+    current_drawdown_pct: ctx.rollingDrawdownPct,
   };
 }
 
