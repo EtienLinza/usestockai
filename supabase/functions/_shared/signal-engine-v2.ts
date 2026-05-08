@@ -655,6 +655,44 @@ export function computeStrategySignal(
   // --- Strategy B: Mean Reversion ---
   let mrSignal: "BUY" | "SHORT" | "HOLD" = "HOLD";
   let mrConviction = 0;
+
+  // RSI divergence detection over last 20 bars (Phase 1 #3).
+  // Bullish: price makes lower low, RSI makes higher low → buying pressure
+  //          underneath the new low. Bearish is the inverse.
+  // Detected by comparing the last 5 bars' extreme to the prior 15 bars'
+  // extreme on both price and RSI series.
+  let bullishDivergence = false, bearishDivergence = false;
+  if (n >= 21 && rsi.length >= 21) {
+    const recentLowIdx = (() => {
+      let mi = n - 5, mv = close[n - 5];
+      for (let i = n - 4; i < n; i++) if (close[i] < mv) { mv = close[i]; mi = i; }
+      return mi;
+    })();
+    const priorLowIdx = (() => {
+      let mi = n - 20, mv = close[n - 20];
+      for (let i = n - 19; i < n - 5; i++) if (close[i] < mv) { mv = close[i]; mi = i; }
+      return mi;
+    })();
+    const recentHighIdx = (() => {
+      let mi = n - 5, mv = close[n - 5];
+      for (let i = n - 4; i < n; i++) if (close[i] > mv) { mv = close[i]; mi = i; }
+      return mi;
+    })();
+    const priorHighIdx = (() => {
+      let mi = n - 20, mv = close[n - 20];
+      for (let i = n - 19; i < n - 5; i++) if (close[i] > mv) { mv = close[i]; mi = i; }
+      return mi;
+    })();
+    if (
+      !isNaN(rsi[recentLowIdx]) && !isNaN(rsi[priorLowIdx]) &&
+      close[recentLowIdx] < close[priorLowIdx] && rsi[recentLowIdx] > rsi[priorLowIdx] + 2
+    ) bullishDivergence = true;
+    if (
+      !isNaN(rsi[recentHighIdx]) && !isNaN(rsi[priorHighIdx]) &&
+      close[recentHighIdx] > close[priorHighIdx] && rsi[recentHighIdx] < rsi[priorHighIdx] - 2
+    ) bearishDivergence = true;
+  }
+
   const mrRsiOverride = rsiVal < RSI_OS || rsiVal > RSI_OB;
   if (adxVal < ADX_THRESH || mrRsiOverride || forceValueMR) {
     const mrConvictionMultiplier = (adxVal >= ADX_THRESH && !forceValueMR && mrRsiOverride) ? 0.8
@@ -666,6 +704,7 @@ export function computeStrategySignal(
       smaDeviation < -atrDevThreshold,
       sk < 20,
       volRatio > 1.2,
+      bullishDivergence, // Phase 1 #3
     ];
     const mrBuyScore = mrBuyConditions.filter(Boolean).length;
 
@@ -675,6 +714,7 @@ export function computeStrategySignal(
       smaDeviation > atrDevThreshold,
       sk > 80,
       volRatio > 1.2,
+      bearishDivergence, // Phase 1 #3
     ];
     const mrShortScore = mrShortConditions.filter(Boolean).length;
 
@@ -682,17 +722,19 @@ export function computeStrategySignal(
 
     if (mrBuyScore >= mrMinScore && !dualRegimeBearBlock) {
       mrSignal = "BUY";
-      const base = mrBuyScore * 16;
+      const base = mrBuyScore * 14; // slightly reduced per-condition weight (was 16) since pool is now 6 not 5
       const rsiBonus = Math.min(Math.abs(rsiVal - 50) * 0.3, 10);
       const smaBonus = Math.min(Math.abs(smaDeviation) * 100, 10);
-      const pooled = applyBonusPool(base, rsiBonus + smaBonus, 20);
+      const divBonus = bullishDivergence ? 6 : 0;
+      const pooled = applyBonusPool(base, rsiBonus + smaBonus + divBonus, 26);
       mrConviction = Math.round(pooled * mrConvictionMultiplier);
     } else if (mrShortScore >= mrMinScore && !(above200 && ctx.spyBearish === false)) {
       mrSignal = "SHORT";
-      const base = mrShortScore * 16;
+      const base = mrShortScore * 14;
       const rsiBonus = Math.min(Math.abs(rsiVal - 50) * 0.3, 10);
       const smaBonus = Math.min(Math.abs(smaDeviation) * 100, 10);
-      const pooled = applyBonusPool(base, rsiBonus + smaBonus, 20);
+      const divBonus = bearishDivergence ? 6 : 0;
+      const pooled = applyBonusPool(base, rsiBonus + smaBonus + divBonus, 26);
       mrConviction = Math.round(pooled * mrConvictionMultiplier);
     }
   }
