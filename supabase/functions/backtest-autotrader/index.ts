@@ -562,7 +562,7 @@ serve(async (req) => {
     const startYear = Math.max(2000, Math.min(2026, Number(body.startYear ?? 2023)));
     const requestedEndYear = Math.max(startYear + 1, Math.min(2026, Number(body.endYear ?? 2025)));
     const endYear = Math.min(requestedEndYear, startYear + MAX_BACKTEST_YEARS - 1);
-    const universeCap = Math.max(5, Math.min(25, Number(body.universeCap ?? body.universe_cap ?? 20)));
+    const universeCap = Math.max(5, Math.min(20, Number(body.universeCap ?? body.universe_cap ?? 15)));
 
     const pick = (a: any, b: any, d: any) => (a ?? b ?? d);
     const settings: ATSettings = {
@@ -641,7 +641,7 @@ serve(async (req) => {
     let truncated = false;
     let entriesEvaluated = 0;
 
-    const ENTRY_STEP = 5; // check entries every 5 bars (weekly cadence) for CPU budget
+    const ENTRY_STEP = 10; // check entries every 10 bars for edge CPU budget
 
     for (let mi = 0; mi < masterDates.length; mi++) {
       if (Date.now() - t0 > TIME_BUDGET_MS) {
