@@ -591,7 +591,7 @@ const Backtest = () => {
 
                       <div className="space-y-2">
                         <Label className="text-xs text-muted-foreground">Universe Cap: {atUniverseCap} tickers</Label>
-                        <Slider value={[atUniverseCap]} onValueChange={v => setAtUniverseCap(v[0])} min={20} max={150} step={10} />
+                        <Slider value={[atUniverseCap]} onValueChange={v => setAtUniverseCap(v[0])} min={10} max={60} step={5} />
                         <p className="text-[10px] text-muted-foreground/60">Top N by volume from live scanner universe</p>
                       </div>
 
