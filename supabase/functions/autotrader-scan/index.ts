@@ -744,6 +744,7 @@ async function runEntryDecision(
   totalNavExposurePct: number,
   todayPnlPct: number,
   openTickers: string[],
+  volScalar: number,
 ): Promise<EntryAction> {
   // Daily loss limit — block all new entries
   if (todayPnlPct <= -settings.daily_loss_limit_pct) {
