@@ -292,6 +292,68 @@ type ExitAction =
   | { kind: "FULL_EXIT"; reason: string; price: number }
   | { kind: "PARTIAL_EXIT"; reason: string; pct: number; price: number };
 
+// ── Correlation-aware portfolio gating (improvement #4) ─────────────────
+// Compute simple log-returns over the last `lookback` daily bars and return
+// the Pearson correlation coefficient. Returns null if either series is too
+// short or has zero variance (avoids NaN poisoning the gate).
+const CORR_LOOKBACK_BARS = 60;
+const CORR_THRESHOLD = 0.75;
+
+function dailyReturns(close: number[], lookback: number): number[] {
+  const n = close.length;
+  if (n < lookback + 1) return [];
+  const out: number[] = [];
+  for (let i = n - lookback; i < n; i++) {
+    const prev = close[i - 1], cur = close[i];
+    if (prev > 0 && cur > 0) out.push(Math.log(cur / prev));
+  }
+  return out;
+}
+
+function pearson(a: number[], b: number[]): number | null {
+  const n = Math.min(a.length, b.length);
+  if (n < 30) return null;
+  let sa = 0, sb = 0;
+  for (let i = 0; i < n; i++) { sa += a[i]; sb += b[i]; }
+  const ma = sa / n, mb = sb / n;
+  let cov = 0, va = 0, vb = 0;
+  for (let i = 0; i < n; i++) {
+    const da = a[i] - ma, db = b[i] - mb;
+    cov += da * db; va += da * da; vb += db * db;
+  }
+  if (va === 0 || vb === 0) return null;
+  return cov / Math.sqrt(va * vb);
+}
+
+/**
+ * Returns the highest absolute correlation between `candidate` and any of the
+ * open positions over the last 60 daily bars, or null if not enough data.
+ * Also returns the ticker that drove the max correlation (for log clarity).
+ */
+function maxCorrelationToBook(
+  candidateTicker: string,
+  openTickers: string[],
+): { maxAbs: number; against: string } | null {
+  const candData = priceCache.get(candidateTicker);
+  if (!candData) return null;
+  const candRet = dailyReturns(candData.close, CORR_LOOKBACK_BARS);
+  if (candRet.length < 30) return null;
+
+  let bestAbs = 0;
+  let bestTicker = "";
+  for (const t of openTickers) {
+    if (t === candidateTicker) continue;
+    const d = priceCache.get(t);
+    if (!d) continue;
+    const r = dailyReturns(d.close, CORR_LOOKBACK_BARS);
+    const c = pearson(candRet, r);
+    if (c === null) continue;
+    const a = Math.abs(c);
+    if (a > bestAbs) { bestAbs = a; bestTicker = t; }
+  }
+  return bestTicker ? { maxAbs: bestAbs, against: bestTicker } : null;
+}
+
 type EntryAction =
   | { kind: "ENTER"; conviction: number; kellyFraction: number; price: number;
       strategy: string; profile: StockProfile; atr: number; hardStop: number;
@@ -645,6 +707,7 @@ async function runEntryDecision(
   openCount: number,
   totalNavExposurePct: number,
   todayPnlPct: number,
+  openTickers: string[],
 ): Promise<EntryAction> {
   // Daily loss limit — block all new entries
   if (todayPnlPct <= -settings.daily_loss_limit_pct) {
@@ -655,6 +718,20 @@ async function runEntryDecision(
   }
   if (totalNavExposurePct >= settings.max_nav_exposure_pct) {
     return { kind: "BLOCKED", reason: `NAV exposure cap reached (${totalNavExposurePct.toFixed(0)}% / ${settings.max_nav_exposure_pct}%)` };
+  }
+
+  // ── Correlation gate (improvement #4) ───────────────────────────────────
+  // Skip if 60-day return correlation with any existing book position exceeds
+  // 0.75 in absolute value. Cuts factor-blowup risk (e.g. all big-cap tech
+  // crashing together) without forcing the user to enforce sector caps manually.
+  if (openTickers.length > 0) {
+    const corr = maxCorrelationToBook(ticker, openTickers);
+    if (corr && corr.maxAbs >= CORR_THRESHOLD) {
+      return {
+        kind: "BLOCKED",
+        reason: `Correlation gate: |ρ|=${corr.maxAbs.toFixed(2)} vs ${corr.against} ≥ ${CORR_THRESHOLD} over ${CORR_LOOKBACK_BARS}d`,
+      };
+    }
   }
 
   const sig = evaluateSignal(data, ticker, undefined, macro);
@@ -1259,6 +1336,7 @@ async function processUser(
       refreshedOpenCount,
       navExposurePct,
       todayPnlPct,
+      Array.from(heldTickers),
     );
 
     if (decision.kind === "ENTER") pending.push({ kind: "enter", ticker, decision });
@@ -1274,12 +1352,29 @@ async function processUser(
   const deferred = enterCandidates.slice(MAX_ENTRIES_PER_SCAN);
 
   for (const p of toExecute) {
+    // Re-check correlation against the live book — including any positions
+    // opened earlier in this same scan loop. Prevents stacking 2 highly
+    // correlated names just because both passed the gate independently.
+    const liveBook = Array.from(heldTickers);
+    if (liveBook.length > 0) {
+      const corr = maxCorrelationToBook(p.ticker, liveBook);
+      if (corr && corr.maxAbs >= CORR_THRESHOLD) {
+        summary.blocked++; userSummary.blocked++;
+        await supabase.from("autotrade_log").insert({
+          user_id: userId, ticker: p.ticker, action: "BLOCKED",
+          reason: `Correlation gate (intra-scan): |ρ|=${corr.maxAbs.toFixed(2)} vs ${corr.against} ≥ ${CORR_THRESHOLD}`,
+          conviction: p.decision.conviction, strategy: p.decision.strategy, profile: p.decision.profile,
+        });
+        continue;
+      }
+    }
     const beforeEntries = summary.entries;
     await executeEntry(supabase, settings, p.ticker, p.decision, summary);
     userSummary.entries += summary.entries - beforeEntries;
     if (summary.entries > beforeEntries) {
       const dollars = p.decision.kellyFraction * settings.starting_nav;
       totalNavExposureDollars += dollars;
+      heldTickers.add(p.ticker);
     }
   }
 
