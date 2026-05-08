@@ -922,7 +922,9 @@ serve(async (req) => {
     const [spy, vixData, weightsRes] = await Promise.all([
       fetchYahooData("SPY"),
       fetchYahooData("^VIX"),
-      supabase.from("strategy_weights").select("regime_floors, exit_calibration").eq("is_active", true)
+      supabase.from("strategy_weights")
+        .select("regime_floors, exit_calibration, calibration_curve, strategy_tilts, ticker_calibration")
+        .eq("is_active", true)
         .order("computed_at", { ascending: false }).limit(1).maybeSingle(),
     ]);
     const macro: MacroContext | null = spy ? { spyClose: spy.close } : null;
@@ -937,6 +939,9 @@ serve(async (req) => {
     }
     const regimeFloors = (weightsRes.data?.regime_floors as Record<string, number> | null) ?? null;
     const exitCalibration = (weightsRes.data?.exit_calibration as Record<string, { trailMultAdjust: number }> | null) ?? null;
+    const calibrationCurve = (weightsRes.data?.calibration_curve as Record<string, { adjust: number }> | null) ?? {};
+    const strategyTilts = (weightsRes.data?.strategy_tilts as Record<string, { multiplier: number }> | null) ?? {};
+    const tickerCalibration = (weightsRes.data?.ticker_calibration as Record<string, { adjust: number }> | null) ?? {};
 
     // 3. Per-user processing — gated by per-user next_scan_at
     const now = new Date();
