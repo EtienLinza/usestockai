@@ -96,7 +96,7 @@ serve(async (req) => {
       computeMacroRegime(),
       fetchSectorMomentum(),
       supabase.from("strategy_weights")
-        .select("id, calibration_curve, strategy_tilts, regime_floors")
+        .select("id, calibration_curve, strategy_tilts, regime_floors, exit_calibration, notes")
         .eq("is_active", true).maybeSingle()
         .then((r: any) => r.data ?? null),
     ]);
@@ -105,7 +105,9 @@ serve(async (req) => {
       activeWeightsId: weightsRow?.id ?? null,
       calibrationCurve: weightsRow?.calibration_curve ?? {},
       strategyTilts: weightsRow?.strategy_tilts ?? {},
+      strategyRegimeTilts: weightsRow?.notes?.strategy_regime_tilts ?? {},
       regimeFloors: weightsRow?.regime_floors ?? {},
+      exitCalibration: weightsRow?.exit_calibration ?? {},
     };
     console.log(`Macro=${macro.score}/${macro.label} sectors=${Object.keys(sectorMomentum).length}`);
 

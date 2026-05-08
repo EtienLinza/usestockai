@@ -691,6 +691,7 @@ export type Database = {
           calibration_curve: Json
           computed_at: string
           created_at: string
+          exit_calibration: Json
           id: string
           is_active: boolean
           notes: Json
@@ -703,6 +704,7 @@ export type Database = {
           calibration_curve?: Json
           computed_at?: string
           created_at?: string
+          exit_calibration?: Json
           id?: string
           is_active?: boolean
           notes?: Json
@@ -715,6 +717,7 @@ export type Database = {
           calibration_curve?: Json
           computed_at?: string
           created_at?: string
+          exit_calibration?: Json
           id?: string
           is_active?: boolean
           notes?: Json

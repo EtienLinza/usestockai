@@ -36,7 +36,16 @@ interface OutcomeRow {
   strategy: string | null;
   regime: string | null;
   signal_type: string | null;
+  max_favorable_excursion_pct: number | null;
+  max_adverse_excursion_pct: number | null;
 }
+
+// Per-(strategy × regime) tilt requires fewer samples since the cell is narrower
+const MIN_SAMPLES_STRATEGY_REGIME = 10;
+// Exit calibration: per-strategy MFE-vs-realized ratio
+const MIN_SAMPLES_EXIT = 12;
+const TRAIL_MULT_MIN = 0.7;   // tighten trail at most 30%
+const TRAIL_MULT_MAX = 1.4;   // loosen trail at most 40%
 
 function bucketLabel(c: number): string {
   if (c < 60) return "lt60";
@@ -74,7 +83,7 @@ serve(async (req) => {
 
     const { data: closed, error } = await supabase
       .from("signal_outcomes")
-      .select("conviction, realized_pnl_pct, strategy, regime, signal_type")
+      .select("conviction, realized_pnl_pct, strategy, regime, signal_type, max_favorable_excursion_pct, max_adverse_excursion_pct")
       .eq("status", "closed")
       .gte("entry_date", sinceISO)
       .limit(10000);
@@ -150,6 +159,72 @@ serve(async (req) => {
       strategy_tilts[k] = { multiplier, winRate, avgReturn: avgRet, count: v.count };
     }
 
+    // ─── 2b) STRATEGY × REGIME TILTS ───────────────────────────────────────
+    // Mean-reversion in risk_off behaves very differently from risk_on.
+    // 2-D matrix keyed "strategy|regime" → multiplier. Scanner falls back
+    // to the 1-D strategy_tilts entry when sample size is too small.
+    const stratRegime: Record<string, { wins: number; count: number; sumRet: number }> = {};
+    for (const r of rows) {
+      const k = `${r.strategy ?? "unknown"}|${r.regime ?? "unknown"}`;
+      stratRegime[k] ??= { wins: 0, count: 0, sumRet: 0 };
+      stratRegime[k].count++;
+      if (Number(r.realized_pnl_pct ?? 0) > 0) stratRegime[k].wins++;
+      stratRegime[k].sumRet += Number(r.realized_pnl_pct ?? 0);
+    }
+    const strategy_regime_tilts: Record<string, { multiplier: number; winRate: number; avgReturn: number; count: number }> = {};
+    for (const [k, v] of Object.entries(stratRegime)) {
+      if (v.count < MIN_SAMPLES_STRATEGY_REGIME) {
+        strategy_regime_tilts[k] = { multiplier: 1.0, winRate: 0, avgReturn: 0, count: v.count };
+        continue;
+      }
+      const winRate = (v.wins / v.count) * 100;
+      const avgRet = v.sumRet / v.count;
+      const winRateZ = (winRate - 50) / 50;
+      const retZ = universeAvgRet !== 0
+        ? Math.max(-1, Math.min(1, (avgRet - universeAvgRet) / Math.max(0.5, Math.abs(universeAvgRet))))
+        : Math.max(-1, Math.min(1, avgRet / 2));
+      const score = (winRateZ + retZ) / 2;
+      const multiplier = Math.max(TILT_MIN - 0.05, Math.min(TILT_MAX + 0.05, 1 + score * 0.18));
+      strategy_regime_tilts[k] = { multiplier, winRate, avgReturn: avgRet, count: v.count };
+    }
+
+    // ─── 2c) EXIT CALIBRATION (per strategy) ───────────────────────────────
+    // Compare MFE vs realized PnL among winners. Low capture → loosen trail;
+    // high capture but losers running → slightly tighten.
+    const exitGroups: Record<string, { winners: { mfe: number; realized: number }[]; total: number }> = {};
+    for (const r of rows) {
+      const k = r.strategy ?? "unknown";
+      exitGroups[k] ??= { winners: [], total: 0 };
+      exitGroups[k].total++;
+      const realized = Number(r.realized_pnl_pct ?? 0);
+      const mfe = Math.abs(Number(r.max_favorable_excursion_pct ?? 0));
+      if (realized > 0 && mfe > 0) exitGroups[k].winners.push({ mfe, realized });
+    }
+    const exit_calibration: Record<string, { trailMultAdjust: number; captureRatio: number; winnerCount: number; sample: number }> = {};
+    for (const [k, g] of Object.entries(exitGroups)) {
+      if (g.winners.length < MIN_SAMPLES_EXIT) {
+        exit_calibration[k] = { trailMultAdjust: 1.0, captureRatio: 0, winnerCount: g.winners.length, sample: g.total };
+        continue;
+      }
+      const ratios = g.winners.map(w => Math.max(0, Math.min(1.5, w.realized / w.mfe)));
+      const captureRatio = ratios.reduce((s, x) => s + x, 0) / ratios.length;
+      // capture <0.45 → trail too tight → loosen up to ×1.40
+      // 0.45–0.65 → mild loosen
+      // 0.65–0.80 → well-tuned ×1.0
+      // >0.80 → tighten slightly
+      let mult = 1.0;
+      if (captureRatio < 0.45) mult = 1.0 + Math.min(0.40, (0.45 - captureRatio) * 1.5);
+      else if (captureRatio < 0.65) mult = 1.0 + (0.65 - captureRatio) * 0.5;
+      else if (captureRatio > 0.80) mult = 1.0 - Math.min(0.15, (captureRatio - 0.80) * 0.75);
+      mult = Math.max(TRAIL_MULT_MIN, Math.min(TRAIL_MULT_MAX, mult));
+      exit_calibration[k] = {
+        trailMultAdjust: Number(mult.toFixed(3)),
+        captureRatio: Number(captureRatio.toFixed(3)),
+        winnerCount: g.winners.length,
+        sample: g.total,
+      };
+    }
+
     // ─── 3) REGIME FLOORS (auto-tuned, aggressive mode) ────────────────────
     // For each regime, compute the conviction level above which historical
     // win rate is at least 55%. Use that as the floor (clamped 55-80).
@@ -210,11 +285,15 @@ serve(async (req) => {
       calibration_curve,
       strategy_tilts,
       regime_floors: regimeFloors,
+      exit_calibration,
       notes: {
         universeAvgReturnPct: universeAvgRet,
+        strategy_regime_tilts,
         thresholds: {
           MIN_SAMPLES_BUCKET, MIN_SAMPLES_STRATEGY, MIN_SAMPLES_REGIME,
+          MIN_SAMPLES_STRATEGY_REGIME, MIN_SAMPLES_EXIT,
           TILT_MIN, TILT_MAX, FLOOR_MIN, FLOOR_MAX, DEFAULT_FLOOR,
+          TRAIL_MULT_MIN, TRAIL_MULT_MAX,
         },
       },
     };
@@ -239,7 +318,9 @@ serve(async (req) => {
       activeWeightsId: inserted?.id,
       calibration_curve,
       strategy_tilts,
+      strategy_regime_tilts,
       regime_floors: regimeFloors,
+      exit_calibration,
     }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
   } catch (e: any) {

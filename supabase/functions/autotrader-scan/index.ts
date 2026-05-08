@@ -746,7 +746,7 @@ serve(async (req) => {
     const [spy, vixData, weightsRes] = await Promise.all([
       fetchYahooData("SPY"),
       fetchYahooData("^VIX"),
-      supabase.from("strategy_weights").select("regime_floors").eq("is_active", true)
+      supabase.from("strategy_weights").select("regime_floors, exit_calibration").eq("is_active", true)
         .order("computed_at", { ascending: false }).limit(1).maybeSingle(),
     ]);
     const macro: MacroContext | null = spy ? { spyClose: spy.close } : null;
@@ -756,6 +756,7 @@ serve(async (req) => {
     const vixRegime = vixRegimeOf(vixValue);
     const spyTrend = spyTrendOf(macro);
     const regimeFloors = (weightsRes.data?.regime_floors as Record<string, number> | null) ?? null;
+    const exitCalibration = (weightsRes.data?.exit_calibration as Record<string, { trailMultAdjust: number }> | null) ?? null;
 
     // 3. Per-user processing — gated by per-user next_scan_at
     const now = new Date();
@@ -832,7 +833,7 @@ serve(async (req) => {
 
       try {
         const userSummary = { entries: 0, exits: 0, partials: 0, holds: 0, blocked: 0, errors: 0, watchlistSize: 0, openPositions: 0, evaluated: 0 };
-        await processUser(supabase, settings, macro, summary, userSummary);
+        await processUser(supabase, settings, macro, summary, userSummary, exitCalibration);
 
         // Always write a per-scan rollup so users see the bot is alive even when
         // no trades fire. This is the single source of "scan happened" visibility.
@@ -1057,6 +1058,7 @@ async function processUser(
   macro: MacroContext | null,
   summary: { entries: number; exits: number; partials: number; holds: number; blocked: number; errors: number },
   userSummary: UserSummary,
+  exitCalibration: Record<string, { trailMultAdjust: number }> | null,
 ) {
   const userId = settings.user_id;
 
@@ -1165,9 +1167,17 @@ async function processUser(
 
     // Profile
     const cls = classifyStock(data.close, data.high, data.low, pos.ticker);
-    const profile = cls.blendedParams ?? PROFILE_PARAMS[
+    const baseProfile = cls.blendedParams ?? PROFILE_PARAMS[
       (pos.entry_profile as StockProfile) ?? cls.classification
     ];
+
+    // ── Exit calibration: nightly job learns per-strategy MFE-vs-realized capture
+    //    and outputs a trailing-stop multiplier adjustment. Apply it here.
+    const stratKey = pos.entry_strategy ?? "unknown";
+    const trailAdj = exitCalibration?.[stratKey]?.trailMultAdjust ?? 1.0;
+    const profile: ProfileParams = trailAdj !== 1.0
+      ? { ...baseProfile, trailingStopATRMult: baseProfile.trailingStopATRMult * trailAdj }
+      : baseProfile;
 
     // Run loss + win in priority order (loss wins ties)
     const lossAct = runLossExit(pos, data, currentPrice, profile, liveDecision, liveBias, liveRsi);
