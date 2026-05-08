@@ -110,7 +110,7 @@ import {
   type WeeklyBias,
   type MacroContext,
 } from "../_shared/signal-engine-v2.ts";
-import { computeReturnForecasts } from "../_shared/return-forecasts.ts";
+
 
 
 // ============================================================================
@@ -924,7 +924,6 @@ serve(async (req) => {
       strategy: string;
       sector: string;
       qualityScore: number;
-      forecasts: any;
     }[] = [];
 
     for (let ti = 0; ti < tickersToScan.length; ti++) {
@@ -997,7 +996,6 @@ serve(async (req) => {
           strategy,
           sector,
           qualityScore,
-          forecasts: computeReturnForecasts(data.close),
         });
       } catch (err) {
         console.error(`Error analyzing ${ticker}:`, err);
@@ -1026,7 +1024,6 @@ serve(async (req) => {
         reasoning: s.reasoning,
         strategy: s.strategy,
         expires_at: expiresAt,
-        forecasts: s.forecasts,
       }));
 
       const { data: upserted, error } = await supabase

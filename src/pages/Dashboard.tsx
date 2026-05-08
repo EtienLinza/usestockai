@@ -17,13 +17,12 @@ import {
 import {
   Brain, Loader2, AlertTriangle, RefreshCw, Zap, DollarSign,
   ArrowUpRight, ArrowDownRight, Package, BarChart3, Bell,
-  Trophy, Percent, Globe, CheckCircle2, Telescope,
+  Trophy, Percent, Globe, CheckCircle2,
 } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import { MarketTab } from "@/components/dashboard/MarketTab";
 import { TradingTab } from "@/components/dashboard/TradingTab";
-import { ReturnForecastPanel } from "@/components/ReturnForecastPanel";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -75,7 +74,7 @@ interface Signal {
   created_at: string;
   expires_at: string;
   sector?: string;
-  forecasts?: any;
+  
 }
 
 interface Position {
@@ -658,7 +657,6 @@ const Dashboard = () => {
               <Tabs defaultValue="trading" className="w-full">
                 <TabsList className="bg-secondary/30 mb-6">
                   <TabsTrigger value="trading" className="text-xs sm:text-sm gap-1.5"><Zap className="w-3.5 h-3.5" />Trading</TabsTrigger>
-                  <TabsTrigger value="forecasts" className="text-xs sm:text-sm gap-1.5"><Telescope className="w-3.5 h-3.5" />Forecasts</TabsTrigger>
                   <TabsTrigger value="market" className="text-xs sm:text-sm gap-1.5"><Globe className="w-3.5 h-3.5" />Market</TabsTrigger>
                 </TabsList>
 
@@ -707,9 +705,6 @@ const Dashboard = () => {
                   />
                 </TabsContent>
 
-                <TabsContent value="forecasts">
-                  <ReturnForecastPanel />
-                </TabsContent>
 
                 <TabsContent value="market">
                   <MarketTab />

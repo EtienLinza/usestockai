@@ -38,15 +38,6 @@ interface Signal {
   created_at: string;
   expires_at: string;
   sector?: string;
-  forecasts?: {
-    asOfPrice?: number;
-    driftAnnualPct?: number;
-    daily?: { expectedPct: number };
-    weekly?: { expectedPct: number };
-    monthly?: { expectedPct: number };
-    quarterly?: { expectedPct: number };
-    yearly?: { expectedPct: number };
-  } | null;
 }
 
 interface Position {
@@ -500,28 +491,6 @@ export function TradingTab({
                       <p className="text-[11px] sm:text-xs text-muted-foreground mt-2 border-t border-border/10 pt-2 ml-6 sm:ml-0 line-clamp-2 sm:line-clamp-none">{signal.reasoning}</p>
                     )}
 
-                    {signal.forecasts && (
-                      <div className="mt-2 ml-6 sm:ml-0 grid grid-cols-5 gap-1 text-[10px] font-mono border-t border-border/10 pt-2">
-                        {([
-                          ["1D", signal.forecasts.daily?.expectedPct],
-                          ["1W", signal.forecasts.weekly?.expectedPct],
-                          ["1M", signal.forecasts.monthly?.expectedPct],
-                          ["1Q", signal.forecasts.quarterly?.expectedPct],
-                          ["1Y", signal.forecasts.yearly?.expectedPct],
-                        ] as const).map(([k, v]) => (
-                          <div key={k} className="flex flex-col items-center min-w-0 px-1 py-1 rounded bg-secondary/20 border border-border/30">
-                            <span className="text-[9px] text-muted-foreground uppercase tracking-wide">{k}</span>
-                            {v == null ? (
-                              <span className="text-muted-foreground">—</span>
-                            ) : (
-                              <span className={cn("truncate text-[10px]", v >= 0 ? "text-primary" : "text-destructive")}>
-                                {v >= 0 ? "+" : ""}{v.toFixed(1)}%
-                              </span>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    )}
                   </motion.div>
                 ))}
               </div>

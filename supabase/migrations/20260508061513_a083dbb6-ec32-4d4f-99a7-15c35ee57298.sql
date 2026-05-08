@@ -1,0 +1,1 @@
+ALTER TABLE public.live_signals DROP COLUMN IF EXISTS forecasts;

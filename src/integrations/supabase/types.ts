@@ -230,7 +230,6 @@ export type Database = {
           created_at: string
           entry_price: number
           expires_at: string | null
-          forecasts: Json | null
           id: string
           reasoning: string | null
           regime: string | null
@@ -246,7 +245,6 @@ export type Database = {
           created_at?: string
           entry_price: number
           expires_at?: string | null
-          forecasts?: Json | null
           id?: string
           reasoning?: string | null
           regime?: string | null
@@ -262,7 +260,6 @@ export type Database = {
           created_at?: string
           entry_price?: number
           expires_at?: string | null
-          forecasts?: Json | null
           id?: string
           reasoning?: string | null
           regime?: string | null
