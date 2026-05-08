@@ -38,15 +38,6 @@ interface Signal {
   created_at: string;
   expires_at: string;
   sector?: string;
-  forecasts?: {
-    asOfPrice?: number;
-    driftAnnualPct?: number;
-    daily?: { expectedPct: number };
-    weekly?: { expectedPct: number };
-    monthly?: { expectedPct: number };
-    quarterly?: { expectedPct: number };
-    yearly?: { expectedPct: number };
-  } | null;
 }
 
 interface Position {
