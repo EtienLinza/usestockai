@@ -876,6 +876,14 @@ async function runEntryDecision(
   if (todayPnlPct <= -settings.daily_loss_limit_pct) {
     return { kind: "BLOCKED", reason: `Daily loss limit (${todayPnlPct.toFixed(1)}% vs −${settings.daily_loss_limit_pct}% cap)` };
   }
+  // Rolling 30-day drawdown circuit breaker (Phase 3 #16) — applies even
+  // when adaptive_mode is off, so manual users still get crash protection.
+  if (settings.current_drawdown_pct >= ROLLING_DD_HARD_BLOCK_PCT) {
+    return {
+      kind: "BLOCKED",
+      reason: `Rolling drawdown circuit breaker: 30d NAV dd ${settings.current_drawdown_pct.toFixed(1)}% ≥ ${ROLLING_DD_HARD_BLOCK_PCT}% — entries paused`,
+    };
+  }
   if (openCount >= settings.max_positions) {
     return { kind: "BLOCKED", reason: `Max positions reached (${openCount}/${settings.max_positions})` };
   }
