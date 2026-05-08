@@ -707,6 +707,7 @@ async function runEntryDecision(
   openCount: number,
   totalNavExposurePct: number,
   todayPnlPct: number,
+  openTickers: string[],
 ): Promise<EntryAction> {
   // Daily loss limit — block all new entries
   if (todayPnlPct <= -settings.daily_loss_limit_pct) {
@@ -717,6 +718,20 @@ async function runEntryDecision(
   }
   if (totalNavExposurePct >= settings.max_nav_exposure_pct) {
     return { kind: "BLOCKED", reason: `NAV exposure cap reached (${totalNavExposurePct.toFixed(0)}% / ${settings.max_nav_exposure_pct}%)` };
+  }
+
+  // ── Correlation gate (improvement #4) ───────────────────────────────────
+  // Skip if 60-day return correlation with any existing book position exceeds
+  // 0.75 in absolute value. Cuts factor-blowup risk (e.g. all big-cap tech
+  // crashing together) without forcing the user to enforce sector caps manually.
+  if (openTickers.length > 0) {
+    const corr = maxCorrelationToBook(ticker, openTickers);
+    if (corr && corr.maxAbs >= CORR_THRESHOLD) {
+      return {
+        kind: "BLOCKED",
+        reason: `Correlation gate: |ρ|=${corr.maxAbs.toFixed(2)} vs ${corr.against} ≥ ${CORR_THRESHOLD} over ${CORR_LOOKBACK_BARS}d`,
+      };
+    }
   }
 
   const sig = evaluateSignal(data, ticker, undefined, macro);
