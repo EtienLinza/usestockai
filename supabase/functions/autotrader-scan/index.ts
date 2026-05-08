@@ -121,6 +121,8 @@ interface Settings {
   auto_add_watchlist: boolean;
   auto_watchlist_consideration_floor: number;
   auto_watchlist_stale_days: number;
+  /** Computed at runtime — 30-day rolling NAV drawdown % (positive = decline). */
+  current_drawdown_pct: number;
 }
 
 interface AdaptiveContext {
@@ -129,8 +131,16 @@ interface AdaptiveContext {
   spyTrend: "up" | "down" | "flat";
   recentPnlPct: number;        // last 7-day realized P&L % vs starting NAV
   windowDays: number;
+  /** 30-day rolling NAV drawdown % from peak (positive number). */
+  rollingDrawdownPct: number;
   adjustments: string[];       // human-readable reasons applied
 }
+
+// ── Rolling drawdown circuit breaker (Phase 3 #16) ─────────────────────────
+// Hard-block all new entries once trailing 30-day NAV drawdown exceeds this
+// threshold. Independent of daily_loss_limit (intraday) and recentPnlPct
+// (7-day realized) — catches slow bleeds the other two miss.
+const ROLLING_DD_HARD_BLOCK_PCT = 10;
 
 // (Sentiment / AI layer removed: signals are now 100% deterministic.
 //  Trading-loop AI was a regulatory + reproducibility risk — keep this surface
@@ -303,6 +313,18 @@ function computeEffectiveSettings(
       adjustments.push(`strong P&L +${ctx.recentPnlPct.toFixed(1)}%: −2 conv`);
     }
 
+    // ── Layer 3b: 30-day rolling drawdown (Phase 3 #16) ──
+    // Slow-bleed protection — graduated tightening; hard block enforced in
+    // runEntryDecision at ROLLING_DD_HARD_BLOCK_PCT regardless of adaptive_mode.
+    const dd = ctx.rollingDrawdownPct;
+    if (dd >= 8) {
+      minConv += 6; maxPos = Math.max(1, maxPos - 2); maxNav = Math.min(maxNav, maxNav * 0.6);
+      adjustments.push(`30d drawdown ${dd.toFixed(1)}%: +6 conv, NAV×0.6`);
+    } else if (dd >= 5) {
+      minConv += 3; maxNav = Math.min(maxNav, maxNav * 0.8);
+      adjustments.push(`30d drawdown ${dd.toFixed(1)}%: +3 conv, NAV×0.8`);
+    }
+
     // ── Layer 4: Calibration floor (from nightly strategy_weights.regime_floors) ──
     if (regimeFloors) {
       const regimeKey = ctx.spyTrend === "down" ? "bear" : ctx.vixRegime === "calm" ? "bull" : "neutral";
@@ -329,6 +351,7 @@ function computeEffectiveSettings(
     max_nav_exposure_pct: maxNav,
     max_single_name_pct: maxSingle,
     daily_loss_limit_pct: s.daily_loss_limit_pct, // always user-controlled / 3% default
+    current_drawdown_pct: ctx.rollingDrawdownPct,
   };
 }
 
@@ -853,6 +876,14 @@ async function runEntryDecision(
   if (todayPnlPct <= -settings.daily_loss_limit_pct) {
     return { kind: "BLOCKED", reason: `Daily loss limit (${todayPnlPct.toFixed(1)}% vs −${settings.daily_loss_limit_pct}% cap)` };
   }
+  // Rolling 30-day drawdown circuit breaker (Phase 3 #16) — applies even
+  // when adaptive_mode is off, so manual users still get crash protection.
+  if (settings.current_drawdown_pct >= ROLLING_DD_HARD_BLOCK_PCT) {
+    return {
+      kind: "BLOCKED",
+      reason: `Rolling drawdown circuit breaker: 30d NAV dd ${settings.current_drawdown_pct.toFixed(1)}% ≥ ${ROLLING_DD_HARD_BLOCK_PCT}% — entries paused`,
+    };
+  }
   if (openCount >= settings.max_positions) {
     return { kind: "BLOCKED", reason: `Max positions reached (${openCount}/${settings.max_positions})` };
   }
@@ -1081,12 +1112,38 @@ serve(async (req) => {
       );
       const recentPnlPct = (recentPnlDollars / Number(rawSettings.starting_nav || 100000)) * 100;
 
+      // 30-day rolling NAV drawdown — peak-to-current from virtual_portfolio_log.
+      // Stale-data safe: if we can't compute it, treat as 0 so we never falsely block.
+      let rollingDrawdownPct = 0;
+      try {
+        const thirtyDaysAgo = new Date(Date.now() - 30 * 86400000).toISOString();
+        const { data: navHistory } = await supabase
+          .from("virtual_portfolio_log")
+          .select("total_value, date")
+          .eq("user_id", rawSettings.user_id)
+          .gte("date", thirtyDaysAgo)
+          .order("date", { ascending: true });
+        const values = (navHistory ?? [])
+          .map((r: any) => Number(r.total_value))
+          .filter((v: number) => Number.isFinite(v) && v > 0);
+        if (values.length >= 2) {
+          const peak = Math.max(...values);
+          const current = values[values.length - 1];
+          if (peak > 0 && current < peak) {
+            rollingDrawdownPct = ((peak - current) / peak) * 100;
+          }
+        }
+      } catch (e) {
+        console.warn("[rolling-dd] compute failed", e);
+      }
+
       const adaptiveCtx: AdaptiveContext = {
         vix: vixValue,
         vixRegime,
         spyTrend,
         recentPnlPct,
         windowDays: 7,
+        rollingDrawdownPct,
         adjustments: [],
       };
 
