@@ -110,125 +110,113 @@ serve(async (req) => {
     // Pre-compute time weight per row so all aggregates use walk-forward decay.
     const tw = rows.map(r => timeWeight(r.entry_date, nowMs));
 
-    // ─── 1) CALIBRATION CURVE ──────────────────────────────────────────────
-    // For each conviction bucket, compare realized win rate to the bucket's
-    // expected win rate (its center). Store an `adjust` value in conviction
-    // points the scanner will add/subtract when this bucket fires.
-    const buckets: Record<string, { wins: number; count: number }> = {};
-    for (const r of rows) {
+    // ─── 1) CALIBRATION CURVE (walk-forward weighted) ─────────────────────
+    // Each trade's contribution to its bucket is scaled by `timeWeight`
+    // (recent trades count 2× and 1.5× vs the oldest tier). The MIN_SAMPLES
+    // gate still uses raw count so we don't act on cells of <10 actual trades.
+    const buckets: Record<string, { wWins: number; wCount: number; raw: number }> = {};
+    rows.forEach((r, i) => {
       const b = bucketLabel(Number(r.conviction));
-      buckets[b] ??= { wins: 0, count: 0 };
-      buckets[b].count++;
-      if (Number(r.realized_pnl_pct ?? 0) > 0) buckets[b].wins++;
-    }
+      buckets[b] ??= { wWins: 0, wCount: 0, raw: 0 };
+      buckets[b].raw++;
+      buckets[b].wCount += tw[i];
+      if (Number(r.realized_pnl_pct ?? 0) > 0) buckets[b].wWins += tw[i];
+    });
 
     const calibration_curve: Record<string, { actualWinRate: number; expectedWinRate: number; adjust: number; count: number }> = {};
     for (const [label, v] of Object.entries(buckets)) {
       const expected = bucketCenter(label);
-      if (v.count < MIN_SAMPLES_BUCKET) {
-        calibration_curve[label] = { actualWinRate: 0, expectedWinRate: expected, adjust: 0, count: v.count };
+      if (v.raw < MIN_SAMPLES_BUCKET) {
+        calibration_curve[label] = { actualWinRate: 0, expectedWinRate: expected, adjust: 0, count: v.raw };
         continue;
       }
-      const actual = (v.wins / v.count) * 100;
-      // Aggressive: shift conviction toward observed win rate, capped at ±8 points
+      const actual = (v.wWins / v.wCount) * 100;
       const rawAdjust = actual - expected;
       const adjust = Math.max(-8, Math.min(8, Math.round(rawAdjust * 0.6)));
-      calibration_curve[label] = {
-        actualWinRate: actual,
-        expectedWinRate: expected,
-        adjust,
-        count: v.count,
-      };
+      calibration_curve[label] = { actualWinRate: actual, expectedWinRate: expected, adjust, count: v.raw };
     }
 
-    // ─── 2) STRATEGY TILTS ─────────────────────────────────────────────────
-    // Per-strategy multiplier from win rate × avg return. We reward
-    // strategies that both win often AND make money when they win.
-    const strats: Record<string, { wins: number; count: number; sumRet: number }> = {};
-    for (const r of rows) {
+    // ─── 2) STRATEGY TILTS (walk-forward weighted) ─────────────────────────
+    const strats: Record<string, { wWins: number; wCount: number; wSumRet: number; raw: number }> = {};
+    rows.forEach((r, i) => {
       const k = r.strategy ?? "unknown";
-      strats[k] ??= { wins: 0, count: 0, sumRet: 0 };
-      strats[k].count++;
-      if (Number(r.realized_pnl_pct ?? 0) > 0) strats[k].wins++;
-      strats[k].sumRet += Number(r.realized_pnl_pct ?? 0);
-    }
+      strats[k] ??= { wWins: 0, wCount: 0, wSumRet: 0, raw: 0 };
+      strats[k].raw++;
+      strats[k].wCount += tw[i];
+      const ret = Number(r.realized_pnl_pct ?? 0);
+      if (ret > 0) strats[k].wWins += tw[i];
+      strats[k].wSumRet += ret * tw[i];
+    });
 
-    // Universe average expectancy (avg return per trade) is the baseline.
-    const universeAvgRet = rows.length
-      ? rows.reduce((s, r) => s + Number(r.realized_pnl_pct ?? 0), 0) / rows.length
+    // Weighted universe expectancy (baseline for tilt z-scores)
+    const totW = tw.reduce((s, x) => s + x, 0);
+    const universeAvgRet = totW > 0
+      ? rows.reduce((s, r, i) => s + Number(r.realized_pnl_pct ?? 0) * tw[i], 0) / totW
       : 0;
 
     const strategy_tilts: Record<string, { multiplier: number; winRate: number; avgReturn: number; count: number }> = {};
     for (const [k, v] of Object.entries(strats)) {
-      if (v.count < MIN_SAMPLES_STRATEGY) {
-        strategy_tilts[k] = { multiplier: 1.0, winRate: 0, avgReturn: 0, count: v.count };
+      if (v.raw < MIN_SAMPLES_STRATEGY) {
+        strategy_tilts[k] = { multiplier: 1.0, winRate: 0, avgReturn: 0, count: v.raw };
         continue;
       }
-      const winRate = (v.wins / v.count) * 100;
-      const avgRet = v.sumRet / v.count;
-      // Score ranges roughly -1..+1. Win rate 50% & avg ret = baseline → 0.
-      const winRateZ = (winRate - 50) / 50;             // -1..+1
+      const winRate = (v.wWins / v.wCount) * 100;
+      const avgRet = v.wSumRet / v.wCount;
+      const winRateZ = (winRate - 50) / 50;
       const retZ = universeAvgRet !== 0
         ? Math.max(-1, Math.min(1, (avgRet - universeAvgRet) / Math.max(0.5, Math.abs(universeAvgRet))))
         : Math.max(-1, Math.min(1, avgRet / 2));
-      const score = (winRateZ + retZ) / 2;              // -1..+1
+      const score = (winRateZ + retZ) / 2;
       const multiplier = Math.max(TILT_MIN, Math.min(TILT_MAX, 1 + score * 0.15));
-      strategy_tilts[k] = { multiplier, winRate, avgReturn: avgRet, count: v.count };
+      strategy_tilts[k] = { multiplier, winRate, avgReturn: avgRet, count: v.raw };
     }
 
-    // ─── 2b) STRATEGY × REGIME TILTS ───────────────────────────────────────
-    // Mean-reversion in risk_off behaves very differently from risk_on.
-    // 2-D matrix keyed "strategy|regime" → multiplier. Scanner falls back
-    // to the 1-D strategy_tilts entry when sample size is too small.
-    const stratRegime: Record<string, { wins: number; count: number; sumRet: number }> = {};
-    for (const r of rows) {
+    // ─── 2b) STRATEGY × REGIME TILTS (walk-forward weighted) ───────────────
+    const stratRegime: Record<string, { wWins: number; wCount: number; wSumRet: number; raw: number }> = {};
+    rows.forEach((r, i) => {
       const k = `${r.strategy ?? "unknown"}|${r.regime ?? "unknown"}`;
-      stratRegime[k] ??= { wins: 0, count: 0, sumRet: 0 };
-      stratRegime[k].count++;
-      if (Number(r.realized_pnl_pct ?? 0) > 0) stratRegime[k].wins++;
-      stratRegime[k].sumRet += Number(r.realized_pnl_pct ?? 0);
-    }
+      stratRegime[k] ??= { wWins: 0, wCount: 0, wSumRet: 0, raw: 0 };
+      stratRegime[k].raw++;
+      stratRegime[k].wCount += tw[i];
+      const ret = Number(r.realized_pnl_pct ?? 0);
+      if (ret > 0) stratRegime[k].wWins += tw[i];
+      stratRegime[k].wSumRet += ret * tw[i];
+    });
     const strategy_regime_tilts: Record<string, { multiplier: number; winRate: number; avgReturn: number; count: number }> = {};
     for (const [k, v] of Object.entries(stratRegime)) {
-      if (v.count < MIN_SAMPLES_STRATEGY_REGIME) {
-        strategy_regime_tilts[k] = { multiplier: 1.0, winRate: 0, avgReturn: 0, count: v.count };
+      if (v.raw < MIN_SAMPLES_STRATEGY_REGIME) {
+        strategy_regime_tilts[k] = { multiplier: 1.0, winRate: 0, avgReturn: 0, count: v.raw };
         continue;
       }
-      const winRate = (v.wins / v.count) * 100;
-      const avgRet = v.sumRet / v.count;
+      const winRate = (v.wWins / v.wCount) * 100;
+      const avgRet = v.wSumRet / v.wCount;
       const winRateZ = (winRate - 50) / 50;
       const retZ = universeAvgRet !== 0
         ? Math.max(-1, Math.min(1, (avgRet - universeAvgRet) / Math.max(0.5, Math.abs(universeAvgRet))))
         : Math.max(-1, Math.min(1, avgRet / 2));
       const score = (winRateZ + retZ) / 2;
       const multiplier = Math.max(TILT_MIN - 0.05, Math.min(TILT_MAX + 0.05, 1 + score * 0.18));
-      strategy_regime_tilts[k] = { multiplier, winRate, avgReturn: avgRet, count: v.count };
+      strategy_regime_tilts[k] = { multiplier, winRate, avgReturn: avgRet, count: v.raw };
     }
 
     // ─── 2c) EXIT CALIBRATION (per strategy) ───────────────────────────────
-    // Compare MFE vs realized PnL among winners. Low capture → loosen trail;
-    // high capture but losers running → slightly tighten.
-    const exitGroups: Record<string, { winners: { mfe: number; realized: number }[]; total: number }> = {};
-    for (const r of rows) {
+    const exitGroups: Record<string, { winners: { mfe: number; realized: number; w: number }[]; total: number }> = {};
+    rows.forEach((r, i) => {
       const k = r.strategy ?? "unknown";
       exitGroups[k] ??= { winners: [], total: 0 };
       exitGroups[k].total++;
       const realized = Number(r.realized_pnl_pct ?? 0);
       const mfe = Math.abs(Number(r.max_favorable_excursion_pct ?? 0));
-      if (realized > 0 && mfe > 0) exitGroups[k].winners.push({ mfe, realized });
-    }
+      if (realized > 0 && mfe > 0) exitGroups[k].winners.push({ mfe, realized, w: tw[i] });
+    });
     const exit_calibration: Record<string, { trailMultAdjust: number; captureRatio: number; winnerCount: number; sample: number }> = {};
     for (const [k, g] of Object.entries(exitGroups)) {
       if (g.winners.length < MIN_SAMPLES_EXIT) {
         exit_calibration[k] = { trailMultAdjust: 1.0, captureRatio: 0, winnerCount: g.winners.length, sample: g.total };
         continue;
       }
-      const ratios = g.winners.map(w => Math.max(0, Math.min(1.5, w.realized / w.mfe)));
-      const captureRatio = ratios.reduce((s, x) => s + x, 0) / ratios.length;
-      // capture <0.45 → trail too tight → loosen up to ×1.40
-      // 0.45–0.65 → mild loosen
-      // 0.65–0.80 → well-tuned ×1.0
-      // >0.80 → tighten slightly
+      const wSum = g.winners.reduce((s, w) => s + w.w, 0);
+      const captureRatio = g.winners.reduce((s, w) => s + Math.max(0, Math.min(1.5, w.realized / w.mfe)) * w.w, 0) / wSum;
       let mult = 1.0;
       if (captureRatio < 0.45) mult = 1.0 + Math.min(0.40, (0.45 - captureRatio) * 1.5);
       else if (captureRatio < 0.65) mult = 1.0 + (0.65 - captureRatio) * 0.5;
@@ -239,6 +227,41 @@ serve(async (req) => {
         captureRatio: Number(captureRatio.toFixed(3)),
         winnerCount: g.winners.length,
         sample: g.total,
+      };
+    }
+
+    // ─── 2d) PER-TICKER CALIBRATION (Bayesian shrinkage) ───────────────────
+    // Some tickers consistently over- or under-deliver vs their conviction
+    // bucket. Compute a per-ticker conviction adjustment that shrinks toward
+    // the global bucket curve when sample size is low. Formula:
+    //   adjust_ticker = (n / (n + PRIOR)) × (raw_ticker_adjust)
+    // where raw_ticker_adjust = ticker_actual_WR − ticker_expected_WR (in
+    // conviction points), and `expected` is the weighted-avg bucket center
+    // for that ticker's trades. Capped at ±6 conviction points.
+    const tickerStats: Record<string, { wWins: number; wCount: number; wExpected: number; raw: number }> = {};
+    rows.forEach((r, i) => {
+      const t = (r.ticker ?? "").toUpperCase();
+      if (!t) return;
+      tickerStats[t] ??= { wWins: 0, wCount: 0, wExpected: 0, raw: 0 };
+      tickerStats[t].raw++;
+      tickerStats[t].wCount += tw[i];
+      tickerStats[t].wExpected += bucketCenter(bucketLabel(Number(r.conviction))) * tw[i];
+      if (Number(r.realized_pnl_pct ?? 0) > 0) tickerStats[t].wWins += tw[i];
+    });
+    const ticker_calibration: Record<string, { adjust: number; actualWinRate: number; expectedWinRate: number; count: number }> = {};
+    for (const [t, v] of Object.entries(tickerStats)) {
+      if (v.raw < MIN_SAMPLES_TICKER) continue;
+      const actual = (v.wWins / v.wCount) * 100;
+      const expected = v.wExpected / v.wCount;
+      const rawDelta = actual - expected;
+      const shrink = v.raw / (v.raw + TICKER_PRIOR_STRENGTH);   // 0..1
+      const adjust = Math.max(-6, Math.min(6, Math.round(rawDelta * shrink * 0.6)));
+      if (adjust === 0) continue;  // omit no-op rows to keep payload lean
+      ticker_calibration[t] = {
+        adjust,
+        actualWinRate: Number(actual.toFixed(1)),
+        expectedWinRate: Number(expected.toFixed(1)),
+        count: v.raw,
       };
     }
 
