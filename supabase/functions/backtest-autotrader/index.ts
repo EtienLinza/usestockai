@@ -32,6 +32,9 @@ import {
 import { fetchDailyHistory } from "../_shared/yahoo-history.ts";
 import { discoverTickers } from "../_shared/scan-pipeline.ts";
 
+const MAX_BACKTEST_YEARS = 3;
+const SIM_LOOKBACK_BARS = 260; // mirrors the live scanner's 1y technical window
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -189,11 +192,10 @@ function computeEffectiveSettings(s: ATSettings, vix: number | null, spyTrend: s
 // ── Correlation gate ─────────────────────────────────────────────────────
 const CORR_LOOKBACK = 60;
 const CORR_THRESHOLD = 0.75;
-function dailyReturns(close: number[], lookback: number): number[] {
-  const n = close.length;
-  if (n < lookback + 1) return [];
+function dailyReturnsWindow(close: number[], endIdx: number, lookback: number): number[] {
+  if (endIdx < lookback) return [];
   const out: number[] = [];
-  for (let i = n - lookback; i < n; i++) {
+  for (let i = endIdx - lookback + 1; i <= endIdx; i++) {
     const a = close[i - 1], b = close[i];
     if (a > 0 && b > 0) out.push(Math.log(b / a));
   }
@@ -397,15 +399,16 @@ interface Trade {
   strategy: string; exitReason: string;
 }
 
-// ── Slice helper (zero-copy via array views) ─────────────────────────────
-function slice(ds: DataSet, end: number): DataSet {
+// ── Bounded live-scanner slice helper ────────────────────────────────────
+function sliceWindow(ds: DataSet, end: number, lookback: number = SIM_LOOKBACK_BARS): DataSet {
+  const start = Math.max(0, end - lookback + 1);
   return {
-    timestamps: ds.timestamps.slice(0, end + 1),
-    close: ds.close.slice(0, end + 1),
-    high: ds.high.slice(0, end + 1),
-    low: ds.low.slice(0, end + 1),
-    open: ds.open.slice(0, end + 1),
-    volume: ds.volume.slice(0, end + 1),
+    timestamps: ds.timestamps.slice(start, end + 1),
+    close: ds.close.slice(start, end + 1),
+    high: ds.high.slice(start, end + 1),
+    low: ds.low.slice(start, end + 1),
+    open: ds.open.slice(start, end + 1),
+    volume: ds.volume.slice(start, end + 1),
   };
 }
 
@@ -557,8 +560,9 @@ serve(async (req) => {
   try {
     const body = await req.json();
     const startYear = Math.max(2000, Math.min(2026, Number(body.startYear ?? 2023)));
-    const endYear = Math.max(startYear + 1, Math.min(2026, Number(body.endYear ?? 2025)));
-    const universeCap = Math.max(10, Math.min(60, Number(body.universeCap ?? body.universe_cap ?? 30)));
+    const requestedEndYear = Math.max(startYear + 1, Math.min(2026, Number(body.endYear ?? 2025)));
+    const endYear = Math.min(requestedEndYear, startYear + MAX_BACKTEST_YEARS - 1);
+    const universeCap = Math.max(5, Math.min(20, Number(body.universeCap ?? body.universe_cap ?? 15)));
 
     const pick = (a: any, b: any, d: any) => (a ?? b ?? d);
     const settings: ATSettings = {
@@ -606,7 +610,9 @@ serve(async (req) => {
 
     // Build a per-ticker timestamp→bar index map for fast lookup
     const tIdx: Map<string, Map<string, number>> = new Map();
+    const dataByTicker = new Map<string, DataSet>();
     for (const e of valid) {
+      dataByTicker.set(e.ticker, e.data);
       const m = new Map<string, number>();
       for (let i = 0; i < e.data.timestamps.length; i++) m.set(e.data.timestamps[i], i);
       tIdx.set(e.ticker, m);
@@ -635,7 +641,7 @@ serve(async (req) => {
     let truncated = false;
     let entriesEvaluated = 0;
 
-    const ENTRY_STEP = 5; // check entries every 5 bars (weekly cadence) for CPU budget
+    const ENTRY_STEP = 10; // check entries every 10 bars for edge CPU budget
 
     for (let mi = 0; mi < masterDates.length; mi++) {
       if (Date.now() - t0 > TIME_BUDGET_MS) {
@@ -649,7 +655,7 @@ serve(async (req) => {
       if (sIdx == null || sIdx < 50) { equityCurve.push({ date: today, value: cash }); continue; }
 
       // Macro context (slice up to today)
-      const macro: MacroContext = { spyClose: spyData.close.slice(0, sIdx + 1) };
+      const macro: MacroContext = { spyClose: spyData.close.slice(Math.max(0, sIdx - SIM_LOOKBACK_BARS + 1), sIdx + 1) };
       const spyTrend = spyTrendOf(macro);
       const vIdx = vixData ? vixIdx.get(today) : null;
       const vixVal = vixData && vIdx != null ? vixData.close[vIdx] : null;
@@ -667,7 +673,7 @@ serve(async (req) => {
       const priceAt = (ticker: string): number | null => {
         const m = tIdx.get(ticker); if (!m) return null;
         const bi = m.get(today); if (bi == null) return null;
-        return valid.find(v => v.ticker === ticker)!.data.close[bi];
+        return dataByTicker.get(ticker)!.close[bi];
       };
       const openAt = (ticker: string, dateIdx: number): number | null => {
         // Get open price for `dateIdx` position in masterDates (i.e. NEXT bar)
@@ -675,7 +681,7 @@ serve(async (req) => {
         const d = masterDates[dateIdx];
         const m = tIdx.get(ticker); if (!m) return null;
         const bi = m.get(d); if (bi == null) return null;
-        return valid.find(v => v.ticker === ticker)!.data.open[bi];
+        return dataByTicker.get(ticker)!.open[bi];
       };
 
       // ── Update MFE/MAE for open positions, run exits ──
@@ -689,23 +695,27 @@ serve(async (req) => {
         if (pnlPct < pos.mae) pos.mae = pnlPct;
         if (pnlPct > pos.mfe) pos.mfe = pnlPct;
 
-        // Live signal (for liveBias / liveAlloc / liveRsi)
-        const tEntry = valid.find(v => v.ticker === pos.ticker)!;
-        const sliced = slice(tEntry.data, tIdx.get(pos.ticker)!.get(today)!);
         let liveBias: "long" | "short" | "flat" | null = null;
         let liveAlloc = 0;
         let liveRsi = 50;
-        try {
-          const sig = evaluateSignal(sliced, pos.ticker, undefined, macro);
-          if (sig) { liveBias = sig.weeklyBias.bias; liveAlloc = sig.weeklyBias.targetAllocation; }
-          const rsiArr = calculateRSI(sliced.close, 14);
-          liveRsi = safeGet(rsiArr, 50);
-        } catch (_e) { /* ignore */ }
+        const needsLiveSignal = pnlPct < -3 || pnlPct >= 6;
+        const tEntryData = dataByTicker.get(pos.ticker)!;
+        const sliced = needsLiveSignal ? sliceWindow(tEntryData, tIdx.get(pos.ticker)!.get(today)!) : null;
+        if (sliced) {
+          try {
+            const sig = evaluateSignal(sliced, pos.ticker, undefined, macro);
+            if (sig) { liveBias = sig.weeklyBias.bias; liveAlloc = sig.weeklyBias.targetAllocation; }
+            if (pnlPct < -3) {
+              const rsiArr = calculateRSI(sliced.close, 14);
+              liveRsi = safeGet(rsiArr, 50);
+            }
+          } catch (_e) { /* ignore */ }
+        }
 
         const profile = PROFILE_PARAMS[pos.profile as keyof typeof PROFILE_PARAMS] ?? PROFILE_PARAMS.momentum;
 
         const lossExit = runLossExit(pos, px, profile, liveBias, liveRsi, mi);
-        const winExit = lossExit ?? runWinExit(pos, sliced, px, profile, liveAlloc);
+        const winExit = lossExit ?? runWinExit(pos, sliced ?? { ...tEntryData, close: [px], high: [px], low: [px], open: [px], volume: [0], timestamps: [today] }, px, profile, liveAlloc);
 
         if (winExit.kind === "FULL") {
           // Execute at next bar's open
@@ -764,11 +774,11 @@ serve(async (req) => {
 
       const openTickerSet = new Set(open.map(p => p.ticker));
       const openReturnSeries: number[][] = open.map(p => {
-        const td = valid.find(v => v.ticker === p.ticker);
+        const td = dataByTicker.get(p.ticker);
         if (!td) return [];
         const bi = tIdx.get(p.ticker)?.get(today);
         if (bi == null) return [];
-        return dailyReturns(td.data.close.slice(0, bi + 1), CORR_LOOKBACK);
+        return dailyReturnsWindow(td.close, bi, CORR_LOOKBACK);
       });
 
       for (const e of valid) {
@@ -780,7 +790,7 @@ serve(async (req) => {
 
         // Correlation gate
         if (open.length > 0) {
-          const candRet = dailyReturns(e.data.close.slice(0, bi + 1), CORR_LOOKBACK);
+          const candRet = dailyReturnsWindow(e.data.close, bi, CORR_LOOKBACK);
           let blocked = false;
           for (const orr of openReturnSeries) {
             const c = pearson(candRet, orr);
@@ -789,7 +799,7 @@ serve(async (req) => {
           if (blocked) continue;
         }
 
-        const sliced = slice(e.data, bi);
+        const sliced = sliceWindow(e.data, bi);
         let sig: ReturnType<typeof evaluateSignal> | null = null;
         try { sig = evaluateSignal(sliced, e.ticker, undefined, macro); } catch (_) { continue; }
         entriesEvaluated++;
