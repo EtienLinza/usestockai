@@ -84,7 +84,13 @@ serve(async (req) => {
         const annualizedVol = atrPct * Math.sqrt(252) * 100;
 
         let conviction = sig.conviction;
-        const tilt = weights.strategyTilts[strategy]?.multiplier ?? 1.0;
+        // Prefer regime×strategy tilt if we have ≥10 samples for that cell;
+        // else fall back to the per-strategy tilt.
+        const cellKey = `${strategy}|${regime}`;
+        const cell = weights.strategyRegimeTilts?.[cellKey];
+        const tilt = (cell && cell.count >= 10)
+          ? cell.multiplier
+          : (weights.strategyTilts[strategy]?.multiplier ?? 1.0);
         conviction = conviction * tilt;
         const adj = weights.calibrationCurve[bucketKey(conviction)]?.adjust ?? 0;
         conviction = Math.max(0, Math.min(100, Math.round(conviction + adj)));
