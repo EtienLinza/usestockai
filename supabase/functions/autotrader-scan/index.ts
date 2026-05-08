@@ -327,7 +327,7 @@ function algoScanIntervalMinutes(macro: MacroContext | null, vixRegime: string):
 type ExitAction =
   | { kind: "HOLD"; reason: string; trailingUpdate?: number; peakUpdate?: number }
   | { kind: "FULL_EXIT"; reason: string; price: number }
-  | { kind: "PARTIAL_EXIT"; reason: string; pct: number; price: number };
+  | { kind: "PARTIAL_EXIT"; reason: string; pct: number; price: number; nextRung?: number; trailingUpdate?: number };
 
 // ── Correlation-aware portfolio gating (improvement #4) ─────────────────
 // Compute simple log-returns over the last `lookback` daily bars and return
