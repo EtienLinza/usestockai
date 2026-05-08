@@ -924,7 +924,6 @@ serve(async (req) => {
       strategy: string;
       sector: string;
       qualityScore: number;
-      forecasts: any;
     }[] = [];
 
     for (let ti = 0; ti < tickersToScan.length; ti++) {
