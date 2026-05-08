@@ -36,7 +36,16 @@ interface OutcomeRow {
   strategy: string | null;
   regime: string | null;
   signal_type: string | null;
+  max_favorable_excursion_pct: number | null;
+  max_adverse_excursion_pct: number | null;
 }
+
+// Per-(strategy × regime) tilt requires fewer samples since the cell is narrower
+const MIN_SAMPLES_STRATEGY_REGIME = 10;
+// Exit calibration: per-strategy MFE-vs-realized ratio
+const MIN_SAMPLES_EXIT = 12;
+const TRAIL_MULT_MIN = 0.7;   // tighten trail at most 30%
+const TRAIL_MULT_MAX = 1.4;   // loosen trail at most 40%
 
 function bucketLabel(c: number): string {
   if (c < 60) return "lt60";
