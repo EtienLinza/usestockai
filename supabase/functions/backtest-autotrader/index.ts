@@ -399,18 +399,7 @@ interface Trade {
   strategy: string; exitReason: string;
 }
 
-// ── Slice helper (zero-copy via array views) ─────────────────────────────
-function slice(ds: DataSet, end: number): DataSet {
-  return {
-    timestamps: ds.timestamps.slice(0, end + 1),
-    close: ds.close.slice(0, end + 1),
-    high: ds.high.slice(0, end + 1),
-    low: ds.low.slice(0, end + 1),
-    open: ds.open.slice(0, end + 1),
-    volume: ds.volume.slice(0, end + 1),
-  };
-}
-
+// ── Bounded live-scanner slice helper ────────────────────────────────────
 function sliceWindow(ds: DataSet, end: number, lookback: number = SIM_LOOKBACK_BARS): DataSet {
   const start = Math.max(0, end - lookback + 1);
   return {
