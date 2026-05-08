@@ -192,17 +192,6 @@ function computeEffectiveSettings(s: ATSettings, vix: number | null, spyTrend: s
 // ── Correlation gate ─────────────────────────────────────────────────────
 const CORR_LOOKBACK = 60;
 const CORR_THRESHOLD = 0.75;
-function dailyReturns(close: number[], lookback: number): number[] {
-  const n = close.length;
-  if (n < lookback + 1) return [];
-  const out: number[] = [];
-  for (let i = n - lookback; i < n; i++) {
-    const a = close[i - 1], b = close[i];
-    if (a > 0 && b > 0) out.push(Math.log(b / a));
-  }
-  return out;
-}
-
 function dailyReturnsWindow(close: number[], endIdx: number, lookback: number): number[] {
   if (endIdx < lookback) return [];
   const out: number[] = [];
