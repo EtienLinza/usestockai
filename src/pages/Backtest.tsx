@@ -203,8 +203,10 @@ const Backtest = () => {
       return;
     }
 
-    const tickers = tickerInput.split(",").map(t => t.trim().toUpperCase()).filter(Boolean).slice(0, 5);
-    if (tickers.length === 0) { toast.error("Enter at least one ticker"); return; }
+    const tickers = btMode === "autotrader"
+      ? []
+      : tickerInput.split(",").map(t => t.trim().toUpperCase()).filter(Boolean).slice(0, 5);
+    if (btMode === "single" && tickers.length === 0) { toast.error("Enter at least one ticker"); return; }
 
     if (startYear < 2000 || startYear > 2026) {
       toast.error("Start year must be between 2000 and 2026");
