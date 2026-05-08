@@ -855,6 +855,21 @@ async function runEntryDecision(
     }
   }
 
+  // ── Earnings blackout (Phase 1 #4) ──────────────────────────────────────
+  // Block new entries within 3 trading days of an earnings release. Earnings
+  // gaps routinely violate ATR-based stops and our signal engine has no edge
+  // through binary fundamental events. Cached 6h via Finnhub free tier.
+  // Crypto / non-equity tickers return null and pass through.
+  try {
+    const days = await getEarningsBlackoutDays(ticker);
+    if (days !== null && days <= 3) {
+      return {
+        kind: "BLOCKED",
+        reason: `Earnings blackout: report in ~${days} trading day${days === 1 ? "" : "s"} — gap risk too high for systematic entry`,
+      };
+    }
+  } catch (_e) { /* non-fatal — never block scan on earnings API hiccup */ }
+
   const sig = evaluateSignal(data, ticker, undefined, macro);
   if (!sig) return { kind: "HOLD", reason: "Insufficient data" };
   if (sig.decision === "HOLD") return { kind: "HOLD", reason: sig.reasoning };
