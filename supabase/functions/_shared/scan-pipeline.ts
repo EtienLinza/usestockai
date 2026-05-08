@@ -283,13 +283,28 @@ export async function discoverTickers(): Promise<DiscoveryResult> {
 export function preScreen(data: DataSet): boolean {
   const n = data.close.length;
   if (n < 200) return false;
-  const close = data.close, volume = data.volume;
+  const close = data.close, volume = data.volume, high = data.high, low = data.low;
 
-  // Liquidity: 20d avg dollar volume >= $5M
+  // Liquidity: 20d avg dollar volume >= $20M (was $5M — too permissive,
+  // illiquid names produced low-quality fills and unreliable signals)
   let dv = 0, count = Math.min(20, n);
   for (let i = n - count; i < n; i++) dv += (close[i] || 0) * (volume[i] || 0);
   const adv = dv / count;
-  if (adv < 5_000_000) return false;
+  if (adv < 20_000_000) return false;
+
+  // Reject "unactionable" tape: today's gap > 6% (post-earnings whipsaw,
+  // M&A news, halts) — entry math is unreliable around these prints.
+  if (n >= 2) {
+    const prevClose = close[n - 2];
+    const todayOpen = data.open[n - 1] ?? close[n - 1];
+    if (prevClose > 0) {
+      const gapPct = Math.abs(todayOpen - prevClose) / prevClose;
+      if (gapPct > 0.06) return false;
+    }
+    // Reject extreme intraday range too (>10% high-low vs prev close)
+    const range = (high[n - 1] - low[n - 1]) / prevClose;
+    if (range > 0.10) return false;
+  }
 
   // Cheap signal probes
   const adx = calculateADX(data.high, data.low, close, 14);
