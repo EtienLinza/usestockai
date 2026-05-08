@@ -1619,6 +1619,28 @@ async function processUser(
   const toExecute = enterCandidates.slice(0, MAX_ENTRIES_PER_SCAN);
   const deferred = enterCandidates.slice(MAX_ENTRIES_PER_SCAN);
 
+  // ── Sector exposure map (Phase 3 #14) ───────────────────────────────────
+  // Build $-by-sector for currently open positions; we'll incrementally update
+  // it as new entries fire so intra-scan stacking respects the cap too.
+  const sectorDollars = new Map<string, number>();
+  const sectorOf = new Map<string, string | null>();
+  const capsActive = !!(caps && caps.enabled && caps.sector_max_pct > 0);
+  const capPct = caps?.sector_max_pct ?? 35;
+  const blockMode = (caps?.enforcement_mode ?? "warn") === "block";
+  if (capsActive) {
+    for (const pos of positions) {
+      const t = pos.ticker.toUpperCase();
+      const data = priceCache.get(t);
+      if (!data) continue;
+      const px = data.close[data.close.length - 1];
+      const dollars = px * Number(pos.shares);
+      let sector: string | null;
+      try { sector = await getSector(t); } catch { sector = null; }
+      sectorOf.set(t, sector);
+      if (sector) sectorDollars.set(sector, (sectorDollars.get(sector) ?? 0) + dollars);
+    }
+  }
+
   for (const p of toExecute) {
     // Re-check correlation against the live book — including any positions
     // opened earlier in this same scan loop. Prevents stacking 2 highly
@@ -1636,6 +1658,35 @@ async function processUser(
         continue;
       }
     }
+
+    // ── Sector cap gate ──
+    let candidateSector: string | null = null;
+    if (capsActive) {
+      try { candidateSector = await getSector(p.ticker); } catch { candidateSector = null; }
+      if (candidateSector) {
+        const candidateDollars = p.decision.kellyFraction * settings.starting_nav;
+        const projected = (sectorDollars.get(candidateSector) ?? 0) + candidateDollars;
+        const projectedPct = (projected / settings.starting_nav) * 100;
+        if (projectedPct > capPct) {
+          if (blockMode) {
+            summary.blocked++; userSummary.blocked++;
+            await supabase.from("autotrade_log").insert({
+              user_id: userId, ticker: p.ticker, action: "BLOCKED",
+              reason: `Sector cap: ${candidateSector} would reach ${projectedPct.toFixed(0)}% NAV (cap ${capPct}%)`,
+              conviction: p.decision.conviction, strategy: p.decision.strategy, profile: p.decision.profile,
+            });
+            continue;
+          } else {
+            await supabase.from("autotrade_log").insert({
+              user_id: userId, ticker: p.ticker, action: "WARN",
+              reason: `Sector exposure warning: ${candidateSector} → ${projectedPct.toFixed(0)}% NAV (cap ${capPct}%, mode=warn)`,
+              conviction: p.decision.conviction, strategy: p.decision.strategy, profile: p.decision.profile,
+            });
+          }
+        }
+      }
+    }
+
     const beforeEntries = summary.entries;
     await executeEntry(supabase, settings, p.ticker, p.decision, summary);
     userSummary.entries += summary.entries - beforeEntries;
@@ -1643,6 +1694,9 @@ async function processUser(
       const dollars = p.decision.kellyFraction * settings.starting_nav;
       totalNavExposureDollars += dollars;
       heldTickers.add(p.ticker);
+      if (capsActive && candidateSector) {
+        sectorDollars.set(candidateSector, (sectorDollars.get(candidateSector) ?? 0) + dollars);
+      }
     }
   }
 
