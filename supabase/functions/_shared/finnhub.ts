@@ -332,3 +332,24 @@ export async function getSector(ticker: string): Promise<string | null> {
   sectorCache.set(t, { sector, cachedAt: Date.now() });
   return sector;
 }
+
+// ── Beta lookup (Phase 3 #15) ────────────────────────────────────────────────
+// Returns Finnhub's published beta for the ticker (vs S&P 500), cached for 24h.
+// Returns null if Finnhub returns no beta or is unconfigured — caller should
+// fall back to assuming beta = 1 in that case.
+const betaCache = new Map<string, { beta: number | null; cachedAt: number }>();
+const BETA_TTL_MS = 24 * 60 * 60 * 1000;
+
+export async function getBeta(ticker: string): Promise<number | null> {
+  const t = ticker.toUpperCase();
+  const cached = betaCache.get(t);
+  if (cached && Date.now() - cached.cachedAt < BETA_TTL_MS) return cached.beta;
+
+  const j = await finnhubFetch(
+    `/stock/metric?symbol=${encodeURIComponent(t)}&metric=all`,
+  ) as { metric?: { beta?: number } } | null;
+  const raw = j?.metric?.beta;
+  const beta = typeof raw === "number" && Number.isFinite(raw) ? raw : null;
+  betaCache.set(t, { beta, cachedAt: Date.now() });
+  return beta;
+}

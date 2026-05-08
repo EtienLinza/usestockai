@@ -32,7 +32,7 @@ import {
 import { isMarketHoliday, nyseCloseMinute } from "../_shared/market-calendar.ts";
 import { evaluateScanHealth, type TickerHealth } from "../_shared/circuit-breaker.ts";
 import { fetchDailyHistory } from "../_shared/yahoo-history.ts";
-import { getQuoteWithFallback, getEarningsBlackoutDays, getSector } from "../_shared/finnhub.ts";
+import { getQuoteWithFallback, getEarningsBlackoutDays, getSector, getBeta } from "../_shared/finnhub.ts";
 import { recordHeartbeat } from "../_shared/heartbeat.ts";
 
 /** Thrown by the circuit breaker to abort the entire scan immediately. */
@@ -1407,11 +1407,11 @@ async function processUser(
   const [posRes, watchRes, capsRes] = await Promise.all([
     supabase.from("virtual_positions").select("*").eq("user_id", userId).eq("status", "open"),
     supabase.from("watchlist").select("ticker, source").eq("user_id", userId).eq("asset_type", "stock"),
-    supabase.from("portfolio_caps").select("enabled, enforcement_mode, sector_max_pct").eq("user_id", userId).maybeSingle(),
+    supabase.from("portfolio_caps").select("enabled, enforcement_mode, sector_max_pct, portfolio_beta_max").eq("user_id", userId).maybeSingle(),
   ]);
   const positions = (posRes.data ?? []) as unknown as Position[];
   let watchRows = (watchRes.data ?? []) as Array<{ ticker: string; source: string | null }>;
-  const caps = (capsRes.data ?? null) as { enabled: boolean; enforcement_mode: string; sector_max_pct: number } | null;
+  const caps = (capsRes.data ?? null) as { enabled: boolean; enforcement_mode: string; sector_max_pct: number; portfolio_beta_max: number } | null;
 
   // ── AUTO-DISCOVERY: pull promising tickers from live_signals into watchlist ──
   if (settings.auto_add_watchlist) {
@@ -1619,14 +1619,20 @@ async function processUser(
   const toExecute = enterCandidates.slice(0, MAX_ENTRIES_PER_SCAN);
   const deferred = enterCandidates.slice(MAX_ENTRIES_PER_SCAN);
 
-  // ── Sector exposure map (Phase 3 #14) ───────────────────────────────────
-  // Build $-by-sector for currently open positions; we'll incrementally update
-  // it as new entries fire so intra-scan stacking respects the cap too.
+  // ── Sector + portfolio-beta exposure maps (Phase 3 #14 / #15) ───────────
+  // Build $-by-sector and weighted-beta accumulator for currently open
+  // positions; both update intra-scan as new entries fire so stacking respects
+  // the caps too. Cash is treated as beta = 0.
   const sectorDollars = new Map<string, number>();
   const sectorOf = new Map<string, string | null>();
-  const capsActive = !!(caps && caps.enabled && caps.sector_max_pct > 0);
+  const betaCapsActive = !!(caps && caps.enabled && (caps.portfolio_beta_max ?? 0) > 0);
+  const sectorCapsActive = !!(caps && caps.enabled && caps.sector_max_pct > 0);
+  const capsActive = sectorCapsActive || betaCapsActive;
   const capPct = caps?.sector_max_pct ?? 35;
+  const betaCap = caps?.portfolio_beta_max ?? 1.5;
   const blockMode = (caps?.enforcement_mode ?? "warn") === "block";
+
+  let bookBetaDollars = 0; // Σ (positionDollars × beta)
   if (capsActive) {
     for (const pos of positions) {
       const t = pos.ticker.toUpperCase();
@@ -1634,10 +1640,17 @@ async function processUser(
       if (!data) continue;
       const px = data.close[data.close.length - 1];
       const dollars = px * Number(pos.shares);
-      let sector: string | null;
-      try { sector = await getSector(t); } catch { sector = null; }
-      sectorOf.set(t, sector);
-      if (sector) sectorDollars.set(sector, (sectorDollars.get(sector) ?? 0) + dollars);
+      if (sectorCapsActive) {
+        let sector: string | null;
+        try { sector = await getSector(t); } catch { sector = null; }
+        sectorOf.set(t, sector);
+        if (sector) sectorDollars.set(sector, (sectorDollars.get(sector) ?? 0) + dollars);
+      }
+      if (betaCapsActive) {
+        let b: number | null;
+        try { b = await getBeta(t); } catch { b = null; }
+        bookBetaDollars += dollars * (b ?? 1);
+      }
     }
   }
 
@@ -1659,12 +1672,13 @@ async function processUser(
       }
     }
 
+    const candidateDollars = p.decision.kellyFraction * settings.starting_nav;
+
     // ── Sector cap gate ──
     let candidateSector: string | null = null;
-    if (capsActive) {
+    if (sectorCapsActive) {
       try { candidateSector = await getSector(p.ticker); } catch { candidateSector = null; }
       if (candidateSector) {
-        const candidateDollars = p.decision.kellyFraction * settings.starting_nav;
         const projected = (sectorDollars.get(candidateSector) ?? 0) + candidateDollars;
         const projectedPct = (projected / settings.starting_nav) * 100;
         if (projectedPct > capPct) {
@@ -1687,15 +1701,45 @@ async function processUser(
       }
     }
 
+    // ── Portfolio beta cap gate (Phase 3 #15) ──
+    // Weighted portfolio beta = Σ(posDollars × beta) / starting_nav
+    // (cash carries beta 0). Block/warn when projected exceeds cap.
+    let candidateBeta: number | null = null;
+    if (betaCapsActive) {
+      try { candidateBeta = await getBeta(p.ticker); } catch { candidateBeta = null; }
+      const useBeta = candidateBeta ?? 1;
+      const projectedBetaDollars = bookBetaDollars + candidateDollars * useBeta;
+      const projectedPortBeta = projectedBetaDollars / settings.starting_nav;
+      if (projectedPortBeta > betaCap) {
+        if (blockMode) {
+          summary.blocked++; userSummary.blocked++;
+          await supabase.from("autotrade_log").insert({
+            user_id: userId, ticker: p.ticker, action: "BLOCKED",
+            reason: `Beta cap: portfolio β would reach ${projectedPortBeta.toFixed(2)} (cap ${betaCap}, ${p.ticker} β=${useBeta.toFixed(2)})`,
+            conviction: p.decision.conviction, strategy: p.decision.strategy, profile: p.decision.profile,
+          });
+          continue;
+        } else {
+          await supabase.from("autotrade_log").insert({
+            user_id: userId, ticker: p.ticker, action: "WARN",
+            reason: `Beta warning: portfolio β → ${projectedPortBeta.toFixed(2)} (cap ${betaCap}, mode=warn)`,
+            conviction: p.decision.conviction, strategy: p.decision.strategy, profile: p.decision.profile,
+          });
+        }
+      }
+    }
+
     const beforeEntries = summary.entries;
     await executeEntry(supabase, settings, p.ticker, p.decision, summary);
     userSummary.entries += summary.entries - beforeEntries;
     if (summary.entries > beforeEntries) {
-      const dollars = p.decision.kellyFraction * settings.starting_nav;
-      totalNavExposureDollars += dollars;
+      totalNavExposureDollars += candidateDollars;
       heldTickers.add(p.ticker);
-      if (capsActive && candidateSector) {
-        sectorDollars.set(candidateSector, (sectorDollars.get(candidateSector) ?? 0) + dollars);
+      if (sectorCapsActive && candidateSector) {
+        sectorDollars.set(candidateSector, (sectorDollars.get(candidateSector) ?? 0) + candidateDollars);
+      }
+      if (betaCapsActive) {
+        bookBetaDollars += candidateDollars * (candidateBeta ?? 1);
       }
     }
   }
