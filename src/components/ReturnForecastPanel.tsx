@@ -13,8 +13,10 @@ type Horizon = "daily" | "weekly" | "monthly" | "quarterly" | "yearly";
 
 interface ForecastEntry {
   expectedPct: number;
+  medianPct?: number;
   lowPct: number;
   highPct: number;
+  probUpPct?: number;
   annualizedVolPct: number;
 }
 
