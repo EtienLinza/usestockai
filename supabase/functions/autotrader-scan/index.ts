@@ -770,6 +770,14 @@ function businessDaysSince(iso: string): number {
 // ============================================================================
 // ENTRY DECISION
 // ============================================================================
+function bucketKeyAT(c: number): string {
+  if (c < 60) return "lt60";
+  if (c < 70) return "60-69";
+  if (c < 80) return "70-79";
+  if (c < 90) return "80-89";
+  return "90+";
+}
+
 async function runEntryDecision(
   ticker: string,
   data: DataSet,
@@ -780,6 +788,9 @@ async function runEntryDecision(
   todayPnlPct: number,
   openTickers: string[],
   volScalar: number,
+  calibrationCurve: Record<string, { adjust: number }>,
+  strategyTilts: Record<string, { multiplier: number }>,
+  tickerCalibration: Record<string, { adjust: number }>,
 ): Promise<EntryAction> {
   // Daily loss limit — block all new entries
   if (todayPnlPct <= -settings.daily_loss_limit_pct) {
@@ -809,12 +820,24 @@ async function runEntryDecision(
   const sig = evaluateSignal(data, ticker, undefined, macro);
   if (!sig) return { kind: "HOLD", reason: "Insufficient data" };
   if (sig.decision === "HOLD") return { kind: "HOLD", reason: sig.reasoning };
-  if (sig.conviction < settings.min_conviction) {
-    return { kind: "HOLD", reason: `Conviction ${sig.conviction} < min ${settings.min_conviction}` };
+
+  // ── Honest conviction calibration (Phase 1 #5) ──────────────────────────
+  // Apply the same nightly-learned adjustments the scanner uses so the
+  // autotrader's min_conviction gate compares apples-to-apples. Order:
+  // strategy tilt × → bucket adjust + → per-ticker adjust +. Clamped 0..100.
+  let conviction = sig.conviction;
+  const tiltMult = strategyTilts[sig.strategy]?.multiplier ?? 1.0;
+  conviction = conviction * tiltMult;
+  const bucketAdj = calibrationCurve[bucketKeyAT(conviction)]?.adjust ?? 0;
+  conviction = conviction + bucketAdj;
+  const tickAdj = tickerCalibration[ticker.toUpperCase()]?.adjust ?? 0;
+  conviction = Math.max(0, Math.min(100, Math.round(conviction + tickAdj)));
+
+  if (conviction < settings.min_conviction) {
+    return { kind: "HOLD", reason: `Calibrated conviction ${conviction} (raw ${sig.conviction}) < min ${settings.min_conviction}` };
   }
 
-  // (News-sentiment layer removed — pure deterministic conviction now.)
-  const effectiveConviction = sig.conviction;
+  const effectiveConviction = conviction;
 
   // Size — apply portfolio-level vol-target scalar (improvement #7) BEFORE
   // single-name and headroom caps so the user-facing caps remain absolute
@@ -922,7 +945,9 @@ serve(async (req) => {
     const [spy, vixData, weightsRes] = await Promise.all([
       fetchYahooData("SPY"),
       fetchYahooData("^VIX"),
-      supabase.from("strategy_weights").select("regime_floors, exit_calibration").eq("is_active", true)
+      supabase.from("strategy_weights")
+        .select("regime_floors, exit_calibration, calibration_curve, strategy_tilts, ticker_calibration")
+        .eq("is_active", true)
         .order("computed_at", { ascending: false }).limit(1).maybeSingle(),
     ]);
     const macro: MacroContext | null = spy ? { spyClose: spy.close } : null;
@@ -937,6 +962,9 @@ serve(async (req) => {
     }
     const regimeFloors = (weightsRes.data?.regime_floors as Record<string, number> | null) ?? null;
     const exitCalibration = (weightsRes.data?.exit_calibration as Record<string, { trailMultAdjust: number }> | null) ?? null;
+    const calibrationCurve = (weightsRes.data?.calibration_curve as Record<string, { adjust: number }> | null) ?? {};
+    const strategyTilts = (weightsRes.data?.strategy_tilts as Record<string, { multiplier: number }> | null) ?? {};
+    const tickerCalibration = (weightsRes.data?.ticker_calibration as Record<string, { adjust: number }> | null) ?? {};
 
     // 3. Per-user processing — gated by per-user next_scan_at
     const now = new Date();
@@ -1013,7 +1041,7 @@ serve(async (req) => {
 
       try {
         const userSummary = { entries: 0, exits: 0, partials: 0, holds: 0, blocked: 0, errors: 0, watchlistSize: 0, openPositions: 0, evaluated: 0 };
-        await processUser(supabase, settings, macro, summary, userSummary, exitCalibration, volScalar);
+        await processUser(supabase, settings, macro, summary, userSummary, exitCalibration, volScalar, calibrationCurve, strategyTilts, tickerCalibration);
 
         // Always write a per-scan rollup so users see the bot is alive even when
         // no trades fire. This is the single source of "scan happened" visibility.
@@ -1240,6 +1268,9 @@ async function processUser(
   userSummary: UserSummary,
   exitCalibration: Record<string, { trailMultAdjust: number }> | null,
   volScalar: number,
+  calibrationCurve: Record<string, { adjust: number }>,
+  strategyTilts: Record<string, { multiplier: number }>,
+  tickerCalibration: Record<string, { adjust: number }>,
 ) {
   const userId = settings.user_id;
 
@@ -1442,6 +1473,7 @@ async function processUser(
       todayPnlPct,
       Array.from(heldTickers),
       volScalar,
+      calibrationCurve, strategyTilts, tickerCalibration,
     );
 
     if (decision.kind === "ENTER") pending.push({ kind: "enter", ticker, decision });
