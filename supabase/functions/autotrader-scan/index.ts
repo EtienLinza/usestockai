@@ -121,6 +121,8 @@ interface Settings {
   auto_add_watchlist: boolean;
   auto_watchlist_consideration_floor: number;
   auto_watchlist_stale_days: number;
+  /** Computed at runtime — 30-day rolling NAV drawdown % (positive = decline). */
+  current_drawdown_pct: number;
 }
 
 interface AdaptiveContext {
@@ -129,8 +131,16 @@ interface AdaptiveContext {
   spyTrend: "up" | "down" | "flat";
   recentPnlPct: number;        // last 7-day realized P&L % vs starting NAV
   windowDays: number;
+  /** 30-day rolling NAV drawdown % from peak (positive number). */
+  rollingDrawdownPct: number;
   adjustments: string[];       // human-readable reasons applied
 }
+
+// ── Rolling drawdown circuit breaker (Phase 3 #16) ─────────────────────────
+// Hard-block all new entries once trailing 30-day NAV drawdown exceeds this
+// threshold. Independent of daily_loss_limit (intraday) and recentPnlPct
+// (7-day realized) — catches slow bleeds the other two miss.
+const ROLLING_DD_HARD_BLOCK_PCT = 10;
 
 // (Sentiment / AI layer removed: signals are now 100% deterministic.
 //  Trading-loop AI was a regulatory + reproducibility risk — keep this surface
