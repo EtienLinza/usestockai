@@ -800,6 +800,7 @@ export type Database = {
           hard_stop_price: number | null
           id: string
           opened_by: string
+          partial_exits_taken: number
           peak_price: number | null
           pnl: number | null
           position_type: string
@@ -828,6 +829,7 @@ export type Database = {
           hard_stop_price?: number | null
           id?: string
           opened_by?: string
+          partial_exits_taken?: number
           peak_price?: number | null
           pnl?: number | null
           position_type?: string
@@ -856,6 +858,7 @@ export type Database = {
           hard_stop_price?: number | null
           id?: string
           opened_by?: string
+          partial_exits_taken?: number
           peak_price?: number | null
           pnl?: number | null
           position_type?: string

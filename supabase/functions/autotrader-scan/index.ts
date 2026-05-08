@@ -102,6 +102,7 @@ interface Position {
   breakout_failed_count: number;
   opened_by: string;
   signal_id: string | null;
+  partial_exits_taken: number;
 }
 
 interface Settings {
@@ -326,7 +327,7 @@ function algoScanIntervalMinutes(macro: MacroContext | null, vixRegime: string):
 type ExitAction =
   | { kind: "HOLD"; reason: string; trailingUpdate?: number; peakUpdate?: number }
   | { kind: "FULL_EXIT"; reason: string; price: number }
-  | { kind: "PARTIAL_EXIT"; reason: string; pct: number; price: number };
+  | { kind: "PARTIAL_EXIT"; reason: string; pct: number; price: number; nextRung?: number; trailingUpdate?: number };
 
 // ── Correlation-aware portfolio gating (improvement #4) ─────────────────
 // Compute simple log-returns over the last `lookback` daily bars and return
@@ -490,6 +491,43 @@ function runWinExit(
     trailing = isLong ? Math.max(trailing, candidate) : Math.min(trailing, candidate);
   }
   const trailingHit = isLong ? currentPrice <= trailing : currentPrice >= trailing;
+
+  // ── R-multiple partial-exit ladder (Phase 2 #7) ────────────────────────
+  // Scale out 1/3 at +1R, another 1/3 at +2R, let runner/peak handle the rest.
+  // Tightens trailing to breakeven after rung 1 fires (free trade).
+  // Initial risk per share = |entry − hard_stop_price|. Skipped if no hard stop.
+  if (pos.hard_stop_price != null && entry > 0) {
+    const initRisk = Math.abs(entry - Number(pos.hard_stop_price));
+    if (initRisk > 0) {
+      const rMult = (isLong ? currentPrice - entry : entry - currentPrice) / initRisk;
+      const rung = pos.partial_exits_taken ?? 0;
+      if (rung === 0 && rMult >= 1.0) {
+        // Rung 1: take ⅓, ratchet trailing to breakeven (entry)
+        const newTrail = isLong ? Math.max(trailing, entry) : Math.min(trailing, entry);
+        return {
+          kind: "PARTIAL_EXIT",
+          reason: `R-ladder rung 1: +1R hit (${(pnlPct * 100).toFixed(1)}%), trail → breakeven`,
+          pct: 1 / 3,
+          price: currentPrice,
+          nextRung: 1,
+          trailingUpdate: newTrail,
+        };
+      }
+      if (rung === 1 && rMult >= 2.0) {
+        // Rung 2: take another ⅓, ratchet trailing to +1R (lock first R)
+        const lockPx = isLong ? entry + initRisk : entry - initRisk;
+        const newTrail = isLong ? Math.max(trailing, lockPx) : Math.min(trailing, lockPx);
+        return {
+          kind: "PARTIAL_EXIT",
+          reason: `R-ladder rung 2: +2R hit (${(pnlPct * 100).toFixed(1)}%), trail → +1R locked`,
+          pct: 0.5, // ½ of remaining = ⅓ of original
+          price: currentPrice,
+          nextRung: 2,
+          trailingUpdate: newTrail,
+        };
+      }
+    }
+  }
 
   // Below +6% we don't try to time a peak — hold or let loss-engine cut
   const MIN_PROFIT_FOR_PEAK = 0.06;
@@ -1625,7 +1663,10 @@ async function executeExit(
       : (entry - action.price) * sharesToClose;
 
     // Reduce shares on the open row
-    await supabase.from("virtual_positions").update({ shares: remaining }).eq("id", pos.id);
+    const partialUpdates: Record<string, unknown> = { shares: remaining };
+    if (action.nextRung != null) partialUpdates.partial_exits_taken = action.nextRung;
+    if (action.trailingUpdate != null) partialUpdates.trailing_stop_price = action.trailingUpdate;
+    await supabase.from("virtual_positions").update(partialUpdates).eq("id", pos.id);
     // Insert paired closed row for accounting
     await supabase.from("virtual_positions").insert({
       user_id: pos.user_id, ticker: pos.ticker,
