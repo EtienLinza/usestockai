@@ -9,7 +9,7 @@ import { evaluateSignal, type DataSet, type MacroContext } from "../_shared/sign
 import { fetchDailyHistory } from "../_shared/yahoo-history.ts";
 import { loadCachedBars, upsertBars } from "../_shared/bars-cache.ts";
 import { getSectorConvictionModifier, macroFloorAdjust, preScreen, type SectorMomentum, type MacroRegime } from "../_shared/scan-pipeline.ts";
-import { computeReturnForecasts } from "../_shared/return-forecasts.ts";
+
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
