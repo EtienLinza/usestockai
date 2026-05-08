@@ -718,8 +718,8 @@ serve(async (req) => {
         if (pnlPct > pos.mfe) pos.mfe = pnlPct;
 
         // Live signal (for liveBias / liveAlloc / liveRsi)
-        const tEntry = valid.find(v => v.ticker === pos.ticker)!;
-        const sliced = slice(tEntry.data, tIdx.get(pos.ticker)!.get(today)!);
+        const tEntryData = dataByTicker.get(pos.ticker)!;
+        const sliced = sliceWindow(tEntryData, tIdx.get(pos.ticker)!.get(today)!);
         let liveBias: "long" | "short" | "flat" | null = null;
         let liveAlloc = 0;
         let liveRsi = 50;
@@ -792,11 +792,11 @@ serve(async (req) => {
 
       const openTickerSet = new Set(open.map(p => p.ticker));
       const openReturnSeries: number[][] = open.map(p => {
-        const td = valid.find(v => v.ticker === p.ticker);
+        const td = dataByTicker.get(p.ticker);
         if (!td) return [];
         const bi = tIdx.get(p.ticker)?.get(today);
         if (bi == null) return [];
-        return dailyReturns(td.data.close.slice(0, bi + 1), CORR_LOOKBACK);
+        return dailyReturnsWindow(td.close, bi, CORR_LOOKBACK);
       });
 
       for (const e of valid) {
@@ -808,7 +808,7 @@ serve(async (req) => {
 
         // Correlation gate
         if (open.length > 0) {
-          const candRet = dailyReturns(e.data.close.slice(0, bi + 1), CORR_LOOKBACK);
+          const candRet = dailyReturnsWindow(e.data.close, bi, CORR_LOOKBACK);
           let blocked = false;
           for (const orr of openReturnSeries) {
             const c = pearson(candRet, orr);
@@ -817,7 +817,7 @@ serve(async (req) => {
           if (blocked) continue;
         }
 
-        const sliced = slice(e.data, bi);
+        const sliced = sliceWindow(e.data, bi);
         let sig: ReturnType<typeof evaluateSignal> | null = null;
         try { sig = evaluateSignal(sliced, e.ticker, undefined, macro); } catch (_) { continue; }
         entriesEvaluated++;
