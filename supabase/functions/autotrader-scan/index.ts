@@ -595,7 +595,7 @@ function runWinExit(
   }
 
 
-  const n = data.close.length;
+  // (n already computed above for runner-mode)
   const close = data.close, vol = data.volume;
 
   // SIGNAL 1: trailing hit
