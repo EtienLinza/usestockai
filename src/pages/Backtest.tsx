@@ -1122,36 +1122,7 @@ const Backtest = () => {
                       </Card>
                     )}
 
-                    {/* Confidence Calibration */}
-                    {report.confidenceCalibration.length > 0 && (
-                      <Card className="glass-card p-6">
-                        <div className="text-sm font-medium mb-4">Confidence Calibration</div>
-                        <div className="overflow-x-auto">
-                          <table className="w-full text-xs">
-                            <thead>
-                              <tr className="border-b border-border/30">
-                                <th className="text-left py-2 text-muted-foreground font-normal">Bucket</th>
-                                <th className="text-right py-2 text-muted-foreground font-normal">Predicted</th>
-                                <th className="text-right py-2 text-muted-foreground font-normal">Actual</th>
-                                <th className="text-right py-2 text-muted-foreground font-normal">Count</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {report.confidenceCalibration.map(cc => (
-                                <tr key={cc.bucket} className="border-b border-border/10">
-                                  <td className="py-2 font-mono">{cc.bucket}</td>
-                                  <td className="text-right py-2 font-mono">{cc.predictedConf}%</td>
-                                  <td className={`text-right py-2 font-mono ${
-                                    Math.abs(cc.actualAccuracy - cc.predictedConf) < 10 ? "text-success" : "text-warning"
-                                  }`}>{cc.actualAccuracy}%</td>
-                                  <td className="text-right py-2 font-mono text-muted-foreground">{cc.count}</td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      </Card>
-                    )}
+                    {/* Confidence Calibration UI removed — kept backend-only */}
 
                     {/* Walk-Forward Periods */}
                     {report.periods.length > 0 && (
