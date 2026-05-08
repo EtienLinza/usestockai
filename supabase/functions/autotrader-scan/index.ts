@@ -1403,13 +1403,15 @@ async function processUser(
 ) {
   const userId = settings.user_id;
 
-  // Load open positions + watchlist
-  const [posRes, watchRes] = await Promise.all([
+  // Load open positions + watchlist + sector-exposure caps (Phase 3 #14)
+  const [posRes, watchRes, capsRes] = await Promise.all([
     supabase.from("virtual_positions").select("*").eq("user_id", userId).eq("status", "open"),
     supabase.from("watchlist").select("ticker, source").eq("user_id", userId).eq("asset_type", "stock"),
+    supabase.from("portfolio_caps").select("enabled, enforcement_mode, sector_max_pct").eq("user_id", userId).maybeSingle(),
   ]);
   const positions = (posRes.data ?? []) as unknown as Position[];
   let watchRows = (watchRes.data ?? []) as Array<{ ticker: string; source: string | null }>;
+  const caps = (capsRes.data ?? null) as { enabled: boolean; enforcement_mode: string; sector_max_pct: number } | null;
 
   // ── AUTO-DISCOVERY: pull promising tickers from live_signals into watchlist ──
   if (settings.auto_add_watchlist) {
