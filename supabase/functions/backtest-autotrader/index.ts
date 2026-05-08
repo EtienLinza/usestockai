@@ -558,17 +558,18 @@ serve(async (req) => {
     const body = await req.json();
     const startYear = Math.max(2000, Math.min(2026, Number(body.startYear ?? 2023)));
     const endYear = Math.max(startYear + 1, Math.min(2026, Number(body.endYear ?? 2025)));
-    const universeCap = Math.max(10, Math.min(100, Number(body.universeCap ?? 50)));
+    const universeCap = Math.max(10, Math.min(60, Number(body.universeCap ?? body.universe_cap ?? 30)));
 
+    const pick = (a: any, b: any, d: any) => (a ?? b ?? d);
     const settings: ATSettings = {
-      risk_profile: (body.risk_profile ?? "balanced") as RiskProfile,
-      adaptive_mode: body.adaptive_mode ?? true,
-      min_conviction: Number(body.min_conviction ?? 70),
-      max_positions: Number(body.max_positions ?? 8),
-      max_nav_exposure_pct: Number(body.max_nav_exposure_pct ?? 80),
-      max_single_name_pct: Number(body.max_single_name_pct ?? 20),
-      daily_loss_limit_pct: Number(body.daily_loss_limit_pct ?? 3),
-      starting_nav: Number(body.starting_nav ?? 100000),
+      risk_profile: (pick(body.riskProfile, body.risk_profile, "balanced")) as RiskProfile,
+      adaptive_mode: pick(body.adaptiveMode, body.adaptive_mode, true),
+      min_conviction: Number(pick(body.minConviction, body.min_conviction, 70)),
+      max_positions: Number(pick(body.maxPositions, body.max_positions, 8)),
+      max_nav_exposure_pct: Number(pick(body.maxNavExposurePct, body.max_nav_exposure_pct, 80)),
+      max_single_name_pct: Number(pick(body.maxSingleNamePct, body.max_single_name_pct, 20)),
+      daily_loss_limit_pct: Number(pick(body.dailyLossLimitPct, body.daily_loss_limit_pct, 3)),
+      starting_nav: Number(pick(body.startingNav, body.starting_nav, 100000)),
     };
 
     // 1. Discover universe
