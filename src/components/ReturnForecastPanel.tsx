@@ -13,8 +13,10 @@ type Horizon = "daily" | "weekly" | "monthly" | "quarterly" | "yearly";
 
 interface ForecastEntry {
   expectedPct: number;
+  medianPct?: number;
   lowPct: number;
   highPct: number;
+  probUpPct?: number;
   annualizedVolPct: number;
 }
 
@@ -140,7 +142,14 @@ export const ReturnForecastPanel = ({ initialTicker = "" }: Props) => {
                     {positive ? <TrendingUp className="w-3.5 h-3.5" /> : <TrendingDown className="w-3.5 h-3.5" />}
                     {positive ? "+" : ""}{f.expectedPct.toFixed(2)}%
                   </div>
-                  <div className="text-[10px] text-muted-foreground mt-1.5 font-mono">
+                  {f.probUpPct != null && (
+                    <div className="text-[10px] text-muted-foreground mt-1 font-mono">
+                      P(up): <span className={cn(f.probUpPct >= 50 ? "text-primary" : "text-destructive")}>
+                        {f.probUpPct.toFixed(0)}%
+                      </span>
+                    </div>
+                  )}
+                  <div className="text-[10px] text-muted-foreground mt-0.5 font-mono">
                     1σ: {f.lowPct.toFixed(1)}% / +{f.highPct.toFixed(1)}%
                   </div>
                 </Card>
@@ -149,8 +158,8 @@ export const ReturnForecastPanel = ({ initialTicker = "" }: Props) => {
           </div>
 
           <p className="text-[10px] text-muted-foreground mt-3 leading-relaxed">
-            Drift + volatility (GBM) projection from 120 daily log returns. Expected return is the mean
-            path; the 1σ band shows ~68% of likely outcomes. Not investment advice.
+            GBM projection: blended-window drift (60d/252d, Bayesian-shrunk) with EWMA volatility (λ=0.94).
+            P(up) is the model probability of a positive return; the 1σ band covers ~68% of outcomes. Not investment advice.
           </p>
         </motion.div>
       )}
