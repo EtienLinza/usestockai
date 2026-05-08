@@ -105,6 +105,26 @@ serve(async (req) => {
           conviction = Math.max(0, Math.min(100, Math.round(conviction + sectorMod.bonus)));
         }
 
+        // Volume z-score modifier: today's volume vs 20d mean (Phase 1 #2).
+        // Strong volume confirmation on a signal day is a robust quality cue;
+        // pathologically low volume is a fade tell.
+        const vol = data.volume;
+        if (vol.length >= 21) {
+          const recent = vol.slice(-21, -1); // last 20 bars excluding today
+          const today = vol[vol.length - 1] || 0;
+          const mean = recent.reduce((a, b) => a + b, 0) / recent.length;
+          const variance = recent.reduce((a, b) => a + (b - mean) ** 2, 0) / recent.length;
+          const std = Math.sqrt(variance);
+          if (std > 0 && mean > 0) {
+            const z = Math.max(-2, Math.min(2, (today - mean) / std));
+            // Map z ∈ [-2, 2] → conviction adj ∈ [-5, +5]
+            const volAdj = Math.round(z * 2.5);
+            if (volAdj !== 0) {
+              conviction = Math.max(0, Math.min(100, conviction + volAdj));
+            }
+          }
+        }
+
         const baselineFloor = strategy === "mean_reversion" ? 60 : 65;
         const adaptiveFloor = weights.regimeFloors[regime]?.floor ?? baselineFloor;
         const macroAdj = macro ? macroFloorAdjust(macro.score) : 0;
