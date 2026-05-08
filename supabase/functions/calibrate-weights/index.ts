@@ -97,7 +97,7 @@ serve(async (req) => {
 
     const { data: closed, error } = await supabase
       .from("signal_outcomes")
-      .select("conviction, realized_pnl_pct, strategy, regime, signal_type, max_favorable_excursion_pct, max_adverse_excursion_pct")
+      .select("conviction, realized_pnl_pct, strategy, regime, signal_type, ticker, entry_date, max_favorable_excursion_pct, max_adverse_excursion_pct")
       .eq("status", "closed")
       .gte("entry_date", sinceISO)
       .limit(10000);
@@ -106,6 +106,9 @@ serve(async (req) => {
 
     const rows = (closed ?? []) as OutcomeRow[];
     const sampleSize = rows.length;
+    const nowMs = Date.now();
+    // Pre-compute time weight per row so all aggregates use walk-forward decay.
+    const tw = rows.map(r => timeWeight(r.entry_date, nowMs));
 
     // ─── 1) CALIBRATION CURVE ──────────────────────────────────────────────
     // For each conviction bucket, compare realized win rate to the bucket's
