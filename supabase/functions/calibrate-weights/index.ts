@@ -36,6 +36,8 @@ interface OutcomeRow {
   strategy: string | null;
   regime: string | null;
   signal_type: string | null;
+  ticker: string | null;
+  entry_date: string | null;
   max_favorable_excursion_pct: number | null;
   max_adverse_excursion_pct: number | null;
 }
@@ -46,6 +48,18 @@ const MIN_SAMPLES_STRATEGY_REGIME = 10;
 const MIN_SAMPLES_EXIT = 12;
 const TRAIL_MULT_MIN = 0.7;   // tighten trail at most 30%
 const TRAIL_MULT_MAX = 1.4;   // loosen trail at most 40%
+// Per-ticker calibration: Bayesian shrinkage toward global curve
+const TICKER_PRIOR_STRENGTH = 30;  // equivalent to 30 "prior" trades
+const MIN_SAMPLES_TICKER = 8;      // skip tickers with fewer than this
+
+// Walk-forward time decay weights (recent → old, applied to all aggregates)
+function timeWeight(entryDate: string | null, nowMs: number): number {
+  if (!entryDate) return 1.0;
+  const ageDays = (nowMs - new Date(entryDate).getTime()) / (24 * 3600 * 1000);
+  if (ageDays <= 30) return 2.0;
+  if (ageDays <= 60) return 1.5;
+  return 1.0;
+}
 
 function bucketLabel(c: number): string {
   if (c < 60) return "lt60";
