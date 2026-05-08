@@ -147,13 +147,19 @@
 
   html {
     scroll-behavior: smooth;
+    overflow-x: hidden;
   }
 
   body {
     @apply bg-background text-foreground antialiased;
     font-family: 'Noto Sans JP', system-ui, sans-serif;
     letter-spacing: 0.01em;
+    overflow-x: hidden;
+    min-width: 0;
   }
+
+  /* Prevent any element from busting the viewport */
+  img, video, canvas, svg, table { max-width: 100%; }
 
   code, pre, .font-mono {
     font-family: 'JetBrains Mono', monospace;

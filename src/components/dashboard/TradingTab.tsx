@@ -401,9 +401,9 @@ export function TradingTab({
                 <span className="text-sm font-medium">Active Signals</span>
                 {filteredSignals.length > 0 && <Badge variant="secondary" className="text-[10px] px-1.5 h-4">{filteredSignals.length}</Badge>}
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
                 <Select value={tradingStyle} onValueChange={setTradingStyle}>
-                  <SelectTrigger className="h-7 w-[140px] text-xs">
+                  <SelectTrigger className="h-7 w-[120px] sm:w-[140px] text-xs">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -412,14 +412,14 @@ export function TradingTab({
                     ))}
                   </SelectContent>
                 </Select>
-                <Button variant="outline" size="sm" onClick={runScan} disabled={scanning || !user} className="gap-1.5 text-xs h-7">
+                <Button variant="outline" size="sm" onClick={runScan} disabled={scanning || !user} className="gap-1.5 text-xs h-7 px-2">
                   {scanning ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
                   Scan
                 </Button>
                 {signals.length > 0 && (
-                  <Button variant="ghost" size="sm" onClick={onClearSignals} disabled={!user} className="gap-1.5 text-xs h-7 text-destructive hover:text-destructive">
+                  <Button variant="ghost" size="sm" onClick={onClearSignals} disabled={!user} className="gap-1.5 text-xs h-7 px-2 text-destructive hover:text-destructive">
                     <Trash2 className="w-3 h-3" />
-                    Clear
+                    <span className="hidden sm:inline">Clear</span>
                   </Button>
                 )}
               </div>
