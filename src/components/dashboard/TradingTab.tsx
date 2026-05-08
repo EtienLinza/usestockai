@@ -257,6 +257,31 @@ export function TradingTab({
     return avgDays;
   }, [closedPositions]);
 
+  // Period return estimates (compounded from realized equity curve)
+  const returnEstimates = useMemo(() => {
+    if (portfolioHistory.length < 2) return null;
+    const first = portfolioHistory[0];
+    const last = portfolioHistory[portfolioHistory.length - 1];
+    const startVal = Number(first.total_value);
+    const endVal = Number(last.total_value);
+    if (!startVal || !endVal) return null;
+    const totalReturn = (endVal - startVal) / startVal;
+    const calDays = Math.max(1, (new Date(last.date).getTime() - new Date(first.date).getTime()) / 86400000);
+    // Convert to per-trading-day compounded rate (assume ~252/365 trading days)
+    const tradingDays = Math.max(1, calDays * (252 / 365));
+    const dailyRate = Math.pow(1 + totalReturn, 1 / tradingDays) - 1;
+    const proj = (n: number) => (Math.pow(1 + dailyRate, n) - 1) * 100;
+    return {
+      sampleDays: Math.round(calDays),
+      realizedPct: totalReturn * 100,
+      daily: proj(1),
+      weekly: proj(5),
+      monthly: proj(21),
+      quarterly: proj(63),
+      yearly: proj(252),
+    };
+  }, [portfolioHistory]);
+
   return (
     <AnimatePresence mode="wait">
       {signalsLoading ? (
