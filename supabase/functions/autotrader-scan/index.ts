@@ -1352,12 +1352,29 @@ async function processUser(
   const deferred = enterCandidates.slice(MAX_ENTRIES_PER_SCAN);
 
   for (const p of toExecute) {
+    // Re-check correlation against the live book — including any positions
+    // opened earlier in this same scan loop. Prevents stacking 2 highly
+    // correlated names just because both passed the gate independently.
+    const liveBook = Array.from(heldTickers);
+    if (liveBook.length > 0) {
+      const corr = maxCorrelationToBook(p.ticker, liveBook);
+      if (corr && corr.maxAbs >= CORR_THRESHOLD) {
+        summary.blocked++; userSummary.blocked++;
+        await supabase.from("autotrade_log").insert({
+          user_id: userId, ticker: p.ticker, action: "BLOCKED",
+          reason: `Correlation gate (intra-scan): |ρ|=${corr.maxAbs.toFixed(2)} vs ${corr.against} ≥ ${CORR_THRESHOLD}`,
+          conviction: p.decision.conviction, strategy: p.decision.strategy, profile: p.decision.profile,
+        });
+        continue;
+      }
+    }
     const beforeEntries = summary.entries;
     await executeEntry(supabase, settings, p.ticker, p.decision, summary);
     userSummary.entries += summary.entries - beforeEntries;
     if (summary.entries > beforeEntries) {
       const dollars = p.decision.kellyFraction * settings.starting_nav;
       totalNavExposureDollars += dollars;
+      heldTickers.add(p.ticker);
     }
   }
 
