@@ -102,6 +102,7 @@ interface Position {
   breakout_failed_count: number;
   opened_by: string;
   signal_id: string | null;
+  partial_exits_taken: number;
 }
 
 interface Settings {
