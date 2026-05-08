@@ -422,6 +422,18 @@ function slice(ds: DataSet, end: number): DataSet {
   };
 }
 
+function sliceWindow(ds: DataSet, end: number, lookback: number = SIM_LOOKBACK_BARS): DataSet {
+  const start = Math.max(0, end - lookback + 1);
+  return {
+    timestamps: ds.timestamps.slice(start, end + 1),
+    close: ds.close.slice(start, end + 1),
+    high: ds.high.slice(start, end + 1),
+    low: ds.low.slice(start, end + 1),
+    open: ds.open.slice(start, end + 1),
+    volume: ds.volume.slice(start, end + 1),
+  };
+}
+
 // ── Metric builders (slim subset of /backtest computeMetrics) ────────────
 function buildReport(
   trades: Trade[],
