@@ -8,6 +8,7 @@ import {
   calculateSMA,
   calculateRSI,
   calculateADX,
+  calculateBollingerBands,
   safeGet,
 } from "./indicators.ts";
 import { fetchDailyHistory } from "./yahoo-history.ts";
