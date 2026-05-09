@@ -980,6 +980,23 @@ serve(async (req) => {
           conviction = Math.max(0, Math.min(100, Math.round(conviction + sectorMod.bonus)));
         }
 
+        // ─── Phase 1 #2 — Volume z-score modifier (continuous, ±5) ─────────
+        const vol = data.volume;
+        if (vol.length >= 21) {
+          const recent = vol.slice(-21, -1);
+          const today = vol[vol.length - 1] || 0;
+          const mean = recent.reduce((a, b) => a + b, 0) / recent.length;
+          const variance = recent.reduce((a, b) => a + (b - mean) ** 2, 0) / recent.length;
+          const std = Math.sqrt(variance);
+          if (std > 0 && mean > 0) {
+            const z = Math.max(-2, Math.min(2, (today - mean) / std));
+            const volAdj = Math.round(z * 2.5);
+            if (volAdj !== 0) {
+              conviction = Math.max(0, Math.min(100, conviction + volAdj));
+            }
+          }
+        }
+
         // ─── PHASE B + D: dynamic floor (adaptive baseline + macro adjust) ─
         const baselineFloor = strategy === "mean_reversion" ? 60 : 65;
         const adaptiveFloor = regimeFloors[regime]?.floor ?? baselineFloor;
