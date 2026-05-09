@@ -927,10 +927,22 @@ serve(async (req) => {
       qualityScore: number;
     }[] = [];
 
+    // Phase 1 #4 — Earnings blackout. Pre-fetch in parallel for all candidate
+    // tickers; skip those with earnings within 3 trading days.
+    const earningsResults = await Promise.all(
+      tickersToScan.map(t => getEarningsBlackoutDays(t).catch(() => null))
+    );
+    const blackoutSet = new Set<string>();
+    tickersToScan.forEach((t, i) => {
+      const days = earningsResults[i];
+      if (days !== null && days <= 3) blackoutSet.add(t);
+    });
+
     for (let ti = 0; ti < tickersToScan.length; ti++) {
       const ticker = tickersToScan[ti];
       const data = allData[ti];
       if (!data || data.close.length < 200) continue;
+      if (blackoutSet.has(ticker)) continue;
 
       try {
         // ─── SINGLE SOURCE OF TRUTH ────────────────────────────────────────
