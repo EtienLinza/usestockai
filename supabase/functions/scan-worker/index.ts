@@ -72,10 +72,28 @@ serve(async (req) => {
       if (warm.length > 0) { upsertBars(warm).catch(() => {}); }
     }
 
+    // Phase 1 #4 — Earnings blackout. Pre-fetch in parallel for the survivors
+    // so we don't block on serial Finnhub calls. Tickers with earnings ≤3
+    // trading days away are skipped before evaluateSignal — gap risk routinely
+    // breaks ATR-based stops and our engine has no edge through binary events.
+    const survivors = tickers.filter(t => {
+      const d = cache.get(t);
+      return d && d.close.length >= 200;
+    });
+    const earningsResults = await Promise.all(
+      survivors.map(t => getEarningsBlackoutDays(t).catch(() => null))
+    );
+    const blackoutSet = new Set<string>();
+    survivors.forEach((t, i) => {
+      const days = earningsResults[i];
+      if (days !== null && days <= 3) blackoutSet.add(t);
+    });
+
     const signals: any[] = [];
     for (const ticker of tickers) {
       const data = cache.get(ticker);
       if (!data || data.close.length < 200) continue;
+      if (blackoutSet.has(ticker)) continue;
       try {
         const sig = evaluateSignal(
           data, ticker,
