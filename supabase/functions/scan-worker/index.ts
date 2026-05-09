@@ -9,6 +9,7 @@ import { evaluateSignal, type DataSet, type MacroContext } from "../_shared/sign
 import { fetchDailyHistory } from "../_shared/yahoo-history.ts";
 import { loadCachedBars, upsertBars } from "../_shared/bars-cache.ts";
 import { getSectorConvictionModifier, macroFloorAdjust, preScreen, type SectorMomentum, type MacroRegime } from "../_shared/scan-pipeline.ts";
+import { getEarningsBlackoutDays } from "../_shared/finnhub.ts";
 
 
 const corsHeaders = {
