@@ -1022,7 +1022,13 @@ export function evaluateSignal(
   // counter-trend penalty — block it here).
   const macroOk = macroPermitsEntry(targetDir, macro ?? null);
 
-  if (!biasMatches || !dailyEntry || sig.confidence === 0 || !macroOk) {
+  // Phase 1 #1 — Multi-timeframe HARD gate. Require the weekly bias to be at
+  // ≥0.5 target allocation. Quarter-strength biases (rsiVal weak, ADX low,
+  // pullback-only) too often produce whipsaws against a not-yet-trending
+  // weekly. Block them here so they can't reach the autotrader.
+  const weeklyStrong = Math.abs(weeklyBias.targetAllocation) >= 0.5;
+
+  if (!biasMatches || !weeklyStrong || !dailyEntry || sig.confidence === 0 || !macroOk) {
     return {
       decision: "HOLD",
       conviction: sig.confidence,
