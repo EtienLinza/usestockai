@@ -1044,6 +1044,8 @@ export function evaluateSignal(
         ? `Macro regime blocks ${targetDir} entry`
         : !biasMatches
         ? `Weekly bias ${weeklyBias.bias} disagrees with daily ${sigDir.toLowerCase()}`
+        : !weeklyStrong
+        ? `Weekly bias too weak (alloc ${(weeklyBias.targetAllocation * 100).toFixed(0)}%) — multi-TF gate requires ≥50%`
         : !dailyEntry
         ? "Daily entry timing not confirmed"
         : "Conviction below threshold",
