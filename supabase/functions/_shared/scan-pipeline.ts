@@ -8,6 +8,7 @@ import {
   calculateSMA,
   calculateRSI,
   calculateADX,
+  calculateBollingerBands,
   safeGet,
 } from "./indicators.ts";
 import { fetchDailyHistory } from "./yahoo-history.ts";
@@ -323,6 +324,19 @@ export function preScreen(data: DataSet): boolean {
   if (adxV > 18) return true;
   if (rsiV < 32 || rsiV > 68) return true;
   if (nearHi || nearLo) return true;
+
+  // Phase 1 #6 — BB squeeze release: current bandwidth in bottom 20% of last
+  // 50 bars AND today's bar pushes outside the band → imminent expansion candidate.
+  const bb = calculateBollingerBands(close, 20, 2);
+  const bwSeries = bb.bandwidth.filter(v => !isNaN(v));
+  if (bwSeries.length >= 50) {
+    const recent = bwSeries.slice(-50).slice().sort((a, b) => a - b);
+    const pct20 = recent[Math.floor(recent.length * 0.2)];
+    const bwNow = bwSeries[bwSeries.length - 1];
+    const bbU = safeGet(bb.upper, px * 1.1);
+    const bbL = safeGet(bb.lower, px * 0.9);
+    if (bwNow <= pct20 && (px >= bbU * 0.99 || px <= bbL * 1.01)) return true;
+  }
 
   // Momentum-pullback candidate (price near 20-EMA in uptrend)
   const ema20 = calculateEMA(close, 20);

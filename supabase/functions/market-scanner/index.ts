@@ -110,6 +110,7 @@ import {
   type WeeklyBias,
   type MacroContext,
 } from "../_shared/signal-engine-v2.ts";
+import { getEarningsBlackoutDays } from "../_shared/finnhub.ts";
 
 
 
@@ -926,10 +927,22 @@ serve(async (req) => {
       qualityScore: number;
     }[] = [];
 
+    // Phase 1 #4 — Earnings blackout. Pre-fetch in parallel for all candidate
+    // tickers; skip those with earnings within 3 trading days.
+    const earningsResults = await Promise.all(
+      tickersToScan.map(t => getEarningsBlackoutDays(t).catch(() => null))
+    );
+    const blackoutSet = new Set<string>();
+    tickersToScan.forEach((t, i) => {
+      const days = earningsResults[i];
+      if (days !== null && days <= 3) blackoutSet.add(t);
+    });
+
     for (let ti = 0; ti < tickersToScan.length; ti++) {
       const ticker = tickersToScan[ti];
       const data = allData[ti];
       if (!data || data.close.length < 200) continue;
+      if (blackoutSet.has(ticker)) continue;
 
       try {
         // ─── SINGLE SOURCE OF TRUTH ────────────────────────────────────────
@@ -965,6 +978,23 @@ serve(async (req) => {
         const sectorMod = getSectorConvictionModifier(ticker, sectorMomentum);
         if (sectorMod.bonus !== 0) {
           conviction = Math.max(0, Math.min(100, Math.round(conviction + sectorMod.bonus)));
+        }
+
+        // ─── Phase 1 #2 — Volume z-score modifier (continuous, ±5) ─────────
+        const vol = data.volume;
+        if (vol.length >= 21) {
+          const recent = vol.slice(-21, -1);
+          const today = vol[vol.length - 1] || 0;
+          const mean = recent.reduce((a, b) => a + b, 0) / recent.length;
+          const variance = recent.reduce((a, b) => a + (b - mean) ** 2, 0) / recent.length;
+          const std = Math.sqrt(variance);
+          if (std > 0 && mean > 0) {
+            const z = Math.max(-2, Math.min(2, (today - mean) / std));
+            const volAdj = Math.round(z * 2.5);
+            if (volAdj !== 0) {
+              conviction = Math.max(0, Math.min(100, conviction + volAdj));
+            }
+          }
         }
 
         // ─── PHASE B + D: dynamic floor (adaptive baseline + macro adjust) ─
