@@ -755,6 +755,7 @@ function runWinExit(
 function runLossExit(
   pos: Position, _data: DataSet, currentPrice: number, profile: ProfileParams,
   liveDecision: "BUY" | "SHORT" | "HOLD" | null,
+  liveConviction: number,
   liveWeeklyBias: "long" | "short" | "flat" | null,
   liveRsi: number,
 ): ExitAction | null {
@@ -771,20 +772,23 @@ function runLossExit(
   }
 
   // T1.5: Intent flip — live engine fires the OPPOSITE side decision (Phase 2 #11).
-  // This is a pure-signal exit: the same engine that opened the position now says
-  // the trade should reverse. Exit immediately regardless of PnL (the engine
-  // already requires high conviction + bias agreement to flip, so it's rare and
-  // meaningful). Skips for tiny gains < 0.5% to avoid round-trip churn.
-  if (liveDecision && Math.abs(pnlPct) > 0.005) {
+  // Normally requires |pnl| > 0.5% to avoid round-trip churn, BUT a high-conviction
+  // (≥75) opposite signal overrides that gate — at that quality the engine is
+  // explicitly telling us the trade should reverse, and the round-trip cost is
+  // small versus the expected loss from holding through the reversal.
+  if (liveDecision) {
     const opposite =
       (isLong && liveDecision === "SHORT") ||
       (!isLong && liveDecision === "BUY");
     if (opposite) {
-      return {
-        kind: "FULL_EXIT",
-        reason: `Engine flipped to ${liveDecision} (intent reversal, pnl ${(pnlPct * 100).toFixed(1)}%)`,
-        price: currentPrice,
-      };
+      const churnGateOk = Math.abs(pnlPct) > 0.005 || liveConviction >= 75;
+      if (churnGateOk) {
+        return {
+          kind: "FULL_EXIT",
+          reason: `Engine flipped to ${liveDecision} (intent reversal, conv ${liveConviction}, pnl ${(pnlPct * 100).toFixed(1)}%)`,
+          price: currentPrice,
+        };
+      }
     }
   }
 
