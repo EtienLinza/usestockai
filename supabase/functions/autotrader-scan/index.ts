@@ -1495,6 +1495,7 @@ async function processUser(
     // Live evaluateSignal output for thesis check
     let liveBias: "long" | "short" | "flat" | null = null;
     let liveDecision: "BUY" | "SHORT" | "HOLD" | null = null;
+    let liveConviction = 0;
     let liveWeeklyAlloc = pos.entry_weekly_alloc ?? 0;
     let liveRsi = 50;
     try {
@@ -1502,6 +1503,7 @@ async function processUser(
       if (sig) {
         liveBias = sig.weeklyBias.bias;
         liveDecision = sig.decision;
+        liveConviction = sig.conviction ?? 0;
         liveWeeklyAlloc = sig.weeklyBias.targetAllocation;
       }
       const rsiArr = calculateRSI(data.close, 14);
@@ -1523,7 +1525,7 @@ async function processUser(
       : baseProfile;
 
     // Run loss + win in priority order (loss wins ties)
-    const lossAct = runLossExit(pos, data, currentPrice, profile, liveDecision, liveBias, liveRsi);
+    const lossAct = runLossExit(pos, data, currentPrice, profile, liveDecision, liveConviction, liveBias, liveRsi);
     const action: ExitAction = lossAct ?? runWinExit(pos, data, currentPrice, profile, liveWeeklyAlloc);
 
     const beforeExits = summary.exits, beforePartials = summary.partials, beforeHolds = summary.holds;
