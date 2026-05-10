@@ -523,13 +523,20 @@ function runWinExit(
   const oldPeak = pos.peak_price ?? entry;
   const newPeak = isLong ? Math.max(oldPeak, currentPrice) : Math.min(oldPeak, currentPrice);
 
-  // Trailing-stop ratchet
+  // Trailing-stop ratchet (Phase 2 #9 — Chandelier-style anchored to peak,
+  // tightening as the R-ladder advances: looser ATR pre-rung, 3.0×ATR after
+  // rung 1, 2.5×ATR after rung 2. Locks gains earlier on mid-sized winners
+  // that never reach runner mode's 12%+ floor.)
   const atr = pos.entry_atr ?? 0;
   let trailing = pos.trailing_stop_price ?? pos.hard_stop_price ?? (isLong ? entry * 0.95 : entry * 1.05);
   if (atr > 0) {
+    const rungNow = pos.partial_exits_taken ?? 0;
+    const trailMult = rungNow >= 2 ? 2.5
+                    : rungNow >= 1 ? 3.0
+                    : profile.trailingStopATRMult;
     const candidate = isLong
-      ? newPeak - atr * profile.trailingStopATRMult
-      : newPeak + atr * profile.trailingStopATRMult;
+      ? newPeak - atr * trailMult
+      : newPeak + atr * trailMult;
     trailing = isLong ? Math.max(trailing, candidate) : Math.min(trailing, candidate);
   }
   const trailingHit = isLong ? currentPrice <= trailing : currentPrice >= trailing;
