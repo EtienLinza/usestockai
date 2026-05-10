@@ -1005,6 +1005,25 @@ export function evaluateSignal(
     adaptiveContext,
   );
 
+  // Phase 1 #2 — Volume z-score conviction modifier (in-engine so backtest
+  // and live share identical math). Today's volume vs the prior 20-bar mean,
+  // clipped to z ∈ [-2, 2] → conviction adj ∈ [-5, +5].
+  if (sig.confidence > 0 && data.volume.length >= 21) {
+    const vol = data.volume;
+    const recent = vol.slice(-21, -1);
+    const today = vol[vol.length - 1] || 0;
+    const mean = recent.reduce((a, b) => a + b, 0) / recent.length;
+    const variance = recent.reduce((a, b) => a + (b - mean) ** 2, 0) / recent.length;
+    const std = Math.sqrt(variance);
+    if (std > 0 && mean > 0) {
+      const z = Math.max(-2, Math.min(2, (today - mean) / std));
+      const volAdj = Math.round(z * 2.5);
+      if (volAdj !== 0) {
+        sig.confidence = Math.max(0, Math.min(100, sig.confidence + volAdj));
+      }
+    }
+  }
+
   // 4. Cross-check daily entry signal with the weekly bias direction
   const lastIdx = data.close.length - 1;
   const targetDir: "long" | "short" = weeklyBias.bias === "long" ? "long" : "short";
