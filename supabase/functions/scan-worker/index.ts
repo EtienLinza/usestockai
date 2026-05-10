@@ -126,7 +126,7 @@ serve(async (req) => {
 
         // Volume z-score adj is applied inside evaluateSignal (Phase 1 #2,
         // moved into the unified engine so backtest matches live exactly).
-        }
+
 
         const baselineFloor = strategy === "mean_reversion" ? 60 : 65;
         const adaptiveFloor = weights.regimeFloors[regime]?.floor ?? baselineFloor;
