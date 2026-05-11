@@ -178,7 +178,7 @@ serve(async (req) => {
     }
     (calibration_curve as any).__isotonic = isotonic;
 
-
+    // ─── 2) STRATEGY TILTS (walk-forward weighted) ─────────────────────────
     const strats: Record<string, { wWins: number; wCount: number; wSumRet: number; raw: number }> = {};
     rows.forEach((r, i) => {
       const k = r.strategy ?? "unknown";
