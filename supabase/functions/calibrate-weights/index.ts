@@ -137,7 +137,48 @@ serve(async (req) => {
       calibration_curve[label] = { actualWinRate: actual, expectedWinRate: expected, adjust, count: v.raw };
     }
 
-    // ─── 2) STRATEGY TILTS (walk-forward weighted) ─────────────────────────
+    // ─── 1b) ISOTONIC CALIBRATION (Phase 1 #5) ────────────────────────────
+    // Fine 5-pt buckets [50,55,…,95] of weighted win rate, then PAV to
+    // enforce a monotonic non-decreasing curve. Stored under a reserved
+    // `__isotonic` key on calibration_curve so legacy bucket consumers
+    // keep working unchanged.
+    const FINE_BUCKET_MIN_RAW = 8;
+    const fine: Record<number, { wWins: number; wCount: number; raw: number }> = {};
+    rows.forEach((r, i) => {
+      const c = Math.max(0, Math.min(100, Number(r.conviction)));
+      const lo = Math.floor(c / 5) * 5;
+      fine[lo] ??= { wWins: 0, wCount: 0, raw: 0 };
+      fine[lo].raw++;
+      fine[lo].wCount += tw[i];
+      if (Number(r.realized_pnl_pct ?? 0) > 0) fine[lo].wWins += tw[i];
+    });
+    const rawAnchors = Object.entries(fine)
+      .filter(([, v]) => v.raw >= FINE_BUCKET_MIN_RAW && v.wCount > 0)
+      .map(([loStr, v]) => {
+        const lo = Number(loStr);
+        const wr = (v.wWins / v.wCount) * 100;
+        return { x: lo + 2.5, y: wr, w: v.wCount, raw: v.raw };
+      })
+      .sort((a, b) => a.x - b.x);
+
+    let isotonic: IsotonicAnchor[] = [];
+    if (rawAnchors.length >= 3) {
+      const monotone = pav(rawAnchors.map((p) => ({ x: p.x, y: p.y, w: p.w })));
+      isotonic = monotone.map((m) => {
+        const nearest = rawAnchors.reduce(
+          (best, r) => Math.abs(r.x - m.x) < Math.abs(best.x - m.x) ? r : best,
+          rawAnchors[0],
+        );
+        return {
+          conviction: Math.round(m.x * 10) / 10,
+          calibrated: Math.round(m.y * 10) / 10,
+          count: nearest.raw,
+        };
+      });
+    }
+    (calibration_curve as any).__isotonic = isotonic;
+
+
     const strats: Record<string, { wWins: number; wCount: number; wSumRet: number; raw: number }> = {};
     rows.forEach((r, i) => {
       const k = r.strategy ?? "unknown";
