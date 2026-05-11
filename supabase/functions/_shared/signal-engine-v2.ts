@@ -656,41 +656,57 @@ export function computeStrategySignal(
   let mrSignal: "BUY" | "SHORT" | "HOLD" = "HOLD";
   let mrConviction = 0;
 
-  // RSI divergence detection over last 20 bars (Phase 1 #3).
-  // Bullish: price makes lower low, RSI makes higher low → buying pressure
-  //          underneath the new low. Bearish is the inverse.
-  // Detected by comparing the last 5 bars' extreme to the prior 15 bars'
-  // extreme on both price and RSI series.
+  // Phase 1 #3 — Breadth-aware divergence over last 20 bars on BOTH RSI and
+  // MACD-histogram. Treat each as a discrete contributing rule used across
+  // strategies (trend gets a bonus/penalty, breakout gets a confirmation
+  // bonus, MR uses it as a scoring condition). Confirmed = both indicators
+  // agree, which is the higher-quality variant we weight more heavily.
   let bullishDivergence = false, bearishDivergence = false;
+  let bullishDivConfirmed = false, bearishDivConfirmed = false;
+  const macdHistArr = macdData.histogram;
   if (n >= 21 && rsi.length >= 21) {
-    const recentLowIdx = (() => {
-      let mi = n - 5, mv = close[n - 5];
-      for (let i = n - 4; i < n; i++) if (close[i] < mv) { mv = close[i]; mi = i; }
+    const argMin = (from: number, toExcl: number) => {
+      let mi = from, mv = close[from];
+      for (let i = from + 1; i < toExcl; i++) if (close[i] < mv) { mv = close[i]; mi = i; }
       return mi;
-    })();
-    const priorLowIdx = (() => {
-      let mi = n - 20, mv = close[n - 20];
-      for (let i = n - 19; i < n - 5; i++) if (close[i] < mv) { mv = close[i]; mi = i; }
+    };
+    const argMax = (from: number, toExcl: number) => {
+      let mi = from, mv = close[from];
+      for (let i = from + 1; i < toExcl; i++) if (close[i] > mv) { mv = close[i]; mi = i; }
       return mi;
-    })();
-    const recentHighIdx = (() => {
-      let mi = n - 5, mv = close[n - 5];
-      for (let i = n - 4; i < n; i++) if (close[i] > mv) { mv = close[i]; mi = i; }
-      return mi;
-    })();
-    const priorHighIdx = (() => {
-      let mi = n - 20, mv = close[n - 20];
-      for (let i = n - 19; i < n - 5; i++) if (close[i] > mv) { mv = close[i]; mi = i; }
-      return mi;
-    })();
-    if (
+    };
+    const recentLowIdx = argMin(n - 5, n);
+    const priorLowIdx  = argMin(n - 20, n - 5);
+    const recentHighIdx = argMax(n - 5, n);
+    const priorHighIdx  = argMax(n - 20, n - 5);
+
+    const rsiBullDiv =
       !isNaN(rsi[recentLowIdx]) && !isNaN(rsi[priorLowIdx]) &&
-      close[recentLowIdx] < close[priorLowIdx] && rsi[recentLowIdx] > rsi[priorLowIdx] + 2
-    ) bullishDivergence = true;
-    if (
+      close[recentLowIdx] < close[priorLowIdx] && rsi[recentLowIdx] > rsi[priorLowIdx] + 2;
+    const rsiBearDiv =
       !isNaN(rsi[recentHighIdx]) && !isNaN(rsi[priorHighIdx]) &&
-      close[recentHighIdx] > close[priorHighIdx] && rsi[recentHighIdx] < rsi[priorHighIdx] - 2
-    ) bearishDivergence = true;
+      close[recentHighIdx] > close[priorHighIdx] && rsi[recentHighIdx] < rsi[priorHighIdx] - 2;
+
+    // MACD histogram is right-aligned to close (length matches), so index
+    // directly. Require a meaningful gap on the histogram (5% of recent |hist|
+    // range) so we don't fire on noise.
+    let macdBullDiv = false, macdBearDiv = false;
+    if (macdHistArr && macdHistArr.length === close.length) {
+      const window = macdHistArr.slice(n - 20, n).filter(v => !isNaN(v));
+      const histAbsMax = window.length ? Math.max(...window.map(Math.abs)) : 0;
+      const eps = Math.max(0.0001, histAbsMax * 0.05);
+      const hRecLow = macdHistArr[recentLowIdx], hPrLow = macdHistArr[priorLowIdx];
+      const hRecHi  = macdHistArr[recentHighIdx], hPrHi = macdHistArr[priorHighIdx];
+      if (!isNaN(hRecLow) && !isNaN(hPrLow) &&
+          close[recentLowIdx] < close[priorLowIdx] && hRecLow > hPrLow + eps) macdBullDiv = true;
+      if (!isNaN(hRecHi) && !isNaN(hPrHi) &&
+          close[recentHighIdx] > close[priorHighIdx] && hRecHi < hPrHi - eps) macdBearDiv = true;
+    }
+
+    bullishDivergence = rsiBullDiv || macdBullDiv;
+    bearishDivergence = rsiBearDiv || macdBearDiv;
+    bullishDivConfirmed = rsiBullDiv && macdBullDiv;
+    bearishDivConfirmed = rsiBearDiv && macdBearDiv;
   }
 
   const mrRsiOverride = rsiVal < RSI_OS || rsiVal > RSI_OB;
