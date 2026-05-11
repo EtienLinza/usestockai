@@ -10,6 +10,7 @@ import { fetchDailyHistory } from "../_shared/yahoo-history.ts";
 import { loadCachedBars, upsertBars } from "../_shared/bars-cache.ts";
 import { getSectorConvictionModifier, macroFloorAdjust, preScreen, type SectorMomentum, type MacroRegime } from "../_shared/scan-pipeline.ts";
 import { getEarningsBlackoutDays } from "../_shared/finnhub.ts";
+import { applyIsotonicCalibration, type IsotonicAnchor } from "../_shared/calibration.ts";
 
 
 const corsHeaders = {
@@ -113,8 +114,15 @@ serve(async (req) => {
           ? cell.multiplier
           : (weights.strategyTilts[strategy]?.multiplier ?? 1.0);
         conviction = conviction * tilt;
-        const adj = weights.calibrationCurve[bucketKey(conviction)]?.adjust ?? 0;
-        conviction = conviction + adj;
+        // Phase 1 #5 — isotonic calibration when ≥3 fine-bucket anchors exist;
+        // otherwise fall back to the legacy coarse-bucket adjust.
+        const isoAnchors = (weights.calibrationCurve as any)?.__isotonic as IsotonicAnchor[] | undefined;
+        if (isoAnchors && isoAnchors.length >= 3) {
+          conviction = applyIsotonicCalibration(conviction, isoAnchors);
+        } else {
+          const adj = weights.calibrationCurve[bucketKey(conviction)]?.adjust ?? 0;
+          conviction = conviction + adj;
+        }
         // Per-ticker calibration (Bayesian-shrunk vs global curve).
         const tickAdj = weights.tickerCalibration?.[ticker.toUpperCase()]?.adjust ?? 0;
         conviction = Math.max(0, Math.min(100, Math.round(conviction + tickAdj)));

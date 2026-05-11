@@ -111,6 +111,7 @@ import {
   type MacroContext,
 } from "../_shared/signal-engine-v2.ts";
 import { getEarningsBlackoutDays } from "../_shared/finnhub.ts";
+import { applyIsotonicCalibration, type IsotonicAnchor } from "../_shared/calibration.ts";
 
 
 
@@ -969,8 +970,14 @@ serve(async (req) => {
           ? cell.multiplier
           : (strategyTilts[strategy]?.multiplier ?? 1.0);
         conviction = conviction * tilt;
-        const adj = calibrationCurve[bucketKey(conviction)]?.adjust ?? 0;
-        conviction = conviction + adj;
+        // Phase 1 #5 — isotonic calibration (PAV) when enough fine buckets exist.
+        const isoAnchors = (calibrationCurve as any)?.__isotonic as IsotonicAnchor[] | undefined;
+        if (isoAnchors && isoAnchors.length >= 3) {
+          conviction = applyIsotonicCalibration(conviction, isoAnchors);
+        } else {
+          const adj = calibrationCurve[bucketKey(conviction)]?.adjust ?? 0;
+          conviction = conviction + adj;
+        }
         const tickAdj = tickerCalibration[ticker.toUpperCase()]?.adjust ?? 0;
         conviction = Math.max(0, Math.min(100, Math.round(conviction + tickAdj)));
 

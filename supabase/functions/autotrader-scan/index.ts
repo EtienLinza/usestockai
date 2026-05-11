@@ -34,6 +34,7 @@ import { evaluateScanHealth, type TickerHealth } from "../_shared/circuit-breake
 import { fetchDailyHistory } from "../_shared/yahoo-history.ts";
 import { getQuoteWithFallback, getEarningsBlackoutDays, getSector, getBeta } from "../_shared/finnhub.ts";
 import { recordHeartbeat } from "../_shared/heartbeat.ts";
+import { applyIsotonicCalibration, type IsotonicAnchor } from "../_shared/calibration.ts";
 
 /** Thrown by the circuit breaker to abort the entire scan immediately. */
 class CircuitBreakerTrippedError extends Error {
@@ -942,8 +943,13 @@ async function runEntryDecision(
   let conviction = sig.conviction;
   const tiltMult = strategyTilts[sig.strategy]?.multiplier ?? 1.0;
   conviction = conviction * tiltMult;
-  const bucketAdj = calibrationCurve[bucketKeyAT(conviction)]?.adjust ?? 0;
-  conviction = conviction + bucketAdj;
+  const isoAnchors = (calibrationCurve as any)?.__isotonic as IsotonicAnchor[] | undefined;
+  if (isoAnchors && isoAnchors.length >= 3) {
+    conviction = applyIsotonicCalibration(conviction, isoAnchors);
+  } else {
+    const bucketAdj = calibrationCurve[bucketKeyAT(conviction)]?.adjust ?? 0;
+    conviction = conviction + bucketAdj;
+  }
   const tickAdj = tickerCalibration[ticker.toUpperCase()]?.adjust ?? 0;
   conviction = Math.max(0, Math.min(100, Math.round(conviction + tickAdj)));
 
