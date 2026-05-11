@@ -943,8 +943,13 @@ async function runEntryDecision(
   let conviction = sig.conviction;
   const tiltMult = strategyTilts[sig.strategy]?.multiplier ?? 1.0;
   conviction = conviction * tiltMult;
-  const bucketAdj = calibrationCurve[bucketKeyAT(conviction)]?.adjust ?? 0;
-  conviction = conviction + bucketAdj;
+  const isoAnchors = (calibrationCurve as any)?.__isotonic as IsotonicAnchor[] | undefined;
+  if (isoAnchors && isoAnchors.length >= 3) {
+    conviction = applyIsotonicCalibration(conviction, isoAnchors);
+  } else {
+    const bucketAdj = calibrationCurve[bucketKeyAT(conviction)]?.adjust ?? 0;
+    conviction = conviction + bucketAdj;
+  }
   const tickAdj = tickerCalibration[ticker.toUpperCase()]?.adjust ?? 0;
   conviction = Math.max(0, Math.min(100, Math.round(conviction + tickAdj)));
 
