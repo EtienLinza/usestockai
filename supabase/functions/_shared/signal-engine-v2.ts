@@ -785,6 +785,36 @@ export function computeStrategySignal(
     }
   }
 
+  // Phase 1 #3 — Apply divergence as a discrete cross-strategy modifier on
+  // Trend and Breakout (MR already uses it as a scoring condition above).
+  // Confirmed (RSI + MACD agree) doubles the bonus / deepens the penalty.
+  const divBonusBase = 6;
+  const divPenaltyMult = 0.85;
+  const divPenaltyMultConfirmed = 0.75;
+  const applyDiv = (sig: "BUY" | "SHORT" | "HOLD", conv: number): number => {
+    if (sig === "HOLD" || conv <= 0) return conv;
+    if (sig === "BUY") {
+      if (bullishDivergence) {
+        const bonus = bullishDivConfirmed ? divBonusBase * 2 : divBonusBase;
+        return applyBonusPool(conv, bonus, 12);
+      }
+      if (bearishDivergence) {
+        return conv * (bearishDivConfirmed ? divPenaltyMultConfirmed : divPenaltyMult);
+      }
+    } else { // SHORT
+      if (bearishDivergence) {
+        const bonus = bearishDivConfirmed ? divBonusBase * 2 : divBonusBase;
+        return applyBonusPool(conv, bonus, 12);
+      }
+      if (bullishDivergence) {
+        return conv * (bullishDivConfirmed ? divPenaltyMultConfirmed : divPenaltyMult);
+      }
+    }
+    return conv;
+  };
+  trendConviction = applyDiv(trendSignal, trendConviction);
+  boConviction = applyDiv(boSignal, boConviction);
+
   // Profile-specific conviction bonuses (pooled, not raw additive)
   const pb = profileBonuses || {};
   if (trendSignal !== "HOLD" && pb.trendConvictionBonus) {
