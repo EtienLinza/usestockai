@@ -234,6 +234,7 @@ export type Database = {
           reasoning: string | null
           regime: string | null
           signal_type: string
+          source: string
           stock_profile: string | null
           strategy: string | null
           target_allocation: number | null
@@ -249,6 +250,7 @@ export type Database = {
           reasoning?: string | null
           regime?: string | null
           signal_type: string
+          source?: string
           stock_profile?: string | null
           strategy?: string | null
           target_allocation?: number | null
@@ -264,6 +266,7 @@ export type Database = {
           reasoning?: string | null
           regime?: string | null
           signal_type?: string
+          source?: string
           stock_profile?: string | null
           strategy?: string | null
           target_allocation?: number | null
