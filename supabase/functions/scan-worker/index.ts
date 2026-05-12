@@ -32,6 +32,7 @@ interface Body {
     exitCalibration?: Record<string, { trailMultAdjust: number }>;
     tickerCalibration?: Record<string, { adjust: number }>;
   };
+  mode?: "premarket" | "live";
 }
 
 function bucketKey(c: number): string {
