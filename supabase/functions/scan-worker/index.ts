@@ -92,6 +92,24 @@ serve(async (req) => {
       if (days !== null && days <= 3) blackoutSet.add(t);
     });
 
+    // Pre-market mode: pull extended-hours quotes in parallel for survivors so
+    // we can compute the overnight gap and skip / boost accordingly.
+    //   • same-direction gap > 4%  → skip (already extended, poor R:R)
+    //   • opposite-direction gap > 1% → skip (thesis invalidated overnight)
+    //   • same-direction gap ≥ 1.5% → +3 conviction (pre-confirmation)
+    const gapMap = new Map<string, number>(); // ticker → gap pct (signed)
+    if (mode === "premarket") {
+      const PAR = 25;
+      for (let i = 0; i < survivors.length; i += PAR) {
+        const slice = survivors.slice(i, i + PAR);
+        const quotes = await Promise.all(slice.map(t => fetchPremarketQuote(t).catch(() => null)));
+        slice.forEach((t, k) => {
+          const q = quotes[k];
+          if (q && q.prevClose > 0) gapMap.set(t, (q.premarketPx - q.prevClose) / q.prevClose);
+        });
+      }
+    }
+
     const signals: any[] = [];
     for (const ticker of tickers) {
       const data = cache.get(ticker);
