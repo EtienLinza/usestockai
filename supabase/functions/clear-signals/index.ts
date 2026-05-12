@@ -25,11 +25,14 @@ serve(async (req) => {
     try { body = await req.json(); } catch { /* empty body is fine */ }
     const autoRescan = body.autoRescan ?? false;
 
-    // Delete all existing signals
+    // Delete all live signals, but preserve fresh pre-market signals (≤6h old)
+    // so the staleness sweep doesn't wipe out the morning's pre-open scan
+    // before traders have a chance to see it.
+    const sixHoursAgo = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString();
     const { error: deleteError } = await supabase
       .from("live_signals")
       .delete()
-      .neq("id", "00000000-0000-0000-0000-000000000000");
+      .or(`source.neq.premarket,created_at.lt.${sixHoursAgo}`);
 
     if (deleteError) {
       console.error("Failed to clear signals:", deleteError);
