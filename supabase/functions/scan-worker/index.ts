@@ -155,6 +155,17 @@ serve(async (req) => {
         // Volume z-score adj is applied inside evaluateSignal (Phase 1 #2,
         // moved into the unified engine so backtest matches live exactly).
 
+        // Pre-market overnight-gap gating + bonus.
+        if (mode === "premarket" && gapMap.has(ticker)) {
+          const gap = gapMap.get(ticker)!;            // signed fraction (e.g. 0.025 = +2.5%)
+          const dir = sig.decision === "BUY" ? 1 : -1;
+          const sameDir = gap * dir;                  // positive when gap aligns with thesis
+          if (sameDir > 0.04) continue;               // skip — already extended
+          if (sameDir < -0.01) continue;              // skip — thesis invalidated
+          if (sameDir >= 0.015) {
+            conviction = Math.max(0, Math.min(100, Math.round(conviction + 3)));
+          }
+        }
 
         const baselineFloor = strategy === "mean_reversion" ? 60 : 65;
         const adaptiveFloor = weights.regimeFloors[regime]?.floor ?? baselineFloor;
