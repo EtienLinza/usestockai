@@ -77,3 +77,25 @@ export function isMarketHoliday(d: Date = new Date()): boolean {
 export function nyseCloseMinute(d: Date = new Date()): number {
   return NYSE_EARLY_CLOSES.has(toEtDateString(d)) ? 13 * 60 : 16 * 60;
 }
+
+/** Minute-of-day (0..1439) in America/New_York for the given UTC instant. */
+export function etMinuteOfDay(d: Date = new Date()): number {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(d);
+  const h = Number(parts.find((p) => p.type === "hour")?.value ?? "0");
+  const m = Number(parts.find((p) => p.type === "minute")?.value ?? "0");
+  return (h % 24) * 60 + m;
+}
+
+/** Day-of-week 0..6 (Sun..Sat) in America/New_York. */
+export function etDayOfWeek(d: Date = new Date()): number {
+  const wk = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    weekday: "short",
+  }).format(d);
+  return ({ Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 } as Record<string, number>)[wk] ?? 0;
+}
