@@ -48,6 +48,7 @@ serve(async (req) => {
   try {
     const body = await req.json() as Body;
     const { tickers, spyContext, macro, sectorMomentum, weights } = body;
+    const mode: "premarket" | "live" = body.mode === "premarket" ? "premarket" : "live";
     if (!Array.isArray(tickers) || tickers.length === 0) {
       return new Response(JSON.stringify({ signals: [] }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
