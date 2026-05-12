@@ -203,7 +203,11 @@ serve(async (req) => {
     allSignals.sort((a, b) => (b.qualityScore ?? 0) - (a.qualityScore ?? 0));
 
     if (allSignals.length > 0) {
-      const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+      // Live signals expire 24h out; premarket signals expire at end of today's
+      // session (so they naturally roll off after the open).
+      const expiresAt = mode === "premarket"
+        ? new Date(new Date().setUTCHours(21, 30, 0, 0)).toISOString() // ~16:30 ET worst-case (DST safe enough)
+        : new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
       const rows = allSignals.map(s => ({
         ticker: s.ticker, signal_type: s.signal_type,
         entry_price: s.entry_price, confidence: s.confidence,
@@ -211,6 +215,7 @@ serve(async (req) => {
         weekly_bias: s.weekly_bias, target_allocation: s.target_allocation,
         reasoning: s.reasoning, strategy: s.strategy,
         expires_at: expiresAt,
+        source: mode === "premarket" ? "premarket" : "live",
       }));
       const { data: upserted, error } = await supabase
         .from("live_signals").upsert(rows, { onConflict: "ticker" }).select("id, ticker");
