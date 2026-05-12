@@ -152,12 +152,19 @@ serve(async (req) => {
       fine[lo].wCount += tw[i];
       if (Number(r.realized_pnl_pct ?? 0) > 0) fine[lo].wWins += tw[i];
     });
+    // Bayesian shrinkage toward the bucket-expected win-rate. With small N,
+    // the empirical win-rate is noisy; shrink with pseudo-count K=10 so an
+    // 8-sample bucket is ~44% empirical / 56% prior, while a 50-sample
+    // bucket is ~83% empirical. Keeps PAV honest at the small-N tail.
+    const SHRINK_K = 10;
     const rawAnchors = Object.entries(fine)
       .filter(([, v]) => v.raw >= FINE_BUCKET_MIN_RAW && v.wCount > 0)
       .map(([loStr, v]) => {
         const lo = Number(loStr);
-        const wr = (v.wWins / v.wCount) * 100;
-        return { x: lo + 2.5, y: wr, w: v.wCount, raw: v.raw };
+        const center = lo + 2.5;
+        const empirical = (v.wWins / v.wCount) * 100;
+        const shrunk = (v.wCount * empirical + SHRINK_K * center) / (v.wCount + SHRINK_K);
+        return { x: center, y: shrunk, w: v.wCount, raw: v.raw };
       })
       .sort((a, b) => a.x - b.x);
 

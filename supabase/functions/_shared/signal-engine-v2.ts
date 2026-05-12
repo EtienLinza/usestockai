@@ -691,15 +691,20 @@ export function computeStrategySignal(
     // directly. Require a meaningful gap on the histogram (5% of recent |hist|
     // range) so we don't fire on noise.
     let macdBullDiv = false, macdBearDiv = false;
-    if (macdHistArr && macdHistArr.length === close.length) {
-      const window = macdHistArr.slice(n - 20, n).filter(v => !isNaN(v));
+    // MACD histogram is right-aligned to close; length should match. Use a
+    // tail offset so we degrade gracefully if a future indicator change
+    // returns a shorter array instead of silently disabling divergence.
+    if (macdHistArr && macdHistArr.length >= 21) {
+      const off = macdHistArr.length - close.length; // 0 in current impl
+      const idx = (i: number) => i + off;
+      const window = macdHistArr.slice(macdHistArr.length - 20).filter(v => !isNaN(v));
       const histAbsMax = window.length ? Math.max(...window.map(Math.abs)) : 0;
       const eps = Math.max(0.0001, histAbsMax * 0.05);
-      const hRecLow = macdHistArr[recentLowIdx], hPrLow = macdHistArr[priorLowIdx];
-      const hRecHi  = macdHistArr[recentHighIdx], hPrHi = macdHistArr[priorHighIdx];
-      if (!isNaN(hRecLow) && !isNaN(hPrLow) &&
+      const hRecLow = macdHistArr[idx(recentLowIdx)], hPrLow = macdHistArr[idx(priorLowIdx)];
+      const hRecHi  = macdHistArr[idx(recentHighIdx)], hPrHi = macdHistArr[idx(priorHighIdx)];
+      if (hRecLow != null && hPrLow != null && !isNaN(hRecLow) && !isNaN(hPrLow) &&
           close[recentLowIdx] < close[priorLowIdx] && hRecLow > hPrLow + eps) macdBullDiv = true;
-      if (!isNaN(hRecHi) && !isNaN(hPrHi) &&
+      if (hRecHi != null && hPrHi != null && !isNaN(hRecHi) && !isNaN(hPrHi) &&
           close[recentHighIdx] > close[priorHighIdx] && hRecHi < hPrHi - eps) macdBearDiv = true;
     }
 
