@@ -70,3 +70,31 @@ export async function fetchDailyCloses(ticker: string, range: string = "3mo"): P
   const ds = await fetchDailyHistory(ticker, range);
   return ds?.close ?? [];
 }
+
+/**
+ * Pre-market / extended-hours quote from Yahoo's chart meta. Returns the
+ * pre-market last price plus the prior regular-session close so callers can
+ * compute an overnight gap. Falls back to null on any failure.
+ */
+export async function fetchPremarketQuote(
+  ticker: string,
+  timeoutMs: number = 5000,
+): Promise<{ premarketPx: number; prevClose: number } | null> {
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), timeoutMs);
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=1m&range=1d&includePrePost=true`;
+    const r = await fetch(url, { headers: { "User-Agent": YAHOO_UA }, signal: ctrl.signal });
+    clearTimeout(t);
+    if (!r.ok) return null;
+    const j = await r.json();
+    const meta = j?.chart?.result?.[0]?.meta;
+    if (!meta) return null;
+    const pre = Number(meta.preMarketPrice ?? meta.postMarketPrice ?? meta.regularMarketPrice);
+    const prev = Number(meta.chartPreviousClose ?? meta.previousClose ?? meta.regularMarketPreviousClose);
+    if (!isFinite(pre) || !isFinite(prev) || pre <= 0 || prev <= 0) return null;
+    return { premarketPx: pre, prevClose: prev };
+  } catch {
+    return null;
+  }
+}

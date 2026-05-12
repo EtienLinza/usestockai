@@ -6,7 +6,7 @@
 // ============================================================================
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { evaluateSignal, type DataSet, type MacroContext } from "../_shared/signal-engine-v2.ts";
-import { fetchDailyHistory } from "../_shared/yahoo-history.ts";
+import { fetchDailyHistory, fetchPremarketQuote } from "../_shared/yahoo-history.ts";
 import { loadCachedBars, upsertBars } from "../_shared/bars-cache.ts";
 import { getSectorConvictionModifier, macroFloorAdjust, preScreen, type SectorMomentum, type MacroRegime } from "../_shared/scan-pipeline.ts";
 import { getEarningsBlackoutDays } from "../_shared/finnhub.ts";
@@ -32,6 +32,7 @@ interface Body {
     exitCalibration?: Record<string, { trailMultAdjust: number }>;
     tickerCalibration?: Record<string, { adjust: number }>;
   };
+  mode?: "premarket" | "live";
 }
 
 function bucketKey(c: number): string {
@@ -47,6 +48,7 @@ serve(async (req) => {
   try {
     const body = await req.json() as Body;
     const { tickers, spyContext, macro, sectorMomentum, weights } = body;
+    const mode: "premarket" | "live" = body.mode === "premarket" ? "premarket" : "live";
     if (!Array.isArray(tickers) || tickers.length === 0) {
       return new Response(JSON.stringify({ signals: [] }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -89,6 +91,24 @@ serve(async (req) => {
       const days = earningsResults[i];
       if (days !== null && days <= 3) blackoutSet.add(t);
     });
+
+    // Pre-market mode: pull extended-hours quotes in parallel for survivors so
+    // we can compute the overnight gap and skip / boost accordingly.
+    //   • same-direction gap > 4%  → skip (already extended, poor R:R)
+    //   • opposite-direction gap > 1% → skip (thesis invalidated overnight)
+    //   • same-direction gap ≥ 1.5% → +3 conviction (pre-confirmation)
+    const gapMap = new Map<string, number>(); // ticker → gap pct (signed)
+    if (mode === "premarket") {
+      const PAR = 25;
+      for (let i = 0; i < survivors.length; i += PAR) {
+        const slice = survivors.slice(i, i + PAR);
+        const quotes = await Promise.all(slice.map(t => fetchPremarketQuote(t).catch(() => null)));
+        slice.forEach((t, k) => {
+          const q = quotes[k];
+          if (q && q.prevClose > 0) gapMap.set(t, (q.premarketPx - q.prevClose) / q.prevClose);
+        });
+      }
+    }
 
     const signals: any[] = [];
     for (const ticker of tickers) {
@@ -135,6 +155,17 @@ serve(async (req) => {
         // Volume z-score adj is applied inside evaluateSignal (Phase 1 #2,
         // moved into the unified engine so backtest matches live exactly).
 
+        // Pre-market overnight-gap gating + bonus.
+        if (mode === "premarket" && gapMap.has(ticker)) {
+          const gap = gapMap.get(ticker)!;            // signed fraction (e.g. 0.025 = +2.5%)
+          const dir = sig.decision === "BUY" ? 1 : -1;
+          const sameDir = gap * dir;                  // positive when gap aligns with thesis
+          if (sameDir > 0.04) continue;               // skip — already extended
+          if (sameDir < -0.01) continue;              // skip — thesis invalidated
+          if (sameDir >= 0.015) {
+            conviction = Math.max(0, Math.min(100, Math.round(conviction + 3)));
+          }
+        }
 
         const baselineFloor = strategy === "mean_reversion" ? 60 : 65;
         const adaptiveFloor = weights.regimeFloors[regime]?.floor ?? baselineFloor;
