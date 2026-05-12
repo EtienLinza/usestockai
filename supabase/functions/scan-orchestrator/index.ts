@@ -17,6 +17,7 @@ import {
 } from "../_shared/scan-pipeline.ts";
 import { loadCachedBars } from "../_shared/bars-cache.ts";
 import { requireCronOrUser } from "../_shared/cron-auth.ts";
+import { isMarketHoliday, etMinuteOfDay, etDayOfWeek } from "../_shared/market-calendar.ts";
 
 
 const corsHeaders = {
