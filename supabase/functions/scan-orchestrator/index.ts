@@ -180,6 +180,7 @@ serve(async (req) => {
       macro,
       sectorMomentum,
       weights,
+      mode,
     };
 
     const allSignals: any[] = [];
