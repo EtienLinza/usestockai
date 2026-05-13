@@ -93,14 +93,14 @@ const Landing = () => {
             )}
             
             <h1 className="text-4xl md:text-5xl lg:text-6xl font-medium mb-6 leading-tight tracking-tight">
-              AI-Powered
+              AI Stock Predictions
               <br />
-              <span className="text-gradient">Market Intelligence</span>
+              <span className="text-gradient">& Live Trading Signals</span>
             </h1>
             
             <p className="text-lg text-muted-foreground mb-12 max-w-xl mx-auto leading-relaxed">
-              Advanced predictions with confidence intervals and full transparency.
-              Intelligence only. No trading. No noise.
+              StockAI scans 75+ tickers in real time, generates high-conviction AI stock signals
+              with calibrated confidence, and lets you backtest every strategy. Research only — no noise.
             </p>
             
             <div className="flex flex-col sm:flex-row gap-4 justify-center">
