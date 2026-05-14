@@ -7,11 +7,27 @@ import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Logo } from "@/components/Logo";
 import { Footer } from "@/components/Footer";
+import { SEO } from "@/components/SEO";
 import {
   ArrowRight, TrendingUp, Brain, Zap, BarChart3, Shield,
   Target, Activity, LineChart, PieChart, Bell, Eye,
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
+
+const FAQS = [
+  {
+    q: "Is there an AI that can predict stocks?",
+    a: "StockAI uses an ensemble of technical indicators, regime detection, and weighted signal consensus to generate AI stock predictions with calibrated confidence intervals. It is research and paper-trading only — not financial advice.",
+  },
+  {
+    q: "How do AI stock signals work on StockAI?",
+    a: "A background market scanner evaluates 75+ tickers using 10+ indicators, gap analysis, and isotonic-calibrated conviction scores, then publishes high-conviction buy/sell signals with full reasoning.",
+  },
+  {
+    q: "Can I backtest AI trading strategies?",
+    a: "Yes. StockAI includes an institutional-grade backtester with Sharpe, Sortino, Calmar, profit factor, Monte Carlo simulations and walk-forward analysis.",
+  },
+];
 
 const Landing = () => {
   const navigate = useNavigate();
@@ -55,6 +71,33 @@ const Landing = () => {
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
+      <SEO
+        title="StockAI — AI Stock Predictions, Signals & Screener"
+        description="StockAI scans 75+ tickers in real time, generates calibrated AI trading signals, and lets you backtest every strategy. Research and paper-trading platform."
+        path="/"
+        jsonLd={[
+          {
+            "@context": "https://schema.org",
+            "@type": "SoftwareApplication",
+            name: "StockAI",
+            applicationCategory: "FinanceApplication",
+            operatingSystem: "Web",
+            url: "https://usestockai.lovable.app/",
+            description:
+              "AI-powered stock prediction and signals platform with real-time scanning of 75+ tickers, high-conviction trade signals, strategy backtesting, and paper-trading portfolio tracking.",
+            offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
+          },
+          {
+            "@context": "https://schema.org",
+            "@type": "FAQPage",
+            mainEntity: FAQS.map((f) => ({
+              "@type": "Question",
+              name: f.q,
+              acceptedAnswer: { "@type": "Answer", text: f.a },
+            })),
+          },
+        ]}
+      />
       <Navbar />
       
       {/* Hero Section */}
@@ -207,6 +250,36 @@ const Landing = () => {
                 <item.icon className="w-6 h-6 text-primary mx-auto mb-3" />
                 <h3 className="text-sm font-medium mb-1">{item.title}</h3>
                 <p className="text-xs text-muted-foreground">{item.desc}</p>
+              </motion.div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* FAQ */}
+      <section className="py-24 bg-secondary/20">
+        <div className="container mx-auto px-6 max-w-3xl">
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            className="text-center mb-12"
+          >
+            <h2 className="text-2xl sm:text-3xl font-medium mb-3">Frequently Asked Questions</h2>
+          </motion.div>
+          <div className="space-y-6">
+            {FAQS.map((f, i) => (
+              <motion.div
+                key={f.q}
+                initial={{ opacity: 0, y: 12 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true }}
+                transition={{ delay: i * 0.05 }}
+              >
+                <Card className="glass-card p-6">
+                  <h3 className="text-base font-medium mb-2">{f.q}</h3>
+                  <p className="text-sm text-muted-foreground leading-relaxed">{f.a}</p>
+                </Card>
               </motion.div>
             ))}
           </div>

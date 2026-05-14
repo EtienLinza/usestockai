@@ -1,3 +1,4 @@
+import { SEO } from "@/components/SEO";
 import { useState, useCallback, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
@@ -440,6 +441,12 @@ const Dashboard = () => {
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
+      <SEO
+        title="Dashboard — Live AI Trading Signals & Portfolio | StockAI"
+        description="Real-time AI trading signals, virtual portfolio P&L, and market intelligence across 75+ tickers. Monitor active high-conviction setups as they form."
+        path="/dashboard"
+        noindex
+      />
       <Navbar />
 
       <div className="fixed inset-0 pointer-events-none">
