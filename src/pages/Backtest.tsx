@@ -1,3 +1,4 @@
+import { SEO } from "@/components/SEO";
 import { useState, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Navbar } from "@/components/Navbar";

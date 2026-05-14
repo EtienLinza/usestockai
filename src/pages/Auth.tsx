@@ -1,3 +1,4 @@
+import { SEO } from "@/components/SEO";
 import { useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { motion } from "framer-motion";
