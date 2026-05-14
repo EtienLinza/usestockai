@@ -71,6 +71,33 @@ const Landing = () => {
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
+      <SEO
+        title="StockAI — AI Stock Predictions, Signals & Screener"
+        description="StockAI scans 75+ tickers in real time, generates calibrated AI trading signals, and lets you backtest every strategy. Research and paper-trading platform."
+        path="/"
+        jsonLd={[
+          {
+            "@context": "https://schema.org",
+            "@type": "SoftwareApplication",
+            name: "StockAI",
+            applicationCategory: "FinanceApplication",
+            operatingSystem: "Web",
+            url: "https://usestockai.lovable.app/",
+            description:
+              "AI-powered stock prediction and signals platform with real-time scanning of 75+ tickers, high-conviction trade signals, strategy backtesting, and paper-trading portfolio tracking.",
+            offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
+          },
+          {
+            "@context": "https://schema.org",
+            "@type": "FAQPage",
+            mainEntity: FAQS.map((f) => ({
+              "@type": "Question",
+              name: f.q,
+              acceptedAnswer: { "@type": "Answer", text: f.a },
+            })),
+          },
+        ]}
+      />
       <Navbar />
       
       {/* Hero Section */}
