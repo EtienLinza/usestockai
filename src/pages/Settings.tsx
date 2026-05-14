@@ -233,6 +233,12 @@ const Settings = () => {
 
   return (
     <div className="min-h-screen bg-background">
+      <SEO
+        title="Settings — Account & Autotrader Preferences | StockAI"
+        description="Configure account, notifications, autotrader risk caps, and portfolio preferences for StockAI."
+        path="/settings"
+        noindex
+      />
       <Navbar />
       <main className="container mx-auto px-6 pt-24 pb-12 max-w-3xl">
         <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">

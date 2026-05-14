@@ -66,6 +66,12 @@ const Auth = () => {
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
+      <SEO
+        title={isSignUp ? "Create your StockAI account" : "Sign in to StockAI"}
+        description="Sign in or create a free StockAI account to access live AI trading signals, backtesting, and a virtual portfolio."
+        path="/auth"
+        noindex
+      />
       {/* Background effects */}
       <div className="fixed inset-0 bg-gradient-hero pointer-events-none" />
       <div className="fixed top-1/3 left-1/2 -translate-x-1/2 w-[600px] h-[600px] bg-primary/5 rounded-full blur-3xl pointer-events-none" />

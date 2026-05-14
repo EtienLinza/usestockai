@@ -3,10 +3,16 @@ import { AlertTriangle } from "lucide-react";
 import { Navbar } from "@/components/Navbar";
 import { Footer } from "@/components/Footer";
 import { Card } from "@/components/ui/card";
+import { SEO } from "@/components/SEO";
 
 const Disclosure = () => {
   return (
     <div className="min-h-screen bg-background flex flex-col">
+      <SEO
+        title="Risk Disclosure | StockAI"
+        description="Important risk disclosure covering paper-trading limitations, backtest caveats, and the research-only nature of StockAI signals."
+        path="/disclosure"
+      />
       <Navbar />
       <main className="flex-1">
         <section className="container mx-auto px-6 py-20 max-w-3xl">

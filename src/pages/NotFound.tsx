@@ -4,6 +4,7 @@ import { motion } from "framer-motion";
 import { Logo } from "@/components/Logo";
 import { Button } from "@/components/ui/button";
 import { Home } from "lucide-react";
+import { SEO } from "@/components/SEO";
 
 const NotFound = () => {
   const location = useLocation();

@@ -265,6 +265,12 @@ const Watchlist = () => {
 
   return (
     <div className="min-h-screen bg-background">
+      <SEO
+        title="Watchlist — Track Tickers with AI Suggestions | StockAI"
+        description="Build a personalized watchlist with AI-suggested tickers, custom price alerts, and live signal monitoring."
+        path="/watchlist"
+        noindex
+      />
       <Navbar />
       
       {/* Subtle background */}

@@ -259,6 +259,11 @@ const Backtest = () => {
 
   return (
     <div className="min-h-screen bg-background">
+      <SEO
+        title="Backtest AI Trading Strategies | StockAI"
+        description="Institutional-grade strategy backtester with Sharpe, Sortino, Calmar, profit factor, walk-forward analysis, and Monte Carlo simulations."
+        path="/backtest"
+      />
       <Navbar />
       <div className="fixed inset-0 pointer-events-none">
         <div className="absolute top-1/4 left-1/2 -translate-x-1/2 w-[800px] h-[800px] bg-primary/2 rounded-full blur-[150px]" />

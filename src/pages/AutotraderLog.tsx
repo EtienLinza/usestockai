@@ -90,6 +90,12 @@ const AutotraderLog = () => {
 
   return (
     <div className="min-h-screen bg-background">
+      <SEO
+        title="Autotrader Log — Trade Decisions & Reasoning | StockAI"
+        description="Full audit log of autotrader entries, exits, holds, and blocks with sentiment, news context, and reasoning."
+        path="/autotrader-log"
+        noindex
+      />
       <Navbar />
       <main className="container mx-auto px-6 pt-24 pb-12 max-w-5xl">
         <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-5">

@@ -1,10 +1,16 @@
 import { motion } from "framer-motion";
 import { Navbar } from "@/components/Navbar";
 import { Footer } from "@/components/Footer";
+import { SEO } from "@/components/SEO";
 
 const Terms = () => {
   return (
     <div className="min-h-screen bg-background flex flex-col">
+      <SEO
+        title="Terms of Service | StockAI"
+        description="StockAI terms of service governing use of the AI stock signals, backtesting, and paper-trading platform."
+        path="/terms"
+      />
       <Navbar />
       <main className="flex-1">
         <section className="container mx-auto px-6 py-20 max-w-3xl">

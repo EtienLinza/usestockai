@@ -1,10 +1,16 @@
 import { motion } from "framer-motion";
 import { Navbar } from "@/components/Navbar";
 import { Footer } from "@/components/Footer";
+import { SEO } from "@/components/SEO";
 
 const Privacy = () => {
   return (
     <div className="min-h-screen bg-background flex flex-col">
+      <SEO
+        title="Privacy Policy | StockAI"
+        description="How StockAI collects, uses, and protects your data across the AI signals and paper-trading platform."
+        path="/privacy"
+      />
       <Navbar />
       <main className="flex-1">
         <section className="container mx-auto px-6 py-20 max-w-3xl">
