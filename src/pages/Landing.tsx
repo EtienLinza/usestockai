@@ -7,11 +7,27 @@ import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Logo } from "@/components/Logo";
 import { Footer } from "@/components/Footer";
+import { SEO } from "@/components/SEO";
 import {
   ArrowRight, TrendingUp, Brain, Zap, BarChart3, Shield,
   Target, Activity, LineChart, PieChart, Bell, Eye,
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
+
+const FAQS = [
+  {
+    q: "Is there an AI that can predict stocks?",
+    a: "StockAI uses an ensemble of technical indicators, regime detection, and weighted signal consensus to generate AI stock predictions with calibrated confidence intervals. It is research and paper-trading only — not financial advice.",
+  },
+  {
+    q: "How do AI stock signals work on StockAI?",
+    a: "A background market scanner evaluates 75+ tickers using 10+ indicators, gap analysis, and isotonic-calibrated conviction scores, then publishes high-conviction buy/sell signals with full reasoning.",
+  },
+  {
+    q: "Can I backtest AI trading strategies?",
+    a: "Yes. StockAI includes an institutional-grade backtester with Sharpe, Sortino, Calmar, profit factor, Monte Carlo simulations and walk-forward analysis.",
+  },
+];
 
 const Landing = () => {
   const navigate = useNavigate();
