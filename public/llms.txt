@@ -1,0 +1,19 @@
+# StockAI
+
+> AI-powered stock prediction and trading-signal platform. Scans 75+ tickers in real time, generates calibrated buy/sell signals, and lets users backtest strategies and track paper-trading portfolios.
+
+StockAI is a research and paper-trading platform — not financial advice. It combines a quantitative signal engine (10+ technical indicators, regime detection, isotonic-calibrated conviction scores) with an institutional-grade backtester (Sharpe, Sortino, Calmar, Monte Carlo, walk-forward analysis).
+
+## Pages
+
+- [Home](/): Product overview, live signal counts, and feature summary.
+- [Dashboard](/dashboard): Live AI trading signals, market scanner output, virtual portfolio P&L.
+- [Backtest](/backtest): Strategy backtesting with Monte Carlo and walk-forward analysis.
+- [Watchlist](/watchlist): User watchlist with AI-suggested tickers and price alerts.
+- [Disclosure](/disclosure): Risk disclosure and paper-trading limitations.
+- [Terms](/terms): Terms of service.
+- [Privacy](/privacy): Privacy policy.
+
+## Optional
+
+- [Sign in](/auth): Authentication page (account required).
