@@ -256,6 +256,36 @@ const Landing = () => {
         </div>
       </section>
 
+      {/* FAQ */}
+      <section className="py-24 bg-secondary/20">
+        <div className="container mx-auto px-6 max-w-3xl">
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            className="text-center mb-12"
+          >
+            <h2 className="text-2xl sm:text-3xl font-medium mb-3">Frequently Asked Questions</h2>
+          </motion.div>
+          <div className="space-y-6">
+            {FAQS.map((f, i) => (
+              <motion.div
+                key={f.q}
+                initial={{ opacity: 0, y: 12 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true }}
+                transition={{ delay: i * 0.05 }}
+              >
+                <Card className="glass-card p-6">
+                  <h3 className="text-base font-medium mb-2">{f.q}</h3>
+                  <p className="text-sm text-muted-foreground leading-relaxed">{f.a}</p>
+                </Card>
+              </motion.div>
+            ))}
+          </div>
+        </div>
+      </section>
+
       {/* CTA */}
       <section className="py-24">
         <div className="container mx-auto px-6 text-center">
