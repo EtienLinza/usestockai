@@ -16,6 +16,7 @@ const NotFound = () => {
 
   return (
     <div className="min-h-screen bg-background flex items-center justify-center relative">
+      <SEO title="Page not found | StockAI" description="The page you're looking for doesn't exist." path={location.pathname} noindex />
       {/* Background glow */}
       <div className="fixed inset-0 pointer-events-none">
         <div className="absolute top-1/4 left-1/2 -translate-x-1/2 w-[800px] h-[800px] bg-primary/2 rounded-full blur-[150px]" />
