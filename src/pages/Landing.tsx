@@ -21,7 +21,7 @@ const FAQS = [
   },
   {
     q: "How do AI stock signals work on StockAI?",
-    a: "A background market scanner evaluates 75+ tickers using 10+ indicators, gap analysis, and isotonic-calibrated conviction scores, then publishes high-conviction buy/sell signals with full reasoning.",
+    a: "A background market scanner evaluates 6,000+ tickers using 10+ indicators, gap analysis, and isotonic-calibrated conviction scores, then publishes high-conviction buy/sell signals with full reasoning.",
   },
   {
     q: "Can I backtest AI trading strategies?",
@@ -48,7 +48,7 @@ const Landing = () => {
     {
       icon: Brain,
       title: "AI Market Scanner",
-      description: "Quantitative analysis of 75+ stocks using 10+ technical indicators, regime detection, and weighted signal consensus.",
+      description: "Quantitative analysis of 6,000+ stocks using 10+ technical indicators, regime detection, and weighted signal consensus.",
     },
     {
       icon: Target,
@@ -64,7 +64,7 @@ const Landing = () => {
 
   const stats = [
     { label: "Technical Indicators", value: "10+" },
-    { label: "Stocks Scanned", value: "75+" },
+    { label: "Stocks Scanned", value: "6,000+" },
     { label: "Conviction Range", value: "35–92%" },
     { label: "Regime Detection", value: "Active" },
   ];
@@ -73,7 +73,7 @@ const Landing = () => {
     <div className="min-h-screen bg-background flex flex-col">
       <SEO
         title="StockAI — AI Stock Predictions, Signals & Screener"
-        description="StockAI scans 75+ tickers in real time, generates calibrated AI trading signals, and lets you backtest every strategy. Research and paper-trading platform."
+        description="StockAI scans 6,000+ tickers in real time, generates calibrated AI trading signals, and lets you backtest every strategy. Research and paper-trading platform."
         path="/"
         jsonLd={[
           {
@@ -84,7 +84,7 @@ const Landing = () => {
             operatingSystem: "Web",
             url: "https://usestockai.lovable.app/",
             description:
-              "AI-powered stock prediction and signals platform with real-time scanning of 75+ tickers, high-conviction trade signals, strategy backtesting, and paper-trading portfolio tracking.",
+              "AI-powered stock prediction and signals platform with real-time scanning of 6,000+ tickers, high-conviction trade signals, strategy backtesting, and paper-trading portfolio tracking.",
             offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
           },
           {
@@ -142,7 +142,7 @@ const Landing = () => {
             </h1>
             
             <p className="text-lg text-muted-foreground mb-12 max-w-xl mx-auto leading-relaxed">
-              StockAI scans 75+ tickers in real time, generates high-conviction AI stock signals
+              StockAI scans 6,000+ tickers in real time, generates high-conviction AI stock signals
               with calibrated confidence, and lets you backtest every strategy. Research only — no noise.
             </p>
             
@@ -233,7 +233,7 @@ const Landing = () => {
 
           <div className="grid grid-cols-1 sm:grid-cols-4 gap-8 max-w-4xl mx-auto">
             {[
-              { step: "01", icon: Eye, title: "Scan", desc: "AI scans 75+ stocks across all market sectors" },
+              { step: "01", icon: Eye, title: "Scan", desc: "AI scans 6,000+ stocks across all market sectors" },
               { step: "02", icon: Zap, title: "Signal", desc: "High-conviction buy/sell signals with reasoning" },
               { step: "03", icon: LineChart, title: "Track", desc: "Register trades and monitor real-time P&L" },
               { step: "04", icon: PieChart, title: "Optimize", desc: "Backtest strategies and improve over time" },

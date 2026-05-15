@@ -443,7 +443,7 @@ const Dashboard = () => {
     <div className="min-h-screen bg-background flex flex-col">
       <SEO
         title="Dashboard — Live AI Trading Signals & Portfolio | StockAI"
-        description="Real-time AI trading signals, virtual portfolio P&L, and market intelligence across 75+ tickers. Monitor active high-conviction setups as they form."
+        description="Real-time AI trading signals, virtual portfolio P&L, and market intelligence across 6,000+ tickers. Monitor active high-conviction setups as they form."
         path="/dashboard"
         noindex
       />
@@ -556,7 +556,7 @@ const Dashboard = () => {
                     Market Scanner
                   </div>
                   <p className="text-xs text-muted-foreground leading-relaxed">
-                    Scan 75+ stocks across all sectors using the quantitative algorithm to find high-conviction trade signals.
+                    Scan 6,000+ stocks across all sectors using the quantitative algorithm to find high-conviction trade signals.
                   </p>
                   {scanning && (() => {
                     void scanTick; // re-render every second
