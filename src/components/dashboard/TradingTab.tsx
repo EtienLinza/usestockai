@@ -430,7 +430,7 @@ export function TradingTab({
                 <Zap className="w-10 h-10 text-muted-foreground/30 mx-auto mb-3" />
                 <h3 className="text-sm font-medium mb-1">{tradingStyle !== "all" ? "No Matching Signals" : "No Active Signals"}</h3>
                 <p className="text-xs text-muted-foreground mb-4">
-                  {tradingStyle !== "all" ? `No signals match the ${TRADING_STYLES.find(s => s.value === tradingStyle)?.label} style. Try a different filter or scan again.` : 'Click "Scan Market" to analyze 75 stocks across all sectors'}
+                  {tradingStyle !== "all" ? `No signals match the ${TRADING_STYLES.find(s => s.value === tradingStyle)?.label} style. Try a different filter or scan again.` : 'Click "Scan Market" to analyze 6,000+ stocks across all sectors'}
                 </p>
                 {tradingStyle === "all" && (
                   <Button variant="glow" size="sm" onClick={runScan} disabled={scanning || !user}>
