@@ -16,7 +16,7 @@ import {
   type MacroRegime, type SectorMomentum,
 } from "../_shared/scan-pipeline.ts";
 import { loadCachedBars } from "../_shared/bars-cache.ts";
-import { requireCronOrUser } from "../_shared/cron-auth.ts";
+import { requireCronOrUser, cronSecretHeader } from "../_shared/cron-auth.ts";
 import { isMarketHoliday, etMinuteOfDay, etDayOfWeek } from "../_shared/market-calendar.ts";
 
 
@@ -190,6 +190,7 @@ serve(async (req) => {
       const results = await Promise.all(wave.map(async (chunk) => {
         const { data, error } = await supabase.functions.invoke("scan-worker", {
           body: { ...workerPayloadBase, tickers: chunk },
+          headers: cronSecretHeader(),
         });
         if (error) { console.error("worker err", error); return []; }
         return (data?.signals ?? []) as any[];

@@ -11,6 +11,7 @@ import { loadCachedBars, upsertBars } from "../_shared/bars-cache.ts";
 import { getSectorConvictionModifier, macroFloorAdjust, preScreen, type SectorMomentum, type MacroRegime } from "../_shared/scan-pipeline.ts";
 import { getEarningsBlackoutDays } from "../_shared/finnhub.ts";
 import { applyIsotonicCalibration, type IsotonicAnchor } from "../_shared/calibration.ts";
+import { requireCronOrUser } from "../_shared/cron-auth.ts";
 
 
 const corsHeaders = {
@@ -45,6 +46,8 @@ function bucketKey(c: number): string {
 
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+  const denied = await requireCronOrUser(req);
+  if (denied) return denied;
   try {
     const body = await req.json() as Body;
     const { tickers, spyContext, macro, sectorMomentum, weights } = body;

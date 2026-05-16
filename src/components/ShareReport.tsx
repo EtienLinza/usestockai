@@ -77,11 +77,18 @@ export const ShareReport = ({ data }: ShareReportProps) => {
   const handleExportPDF = async () => {
     setIsExporting("pdf");
     try {
+      const esc = (s: unknown) =>
+        String(s ?? "")
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#39;");
       const reportHtml = `
         <!DOCTYPE html>
         <html>
         <head>
-          <title>${data.ticker} - StockAI Report</title>
+          <title>${esc(data.ticker)} - StockAI Report</title>
           <style>
             * { margin: 0; padding: 0; box-sizing: border-box; }
             body { 
@@ -160,11 +167,11 @@ export const ShareReport = ({ data }: ShareReportProps) => {
         <body>
           <div class="header">
             <div class="logo">Stock<span>AI</span></div>
-            <span class="badge">${data.regime}</span>
+            <span class="badge">${esc(data.regime)}</span>
           </div>
           
-          <div class="ticker">${data.ticker}</div>
-          <div class="date">Target: ${data.targetDate}</div>
+          <div class="ticker">${esc(data.ticker)}</div>
+          <div class="date">Target: ${esc(data.targetDate)}</div>
           
           <div class="stats">
             <div class="stat">
@@ -188,7 +195,7 @@ export const ShareReport = ({ data }: ShareReportProps) => {
           ${data.reasoning ? `
           <div class="reasoning">
             <div class="reasoning-title">AI Analysis</div>
-            <div class="reasoning-text">${data.reasoning}</div>
+            <div class="reasoning-text">${esc(data.reasoning)}</div>
           </div>
           ` : ''}
 
