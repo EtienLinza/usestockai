@@ -114,7 +114,7 @@ export function NotificationCenter() {
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="sm" className="relative p-2">
+        <Button variant="ghost" size="sm" className="relative p-2" aria-label="Notifications">
           {unreadCount > 0 ? (
             <BellRing className="w-4 h-4" />
           ) : (
@@ -154,7 +154,7 @@ export function NotificationCenter() {
                     {new Date(n.timestamp).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
                   </p>
                 </div>
-                <Button variant="ghost" size="sm" className="h-6 w-6 p-0 shrink-0" onClick={() => dismissNotification(n)}>
+                <Button variant="ghost" size="sm" className="h-6 w-6 p-0 shrink-0" onClick={() => dismissNotification(n)} aria-label="Dismiss notification">
                   <X className="w-3 h-3" />
                 </Button>
               </div>
