@@ -318,7 +318,7 @@ const Settings = () => {
                         value={bot.risk_profile}
                         onValueChange={(v: RiskProfile) => setBot({ ...bot, risk_profile: v })}
                       >
-                        <SelectTrigger className="w-36"><SelectValue /></SelectTrigger>
+                        <SelectTrigger className="w-36" aria-label="Risk profile"><SelectValue /></SelectTrigger>
                         <SelectContent>
                           {(Object.keys(RISK_PROFILE_LABEL) as RiskProfile[]).map((k) => (
                             <SelectItem key={k} value={k}>{RISK_PROFILE_LABEL[k].label}</SelectItem>
@@ -372,8 +372,9 @@ const Settings = () => {
                     {bot.auto_add_watchlist && (
                       <div className="grid grid-cols-2 gap-3 pt-1 border-t border-border/40">
                         <div className="space-y-1">
-                          <Label className="text-xs text-muted-foreground">Consideration floor</Label>
+                          <Label htmlFor="discovery-floor" className="text-xs text-muted-foreground">Consideration floor</Label>
                           <Input
+                            id="discovery-floor"
                             type="number"
                             min={50}
                             max={95}

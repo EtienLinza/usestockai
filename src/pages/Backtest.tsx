@@ -293,20 +293,20 @@ const Backtest = () => {
                   </div>
 
                   <div className="space-y-2">
-                    <Label className="text-xs text-muted-foreground">Tickers (comma-separated, max 5)</Label>
-                    <Input value={tickerInput} onChange={e => setTickerInput(e.target.value.toUpperCase())} placeholder="AAPL, MSFT, GOOGL" variant="glass" />
+                    <Label htmlFor="bt-tickers" className="text-xs text-muted-foreground">Tickers (comma-separated, max 5)</Label>
+                    <Input id="bt-tickers" value={tickerInput} onChange={e => setTickerInput(e.target.value.toUpperCase())} placeholder="AAPL, MSFT, GOOGL" variant="glass" />
                   </div>
 
 
 
                   <div className="grid grid-cols-2 gap-3">
                     <div className="space-y-2">
-                      <Label className="text-xs text-muted-foreground">Start Year</Label>
-                      <Input type="number" value={startYear} onChange={e => { const v = Number(e.target.value); setStartYear(v); }} min={2000} max={2026} variant="glass" onBlur={() => { if (startYear < 2000) setStartYear(2010); if (startYear > 2026) setStartYear(2025); }} />
+                      <Label htmlFor="bt-start-year" className="text-xs text-muted-foreground">Start Year</Label>
+                      <Input id="bt-start-year" type="number" value={startYear} onChange={e => { const v = Number(e.target.value); setStartYear(v); }} min={2000} max={2026} variant="glass" onBlur={() => { if (startYear < 2000) setStartYear(2010); if (startYear > 2026) setStartYear(2025); }} />
                     </div>
                     <div className="space-y-2">
-                      <Label className="text-xs text-muted-foreground">End Year</Label>
-                      <Input type="number" value={endYear} onChange={e => setEndYear(Number(e.target.value))} min={2015} max={2026} variant="glass" />
+                      <Label htmlFor="bt-end-year" className="text-xs text-muted-foreground">End Year</Label>
+                      <Input id="bt-end-year" type="number" value={endYear} onChange={e => setEndYear(Number(e.target.value))} min={2015} max={2026} variant="glass" />
                     </div>
                   </div>
 

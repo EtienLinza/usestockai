@@ -370,6 +370,7 @@ const Watchlist = () => {
                         size="icon"
                         onClick={() => deleteAlert(alert.id, alert.ticker)}
                         className="text-muted-foreground hover:text-destructive"
+                        aria-label="Remove alert"
                       >
                         <X className="w-4 h-4" />
                       </Button>
