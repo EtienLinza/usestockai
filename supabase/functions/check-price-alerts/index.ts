@@ -40,13 +40,27 @@ serve(async (req) => {
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    // Get optional user_id from request body for on-demand checking
+    // Determine scope: cron callers (valid x-cron-secret) may scan all users;
+    // authenticated user callers can only ever check their own alerts. We
+    // derive the user id from the JWT and IGNORE any body.user_id field to
+    // prevent IDOR across accounts.
+    const cronSecret = Deno.env.get("CRON_SECRET");
+    const isCron = !!cronSecret && req.headers.get("x-cron-secret") === cronSecret;
+
     let userId: string | null = null;
-    try {
-      const body = await req.json();
-      userId = body?.user_id || null;
-    } catch {
-      // No body provided, check all alerts
+    if (!isCron) {
+      const authHeader = req.headers.get("Authorization");
+      if (authHeader?.startsWith("Bearer ")) {
+        const token = authHeader.replace("Bearer ", "");
+        const { data } = await supabase.auth.getUser(token);
+        userId = data?.user?.id ?? null;
+      }
+      if (!userId) {
+        return new Response(
+          JSON.stringify({ error: "Unauthorized" }),
+          { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
     }
 
     // Fetch active (non-triggered) alerts

@@ -1027,6 +1027,10 @@ async function runEntryDecision(
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
+  const { requireCronOrUser } = await import("../_shared/cron-auth.ts");
+  const denied = await requireCronOrUser(req);
+  if (denied) return denied;
+
   const startedAt = Date.now();
   const supabase = createClient(
     Deno.env.get("SUPABASE_URL")!,
