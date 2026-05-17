@@ -204,11 +204,22 @@ export function TradingTab({
     return losses.reduce((sum, p) => sum + Number(p.pnl), 0) / losses.length;
   }, [closedPositions]);
 
+  // Profit factor folds in unrealized P&L on open positions so a massive
+  // open drawdown can't be hidden behind a clean closed-trade ledger.
   const profitFactor = useMemo(() => {
-    const grossProfit = closedPositions.filter(p => (Number(p.pnl) || 0) > 0).reduce((s, p) => s + Number(p.pnl), 0);
-    const grossLoss = Math.abs(closedPositions.filter(p => (Number(p.pnl) || 0) < 0).reduce((s, p) => s + Number(p.pnl), 0));
+    let grossProfit = closedPositions.filter(p => (Number(p.pnl) || 0) > 0).reduce((s, p) => s + Number(p.pnl), 0);
+    let grossLoss = Math.abs(closedPositions.filter(p => (Number(p.pnl) || 0) < 0).reduce((s, p) => s + Number(p.pnl), 0));
+    for (const pos of openPositions) {
+      const price = currentPrices[pos.ticker];
+      if (!price) continue;
+      const u = pos.position_type === "long"
+        ? (price - Number(pos.entry_price)) * Number(pos.shares)
+        : (Number(pos.entry_price) - price) * Number(pos.shares);
+      if (u > 0) grossProfit += u;
+      else if (u < 0) grossLoss += Math.abs(u);
+    }
     return grossLoss === 0 ? grossProfit > 0 ? Infinity : 0 : grossProfit / grossLoss;
-  }, [closedPositions]);
+  }, [closedPositions, openPositions, currentPrices]);
 
   const drawdownData = useMemo(() => {
     if (portfolioHistory.length < 2) return [];
@@ -356,7 +367,14 @@ export function TradingTab({
                     </defs>
                     <CartesianGrid strokeDasharray="3 3" className="stroke-border/20" />
                     <XAxis dataKey="date" tick={{ fontSize: 10 }} className="fill-muted-foreground" />
-                    <YAxis tick={{ fontSize: 10 }} className="fill-muted-foreground" tickFormatter={(v) => `$${v.toLocaleString()}`} />
+                    <YAxis
+                      tick={{ fontSize: 10 }}
+                      className="fill-muted-foreground"
+                      // Auto-scale around the actual series instead of a fixed
+                      // domain so the curve fills the chart at any portfolio size.
+                      domain={[(dataMin: number) => dataMin * 0.95, (dataMax: number) => dataMax * 1.1]}
+                      tickFormatter={(v) => `$${Math.round(v).toLocaleString()}`}
+                    />
                     <Tooltip
                       contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: "8px", fontSize: "12px" }}
                       formatter={(value: number) => [`$${value.toFixed(2)}`, "Portfolio Value"]}
