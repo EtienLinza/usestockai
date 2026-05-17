@@ -815,11 +815,16 @@ function bot_daily_loss_label_helper(_s: AutotraderState | null): string {
 }
 
 function EffectiveCell({ label, value, suffix = "" }: { label: string; value: number | null | undefined; suffix?: string }) {
+  // Round numeric effective values so we never render floating-point noise
+  // like "84.10974240984235%" — show at most one decimal place.
+  const display = value == null
+    ? "—"
+    : `${Number.isInteger(value) ? value : Number(value).toFixed(1)}${suffix}`;
   return (
     <div className="space-y-0.5">
       <p className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</p>
       <p className="text-sm font-mono font-medium text-primary tabular-nums">
-        {value != null ? `${value}${suffix}` : "—"}
+        {display}
       </p>
     </div>
   );

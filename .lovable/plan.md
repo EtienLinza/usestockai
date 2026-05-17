@@ -1,125 +1,57 @@
-# Algo Improvement Roadmap
+# Production Punch-List — Backtest, Dashboard, AutoTrader, UI
 
-A prioritized, end-to-end plan to push **scanner edge**, **exits/risk**, **portfolio construction**, and the **learning loop** further. Grouped into 4 phases — each phase is independently shippable. Rough impact tags: **[E]** edge / win-rate, **[R]** risk-adjusted return, **[L]** learning speed, **[O]** ops cost.
+Grouped by area so we can ship in independent PRs. Each item lists the file(s) touched and the exact change.
 
----
+## 1. Signal engine bugs (`supabase/functions/_shared/signal-engine-v2.ts`)
 
-## Phase 1 — Signal Quality (scanner edge)
+These are the root cause of the broken backtest sliders, Monte Carlo, and misclassifications.
 
-Goal: fewer false positives, better entry timing, more honest conviction.
+1. **Parameter override plumbing** — add an optional `paramOverrides?: Partial<ProfileParams>` arg to `evaluateSignal` and merge it on top of `cls.blendedParams || PROFILE_PARAMS[cls.classification]`. Thread the same override through `computeStrategySignal` so `buyThreshold` / `shortThreshold` actually move when the backtester sweeps them.
+2. **Tracker cache pollution** — `signalTrackerCache` persists across runs. Call `clearTrackerCache()` at the top of every backtest run *and* every Monte Carlo iteration (`supabase/functions/backtest/index.ts`). Optionally accept an injected `Map` so concurrent runs are isolated.
+3. **Higher-Highs uses `close` instead of `high`** (line ~220). Swap both `close.slice(...)` calls in `classifyStock` to `high.slice(...)`.
+4. **Volume z-score leak** (line ~551 + post-signal block). Slice `volume.slice(n - 21, n - 1)` so the current bar isn't in its own baseline. Re-validate `sig.confidence` against `buyThreshold`/`shortThreshold` **after** the volume adjustment and downgrade to HOLD if it drops below; also mirror the confidence change into `sig.consensusScore` so the decision engine sees the same number.
 
-1. **Multi-timeframe confirmation** [E]
-   - Add a weekly-bar agreement check inside `evaluateSignal`: long signals require weekly EMA20 > EMA50 (or weekly RSI > 50 + rising); shorts require the inverse. Disagreement → cap conviction at floor or downgrade to HOLD.
-   - Already pulling `weeklyBias` — extend it to a hard gate, not just a tag.
+## 2. Backtest engine (`supabase/functions/backtest/index.ts`, `src/pages/Backtest.tsx`)
 
-2. **Volume / liquidity quality score** [E]
-   - Replace the binary "volume confirmed" check with a `volumeZ` (today vs 20-day avg, z-scored). Feed it as a continuous conviction modifier (±5).
-   - Add a hard min-ADV gate (e.g. $20M/day) and dollar-spread proxy (ATR/price < X) to prune illiquid noise before AI/scoring.
+5. **Parameter sensitivity** — pass the swept threshold into `evaluateSignal` via the new `paramOverrides`. Verify rows differ by >0% before returning; if they don't, set `parameterSensitivityVaried = false` and surface the warning we already render.
+6. **Monte Carlo distribution** — confirm each of the 200 sims (a) calls `clearTrackerCache()`, (b) reshuffles the trade-return array (bootstrap, not a single static seed), and (c) computes percentiles from the resulting equity distribution. Add a unit guard: if `p5 === p50 === p95`, throw a "degenerate distribution" error so it surfaces in logs.
+7. **Monthly-return heatmap anomalies** — audit the per-month aggregation: clamp single-trade monthly returns, divide cumulative P&L by *starting* equity for that month (not running equity), and skip months with zero trades instead of carrying forward stale values.
 
-3. **Breadth-aware divergence detection** [E]
-   - Track RSI/MACD bullish divergence over the last 20 bars (lower price low, higher indicator low) as a discrete contributing rule with weight. Same for bearish.
-   - Currently only end-of-window levels are checked; divergence is a real edge.
+## 3. Dashboard math (`src/components/dashboard/TradingTab.tsx`, `src/pages/Dashboard.tsx`)
 
-4. **Earnings & event blackout** [E][R]
-   - Use Finnhub (already a secret) to fetch upcoming earnings and **block new entries within 3 trading days** of an earnings date, or downgrade conviction by 10 pts.
-   - Same for ex-dividend gaps if relevant.
+8. **Profit Factor includes unrealized P&L.** Today it only sums closed trades. Change `profitFactor` useMemo to fold `getUnrealizedPnL(pos)` for every open position into the gross-profit / gross-loss buckets.
+9. **Equity-curve Y-axis** — replace the hardcoded domain with `domain={[min * 0.95, max * 1.1]}` driven by the actual series so the curve fills the chart.
 
-5. **Honest conviction calibration** [E][L]
-   - Apply **Platt scaling / isotonic regression** on raw conviction → realized win-rate, instead of the current ±8 bucket adjust. Fit nightly in `calibrate-weights`.
-   - Output: a smooth monotonic mapping per strategy. Improves probability quality everywhere downstream (sizing, exits, portfolio gate).
+## 4. AutoTrader logic (`supabase/functions/autotrader-scan/index.ts`)
 
-6. **Pre-screen tightening** [O][E]
-   - In `scan-pipeline.preScreen`, add: trend coherence (ADX > 18 OR BB squeeze release), and an "unactionable" filter (gap > 5% today, halted, post-earnings whipsaw).
+10. **Capital rotation when 8/8 full** — when all slots are taken and the scanner surfaces a signal with `confidence > 85`, compare it to the worst-performing open position (by unrealized P&L %). If the new signal beats it by a configurable margin (default 15 conviction points), close that position and open the new one. Add a per-day rotation cap (e.g. 3) to prevent churn.
+11. **Emergency Stop modes** (`src/pages/Settings.tsx` + autotrader) — replace the single boolean with `emergency_mode: 'off' | 'freeze_entries' | 'liquidate'`. `freeze_entries` keeps stop-losses / take-profits running; `liquidate` market-sells every open virtual position immediately, then freezes entries.
 
----
+## 5. Risk & UI polish
 
-## Phase 2 — Risk & Exits (where most P&L is actually made)
+12. **Default risk enforcement to enabled** — flip `portfolio_caps.enabled` default to `true` in the seeding trigger and in `Settings.tsx` initial state, and add an onboarding prompt.
+13. **Max NAV formatting** — wrap the displayed value in `.toFixed(1)` in `Settings.tsx` (and any other place showing `effective_max_nav_exposure_pct`).
+14. **Synthetic ticker filter** (`src/components/WatchlistSuggestions.tsx` + add server validation) — before suggesting a ticker, call a small `validate-ticker` edge function (or reuse `fetch-stock-price`) that confirms Yahoo returns a real quote with non-null `regularMarketPrice`. Drop any ticker that fails.
 
-7. **Partial profit-taking ladder** [R]
-   - Replace single take-profit with a 3-tier scale-out: 1/3 at 1R, 1/3 at 2R, trail the last 1/3 with widened ATR trail. Hugely improves expectancy + capture ratio.
-   - Backtest evidence already shows capture ratio is the key lever; `exit_calibration` is in place — extend it to per-strategy scale-out fractions, not just trail mult.
+## Technical details
 
-8. **Time-based stops** [R]
-   - If a position hasn't moved ≥0.5R in N bars (N depends on strategy: 5 for scalp, 10 for swing, 20 for position), close it. Cuts dead-money tail risk.
-   - Already have `bars_held` in `signal_outcomes` — calibrate N from data.
+- **Override merge order in `evaluateSignal`**: `{ ...PROFILE_PARAMS[base], ...cls.blendedParams, ...paramOverrides }` so blended classification stays the baseline and the backtester is the highest-priority override.
+- **Tracker isolation**: simplest path is `evaluateSignal(..., trackerCache?: Map<string, SignalState>)` defaulting to the module-level one; backtester passes a fresh map per run.
+- **Profit Factor with unrealized**:
+  ```ts
+  const grossWins = closedWins + openPositions.filter(p => getUnrealizedPnL(p) > 0).reduce(sum, 0);
+  const grossLoss = closedLosses + Math.abs(openPositions.filter(p => getUnrealizedPnL(p) < 0).reduce(sum, 0));
+  ```
+- **Equity domain**: Recharts `<YAxis domain={[dataMin => dataMin * 0.95, dataMax => dataMax * 1.1]} />`.
+- **Capital rotation**: needs a DB column `virtual_positions.opened_by_rotation` to avoid loops; rotation skips positions opened <30 min ago.
+- **Liquidate mode**: reuse the existing `check-sell-alerts` exit path so accounting stays consistent.
 
-9. **Chandelier / Supertrend trailing stop** [R]
-   - Swap the static ATR trail for **Chandelier (highest-high − k·ATR)** or **Supertrend**. Preserves more of the trend, gives back less on pullbacks. k auto-tuned per regime by `exit_calibration`.
+## Suggested order
 
-10. **Stop placement quality** [R]
-    - Stops should sit just beyond *structural* levels (recent swing low, VWAP, 20-EMA), not pure ATR. Add a `structuralStop = max(swingLow_10bars, ema20 − 0.25·ATR)` and use the tighter of structural vs ATR.
+1. Signal-engine bug fixes (1–4) — unblocks the backtester.
+2. Backtest engine wiring (5–7) — proves the fixes.
+3. Dashboard math (8–9) — quick wins, no backend risk.
+4. UI polish (12–14) — cheap, ship alongside.
+5. AutoTrader rotation + emergency modes (10–11) — biggest behavioral change, ship last with explicit user warning.
 
-11. **Exit-side signal evaluation** [R]
-    - Run `evaluateSignal` on open positions every bar in `autotrader-scan` (not just on entry). If the engine flips to opposite-side or HOLD with deteriorating regime, exit immediately rather than waiting for stop. Adds an "intent" exit alongside price-based exits.
-
----
-
-## Phase 3 — Portfolio Construction (autotrader)
-
-12. **Risk-parity sizing v2** [R]
-    - Current vol-target sizing uses SPY vol as a scalar. Upgrade to **per-position risk budget**: each position contributes equal % portfolio σ. Compute via 60-day cov matrix of open names + candidate.
-    - Combined with correlation gating already in place, this is the "real" institutional portfolio layer.
-
-13. **Regime-conditional exposure curve** [R]
-    - Replace the binary risk-on/off NAV cap with a **continuous max-NAV curve** as a function of `macro.score`: e.g. NAV cap = 30% + 0.7 × score. Lets capital lean in during clear risk-on without manual tweaking.
-
-14. **Sector / factor caps refinement** [R]
-    - Extend `portfolio-gate` from sector ETF only → **factor exposure**: long-only momentum/quality/value/size buckets via a small ticker→factor table. Cap any single factor at 40%. Prevents "all momentum" books.
-
-15. **Pyramiding / position adds** [R]
-    - Allow adding 0.5× initial size to a winner that re-triggers within 10 bars and is up ≥1R, **only if** new conviction ≥ original. Cap total position at 1.5× initial. Mirrors trend-following best practice.
-
-16. **Drawdown circuit breaker** [R]
-    - Beyond per-day loss limit: rolling 5-day and 20-day drawdown gates. If portfolio is in top decile of historical drawdown speed, halve sizing for the next N entries until equity recovers above prior peak × 0.97.
-
----
-
-## Phase 4 — Learning Loop (faster, sharper adaptation)
-
-17. **Contextual bandit on strategy selection** [L]
-    - Replace static `strategy_tilts` with a **Thompson-sampling bandit** keyed on `(strategy, regime, profile)`. Each closed trade updates a Beta(α,β) for that arm. Scanner samples from posterior to choose tilts → faster exploration/exploitation than 90-day weighted average.
-
-18. **Per-feature attribution** [L]
-    - Log `contributing_rules` weights per signal (already a column!) and run **logistic regression** nightly: rule presence → outcome. Down-weight underperforming rules, boost overperforming ones. Auto-pruning of dead signals.
-
-19. **Walk-forward validation guardrail** [L][R]
-    - Before activating a new `strategy_weights` row, paper-validate it on the most recent 2 weeks of held-out outcomes. If win-rate regresses >5 pts vs current active row, skip the swap and alert.
-
-20. **Per-ticker memory horizon** [L]
-    - Current ticker_calibration uses 90 days flat. Add an **EWMA half-life of 30 days** — a stock that changed character (e.g. NVDA 2022 vs 2024) adapts faster. Bayesian shrinkage stays.
-
-21. **Outcome enrichment** [L]
-    - Capture **MAE-time** (bars to max adverse excursion) and **slippage proxy** (fill vs next-bar open). These unlock smarter stop calibration and execution-cost modeling.
-
----
-
-## Suggested ship order (8 weeks of work, but each item is independent)
-
-```
-Week 1-2  →  #1 multi-TF, #2 volume z-score, #6 prescreen, #4 earnings blackout
-Week 3    →  #7 partial exits, #9 chandelier, #8 time stop
-Week 4    →  #5 isotonic calibration, #11 intent exit
-Week 5-6  →  #12 risk-parity v2, #13 continuous NAV curve, #14 factor caps
-Week 7    →  #15 pyramiding, #16 drawdown breaker
-Week 8    →  #17 bandit, #18 rule attribution, #19 WF guardrail, #20 EWMA, #21 enrichment
-```
-
-## Technical Notes
-
-- **Where most code lands**: `_shared/signal-engine-v2.ts` (Phase 1, #11), `autotrader-scan/index.ts` (Phase 2, 3), `calibrate-weights/index.ts` (Phase 4), `_shared/scan-pipeline.ts` (Phase 1 #6), `portfolio-gate/index.ts` (Phase 3 #14).
-- **Schema changes**: extend `strategy_weights.exit_calibration` JSON with `{scaleOuts, timeStopBars, chandelierK}`; add `signal_outcomes.mae_bars`, `slippage_bps`; add `factor_map` table for #14.
-- **Backtester parity**: each item must be mirrored in the backtest path (per existing "shared logic replication" rule) so we can validate before live.
-- **CPU**: bandit + isotonic stay nightly only — zero live cost. Multi-TF and divergence add ~10-15% to scanner CPU; offset by tighter prescreen.
-- **Risk of overfitting**: WF guardrail (#19) is the kill-switch for any new weights row. Ship it before #17.
-
----
-
-## What I'd do first if forced to pick 5
-
-1. #7 Partial exits ladder — biggest expectancy win
-2. #5 Isotonic calibration — fixes everything downstream
-3. #1 Multi-TF gate — kills a class of false longs
-4. #9 Chandelier trail — better capture without more risk
-5. #19 WF guardrail — protects the system from itself
-
-Tell me which subset to implement, or say "go" for the full Week 1-2 batch.
+Want me to start with the signal-engine block (items 1–4) or jump straight to the AutoTrader rotation/emergency logic?

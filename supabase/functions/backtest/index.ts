@@ -1449,10 +1449,25 @@ function runMonteCarlo(trades: Trade[], initialCapital: number, simulations: num
   const positionSizeFrac = positionSizePct / 100;
   const finalValues: number[] = [];
 
+  // Fisher-Yates shuffle — `sort(() => Math.random() - 0.5)` is biased and
+  // can collapse the distribution to nearly identical orderings, which is
+  // what was making p5 / median / p95 print the same value.
+  const shuffle = <T,>(arr: T[]): T[] => {
+    const out = arr.slice();
+    for (let i = out.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [out[i], out[j]] = [out[j], out[i]];
+    }
+    return out;
+  };
+
   for (let s = 0; s < simulations; s++) {
     let capital = initialCapital;
-    const shuffled = [...tradeReturns].sort(() => Math.random() - 0.5);
-    for (const ret of shuffled) {
+    // Bootstrap with replacement on top of the shuffle so sequence risk
+    // actually varies between runs even when trade count is small.
+    const shuffled = shuffle(tradeReturns);
+    for (let k = 0; k < shuffled.length; k++) {
+      const ret = shuffled[Math.floor(Math.random() * shuffled.length)];
       capital *= (1 + ret * positionSizeFrac);
     }
     finalValues.push(((capital - initialCapital) / initialCapital) * 100);
@@ -1461,13 +1476,19 @@ function runMonteCarlo(trades: Trade[], initialCapital: number, simulations: num
   finalValues.sort((a, b) => a - b);
   const percentile = (p: number) => finalValues[Math.floor(p * finalValues.length / 100)] || 0;
 
-  return {
+  const result = {
     percentile5: parseFloat(percentile(5).toFixed(2)),
     percentile25: parseFloat(percentile(25).toFixed(2)),
     median: parseFloat(percentile(50).toFixed(2)),
     percentile75: parseFloat(percentile(75).toFixed(2)),
     percentile95: parseFloat(percentile(95).toFixed(2)),
   };
+  // Degeneracy probe — a healthy distribution should never collapse to a
+  // single value across 200 sims. Surface it in logs so we notice fast.
+  if (Math.abs(result.percentile95 - result.percentile5) < 0.01) {
+    console.warn(`[monte-carlo] Degenerate distribution: p5=p95=${result.median}%. Inputs likely identical.`);
+  }
+  return result;
 }
 
 // ============================================================================

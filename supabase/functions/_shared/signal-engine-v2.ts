@@ -214,11 +214,13 @@ export function classifyStock(close: number[], high: number[], low: number[], ti
   }
   const maAlignment = maValidCount > 0 ? maAlignedCount / maValidCount : 0;
 
+  // Bug fix: was slicing `close` so we were really tracking "higher closing
+  // prices" instead of actual higher highs. Read from the `high` array.
   const hhWindow = 20;
   let hhCount = 0, hhTotal = 0;
   for (let i = hhWindow * 2; i < n; i += hhWindow) {
-    const currentHigh = Math.max(...close.slice(i - hhWindow, i));
-    const prevHigh = Math.max(...close.slice(i - hhWindow * 2, i - hhWindow));
+    const currentHigh = Math.max(...high.slice(i - hhWindow, i));
+    const prevHigh = Math.max(...high.slice(i - hhWindow * 2, i - hhWindow));
     hhTotal++;
     if (currentHigh > prevHigh) hhCount++;
   }
@@ -548,7 +550,10 @@ export function computeStrategySignal(
   const prevMacdH = macdData.histogram.length >= 2 ? macdData.histogram[macdData.histogram.length - 2] : 0;
   const currentVol = safeGet(vol, 0.02);
 
-  const volSlice = volume.slice(Math.max(0, n - 20));
+  // Bug fix: exclude the current bar from its own baseline so a true
+  // institutional accumulation spike compares against the prior 20 days,
+  // not a baseline diluted by today's print.
+  const volSlice = volume.slice(Math.max(0, n - 21), Math.max(0, n - 1));
   const avgVolume = volSlice.length > 0 ? volSlice.reduce((a, b) => a + b, 0) / volSlice.length : 1;
   const currentVolume = volume[n - 1] || 0;
   const volRatio = avgVolume > 0 ? currentVolume / avgVolume : 1;
@@ -983,12 +988,20 @@ export function evaluateSignal(
    *  When omitted, a per-ticker in-memory tracker is used (lives for the
    *  duration of the edge-function invocation). */
   tracker?: SignalState,
+  /** Optional per-call overrides for ProfileParams. Used by the backtester's
+   *  parameter-sensitivity sweeps so changing `buyThreshold` actually changes
+   *  the result instead of being silently overwritten by the classifier. */
+  paramOverrides?: Partial<ProfileParams>,
 ): EvaluateSignalResult | null {
   if (data.close.length < 200) return null;
 
-  // 1. Classify the stock (full blended classifier)
+  // 1. Classify the stock (full blended classifier), then layer caller
+  //    overrides on top so sweeps actually take effect.
   const cls = classifyStock(data.close, data.high, data.low, ticker);
-  const activeProfile = cls.blendedParams || PROFILE_PARAMS[cls.classification];
+  const activeProfile: ProfileParams = {
+    ...(cls.blendedParams || PROFILE_PARAMS[cls.classification]),
+    ...(paramOverrides || {}),
+  };
 
   // 2. Aggregate to weekly + compute weekly bias
   const weekly = aggregateToWeekly(data);
@@ -1059,6 +1072,9 @@ export function evaluateSignal(
   // Phase 1 #2 — Volume z-score conviction modifier (in-engine so backtest
   // and live share identical math). Today's volume vs the prior 20-bar mean,
   // clipped to z ∈ [-2, 2] → conviction adj ∈ [-5, +5].
+  // Bug fix: we now mirror the adjustment into consensusScore *and* re-validate
+  // the buy/short threshold so a trade that drops below the gate after the
+  // volume adjustment is properly downgraded to HOLD instead of leaking through.
   if (sig.confidence > 0 && data.volume.length >= 21) {
     const vol = data.volume;
     const recent = vol.slice(-21, -1);
@@ -1070,8 +1086,31 @@ export function evaluateSignal(
       const z = Math.max(-2, Math.min(2, (today - mean) / std));
       const volAdj = Math.round(z * 2.5);
       if (volAdj !== 0) {
+        const before = sig.confidence;
         sig.confidence = Math.max(0, Math.min(100, sig.confidence + volAdj));
+        // Keep consensusScore magnitude in sync with the adjusted confidence so
+        // downstream direction gates see the same number.
+        if (before > 0 && sig.consensusScore !== 0) {
+          sig.consensusScore = Math.sign(sig.consensusScore) * sig.confidence;
+        }
       }
+    }
+  }
+
+  // Re-validate against the active profile's threshold after the volume
+  // adjustment. Previously a 66-confidence signal could fall to 61, below the
+  // 65 gate, but still execute because the gate was only checked inside
+  // computeStrategySignal *before* the adjustment.
+  {
+    const sigDirCheck: "BUY" | "SHORT" | "HOLD" =
+      sig.consensusScore > 0 ? "BUY" : sig.consensusScore < 0 ? "SHORT" : "HOLD";
+    const convThresh = sigDirCheck === "BUY"
+      ? activeProfile.buyThreshold
+      : sigDirCheck === "SHORT" ? activeProfile.shortThreshold : 0;
+    if (sigDirCheck !== "HOLD" && sig.confidence < convThresh) {
+      sig.consensusScore = 0;
+      sig.confidence = 0;
+      sig.strategy = "none";
     }
   }
 
