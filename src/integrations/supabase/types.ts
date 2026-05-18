@@ -80,6 +80,7 @@ export type Database = {
           auto_watchlist_stale_days: number
           created_at: string
           daily_loss_limit_pct: number
+          emergency_mode: string
           enabled: boolean
           kill_switch: boolean
           last_scan_at: string | null
@@ -91,6 +92,11 @@ export type Database = {
           notify_on_action: boolean
           paper_mode: boolean
           risk_profile: string
+          rotation_count_today: number
+          rotation_day: string | null
+          rotation_enabled: boolean
+          rotation_max_per_day: number
+          rotation_min_delta_conviction: number
           scan_interval_minutes: number
           starting_nav: number
           updated_at: string
@@ -104,6 +110,7 @@ export type Database = {
           auto_watchlist_stale_days?: number
           created_at?: string
           daily_loss_limit_pct?: number
+          emergency_mode?: string
           enabled?: boolean
           kill_switch?: boolean
           last_scan_at?: string | null
@@ -115,6 +122,11 @@ export type Database = {
           notify_on_action?: boolean
           paper_mode?: boolean
           risk_profile?: string
+          rotation_count_today?: number
+          rotation_day?: string | null
+          rotation_enabled?: boolean
+          rotation_max_per_day?: number
+          rotation_min_delta_conviction?: number
           scan_interval_minutes?: number
           starting_nav?: number
           updated_at?: string
@@ -128,6 +140,7 @@ export type Database = {
           auto_watchlist_stale_days?: number
           created_at?: string
           daily_loss_limit_pct?: number
+          emergency_mode?: string
           enabled?: boolean
           kill_switch?: boolean
           last_scan_at?: string | null
@@ -139,6 +152,11 @@ export type Database = {
           notify_on_action?: boolean
           paper_mode?: boolean
           risk_profile?: string
+          rotation_count_today?: number
+          rotation_day?: string | null
+          rotation_enabled?: boolean
+          rotation_max_per_day?: number
+          rotation_min_delta_conviction?: number
           scan_interval_minutes?: number
           starting_nav?: number
           updated_at?: string
@@ -803,6 +821,7 @@ export type Database = {
           hard_stop_price: number | null
           id: string
           opened_by: string
+          opened_by_rotation: boolean
           partial_exits_taken: number
           peak_price: number | null
           pnl: number | null
@@ -832,6 +851,7 @@ export type Database = {
           hard_stop_price?: number | null
           id?: string
           opened_by?: string
+          opened_by_rotation?: boolean
           partial_exits_taken?: number
           peak_price?: number | null
           pnl?: number | null
@@ -861,6 +881,7 @@ export type Database = {
           hard_stop_price?: number | null
           id?: string
           opened_by?: string
+          opened_by_rotation?: boolean
           partial_exits_taken?: number
           peak_price?: number | null
           pnl?: number | null
