@@ -102,6 +102,7 @@ interface Position {
   entry_weekly_alloc: number | null;
   breakout_failed_count: number;
   opened_by: string;
+  opened_by_rotation: boolean;
   signal_id: string | null;
   partial_exits_taken: number;
 }
@@ -109,6 +110,14 @@ interface Position {
 interface Settings {
   user_id: string; enabled: boolean;
   kill_switch: boolean;
+  /** off | freeze_entries | liquidate (preferred over legacy kill_switch). */
+  emergency_mode: "off" | "freeze_entries" | "liquidate";
+  /** Capital rotation: replace worst open position with a stronger fresh signal. */
+  rotation_enabled: boolean;
+  rotation_min_delta_conviction: number;
+  rotation_max_per_day: number;
+  rotation_count_today: number;
+  rotation_day: string | null;
   min_conviction: number; max_positions: number;
   max_nav_exposure_pct: number; max_single_name_pct: number;
   daily_loss_limit_pct: number; starting_nav: number;
@@ -1094,22 +1103,68 @@ serve(async (req) => {
     const now = new Date();
     let skippedNotDue = 0;
     let skippedKillSwitch = 0;
+    let liquidatedUsers = 0;
     for (const settingsRow of settingsRows) {
       const rawSettings = settingsRow as Settings;
 
-      // PER-USER KILL SWITCH — halt entries AND freeze automated exits.
-      // User must manage positions manually until they flip it off.
-      if (rawSettings.kill_switch) {
+      // ── EMERGENCY MODE ───────────────────────────────────────────────────
+      // Resolve effective mode from new `emergency_mode` column; fall back
+      // to legacy `kill_switch` boolean (treated as 'freeze_entries') so any
+      // user still on the old toggle keeps the same protective behavior.
+      const effectiveEmergency: "off" | "freeze_entries" | "liquidate" =
+        rawSettings.emergency_mode && rawSettings.emergency_mode !== "off"
+          ? rawSettings.emergency_mode
+          : rawSettings.kill_switch ? "freeze_entries" : "off";
+
+      if (effectiveEmergency === "liquidate") {
+        // Market-sell every open virtual position immediately, then drop the
+        // user into freeze_entries so we don't keep liquidating on every scan.
+        try {
+          const closedCount = await liquidateAllPositions(supabase, rawSettings.user_id);
+          liquidatedUsers++;
+          await supabase.from("autotrade_settings")
+            .update({
+              emergency_mode: "freeze_entries",
+              kill_switch: true,
+              last_scan_at: now.toISOString(),
+              next_scan_at: new Date(now.getTime() + 10 * 60_000).toISOString(),
+            })
+            .eq("user_id", rawSettings.user_id);
+          await supabase.from("autotrade_log").insert({
+            user_id: rawSettings.user_id,
+            ticker: "SCAN",
+            action: "LIQUIDATE",
+            reason: `Emergency LIQUIDATE: closed ${closedCount} open position${closedCount === 1 ? "" : "s"} at market. Entries now frozen — switch emergency mode to OFF to resume.`,
+          });
+        } catch (e) {
+          console.error(`[liquidate] user ${rawSettings.user_id} failed`, e);
+          await supabase.from("autotrade_log").insert({
+            user_id: rawSettings.user_id, ticker: "SCAN", action: "ERROR",
+            reason: `Liquidation error: ${(e as Error).message ?? "unknown"}`,
+          });
+        }
+        continue;
+      }
+
+      if (effectiveEmergency === "freeze_entries") {
+        // Entries frozen, but the regular scan loop below would also block
+        // *exits*. Run a slim exit-only pass so stop-losses and take-profits
+        // still fire and the user keeps risk management.
         skippedKillSwitch++;
         const nextScan = new Date(now.getTime() + 10 * 60_000);
         await supabase.from("autotrade_settings")
           .update({ last_scan_at: now.toISOString(), next_scan_at: nextScan.toISOString() })
           .eq("user_id", rawSettings.user_id);
+        try {
+          await runExitOnlyPass(supabase, rawSettings, macro, exitCalibration);
+        } catch (e) {
+          console.warn(`[freeze_entries] exit-pass failed for ${rawSettings.user_id}`, e);
+        }
         await supabase.from("autotrade_log").insert({
           user_id: rawSettings.user_id,
           ticker: "SCAN",
-          action: "KILL_SWITCH",
-          reason: "Emergency stop active — no entries, no automated exits. Manage positions manually.",
+          action: "FREEZE_ENTRIES",
+          reason: "Emergency: entries frozen. Automated stop-losses & take-profits still active.",
         });
         continue;
       }
@@ -1244,6 +1299,7 @@ serve(async (req) => {
     }
     (summary as Record<string, unknown>).skipped_not_due = skippedNotDue;
     (summary as Record<string, unknown>).skipped_kill_switch = skippedKillSwitch;
+    (summary as Record<string, unknown>).liquidated_users = liquidatedUsers;
 
     await recordHeartbeat(
       "autotrader-scan",
@@ -1406,6 +1462,105 @@ async function syncAutoWatchlist(
       action: "AUTO_REMOVE",
       reason: `Pruned ${toDelete.length} stale auto-added ticker${toDelete.length === 1 ? "" : "s"} (no signal in ${staleDays}d): ${deletedTickers.join(", ")}`,
     });
+  }
+}
+
+
+// ── EMERGENCY MODE HELPERS ──────────────────────────────────────────────────
+
+/** Market-sell every open virtual position for a user at the live quote.
+ *  Reuses the same accounting path as a normal FULL_EXIT so unrealized P&L,
+ *  cooldowns, and sell_alert notifications stay consistent. */
+async function liquidateAllPositions(
+  supabase: ReturnType<typeof createClient>,
+  userId: string,
+): Promise<number> {
+  const { data: posRows } = await supabase
+    .from("virtual_positions")
+    .select("*")
+    .eq("user_id", userId)
+    .eq("status", "open");
+  const positions = (posRows ?? []) as unknown as Position[];
+  if (positions.length === 0) return 0;
+
+  let closed = 0;
+  for (const pos of positions) {
+    let price: number | null = null;
+    try {
+      const q = await fetchLiveQuote(pos.ticker);
+      price = q?.price ?? null;
+    } catch (_e) { /* fall through to entry price */ }
+    if (!price || !Number.isFinite(price) || price <= 0) {
+      price = Number(pos.entry_price); // last-resort flat exit
+    }
+    const action: ExitAction = {
+      kind: "FULL_EXIT",
+      price,
+      reason: "Emergency LIQUIDATE",
+    } as ExitAction;
+    const profile = PROFILE_PARAMS[(pos.entry_profile as StockProfile) ?? "normal"];
+    const innerSummary = { exits: 0, partials: 0, holds: 0 };
+    await executeExit(supabase, pos, action, profile, innerSummary);
+    closed += innerSummary.exits;
+  }
+  return closed;
+}
+
+/** Run only the exit pass (stops, take-profits, partials) for a frozen user.
+ *  Skips watchlist, entries, sizing — pure risk management. */
+async function runExitOnlyPass(
+  supabase: ReturnType<typeof createClient>,
+  rawSettings: Settings,
+  macro: MacroContext | null,
+  exitCalibration: Record<string, { trailMultAdjust: number }> | null,
+): Promise<void> {
+  const userId = rawSettings.user_id;
+  const { data: posRows } = await supabase
+    .from("virtual_positions")
+    .select("*")
+    .eq("user_id", userId)
+    .eq("status", "open");
+  const positions = (posRows ?? []) as unknown as Position[];
+  if (positions.length === 0) return;
+
+  await batchFetch(positions.map(p => p.ticker.toUpperCase()));
+
+  for (const pos of positions) {
+    const data = priceCache.get(pos.ticker.toUpperCase());
+    if (!data || data.close.length < 200) continue;
+    const currentPrice = data.close[data.close.length - 1];
+
+    let liveBias: "long" | "short" | "flat" | null = null;
+    let liveDecision: "BUY" | "SHORT" | "HOLD" | null = null;
+    let liveConviction = 0;
+    let liveWeeklyAlloc = pos.entry_weekly_alloc ?? 0;
+    let liveRsi = 50;
+    try {
+      const sig = evaluateSignal(data, pos.ticker, undefined, macro);
+      if (sig) {
+        liveBias = sig.weeklyBias.bias;
+        liveDecision = sig.decision;
+        liveConviction = sig.conviction ?? 0;
+        liveWeeklyAlloc = sig.weeklyBias.targetAllocation;
+      }
+      const rsiArr = calculateRSI(data.close, 14);
+      liveRsi = safeGet(rsiArr, 50);
+    } catch (_e) { /* swallow — defensive only */ }
+
+    const cls = classifyStock(data.close, data.high, data.low, pos.ticker);
+    const baseProfile = cls.blendedParams ?? PROFILE_PARAMS[
+      (pos.entry_profile as StockProfile) ?? cls.classification
+    ];
+    const stratKey = pos.entry_strategy ?? "unknown";
+    const trailAdj = exitCalibration?.[stratKey]?.trailMultAdjust ?? 1.0;
+    const profile: ProfileParams = trailAdj !== 1.0
+      ? { ...baseProfile, trailingStopATRMult: baseProfile.trailingStopATRMult * trailAdj }
+      : baseProfile;
+
+    const lossAct = runLossExit(pos, data, currentPrice, profile, liveDecision, liveConviction, liveBias, liveRsi);
+    const action: ExitAction = lossAct ?? runWinExit(pos, data, currentPrice, profile, liveWeeklyAlloc);
+    const innerSummary = { exits: 0, partials: 0, holds: 0 };
+    await executeExit(supabase, pos, action, profile, innerSummary);
   }
 }
 
@@ -1579,11 +1734,13 @@ async function processUser(
 
   const heldTickers = new Set(positions.map(p => p.ticker.toUpperCase()));
 
-  // ── EARLY EXIT — all slots full ───────────────────────────────────────
-  // If the user already holds max_positions after the exit pass, skip the entire
-  // entry evaluation loop. Saves Yahoo quote fetches, news-sentiment API calls,
-  // and per-ticker cooldown queries. New entries can't fit anyway.
-  if (refreshedOpenCount >= settings.max_positions) {
+  // ── CAPITAL ROTATION GATE ─────────────────────────────────────────────
+  // When all slots are full we normally skip the entry scan to conserve API
+  // calls. If the user opted into capital rotation we instead let the scan
+  // run; rotation candidates are evaluated below in PASS 2. Anything that's
+  // not strong enough to rotate still gets skipped efficiently.
+  const rotationActive = !!settings.rotation_enabled && refreshedOpenCount >= settings.max_positions;
+  if (refreshedOpenCount >= settings.max_positions && !settings.rotation_enabled) {
     userSummary.holds += Math.max(0, watchlist.length - heldTickers.size);
     await supabase.from("autotrade_log").insert({
       user_id: userId, ticker: "—", action: "BLOCKED",
@@ -1591,6 +1748,17 @@ async function processUser(
     });
     return;
   }
+
+  // Daily rotation counter — reset when calendar day rolled over.
+  let rotationCountToday = settings.rotation_count_today ?? 0;
+  if (settings.rotation_day !== today) {
+    rotationCountToday = 0;
+    await supabase.from("autotrade_settings")
+      .update({ rotation_count_today: 0, rotation_day: today })
+      .eq("user_id", userId);
+  }
+  const rotationBudget = Math.max(0, (settings.rotation_max_per_day ?? 3) - rotationCountToday);
+
 
   // PASS 1 — gather decisions for every eligible ticker (no DB writes yet).
   // This lets us rank ENTER candidates by conviction and stagger entries
@@ -1622,7 +1790,10 @@ async function processUser(
 
     const decision = await runEntryDecision(
       ticker, data, macro, settings,
-      refreshedOpenCount,
+      // When rotation is active we already know slots are full — bypass the
+      // hard slot-count block so the candidate can be ranked & compared
+      // against the worst open position downstream.
+      rotationActive ? 0 : refreshedOpenCount,
       navExposurePct,
       todayPnlPct,
       Array.from(heldTickers),
@@ -1677,7 +1848,105 @@ async function processUser(
     }
   }
 
+  // ── Rotation bookkeeping ─────────────────────────────────────────────────
+  // Build a mutable view of open positions so rotation closes update the book
+  // and downstream NAV / correlation re-checks see the new state.
+  const livePositions: Position[] = [...positions];
+  let rotationsDoneThisScan = 0;
+  const HIGH_CONVICTION_ROTATION_FLOOR = 85;
+  const MIN_POSITION_AGE_MS = 30 * 60_000; // don't rotate fresh entries
+
   for (const p of toExecute) {
+    // ── ROTATION GATE: if slots are full and rotation enabled, evaluate
+    // whether this candidate is strong enough to displace the weakest open
+    // position. If not, log and skip.
+    if (rotationActive) {
+      if (rotationsDoneThisScan >= rotationBudget) {
+        summary.blocked++; userSummary.blocked++;
+        await supabase.from("autotrade_log").insert({
+          user_id: userId, ticker: p.ticker, action: "BLOCKED",
+          reason: `Rotation cap reached for today (${rotationCountToday + rotationsDoneThisScan}/${settings.rotation_max_per_day})`,
+          conviction: p.decision.conviction, strategy: p.decision.strategy, profile: p.decision.profile,
+        });
+        continue;
+      }
+      if (p.decision.conviction < HIGH_CONVICTION_ROTATION_FLOOR) {
+        summary.holds++; userSummary.holds++;
+        await supabase.from("autotrade_log").insert({
+          user_id: userId, ticker: p.ticker, action: "HOLD",
+          reason: `Rotation skipped — conviction ${p.decision.conviction} < floor ${HIGH_CONVICTION_ROTATION_FLOOR}`,
+          conviction: p.decision.conviction, strategy: p.decision.strategy, profile: p.decision.profile,
+        });
+        continue;
+      }
+      // Find worst-performing eligible position
+      const nowMs = Date.now();
+      const ranked = livePositions
+        .map(pos => {
+          const d = priceCache.get(pos.ticker.toUpperCase());
+          if (!d) return null;
+          const px = d.close[d.close.length - 1];
+          const entry = Number(pos.entry_price);
+          const pnlPct = pos.position_type === "long"
+            ? ((px - entry) / entry) * 100
+            : ((entry - px) / entry) * 100;
+          const ageMs = nowMs - new Date(pos.created_at).getTime();
+          return { pos, pnlPct, ageMs };
+        })
+        .filter((r): r is { pos: Position; pnlPct: number; ageMs: number } =>
+          !!r && !r.pos.opened_by_rotation && r.ageMs >= MIN_POSITION_AGE_MS,
+        )
+        .sort((a, b) => a.pnlPct - b.pnlPct);
+      const worst = ranked[0];
+      if (!worst) {
+        summary.blocked++; userSummary.blocked++;
+        await supabase.from("autotrade_log").insert({
+          user_id: userId, ticker: p.ticker, action: "BLOCKED",
+          reason: `Rotation skipped — no eligible position to displace (all rotated today or <30min old)`,
+          conviction: p.decision.conviction, strategy: p.decision.strategy, profile: p.decision.profile,
+        });
+        continue;
+      }
+      const incumbentConv = worst.pos.entry_conviction ?? 0;
+      const delta = p.decision.conviction - incumbentConv;
+      if (delta < settings.rotation_min_delta_conviction) {
+        summary.holds++; userSummary.holds++;
+        await supabase.from("autotrade_log").insert({
+          user_id: userId, ticker: p.ticker, action: "HOLD",
+          reason: `Rotation skipped — Δconv ${delta} < min ${settings.rotation_min_delta_conviction} (incumbent ${worst.pos.ticker} @ conv ${incumbentConv}, P&L ${worst.pnlPct.toFixed(1)}%)`,
+          conviction: p.decision.conviction, strategy: p.decision.strategy, profile: p.decision.profile,
+        });
+        continue;
+      }
+      // ROTATE: close worst, open candidate with opened_by_rotation=true
+      const worstData = priceCache.get(worst.pos.ticker.toUpperCase())!;
+      const worstPx = worstData.close[worstData.close.length - 1];
+      const profile = PROFILE_PARAMS[(worst.pos.entry_profile as StockProfile) ?? "normal"];
+      const innerSummary = { exits: 0, partials: 0, holds: 0 };
+      await executeExit(supabase, worst.pos, {
+        kind: "FULL_EXIT",
+        price: worstPx,
+        reason: `Capital rotation: replaced by ${p.ticker} (Δconv +${delta})`,
+      } as ExitAction, profile, innerSummary);
+      userSummary.exits += innerSummary.exits;
+      // Update live book state
+      const removeIdx = livePositions.findIndex(x => x.id === worst.pos.id);
+      if (removeIdx >= 0) livePositions.splice(removeIdx, 1);
+      heldTickers.delete(worst.pos.ticker.toUpperCase());
+      const worstDollars = worstPx * Number(worst.pos.shares);
+      totalNavExposureDollars = Math.max(0, totalNavExposureDollars - worstDollars);
+      if (sectorCapsActive) {
+        const sec = sectorOf.get(worst.pos.ticker.toUpperCase());
+        if (sec) sectorDollars.set(sec, Math.max(0, (sectorDollars.get(sec) ?? 0) - worstDollars));
+      }
+      if (betaCapsActive) {
+        let b: number | null;
+        try { b = await getBeta(worst.pos.ticker); } catch { b = null; }
+        bookBetaDollars = Math.max(0, bookBetaDollars - worstDollars * (b ?? 1));
+      }
+      rotationsDoneThisScan++;
+    }
+
     // Re-check correlation against the live book — including any positions
     // opened earlier in this same scan loop. Prevents stacking 2 highly
     // correlated names just because both passed the gate independently.
@@ -1753,7 +2022,7 @@ async function processUser(
     }
 
     const beforeEntries = summary.entries;
-    await executeEntry(supabase, settings, p.ticker, p.decision, summary);
+    await executeEntry(supabase, settings, p.ticker, p.decision, summary, rotationActive);
     userSummary.entries += summary.entries - beforeEntries;
     if (summary.entries > beforeEntries) {
       totalNavExposureDollars += candidateDollars;
@@ -1906,6 +2175,7 @@ async function executeEntry(
   supabase: ReturnType<typeof createClient>,
   settings: Settings, ticker: string, e: Extract<EntryAction, { kind: "ENTER" }>,
   summary: { entries: number },
+  openedByRotation = false,
 ) {
   if (!settings.paper_mode) {
     // Live broker integration not implemented in v1
@@ -1974,6 +2244,7 @@ async function executeEntry(
     position_type: positionType,
     status: "open",
     opened_by: "autotrader",
+    opened_by_rotation: openedByRotation,
     entry_atr: e.atr,
     entry_conviction: e.conviction,
     entry_strategy: e.strategy,
@@ -1984,6 +2255,19 @@ async function executeEntry(
     peak_price: fillPrice,
   }).select("id").single();
   if (insErr) { console.error("entry insert failed", insErr); return; }
+  if (openedByRotation) {
+    // Increment per-day counter atomically-enough (single-writer scan loop).
+    const today = new Date().toISOString().split("T")[0];
+    const { data: cur } = await supabase
+      .from("autotrade_settings")
+      .select("rotation_count_today, rotation_day")
+      .eq("user_id", settings.user_id)
+      .maybeSingle();
+    const base = cur?.rotation_day === today ? Number(cur?.rotation_count_today ?? 0) : 0;
+    await supabase.from("autotrade_settings")
+      .update({ rotation_count_today: base + 1, rotation_day: today })
+      .eq("user_id", settings.user_id);
+  }
 
   summary.entries++;
   const signalPrice = e.price;
