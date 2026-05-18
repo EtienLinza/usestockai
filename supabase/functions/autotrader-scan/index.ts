@@ -1790,7 +1790,10 @@ async function processUser(
 
     const decision = await runEntryDecision(
       ticker, data, macro, settings,
-      refreshedOpenCount,
+      // When rotation is active we already know slots are full — bypass the
+      // hard slot-count block so the candidate can be ranked & compared
+      // against the worst open position downstream.
+      rotationActive ? 0 : refreshedOpenCount,
       navExposurePct,
       todayPnlPct,
       Array.from(heldTickers),
