@@ -2258,7 +2258,6 @@ async function executeEntry(
   if (openedByRotation) {
     // Increment per-day counter atomically-enough (single-writer scan loop).
     const today = new Date().toISOString().split("T")[0];
-    await supabase.rpc; // no-op anchor for tooling
     const { data: cur } = await supabase
       .from("autotrade_settings")
       .select("rotation_count_today, rotation_day")
