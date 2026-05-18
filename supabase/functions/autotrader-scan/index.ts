@@ -1848,7 +1848,105 @@ async function processUser(
     }
   }
 
+  // ── Rotation bookkeeping ─────────────────────────────────────────────────
+  // Build a mutable view of open positions so rotation closes update the book
+  // and downstream NAV / correlation re-checks see the new state.
+  const livePositions: Position[] = [...positions];
+  let rotationsDoneThisScan = 0;
+  const HIGH_CONVICTION_ROTATION_FLOOR = 85;
+  const MIN_POSITION_AGE_MS = 30 * 60_000; // don't rotate fresh entries
+
   for (const p of toExecute) {
+    // ── ROTATION GATE: if slots are full and rotation enabled, evaluate
+    // whether this candidate is strong enough to displace the weakest open
+    // position. If not, log and skip.
+    if (rotationActive) {
+      if (rotationsDoneThisScan >= rotationBudget) {
+        summary.blocked++; userSummary.blocked++;
+        await supabase.from("autotrade_log").insert({
+          user_id: userId, ticker: p.ticker, action: "BLOCKED",
+          reason: `Rotation cap reached for today (${rotationCountToday + rotationsDoneThisScan}/${settings.rotation_max_per_day})`,
+          conviction: p.decision.conviction, strategy: p.decision.strategy, profile: p.decision.profile,
+        });
+        continue;
+      }
+      if (p.decision.conviction < HIGH_CONVICTION_ROTATION_FLOOR) {
+        summary.holds++; userSummary.holds++;
+        await supabase.from("autotrade_log").insert({
+          user_id: userId, ticker: p.ticker, action: "HOLD",
+          reason: `Rotation skipped — conviction ${p.decision.conviction} < floor ${HIGH_CONVICTION_ROTATION_FLOOR}`,
+          conviction: p.decision.conviction, strategy: p.decision.strategy, profile: p.decision.profile,
+        });
+        continue;
+      }
+      // Find worst-performing eligible position
+      const nowMs = Date.now();
+      const ranked = livePositions
+        .map(pos => {
+          const d = priceCache.get(pos.ticker.toUpperCase());
+          if (!d) return null;
+          const px = d.close[d.close.length - 1];
+          const entry = Number(pos.entry_price);
+          const pnlPct = pos.position_type === "long"
+            ? ((px - entry) / entry) * 100
+            : ((entry - px) / entry) * 100;
+          const ageMs = nowMs - new Date(pos.created_at).getTime();
+          return { pos, pnlPct, ageMs };
+        })
+        .filter((r): r is { pos: Position; pnlPct: number; ageMs: number } =>
+          !!r && !r.pos.opened_by_rotation && r.ageMs >= MIN_POSITION_AGE_MS,
+        )
+        .sort((a, b) => a.pnlPct - b.pnlPct);
+      const worst = ranked[0];
+      if (!worst) {
+        summary.blocked++; userSummary.blocked++;
+        await supabase.from("autotrade_log").insert({
+          user_id: userId, ticker: p.ticker, action: "BLOCKED",
+          reason: `Rotation skipped — no eligible position to displace (all rotated today or <30min old)`,
+          conviction: p.decision.conviction, strategy: p.decision.strategy, profile: p.decision.profile,
+        });
+        continue;
+      }
+      const incumbentConv = worst.pos.entry_conviction ?? 0;
+      const delta = p.decision.conviction - incumbentConv;
+      if (delta < settings.rotation_min_delta_conviction) {
+        summary.holds++; userSummary.holds++;
+        await supabase.from("autotrade_log").insert({
+          user_id: userId, ticker: p.ticker, action: "HOLD",
+          reason: `Rotation skipped — Δconv ${delta} < min ${settings.rotation_min_delta_conviction} (incumbent ${worst.pos.ticker} @ conv ${incumbentConv}, P&L ${worst.pnlPct.toFixed(1)}%)`,
+          conviction: p.decision.conviction, strategy: p.decision.strategy, profile: p.decision.profile,
+        });
+        continue;
+      }
+      // ROTATE: close worst, open candidate with opened_by_rotation=true
+      const worstData = priceCache.get(worst.pos.ticker.toUpperCase())!;
+      const worstPx = worstData.close[worstData.close.length - 1];
+      const profile = PROFILE_PARAMS[(worst.pos.entry_profile as StockProfile) ?? "normal"];
+      const innerSummary = { exits: 0, partials: 0, holds: 0 };
+      await executeExit(supabase, worst.pos, {
+        kind: "FULL_EXIT",
+        price: worstPx,
+        reason: `Capital rotation: replaced by ${p.ticker} (Δconv +${delta})`,
+      } as ExitAction, profile, innerSummary);
+      userSummary.exits += innerSummary.exits;
+      // Update live book state
+      const removeIdx = livePositions.findIndex(x => x.id === worst.pos.id);
+      if (removeIdx >= 0) livePositions.splice(removeIdx, 1);
+      heldTickers.delete(worst.pos.ticker.toUpperCase());
+      const worstDollars = worstPx * Number(worst.pos.shares);
+      totalNavExposureDollars = Math.max(0, totalNavExposureDollars - worstDollars);
+      if (sectorCapsActive) {
+        const sec = sectorOf.get(worst.pos.ticker.toUpperCase());
+        if (sec) sectorDollars.set(sec, Math.max(0, (sectorDollars.get(sec) ?? 0) - worstDollars));
+      }
+      if (betaCapsActive) {
+        let b: number | null;
+        try { b = await getBeta(worst.pos.ticker); } catch { b = null; }
+        bookBetaDollars = Math.max(0, bookBetaDollars - worstDollars * (b ?? 1));
+      }
+      rotationsDoneThisScan++;
+    }
+
     // Re-check correlation against the live book — including any positions
     // opened earlier in this same scan loop. Prevents stacking 2 highly
     // correlated names just because both passed the gate independently.
