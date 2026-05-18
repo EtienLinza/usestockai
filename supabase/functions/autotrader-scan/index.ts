@@ -102,6 +102,7 @@ interface Position {
   entry_weekly_alloc: number | null;
   breakout_failed_count: number;
   opened_by: string;
+  opened_by_rotation: boolean;
   signal_id: string | null;
   partial_exits_taken: number;
 }
@@ -109,6 +110,14 @@ interface Position {
 interface Settings {
   user_id: string; enabled: boolean;
   kill_switch: boolean;
+  /** off | freeze_entries | liquidate (preferred over legacy kill_switch). */
+  emergency_mode: "off" | "freeze_entries" | "liquidate";
+  /** Capital rotation: replace worst open position with a stronger fresh signal. */
+  rotation_enabled: boolean;
+  rotation_min_delta_conviction: number;
+  rotation_max_per_day: number;
+  rotation_count_today: number;
+  rotation_day: string | null;
   min_conviction: number; max_positions: number;
   max_nav_exposure_pct: number; max_single_name_pct: number;
   daily_loss_limit_pct: number; starting_nav: number;
