@@ -2244,6 +2244,7 @@ async function executeEntry(
     position_type: positionType,
     status: "open",
     opened_by: "autotrader",
+    opened_by_rotation: openedByRotation,
     entry_atr: e.atr,
     entry_conviction: e.conviction,
     entry_strategy: e.strategy,
@@ -2254,6 +2255,20 @@ async function executeEntry(
     peak_price: fillPrice,
   }).select("id").single();
   if (insErr) { console.error("entry insert failed", insErr); return; }
+  if (openedByRotation) {
+    // Increment per-day counter atomically-enough (single-writer scan loop).
+    const today = new Date().toISOString().split("T")[0];
+    await supabase.rpc; // no-op anchor for tooling
+    const { data: cur } = await supabase
+      .from("autotrade_settings")
+      .select("rotation_count_today, rotation_day")
+      .eq("user_id", settings.user_id)
+      .maybeSingle();
+    const base = cur?.rotation_day === today ? Number(cur?.rotation_count_today ?? 0) : 0;
+    await supabase.from("autotrade_settings")
+      .update({ rotation_count_today: base + 1, rotation_day: today })
+      .eq("user_id", settings.user_id);
+  }
 
   summary.entries++;
   const signalPrice = e.price;
