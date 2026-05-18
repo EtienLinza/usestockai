@@ -556,14 +556,14 @@ const Settings = () => {
                     />
                     {bot.rotation_enabled && (
                       <div className="grid sm:grid-cols-2 gap-4 pt-1 border-t border-border/40">
-                        <NumberInputRow
+                        <CapSlider
                           label="Min Δ conviction"
                           hint="New signal must beat the incumbent by at least this many conviction points."
                           value={bot.rotation_min_delta_conviction}
                           onChange={(v) => setBot({ ...bot, rotation_min_delta_conviction: v })}
                           min={5} max={40} step={1} suffix="pts" decimals={0}
                         />
-                        <NumberInputRow
+                        <CapSlider
                           label="Max rotations / day"
                           hint="Hard ceiling on how many times rotation can fire in a single trading day."
                           value={bot.rotation_max_per_day}
