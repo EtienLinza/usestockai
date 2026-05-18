@@ -1466,6 +1466,105 @@ async function syncAutoWatchlist(
 }
 
 
+// ── EMERGENCY MODE HELPERS ──────────────────────────────────────────────────
+
+/** Market-sell every open virtual position for a user at the live quote.
+ *  Reuses the same accounting path as a normal FULL_EXIT so unrealized P&L,
+ *  cooldowns, and sell_alert notifications stay consistent. */
+async function liquidateAllPositions(
+  supabase: ReturnType<typeof createClient>,
+  userId: string,
+): Promise<number> {
+  const { data: posRows } = await supabase
+    .from("virtual_positions")
+    .select("*")
+    .eq("user_id", userId)
+    .eq("status", "open");
+  const positions = (posRows ?? []) as unknown as Position[];
+  if (positions.length === 0) return 0;
+
+  let closed = 0;
+  for (const pos of positions) {
+    let price: number | null = null;
+    try {
+      const q = await fetchLiveQuote(pos.ticker);
+      price = q?.price ?? null;
+    } catch (_e) { /* fall through to entry price */ }
+    if (!price || !Number.isFinite(price) || price <= 0) {
+      price = Number(pos.entry_price); // last-resort flat exit
+    }
+    const action: ExitAction = {
+      kind: "FULL_EXIT",
+      price,
+      reason: "Emergency LIQUIDATE",
+    } as ExitAction;
+    const profile = PROFILE_PARAMS[(pos.entry_profile as StockProfile) ?? "normal"];
+    const innerSummary = { exits: 0, partials: 0, holds: 0 };
+    await executeExit(supabase, pos, action, profile, innerSummary);
+    closed += innerSummary.exits;
+  }
+  return closed;
+}
+
+/** Run only the exit pass (stops, take-profits, partials) for a frozen user.
+ *  Skips watchlist, entries, sizing — pure risk management. */
+async function runExitOnlyPass(
+  supabase: ReturnType<typeof createClient>,
+  rawSettings: Settings,
+  macro: MacroContext | null,
+  exitCalibration: Record<string, { trailMultAdjust: number }> | null,
+): Promise<void> {
+  const userId = rawSettings.user_id;
+  const { data: posRows } = await supabase
+    .from("virtual_positions")
+    .select("*")
+    .eq("user_id", userId)
+    .eq("status", "open");
+  const positions = (posRows ?? []) as unknown as Position[];
+  if (positions.length === 0) return;
+
+  await batchFetch(positions.map(p => p.ticker.toUpperCase()));
+
+  for (const pos of positions) {
+    const data = priceCache.get(pos.ticker.toUpperCase());
+    if (!data || data.close.length < 200) continue;
+    const currentPrice = data.close[data.close.length - 1];
+
+    let liveBias: "long" | "short" | "flat" | null = null;
+    let liveDecision: "BUY" | "SHORT" | "HOLD" | null = null;
+    let liveConviction = 0;
+    let liveWeeklyAlloc = pos.entry_weekly_alloc ?? 0;
+    let liveRsi = 50;
+    try {
+      const sig = evaluateSignal(data, pos.ticker, undefined, macro);
+      if (sig) {
+        liveBias = sig.weeklyBias.bias;
+        liveDecision = sig.decision;
+        liveConviction = sig.conviction ?? 0;
+        liveWeeklyAlloc = sig.weeklyBias.targetAllocation;
+      }
+      const rsiArr = calculateRSI(data.close, 14);
+      liveRsi = safeGet(rsiArr, 50);
+    } catch (_e) { /* swallow — defensive only */ }
+
+    const cls = classifyStock(data.close, data.high, data.low, pos.ticker);
+    const baseProfile = cls.blendedParams ?? PROFILE_PARAMS[
+      (pos.entry_profile as StockProfile) ?? cls.classification
+    ];
+    const stratKey = pos.entry_strategy ?? "unknown";
+    const trailAdj = exitCalibration?.[stratKey]?.trailMultAdjust ?? 1.0;
+    const profile: ProfileParams = trailAdj !== 1.0
+      ? { ...baseProfile, trailingStopATRMult: baseProfile.trailingStopATRMult * trailAdj }
+      : baseProfile;
+
+    const lossAct = runLossExit(pos, data, currentPrice, profile, liveDecision, liveConviction, liveBias, liveRsi);
+    const action: ExitAction = lossAct ?? runWinExit(pos, data, currentPrice, profile, liveWeeklyAlloc);
+    const innerSummary = { exits: 0, partials: 0, holds: 0 };
+    await executeExit(supabase, pos, action, profile, innerSummary);
+  }
+}
+
+
 async function processUser(
   supabase: ReturnType<typeof createClient>,
   settings: Settings,
