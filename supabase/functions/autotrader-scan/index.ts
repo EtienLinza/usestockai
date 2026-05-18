@@ -2175,6 +2175,7 @@ async function executeEntry(
   supabase: ReturnType<typeof createClient>,
   settings: Settings, ticker: string, e: Extract<EntryAction, { kind: "ENTER" }>,
   summary: { entries: number },
+  openedByRotation = false,
 ) {
   if (!settings.paper_mode) {
     // Live broker integration not implemented in v1
