@@ -1734,11 +1734,13 @@ async function processUser(
 
   const heldTickers = new Set(positions.map(p => p.ticker.toUpperCase()));
 
-  // ── EARLY EXIT — all slots full ───────────────────────────────────────
-  // If the user already holds max_positions after the exit pass, skip the entire
-  // entry evaluation loop. Saves Yahoo quote fetches, news-sentiment API calls,
-  // and per-ticker cooldown queries. New entries can't fit anyway.
-  if (refreshedOpenCount >= settings.max_positions) {
+  // ── CAPITAL ROTATION GATE ─────────────────────────────────────────────
+  // When all slots are full we normally skip the entry scan to conserve API
+  // calls. If the user opted into capital rotation we instead let the scan
+  // run; rotation candidates are evaluated below in PASS 2. Anything that's
+  // not strong enough to rotate still gets skipped efficiently.
+  const rotationActive = !!settings.rotation_enabled && refreshedOpenCount >= settings.max_positions;
+  if (refreshedOpenCount >= settings.max_positions && !settings.rotation_enabled) {
     userSummary.holds += Math.max(0, watchlist.length - heldTickers.size);
     await supabase.from("autotrade_log").insert({
       user_id: userId, ticker: "—", action: "BLOCKED",
@@ -1746,6 +1748,17 @@ async function processUser(
     });
     return;
   }
+
+  // Daily rotation counter — reset when calendar day rolled over.
+  let rotationCountToday = settings.rotation_count_today ?? 0;
+  if (settings.rotation_day !== today) {
+    rotationCountToday = 0;
+    await supabase.from("autotrade_settings")
+      .update({ rotation_count_today: 0, rotation_day: today })
+      .eq("user_id", userId);
+  }
+  const rotationBudget = Math.max(0, (settings.rotation_max_per_day ?? 3) - rotationCountToday);
+
 
   // PASS 1 — gather decisions for every eligible ticker (no DB writes yet).
   // This lets us rank ENTER candidates by conviction and stagger entries
