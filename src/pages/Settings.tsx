@@ -152,6 +152,10 @@ const Settings = () => {
         setBot({
           enabled: Boolean(botRes.data.enabled),
           kill_switch: Boolean(botRes.data.kill_switch),
+          emergency_mode: ((botRes.data as any).emergency_mode as "off" | "freeze_entries" | "liquidate") ?? (botRes.data.kill_switch ? "freeze_entries" : "off"),
+          rotation_enabled: Boolean((botRes.data as any).rotation_enabled ?? false),
+          rotation_min_delta_conviction: Number((botRes.data as any).rotation_min_delta_conviction ?? 15),
+          rotation_max_per_day: Number((botRes.data as any).rotation_max_per_day ?? 3),
           paper_mode: Boolean(botRes.data.paper_mode),
           advanced_mode: Boolean(botRes.data.advanced_mode),
           adaptive_mode: botRes.data.adaptive_mode ?? true,
