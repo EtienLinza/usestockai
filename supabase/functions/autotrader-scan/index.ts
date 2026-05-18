@@ -1103,22 +1103,68 @@ serve(async (req) => {
     const now = new Date();
     let skippedNotDue = 0;
     let skippedKillSwitch = 0;
+    let liquidatedUsers = 0;
     for (const settingsRow of settingsRows) {
       const rawSettings = settingsRow as Settings;
 
-      // PER-USER KILL SWITCH — halt entries AND freeze automated exits.
-      // User must manage positions manually until they flip it off.
-      if (rawSettings.kill_switch) {
+      // ── EMERGENCY MODE ───────────────────────────────────────────────────
+      // Resolve effective mode from new `emergency_mode` column; fall back
+      // to legacy `kill_switch` boolean (treated as 'freeze_entries') so any
+      // user still on the old toggle keeps the same protective behavior.
+      const effectiveEmergency: "off" | "freeze_entries" | "liquidate" =
+        rawSettings.emergency_mode && rawSettings.emergency_mode !== "off"
+          ? rawSettings.emergency_mode
+          : rawSettings.kill_switch ? "freeze_entries" : "off";
+
+      if (effectiveEmergency === "liquidate") {
+        // Market-sell every open virtual position immediately, then drop the
+        // user into freeze_entries so we don't keep liquidating on every scan.
+        try {
+          const closedCount = await liquidateAllPositions(supabase, rawSettings.user_id);
+          liquidatedUsers++;
+          await supabase.from("autotrade_settings")
+            .update({
+              emergency_mode: "freeze_entries",
+              kill_switch: true,
+              last_scan_at: now.toISOString(),
+              next_scan_at: new Date(now.getTime() + 10 * 60_000).toISOString(),
+            })
+            .eq("user_id", rawSettings.user_id);
+          await supabase.from("autotrade_log").insert({
+            user_id: rawSettings.user_id,
+            ticker: "SCAN",
+            action: "LIQUIDATE",
+            reason: `Emergency LIQUIDATE: closed ${closedCount} open position${closedCount === 1 ? "" : "s"} at market. Entries now frozen — switch emergency mode to OFF to resume.`,
+          });
+        } catch (e) {
+          console.error(`[liquidate] user ${rawSettings.user_id} failed`, e);
+          await supabase.from("autotrade_log").insert({
+            user_id: rawSettings.user_id, ticker: "SCAN", action: "ERROR",
+            reason: `Liquidation error: ${(e as Error).message ?? "unknown"}`,
+          });
+        }
+        continue;
+      }
+
+      if (effectiveEmergency === "freeze_entries") {
+        // Entries frozen, but the regular scan loop below would also block
+        // *exits*. Run a slim exit-only pass so stop-losses and take-profits
+        // still fire and the user keeps risk management.
         skippedKillSwitch++;
         const nextScan = new Date(now.getTime() + 10 * 60_000);
         await supabase.from("autotrade_settings")
           .update({ last_scan_at: now.toISOString(), next_scan_at: nextScan.toISOString() })
           .eq("user_id", rawSettings.user_id);
+        try {
+          await runExitOnlyPass(supabase, rawSettings, macro, exitCalibration);
+        } catch (e) {
+          console.warn(`[freeze_entries] exit-pass failed for ${rawSettings.user_id}`, e);
+        }
         await supabase.from("autotrade_log").insert({
           user_id: rawSettings.user_id,
           ticker: "SCAN",
-          action: "KILL_SWITCH",
-          reason: "Emergency stop active — no entries, no automated exits. Manage positions manually.",
+          action: "FREEZE_ENTRIES",
+          reason: "Emergency: entries frozen. Automated stop-losses & take-profits still active.",
         });
         continue;
       }
