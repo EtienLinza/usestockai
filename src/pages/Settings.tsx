@@ -515,32 +515,63 @@ const Settings = () => {
                     Danger zone
                   </h2>
                   <Card className={cn(
-                    "p-5 border-2 transition-colors",
-                    bot.kill_switch
+                    "p-5 border-2 transition-colors space-y-4",
+                    bot.emergency_mode !== "off"
                       ? "border-destructive bg-destructive/10"
                       : "border-destructive/30 bg-destructive/5",
                   )}>
-                    <div className="flex items-center justify-between gap-4">
-                      <div className="space-y-1 flex-1">
-                        <div className="flex items-center gap-2">
-                          <AlertTriangle className={cn("w-4 h-4", bot.kill_switch ? "text-destructive" : "text-destructive/70")} />
-                          <Label className="text-sm font-semibold">Emergency Stop</Label>
-                          {bot.kill_switch && (
-                            <Badge variant="destructive" className="text-[10px] px-1.5 py-0">ACTIVE</Badge>
-                          )}
-                        </div>
-                        <p className="text-xs text-muted-foreground leading-relaxed">
-                          Freezes the autotrader: no new entries AND no automated exits will run.
-                          Your existing positions stay open until you close them manually.
-                          Use this if you suspect bad data, want to take manual control, or just need a breather.
-                        </p>
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2">
+                        <AlertTriangle className={cn("w-4 h-4", bot.emergency_mode !== "off" ? "text-destructive" : "text-destructive/70")} />
+                        <Label className="text-sm font-semibold">Emergency Mode</Label>
+                        {bot.emergency_mode !== "off" && (
+                          <Badge variant="destructive" className="text-[10px] px-1.5 py-0">{bot.emergency_mode.toUpperCase()}</Badge>
+                        )}
                       </div>
-                      <Switch
-                        checked={bot.kill_switch}
-                        onCheckedChange={(v) => setBot({ ...bot, kill_switch: v })}
-                        className="data-[state=checked]:bg-destructive"
-                      />
+                      <Select
+                        value={bot.emergency_mode}
+                        onValueChange={(v) => setBot({ ...bot, emergency_mode: v as AutoTradeSettings["emergency_mode"] })}
+                      >
+                        <SelectTrigger aria-label="Emergency mode"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="off">Off — autotrader runs normally</SelectItem>
+                          <SelectItem value="freeze_entries">Freeze entries — no new positions, exits still active</SelectItem>
+                          <SelectItem value="liquidate">Liquidate — close all positions at market, then freeze</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <p className="text-xs text-muted-foreground leading-relaxed">
+                        <strong>Freeze entries</strong> keeps stop-losses & take-profits running but blocks any new buys.
+                        <strong> Liquidate</strong> sells every open virtual position at the next live quote, then drops you into freeze mode.
+                      </p>
                     </div>
+                  </Card>
+
+                  {/* Capital rotation */}
+                  <Card className="glass-card p-5 space-y-3">
+                    <ToggleRow
+                      label="Capital rotation when full"
+                      hint="When all slots are taken and a stronger signal appears, close the weakest open position and take the new one."
+                      checked={bot.rotation_enabled}
+                      onChange={(v) => setBot({ ...bot, rotation_enabled: v })}
+                    />
+                    {bot.rotation_enabled && (
+                      <div className="grid sm:grid-cols-2 gap-4 pt-1 border-t border-border/40">
+                        <NumberInputRow
+                          label="Min Δ conviction"
+                          hint="New signal must beat the incumbent by at least this many conviction points."
+                          value={bot.rotation_min_delta_conviction}
+                          onChange={(v) => setBot({ ...bot, rotation_min_delta_conviction: v })}
+                          min={5} max={40} step={1} suffix="pts" decimals={0}
+                        />
+                        <NumberInputRow
+                          label="Max rotations / day"
+                          hint="Hard ceiling on how many times rotation can fire in a single trading day."
+                          value={bot.rotation_max_per_day}
+                          onChange={(v) => setBot({ ...bot, rotation_max_per_day: v })}
+                          min={1} max={10} step={1} suffix="" decimals={0}
+                        />
+                      </div>
+                    )}
                   </Card>
                 </div>
               </TabsContent>
