@@ -36,6 +36,10 @@ type RiskProfile = "conservative" | "balanced" | "aggressive";
 interface AutoTradeSettings {
   enabled: boolean;
   kill_switch: boolean;
+  emergency_mode: "off" | "freeze_entries" | "liquidate";
+  rotation_enabled: boolean;
+  rotation_min_delta_conviction: number;
+  rotation_max_per_day: number;
   paper_mode: boolean;
   advanced_mode: boolean;
   adaptive_mode: boolean;
