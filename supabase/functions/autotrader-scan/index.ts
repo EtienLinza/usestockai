@@ -2022,7 +2022,7 @@ async function processUser(
     }
 
     const beforeEntries = summary.entries;
-    await executeEntry(supabase, settings, p.ticker, p.decision, summary);
+    await executeEntry(supabase, settings, p.ticker, p.decision, summary, rotationActive);
     userSummary.entries += summary.entries - beforeEntries;
     if (summary.entries > beforeEntries) {
       totalNavExposureDollars += candidateDollars;
