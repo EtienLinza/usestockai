@@ -1299,6 +1299,7 @@ serve(async (req) => {
     }
     (summary as Record<string, unknown>).skipped_not_due = skippedNotDue;
     (summary as Record<string, unknown>).skipped_kill_switch = skippedKillSwitch;
+    (summary as Record<string, unknown>).liquidated_users = liquidatedUsers;
 
     await recordHeartbeat(
       "autotrader-scan",
