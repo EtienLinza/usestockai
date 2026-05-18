@@ -83,6 +83,10 @@ const CAPS_DEFAULTS: PortfolioCaps = {
 const AUTOTRADE_DEFAULTS: AutoTradeSettings = {
   enabled: false,
   kill_switch: false,
+  emergency_mode: "off",
+  rotation_enabled: false,
+  rotation_min_delta_conviction: 15,
+  rotation_max_per_day: 3,
   paper_mode: true,
   advanced_mode: false,
   adaptive_mode: true,
