@@ -918,6 +918,10 @@ function CapSlider({ label, hint, value, onChange, min, max, step, suffix = "", 
   );
 }
 
+function NumberInputRow(props: CapSliderProps) {
+  return <CapSlider {...props} />;
+}
+
 interface StartingCapitalCardProps {
   value: number;
   onChange: (v: number) => void;
