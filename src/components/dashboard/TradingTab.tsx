@@ -201,6 +201,14 @@ export function TradingTab({
     return signals.filter(s => matchesTradingStyle(s, tradingStyle));
   }, [signals, tradingStyle]);
 
+  // Danelfin AI Scores for visible signals + open positions (supporting badge).
+  const danelfinTickers = useMemo(
+    () => Array.from(new Set([...filteredSignals.map(s => s.ticker), ...openPositions.map(p => p.ticker)])),
+    [filteredSignals, openPositions],
+  );
+  const danelfinScores = useDanelfinScores(danelfinTickers);
+
+
   const totalUnrealizedPnL = useMemo(() => {
     return openPositions.reduce((sum, pos) => {
       const price = currentPrices[pos.ticker];
