@@ -1,4 +1,5 @@
-import { useMemo } from "react";
+import { useMemo, useEffect, useState } from "react";
+import { supabase } from "@/integrations/supabase/client";
 import { motion, AnimatePresence } from "framer-motion";
 import { MetricCard } from "@/components/MetricCard";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -108,6 +109,43 @@ const getConfidenceBg = (c: number) => {
   return "bg-warning";
 };
 
+// Hook: fetch Danelfin AI Scores for a list of tickers (≤7 days fresh).
+// Returns map ticker → ai_score. Missing tickers simply omitted.
+function useDanelfinScores(tickers: string[]): Record<string, number> {
+  const [scores, setScores] = useState<Record<string, number>>({});
+  const key = tickers.slice().sort().join(",");
+  useEffect(() => {
+    if (tickers.length === 0) return;
+    const cutoff = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from("danelfin_scores")
+        .select("ticker, ai_score, as_of")
+        .in("ticker", Array.from(new Set(tickers.map(t => t.toUpperCase()))))
+        .gte("as_of", cutoff)
+        .order("as_of", { ascending: false });
+      if (cancelled || !data) return;
+      const m: Record<string, number> = {};
+      for (const r of data as Array<{ ticker: string; ai_score: number }>) {
+        if (!(r.ticker in m)) m[r.ticker] = r.ai_score;
+      }
+      setScores(m);
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+  return scores;
+}
+
+const danelfinBadgeClass = (score: number) => {
+  if (score >= 8) return "bg-primary/20 text-primary border-primary/30";
+  if (score >= 6) return "bg-primary/10 text-primary border-primary/20";
+  if (score <= 3) return "bg-destructive/10 text-destructive border-destructive/20";
+  return "bg-muted/30 text-muted-foreground border-border/30";
+};
+
+
 const getRegimeBadge = (regime: string) => {
   const colors: Record<string, string> = {
     strong_bullish: "bg-success/20 text-success border-success/30",
@@ -162,6 +200,14 @@ export function TradingTab({
   const filteredSignals = useMemo(() => {
     return signals.filter(s => matchesTradingStyle(s, tradingStyle));
   }, [signals, tradingStyle]);
+
+  // Danelfin AI Scores for visible signals + open positions (supporting badge).
+  const danelfinTickers = useMemo(
+    () => Array.from(new Set([...filteredSignals.map(s => s.ticker), ...openPositions.map(p => p.ticker)])),
+    [filteredSignals, openPositions],
+  );
+  const danelfinScores = useDanelfinScores(danelfinTickers);
+
 
   const totalUnrealizedPnL = useMemo(() => {
     return openPositions.reduce((sum, pos) => {
@@ -467,6 +513,11 @@ export function TradingTab({
                         <Badge variant="outline" className={cn("text-[10px]", signal.signal_type === "BUY" ? "bg-success/10 text-success border-success/30" : "bg-destructive/10 text-destructive border-destructive/30")}>
                           {signal.signal_type}
                         </Badge>
+                        {danelfinScores[signal.ticker.toUpperCase()] !== undefined && (
+                          <Badge variant="outline" className={cn("text-[10px] font-mono", danelfinBadgeClass(danelfinScores[signal.ticker.toUpperCase()]))} title="Danelfin AI Score (1–10)">
+                            AI {danelfinScores[signal.ticker.toUpperCase()]}
+                          </Badge>
+                        )}
                       </div>
                       <Button
                         size="sm"

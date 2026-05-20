@@ -992,6 +992,10 @@ export function evaluateSignal(
    *  parameter-sensitivity sweeps so changing `buyThreshold` actually changes
    *  the result instead of being silently overwritten by the classifier. */
   paramOverrides?: Partial<ProfileParams>,
+  /** Optional Danelfin AI Score (1–10) for the ticker. Used as a SUPPORTING
+   *  conviction factor — long: +(score-5)*1.5, short: -(score-5)*1.5.
+   *  Missing/undefined → 0 (neutral, never blocks). */
+  danelfinScore?: number | null,
 ): EvaluateSignalResult | null {
   if (data.close.length < 200) return null;
 
@@ -1096,6 +1100,25 @@ export function evaluateSignal(
       }
     }
   }
+
+  // Danelfin AI Score overlay — supporting conviction factor (NEVER a gate).
+  // Long: +(score-5)*1.5  → range -6 … +7.5
+  // Short: -(score-5)*1.5
+  // Missing/null → 0 (neutral). The adaptive weighting loop will tune real
+  // influence over time by reading contributing_rules.danelfin from outcomes.
+  if (sig.confidence > 0 && danelfinScore !== undefined && danelfinScore !== null && Number.isFinite(danelfinScore)) {
+    const side: "long" | "short" = sig.consensusScore >= 0 ? "long" : "short";
+    const raw = (danelfinScore - 5) * 1.5;
+    const delta = Math.round(side === "long" ? raw : -raw);
+    if (delta !== 0) {
+      const before = sig.confidence;
+      sig.confidence = Math.max(0, Math.min(100, sig.confidence + delta));
+      if (before > 0 && sig.consensusScore !== 0) {
+        sig.consensusScore = Math.sign(sig.consensusScore) * sig.confidence;
+      }
+    }
+  }
+
 
   // Re-validate against the active profile's threshold after the volume
   // adjustment. Previously a 66-confidence signal could fall to 61, below the

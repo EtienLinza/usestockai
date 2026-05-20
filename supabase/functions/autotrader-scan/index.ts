@@ -35,6 +35,7 @@ import { fetchDailyHistory } from "../_shared/yahoo-history.ts";
 import { getQuoteWithFallback, getEarningsBlackoutDays, getSector, getBeta } from "../_shared/finnhub.ts";
 import { recordHeartbeat } from "../_shared/heartbeat.ts";
 import { applyIsotonicCalibration, type IsotonicAnchor } from "../_shared/calibration.ts";
+import { loadDanelfinScores } from "../_shared/danelfin.ts";
 
 /** Thrown by the circuit breaker to abort the entire scan immediately. */
 class CircuitBreakerTrippedError extends Error {
@@ -892,6 +893,7 @@ async function runEntryDecision(
   calibrationCurve: Record<string, { adjust: number }>,
   strategyTilts: Record<string, { multiplier: number }>,
   tickerCalibration: Record<string, { adjust: number }>,
+  danelfinMap?: Map<string, number>,
 ): Promise<EntryAction> {
   // Daily loss limit — block all new entries
   if (todayPnlPct <= -settings.daily_loss_limit_pct) {
@@ -941,7 +943,8 @@ async function runEntryDecision(
     }
   } catch (_e) { /* non-fatal — never block scan on earnings API hiccup */ }
 
-  const sig = evaluateSignal(data, ticker, undefined, macro);
+  const danelfin = danelfinMap?.get(ticker.toUpperCase()) ?? null;
+  const sig = evaluateSignal(data, ticker, undefined, macro, undefined, undefined, danelfin);
   if (!sig) return { kind: "HOLD", reason: "Insufficient data" };
   if (sig.decision === "HOLD") return { kind: "HOLD", reason: sig.reasoning };
 
@@ -1771,6 +1774,15 @@ async function processUser(
     | { kind: "hold" };
   const pending: Pending[] = [];
 
+  // Pre-load Danelfin AI Scores for the whole watchlist in one query — used
+  // as a SUPPORTING conviction factor inside evaluateSignal. Missing scores
+  // are neutral (never block).
+  const danelfinMap = await loadDanelfinScores(watchlist);
+  if (danelfinMap.size > 0) {
+    console.log(`autotrader-scan: Danelfin coverage ${danelfinMap.size}/${watchlist.length}`);
+  }
+
+
   for (const ticker of watchlist) {
     if (heldTickers.has(ticker)) continue;
 
@@ -1799,6 +1811,7 @@ async function processUser(
       Array.from(heldTickers),
       volScalar,
       calibrationCurve, strategyTilts, tickerCalibration,
+      danelfinMap,
     );
 
     if (decision.kind === "ENTER") pending.push({ kind: "enter", ticker, decision });
