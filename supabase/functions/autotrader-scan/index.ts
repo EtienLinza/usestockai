@@ -1774,6 +1774,15 @@ async function processUser(
     | { kind: "hold" };
   const pending: Pending[] = [];
 
+  // Pre-load Danelfin AI Scores for the whole watchlist in one query — used
+  // as a SUPPORTING conviction factor inside evaluateSignal. Missing scores
+  // are neutral (never block).
+  const danelfinMap = await loadDanelfinScores(watchlist);
+  if (danelfinMap.size > 0) {
+    console.log(`autotrader-scan: Danelfin coverage ${danelfinMap.size}/${watchlist.length}`);
+  }
+
+
   for (const ticker of watchlist) {
     if (heldTickers.has(ticker)) continue;
 
