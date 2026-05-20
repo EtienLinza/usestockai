@@ -109,6 +109,43 @@ const getConfidenceBg = (c: number) => {
   return "bg-warning";
 };
 
+// Hook: fetch Danelfin AI Scores for a list of tickers (≤7 days fresh).
+// Returns map ticker → ai_score. Missing tickers simply omitted.
+function useDanelfinScores(tickers: string[]): Record<string, number> {
+  const [scores, setScores] = useState<Record<string, number>>({});
+  const key = tickers.slice().sort().join(",");
+  useEffect(() => {
+    if (tickers.length === 0) return;
+    const cutoff = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from("danelfin_scores")
+        .select("ticker, ai_score, as_of")
+        .in("ticker", Array.from(new Set(tickers.map(t => t.toUpperCase()))))
+        .gte("as_of", cutoff)
+        .order("as_of", { ascending: false });
+      if (cancelled || !data) return;
+      const m: Record<string, number> = {};
+      for (const r of data as Array<{ ticker: string; ai_score: number }>) {
+        if (!(r.ticker in m)) m[r.ticker] = r.ai_score;
+      }
+      setScores(m);
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+  return scores;
+}
+
+const danelfinBadgeClass = (score: number) => {
+  if (score >= 8) return "bg-primary/20 text-primary border-primary/30";
+  if (score >= 6) return "bg-primary/10 text-primary border-primary/20";
+  if (score <= 3) return "bg-destructive/10 text-destructive border-destructive/20";
+  return "bg-muted/30 text-muted-foreground border-border/30";
+};
+
+
 const getRegimeBadge = (regime: string) => {
   const colors: Record<string, string> = {
     strong_bullish: "bg-success/20 text-success border-success/30",
