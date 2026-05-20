@@ -992,6 +992,10 @@ export function evaluateSignal(
    *  parameter-sensitivity sweeps so changing `buyThreshold` actually changes
    *  the result instead of being silently overwritten by the classifier. */
   paramOverrides?: Partial<ProfileParams>,
+  /** Optional Danelfin AI Score (1–10) for the ticker. Used as a SUPPORTING
+   *  conviction factor — long: +(score-5)*1.5, short: -(score-5)*1.5.
+   *  Missing/undefined → 0 (neutral, never blocks). */
+  danelfinScore?: number | null,
 ): EvaluateSignalResult | null {
   if (data.close.length < 200) return null;
 
