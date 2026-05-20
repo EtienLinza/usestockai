@@ -1,57 +1,111 @@
-# Production Punch-List — Backtest, Dashboard, AutoTrader, UI
+# Danelfin AI Score Integration
 
-Grouped by area so we can ship in independent PRs. Each item lists the file(s) touched and the exact change.
+Danelfin is added as a **supporting conviction factor** — never a hard gate. It runs entirely in the background, nightly, and flows through every layer of the existing pipeline (signals, autotrader, UI, backtest) with small, calibrated weight so the adaptive weighting loop can tune it over time.
 
-## 1. Signal engine bugs (`supabase/functions/_shared/signal-engine-v2.ts`)
+Given the free API tier (low rate limit, US-only, current scores only, no history), the design is rate-limit-safe and degrades gracefully when Danelfin is unavailable.
 
-These are the root cause of the broken backtest sliders, Monte Carlo, and misclassifications.
+---
 
-1. **Parameter override plumbing** — add an optional `paramOverrides?: Partial<ProfileParams>` arg to `evaluateSignal` and merge it on top of `cls.blendedParams || PROFILE_PARAMS[cls.classification]`. Thread the same override through `computeStrategySignal` so `buyThreshold` / `shortThreshold` actually move when the backtester sweeps them.
-2. **Tracker cache pollution** — `signalTrackerCache` persists across runs. Call `clearTrackerCache()` at the top of every backtest run *and* every Monte Carlo iteration (`supabase/functions/backtest/index.ts`). Optionally accept an injected `Map` so concurrent runs are isolated.
-3. **Higher-Highs uses `close` instead of `high`** (line ~220). Swap both `close.slice(...)` calls in `classifyStock` to `high.slice(...)`.
-4. **Volume z-score leak** (line ~551 + post-signal block). Slice `volume.slice(n - 21, n - 1)` so the current bar isn't in its own baseline. Re-validate `sig.confidence` against `buyThreshold`/`shortThreshold` **after** the volume adjustment and downgrade to HOLD if it drops below; also mirror the confidence change into `sig.consensusScore` so the decision engine sees the same number.
+## 1. Secret + client
 
-## 2. Backtest engine (`supabase/functions/backtest/index.ts`, `src/pages/Backtest.tsx`)
+- Add runtime secret `DANELFIN_API_KEY`.
+- New `supabase/functions/_shared/danelfin.ts`:
+  - `getAiScore(ticker)` → `{ aiScore, technical, fundamental, sentiment, lowRisk, asOf } | null`
+  - 6s timeout, in-memory 24h cache, returns `null` on any failure (mirrors `finnhub.ts` pattern).
+  - `isDanelfinConfigured()` helper.
 
-5. **Parameter sensitivity** — pass the swept threshold into `evaluateSignal` via the new `paramOverrides`. Verify rows differ by >0% before returning; if they don't, set `parameterSensitivityVaried = false` and surface the warning we already render.
-6. **Monte Carlo distribution** — confirm each of the 200 sims (a) calls `clearTrackerCache()`, (b) reshuffles the trade-return array (bootstrap, not a single static seed), and (c) computes percentiles from the resulting equity distribution. Add a unit guard: if `p5 === p50 === p95`, throw a "degenerate distribution" error so it surfaces in logs.
-7. **Monthly-return heatmap anomalies** — audit the per-month aggregation: clamp single-trade monthly returns, divide cumulative P&L by *starting* equity for that month (not running equity), and skip months with zero trades instead of carrying forward stale values.
+## 2. Database
 
-## 3. Dashboard math (`src/components/dashboard/TradingTab.tsx`, `src/pages/Dashboard.tsx`)
+New table `danelfin_scores` (nightly snapshot, one row per ticker per day):
 
-8. **Profit Factor includes unrealized P&L.** Today it only sums closed trades. Change `profitFactor` useMemo to fold `getUnrealizedPnL(pos)` for every open position into the gross-profit / gross-loss buckets.
-9. **Equity-curve Y-axis** — replace the hardcoded domain with `domain={[min * 0.95, max * 1.1]}` driven by the actual series so the curve fills the chart.
+```text
+ticker        text       PK part 1
+as_of         date       PK part 2
+ai_score      int        1..10
+technical     int        1..10
+fundamental   int        1..10
+sentiment     int        1..10
+low_risk      int        1..10  nullable
+updated_at    timestamptz
+```
 
-## 4. AutoTrader logic (`supabase/functions/autotrader-scan/index.ts`)
+RLS: `No client access` (server-only, like `ticker_bars_cache`).
 
-10. **Capital rotation when 8/8 full** — when all slots are taken and the scanner surfaces a signal with `confidence > 85`, compare it to the worst-performing open position (by unrealized P&L %). If the new signal beats it by a configurable margin (default 15 conviction points), close that position and open the new one. Add a per-day rotation cap (e.g. 3) to prevent churn.
-11. **Emergency Stop modes** (`src/pages/Settings.tsx` + autotrader) — replace the single boolean with `emergency_mode: 'off' | 'freeze_entries' | 'liquidate'`. `freeze_entries` keeps stop-losses / take-profits running; `liquidate` market-sells every open virtual position immediately, then freezes entries.
+## 3. Nightly refresh cron
 
-## 5. Risk & UI polish
+New edge function `refresh-danelfin-scores` (`verify_jwt = false`, cron-auth header):
+- Pulls the union of: scan universe (last `scan_universe_log`), all watchlist tickers, all open `virtual_positions`.
+- Throttles requests (free-tier safe: ~1 req/sec, batched).
+- Upserts into `danelfin_scores` with today's `as_of`.
+- Writes to `cron_heartbeat`.
+- Scheduled via `pg_cron` at **22:30 ET on weekdays** (after US close + Danelfin's daily refresh).
 
-12. **Default risk enforcement to enabled** — flip `portfolio_caps.enabled` default to `true` in the seeding trigger and in `Settings.tsx` initial state, and add an onboarding prompt.
-13. **Max NAV formatting** — wrap the displayed value in `.toFixed(1)` in `Settings.tsx` (and any other place showing `effective_max_nav_exposure_pct`).
-14. **Synthetic ticker filter** (`src/components/WatchlistSuggestions.tsx` + add server validation) — before suggesting a ticker, call a small `validate-ticker` edge function (or reuse `fetch-stock-price`) that confirms Yahoo returns a real quote with non-null `regularMarketPrice`. Drop any ticker that fails.
+## 4. Signal engine overlay (the core of the integration)
 
-## Technical details
+In `_shared/signal-engine-v2.ts`:
+- New helper `loadDanelfinScores(tickers)` → `Map<ticker, score>`, loaded once per scan (not per-ticker).
+- New conviction factor `danelfinFactor`:
+  - Long: `+ (aiScore - 5) * 1.5` → range roughly `-6 … +7.5`
+  - Short: `- (aiScore - 5) * 1.5`
+  - Missing score → `0` (neutral, never blocks).
+- Added to the existing weighted-sum conviction the same way every other factor is, so:
+  - Adaptive weighting loop already tunes it via `strategy_tilts` / `regime_floors`.
+  - Isotonic calibration sees it transparently.
+  - Backtest ↔ live parity is preserved (same code path).
+- `contributing_rules` JSON in `signal_outcomes` gets a `"danelfin": <delta>` entry, so we can later measure its incremental edge.
 
-- **Override merge order in `evaluateSignal`**: `{ ...PROFILE_PARAMS[base], ...cls.blendedParams, ...paramOverrides }` so blended classification stays the baseline and the backtester is the highest-priority override.
-- **Tracker isolation**: simplest path is `evaluateSignal(..., trackerCache?: Map<string, SignalState>)` defaulting to the module-level one; backtester passes a fresh map per run.
-- **Profit Factor with unrealized**:
-  ```ts
-  const grossWins = closedWins + openPositions.filter(p => getUnrealizedPnL(p) > 0).reduce(sum, 0);
-  const grossLoss = closedLosses + Math.abs(openPositions.filter(p => getUnrealizedPnL(p) < 0).reduce(sum, 0));
-  ```
-- **Equity domain**: Recharts `<YAxis domain={[dataMin => dataMin * 0.95, dataMax => dataMax * 1.1]} />`.
-- **Capital rotation**: needs a DB column `virtual_positions.opened_by_rotation` to avoid loops; rotation skips positions opened <30 min ago.
-- **Liquidate mode**: reuse the existing `check-sell-alerts` exit path so accounting stays consistent.
+## 5. Autotrader (background-only, supporting)
 
-## Suggested order
+Per your direction, **no hard gate**. Changes in `autotrader-scan/index.ts`:
+- Danelfin score is already baked into `conviction` (via #4), so it influences:
+  - Entry ranking (higher AI Score → higher conviction → preferred).
+  - Capital rotation (#10 you added earlier) — rotation candidates with higher AI Score than incumbents become eligible.
+  - Position sizing (Kelly fraction scales with conviction).
+- Logged to `autotrade_log.reason` as `"… danelfinΔ=+4"` for transparency.
+- No new Settings toggle. (We can add one later if you want to expose its weight.)
 
-1. Signal-engine bug fixes (1–4) — unblocks the backtester.
-2. Backtest engine wiring (5–7) — proves the fixes.
-3. Dashboard math (8–9) — quick wins, no backend risk.
-4. UI polish (12–14) — cheap, ship alongside.
-5. AutoTrader rotation + emergency modes (10–11) — biggest behavioral change, ship last with explicit user warning.
+## 6. UI (Trading Hub)
 
-Want me to start with the signal-engine block (items 1–4) or jump straight to the AutoTrader rotation/emergency logic?
+Minimal, on-brand surface:
+- Small "AI 8" sage-green badge on each signal card and each open position card.
+- Hover/long-press → mini popover with the three sub-scores (T/F/S).
+- Sortable column in the signals table on desktop.
+- Hidden gracefully when score is missing.
+
+No new page, no new tab.
+
+## 7. Backtester
+
+Free tier has **no historical scores**, so:
+- Backtest reads `danelfin_scores` if a row exists for that `as_of` date, otherwise treats factor as `0`.
+- Going forward, the nightly job builds up history naturally → backtests over recent windows gain the factor automatically.
+- Documented in `autotrader_pipeline_and_math.md`.
+
+## 8. Memory
+
+Add `mem://architecture/prediction-engine/danelfin-overlay` describing: source, factor formula, neutral-on-miss behavior, free-tier constraints, and the rule that it must remain a supporting factor (not a gate).
+
+---
+
+## Technical notes
+
+- **Rate limiting**: Free tier — refresh job batches with 1100ms delay between calls and a hard cap of ~300 tickers/night. Falls back to "skip" if budget exhausted; existing scores from yesterday are still served from `danelfin_scores` (max 7-day staleness allowed before treated as missing).
+- **Edge function isolation**: per project rule, the Danelfin client lives in `_shared/danelfin.ts` and is duplicated into any function directory that needs it (signal-engine call sites already import from `_shared`).
+- **No frontend secret**: all Danelfin calls happen server-side.
+- **Cost guard**: if Danelfin returns 401/402/429 three times in a row in one job, the job exits early and writes `status='degraded'` to `cron_heartbeat`.
+
+## Files touched
+
+- new: `supabase/functions/_shared/danelfin.ts`
+- new: `supabase/functions/refresh-danelfin-scores/index.ts`
+- new migration: `danelfin_scores` table + RLS + cron schedule
+- edited: `supabase/functions/_shared/signal-engine-v2.ts` (factor + loader)
+- edited: `supabase/functions/autotrader-scan/index.ts` (log line only)
+- edited: `supabase/functions/backtest/index.ts` (lookup, no-op on miss)
+- edited: `src/components/dashboard/TradingTab.tsx` (badge + column)
+- edited: `autotrader_pipeline_and_math.md`
+- new memory: `mem://architecture/prediction-engine/danelfin-overlay`
+
+## What you'll need to provide
+
+- The `DANELFIN_API_KEY` value (I'll request it via the secret tool when you approve).
