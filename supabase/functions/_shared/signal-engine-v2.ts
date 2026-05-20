@@ -1096,6 +1096,9 @@ export function evaluateSignal(
         // downstream direction gates see the same number.
         if (before > 0 && sig.consensusScore !== 0) {
           sig.consensusScore = Math.sign(sig.consensusScore) * sig.confidence;
+        }
+      }
+    }
   }
 
   // Danelfin AI Score overlay — supporting conviction factor (NEVER a gate).
@@ -1116,9 +1119,6 @@ export function evaluateSignal(
     }
   }
 
-      }
-    }
-  }
 
   // Re-validate against the active profile's threshold after the volume
   // adjustment. Previously a 66-confidence signal could fall to 61, below the
