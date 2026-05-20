@@ -892,6 +892,7 @@ async function runEntryDecision(
   calibrationCurve: Record<string, { adjust: number }>,
   strategyTilts: Record<string, { multiplier: number }>,
   tickerCalibration: Record<string, { adjust: number }>,
+  danelfinMap?: Map<string, number>,
 ): Promise<EntryAction> {
   // Daily loss limit — block all new entries
   if (todayPnlPct <= -settings.daily_loss_limit_pct) {
