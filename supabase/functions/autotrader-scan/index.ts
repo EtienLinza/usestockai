@@ -1811,6 +1811,7 @@ async function processUser(
       Array.from(heldTickers),
       volScalar,
       calibrationCurve, strategyTilts, tickerCalibration,
+      danelfinMap,
     );
 
     if (decision.kind === "ENTER") pending.push({ kind: "enter", ticker, decision });
