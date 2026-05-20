@@ -242,6 +242,39 @@ export type Database = {
         }
         Relationships: []
       }
+      danelfin_scores: {
+        Row: {
+          ai_score: number
+          as_of: string
+          fundamental: number | null
+          low_risk: number | null
+          sentiment: number | null
+          technical: number | null
+          ticker: string
+          updated_at: string
+        }
+        Insert: {
+          ai_score: number
+          as_of: string
+          fundamental?: number | null
+          low_risk?: number | null
+          sentiment?: number | null
+          technical?: number | null
+          ticker: string
+          updated_at?: string
+        }
+        Update: {
+          ai_score?: number
+          as_of?: string
+          fundamental?: number | null
+          low_risk?: number | null
+          sentiment?: number | null
+          technical?: number | null
+          ticker?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       live_signals: {
         Row: {
           confidence: number
