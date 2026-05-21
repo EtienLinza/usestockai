@@ -1033,6 +1033,8 @@ serve(async (req) => {
           strategy,
           sector,
           qualityScore,
+          danelfin_score: sig.danelfinScore ?? null,
+          danelfin_delta: sig.danelfinDelta ?? 0,
         });
       } catch (err) {
         console.error(`Error analyzing ${ticker}:`, err);
