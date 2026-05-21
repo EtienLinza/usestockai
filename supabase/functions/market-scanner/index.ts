@@ -944,6 +944,12 @@ serve(async (req) => {
       if (days !== null && days <= 3) blackoutSet.add(t);
     });
 
+    // Pre-load Danelfin AI Scores for the batch (one DB query, no API hits).
+    const danelfinMap = await loadDanelfinScores(tickersToScan);
+    if (danelfinMap.size > 0) {
+      console.log(`market-scanner: Danelfin coverage ${danelfinMap.size}/${tickersToScan.length}`);
+    }
+
     for (let ti = 0; ti < tickersToScan.length; ti++) {
       const ticker = tickersToScan[ti];
       const data = allData[ti];
@@ -955,11 +961,14 @@ serve(async (req) => {
         // Use the canonical evaluateSignal() — same code path the autotrader
         // uses for entries and the backtester validates against. Eliminates
         // scanner/autotrader divergence.
+        const danelfin = danelfinMap.get(ticker.toUpperCase()) ?? null;
         const sig = evaluateSignal(
           data,
           ticker,
           { spyBearish },
           (macro as MacroContext | null) ?? null,
+          undefined, undefined,
+          danelfin,
         );
         if (!sig || sig.decision === "HOLD") continue;
 
