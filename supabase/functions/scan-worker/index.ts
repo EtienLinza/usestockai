@@ -33,6 +33,9 @@ interface Body {
     exitCalibration?: Record<string, { trailMultAdjust: number }>;
     tickerCalibration?: Record<string, { adjust: number }>;
   };
+  /** Pre-loaded Danelfin AI Scores keyed by uppercase ticker — supporting
+   *  conviction factor passed through to evaluateSignal. Missing → neutral. */
+  danelfinScores?: Record<string, number>;
   mode?: "premarket" | "live";
 }
 
