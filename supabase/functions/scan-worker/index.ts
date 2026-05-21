@@ -197,6 +197,8 @@ serve(async (req) => {
           reasoning: sig.reasoning,
           strategy,
           qualityScore,
+          danelfin_score: sig.danelfinScore ?? null,
+          danelfin_delta: sig.danelfinDelta ?? 0,
         });
       } catch (err) {
         console.error(`worker ${ticker}:`, err);
