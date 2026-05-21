@@ -573,9 +573,7 @@ export function TradingTab({
                           {signal.signal_type}
                         </Badge>
                         {danelfinScores[signal.ticker.toUpperCase()] !== undefined && (
-                          <Badge variant="outline" className={cn("text-[10px] font-mono", danelfinBadgeClass(danelfinScores[signal.ticker.toUpperCase()]))} title="Danelfin AI Score (1–10)">
-                            AI {danelfinScores[signal.ticker.toUpperCase()]}
-                          </Badge>
+                          <DanelfinBadge row={danelfinScores[signal.ticker.toUpperCase()]} />
                         )}
                       </div>
                       <Button
