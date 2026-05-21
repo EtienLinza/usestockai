@@ -110,10 +110,20 @@ const getConfidenceBg = (c: number) => {
   return "bg-warning";
 };
 
+// Danelfin AI Score record (subset of danelfin_scores row used by the UI).
+interface DanelfinRow {
+  ai_score: number;
+  technical: number | null;
+  fundamental: number | null;
+  sentiment: number | null;
+  low_risk: number | null;
+  as_of: string;
+}
+
 // Hook: fetch Danelfin AI Scores for a list of tickers (≤7 days fresh).
-// Returns map ticker → ai_score. Missing tickers simply omitted.
-function useDanelfinScores(tickers: string[]): Record<string, number> {
-  const [scores, setScores] = useState<Record<string, number>>({});
+// Returns map ticker → row. Missing tickers simply omitted.
+function useDanelfinScores(tickers: string[]): Record<string, DanelfinRow> {
+  const [scores, setScores] = useState<Record<string, DanelfinRow>>({});
   const key = tickers.slice().sort().join(",");
   useEffect(() => {
     if (tickers.length === 0) return;
@@ -122,14 +132,23 @@ function useDanelfinScores(tickers: string[]): Record<string, number> {
     (async () => {
       const { data } = await supabase
         .from("danelfin_scores")
-        .select("ticker, ai_score, as_of")
+        .select("ticker, ai_score, technical, fundamental, sentiment, low_risk, as_of")
         .in("ticker", Array.from(new Set(tickers.map(t => t.toUpperCase()))))
         .gte("as_of", cutoff)
         .order("as_of", { ascending: false });
       if (cancelled || !data) return;
-      const m: Record<string, number> = {};
-      for (const r of data as Array<{ ticker: string; ai_score: number }>) {
-        if (!(r.ticker in m)) m[r.ticker] = r.ai_score;
+      const m: Record<string, DanelfinRow> = {};
+      for (const r of data as Array<DanelfinRow & { ticker: string }>) {
+        if (!(r.ticker in m)) {
+          m[r.ticker] = {
+            ai_score: r.ai_score,
+            technical: r.technical,
+            fundamental: r.fundamental,
+            sentiment: r.sentiment,
+            low_risk: r.low_risk,
+            as_of: r.as_of,
+          };
+        }
       }
       setScores(m);
     })();
@@ -145,6 +164,45 @@ const danelfinBadgeClass = (score: number) => {
   if (score <= 3) return "bg-destructive/10 text-destructive border-destructive/20";
   return "bg-muted/30 text-muted-foreground border-border/30";
 };
+
+const SubScore = ({ label, value }: { label: string; value: number | null }) => (
+  <div className="flex items-center justify-between text-[11px]">
+    <span className="text-muted-foreground">{label}</span>
+    <span className="font-mono font-medium text-foreground">{value ?? "—"}</span>
+  </div>
+);
+
+function DanelfinBadge({ row }: { row: DanelfinRow }) {
+  return (
+    <HoverCard openDelay={120} closeDelay={80}>
+      <HoverCardTrigger asChild>
+        <Badge
+          variant="outline"
+          className={cn("text-[10px] font-mono cursor-help", danelfinBadgeClass(row.ai_score))}
+        >
+          AI {row.ai_score}
+        </Badge>
+      </HoverCardTrigger>
+      <HoverCardContent className="w-56 p-3 space-y-2" align="start" side="top">
+        <div className="flex items-center justify-between">
+          <span className="text-xs font-semibold">Danelfin AI Score</span>
+          <span className={cn("text-xs font-mono font-bold", row.ai_score >= 6 ? "text-primary" : row.ai_score <= 3 ? "text-destructive" : "text-muted-foreground")}>
+            {row.ai_score}/10
+          </span>
+        </div>
+        <div className="space-y-1 border-t border-border/40 pt-2">
+          <SubScore label="Technical" value={row.technical} />
+          <SubScore label="Fundamental" value={row.fundamental} />
+          <SubScore label="Sentiment" value={row.sentiment} />
+          {row.low_risk !== null && <SubScore label="Low Risk" value={row.low_risk} />}
+        </div>
+        <div className="text-[10px] text-muted-foreground pt-1 border-t border-border/40">
+          Supporting factor only — never blocks signals. As of {row.as_of}.
+        </div>
+      </HoverCardContent>
+    </HoverCard>
+  );
+}
 
 
 const getRegimeBadge = (regime: string) => {
