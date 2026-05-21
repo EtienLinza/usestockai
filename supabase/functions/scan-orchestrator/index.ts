@@ -16,6 +16,7 @@ import {
   type MacroRegime, type SectorMomentum,
 } from "../_shared/scan-pipeline.ts";
 import { loadCachedBars } from "../_shared/bars-cache.ts";
+import { loadDanelfinScores } from "../_shared/danelfin.ts";
 import { requireCronOrUser, cronSecretHeader } from "../_shared/cron-auth.ts";
 import { isMarketHoliday, etMinuteOfDay, etDayOfWeek } from "../_shared/market-calendar.ts";
 
@@ -175,11 +176,20 @@ serve(async (req) => {
       chunks.push(survivors.slice(i, i + WORKER_CHUNK));
     }
 
+    // Pre-load Danelfin AI Scores for survivors once (one SELECT, no API hits).
+    // Forwarded to every worker so the engine can apply the supporting overlay
+    // without each worker hitting the DB independently.
+    const danelfinMap = await loadDanelfinScores(survivors);
+    const danelfinObj: Record<string, number> = {};
+    for (const [t, s] of danelfinMap.entries()) danelfinObj[t] = s;
+    console.log(`Danelfin coverage: ${danelfinMap.size}/${survivors.length}`);
+
     const workerPayloadBase = {
       spyContext: { spyBearish, spyClose: macro.spyClose.slice(-30) },
       macro,
       sectorMomentum,
       weights,
+      danelfinScores: danelfinObj,
       mode,
     };
 
@@ -236,7 +246,11 @@ serve(async (req) => {
           regime: s.regime, stock_profile: s.stock_profile,
           weekly_bias: s.weekly_bias, conviction: s.confidence,
           strategy: s.strategy, entry_thesis: s.strategy,
-          contributing_rules: { reasoning: s.reasoning },
+          contributing_rules: {
+            reasoning: s.reasoning,
+            danelfin: s.danelfin_delta ?? 0,
+            danelfin_score: s.danelfin_score ?? null,
+          },
           entry_price: s.entry_price,
           spy_at_entry: macro.spyClose[macro.spyClose.length - 1] ?? null,
           macro_score: macro.score, macro_label: macro.label,

@@ -954,6 +954,12 @@ export interface EvaluateSignalResult {
   atr: number;
   atrPct: number;
   reasoning: string;
+  /** Conviction delta from the Danelfin AI Score overlay (long: +(s-5)*1.5,
+   *  short: -(s-5)*1.5, rounded). 0 when no score available. Exposed so
+   *  callers can persist it to contributing_rules for the calibration loop. */
+  danelfinDelta?: number;
+  /** Raw Danelfin AI Score 1..10 (or undefined when missing). */
+  danelfinScore?: number;
 }
 
 // ----------------------------------------------------------------------------
@@ -1106,13 +1112,14 @@ export function evaluateSignal(
   // Short: -(score-5)*1.5
   // Missing/null → 0 (neutral). The adaptive weighting loop will tune real
   // influence over time by reading contributing_rules.danelfin from outcomes.
+  let danelfinDelta = 0;
   if (sig.confidence > 0 && danelfinScore !== undefined && danelfinScore !== null && Number.isFinite(danelfinScore)) {
     const side: "long" | "short" = sig.consensusScore >= 0 ? "long" : "short";
     const raw = (danelfinScore - 5) * 1.5;
-    const delta = Math.round(side === "long" ? raw : -raw);
-    if (delta !== 0) {
+    danelfinDelta = Math.round(side === "long" ? raw : -raw);
+    if (danelfinDelta !== 0) {
       const before = sig.confidence;
-      sig.confidence = Math.max(0, Math.min(100, sig.confidence + delta));
+      sig.confidence = Math.max(0, Math.min(100, sig.confidence + danelfinDelta));
       if (before > 0 && sig.consensusScore !== 0) {
         sig.consensusScore = Math.sign(sig.consensusScore) * sig.confidence;
       }
@@ -1197,7 +1204,9 @@ export function evaluateSignal(
     kellyFraction,
     atr: sig.atr,
     atrPct: atrPctNow,
-    reasoning: `${sig.strategy.replace("_", " ")} ${sigDir.toLowerCase()} | ${cls.classification} profile | ${sig.regime} regime | conviction ${sig.confidence} | kelly ${(kellyFraction * 100).toFixed(1)}%`,
+    reasoning: `${sig.strategy.replace("_", " ")} ${sigDir.toLowerCase()} | ${cls.classification} profile | ${sig.regime} regime | conviction ${sig.confidence} | kelly ${(kellyFraction * 100).toFixed(1)}%${danelfinDelta !== 0 ? ` | danelfinΔ=${danelfinDelta > 0 ? "+" : ""}${danelfinDelta}` : ""}`,
+    danelfinDelta,
+    danelfinScore: (danelfinScore !== undefined && danelfinScore !== null && Number.isFinite(danelfinScore)) ? danelfinScore : undefined,
   };
 }
 

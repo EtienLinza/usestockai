@@ -33,6 +33,9 @@ interface Body {
     exitCalibration?: Record<string, { trailMultAdjust: number }>;
     tickerCalibration?: Record<string, { adjust: number }>;
   };
+  /** Pre-loaded Danelfin AI Scores keyed by uppercase ticker — supporting
+   *  conviction factor passed through to evaluateSignal. Missing → neutral. */
+  danelfinScores?: Record<string, number>;
   mode?: "premarket" | "live";
 }
 
@@ -51,6 +54,7 @@ serve(async (req) => {
   try {
     const body = await req.json() as Body;
     const { tickers, spyContext, macro, sectorMomentum, weights } = body;
+    const danelfinScores = body.danelfinScores ?? {};
     const mode: "premarket" | "live" = body.mode === "premarket" ? "premarket" : "live";
     if (!Array.isArray(tickers) || tickers.length === 0) {
       return new Response(JSON.stringify({ signals: [] }), {
@@ -119,10 +123,13 @@ serve(async (req) => {
       if (!data || data.close.length < 200) continue;
       if (blackoutSet.has(ticker)) continue;
       try {
+        const danelfin = danelfinScores[ticker.toUpperCase()] ?? null;
         const sig = evaluateSignal(
           data, ticker,
           { spyBearish: spyContext.spyBearish },
           (macro as MacroContext | null) ?? null,
+          undefined, undefined,
+          danelfin,
         );
         if (!sig || sig.decision === "HOLD") continue;
         const { regime, strategy, weeklyBias, profile, atrPct } = sig;
@@ -190,6 +197,8 @@ serve(async (req) => {
           reasoning: sig.reasoning,
           strategy,
           qualityScore,
+          danelfin_score: sig.danelfinScore ?? null,
+          danelfin_delta: sig.danelfinDelta ?? 0,
         });
       } catch (err) {
         console.error(`worker ${ticker}:`, err);

@@ -44,3 +44,6 @@ verify_jwt = false
 
 [functions.scan-worker]
 verify_jwt = false
+
+[functions.refresh-danelfin-scores]
+verify_jwt = false

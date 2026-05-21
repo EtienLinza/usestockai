@@ -521,3 +521,57 @@ correlatedCount = |\text{tickers in candidate sector after add}|
 \]
 
 Violations compare these to user caps and output allow/warn/block. 【F:supabase/functions/portfolio-gate/index.ts†L168-L207】【F:supabase/functions/portfolio-gate/index.ts†L209-L240】
+
+---
+
+## 9. Danelfin AI Score Overlay (supporting factor)
+
+Layered into conviction inside `evaluateSignal` (`_shared/signal-engine-v2.ts`).
+The score (1–10) is **never a gate** — it nudges conviction up or down and the
+adaptive weighting loop measures its incremental edge via
+`signal_outcomes.contributing_rules.danelfin`.
+
+### 9.1 Factor
+
+\[
+\Delta_{danelfin} =
+\begin{cases}
+\mathrm{round}((s-5)\cdot 1.5) & \text{long} \\
+-\mathrm{round}((s-5)\cdot 1.5) & \text{short} \\
+0 & s \text{ missing/null}
+\end{cases}
+\quad s\in[1,10],\;\Delta\in[-6,+8]
+\]
+
+Applied to `sig.confidence` (clamped 0..100) and mirrored into
+`sig.consensusScore` so the post-overlay threshold re-check still gates
+correctly. The threshold check itself is unchanged — Danelfin only changes the
+input, not the gate.
+
+### 9.2 Pipeline placement
+
+```
+classifier → weekly bias → strategy signal → volume z-adj → Danelfin overlay
+           → threshold re-check → multi-TF gate → daily entry gate → Kelly sizing
+```
+
+The scanner (`scan-orchestrator`) loads `danelfin_scores` once per run and
+forwards the map to every `scan-worker`. The autotrader pre-loads once per
+scan and passes through to `evaluateSignal`. Same code path → backtest/live
+parity preserved.
+
+### 9.3 Refresh
+
+`refresh-danelfin-scores` runs nightly at 02:30 UTC (Mon–Fri). Universe =
+`scan_universe_log.sample_tickers` ∪ `watchlist` ∪ open `virtual_positions`,
+capped at 300 tickers/night with ~1 req/sec throttle (free-tier safe).
+Exits early after 3 consecutive 401/402/429 and marks `cron_heartbeat`
+`degraded`. Persistent cache (`danelfin_scores`, PK `ticker, as_of`) allows
+≤7-day staleness before a row is treated as missing.
+
+### 9.4 Backtest
+
+Free tier has no historical scores. Backtest currently runs with
+\(\Delta_{danelfin} = 0\) for all bars. As the nightly job accumulates rows,
+backtests over forward windows naturally pick up the factor without any code
+change.

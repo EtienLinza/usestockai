@@ -113,6 +113,7 @@ import {
 } from "../_shared/signal-engine-v2.ts";
 import { getEarningsBlackoutDays } from "../_shared/finnhub.ts";
 import { applyIsotonicCalibration, type IsotonicAnchor } from "../_shared/calibration.ts";
+import { loadDanelfinScores } from "../_shared/danelfin.ts";
 
 
 
@@ -943,6 +944,12 @@ serve(async (req) => {
       if (days !== null && days <= 3) blackoutSet.add(t);
     });
 
+    // Pre-load Danelfin AI Scores for the batch (one DB query, no API hits).
+    const danelfinMap = await loadDanelfinScores(tickersToScan);
+    if (danelfinMap.size > 0) {
+      console.log(`market-scanner: Danelfin coverage ${danelfinMap.size}/${tickersToScan.length}`);
+    }
+
     for (let ti = 0; ti < tickersToScan.length; ti++) {
       const ticker = tickersToScan[ti];
       const data = allData[ti];
@@ -954,11 +961,14 @@ serve(async (req) => {
         // Use the canonical evaluateSignal() — same code path the autotrader
         // uses for entries and the backtester validates against. Eliminates
         // scanner/autotrader divergence.
+        const danelfin = danelfinMap.get(ticker.toUpperCase()) ?? null;
         const sig = evaluateSignal(
           data,
           ticker,
           { spyBearish },
           (macro as MacroContext | null) ?? null,
+          undefined, undefined,
+          danelfin,
         );
         if (!sig || sig.decision === "HOLD") continue;
 
@@ -1023,6 +1033,8 @@ serve(async (req) => {
           strategy,
           sector,
           qualityScore,
+          danelfin_score: sig.danelfinScore ?? null,
+          danelfin_delta: sig.danelfinDelta ?? 0,
         });
       } catch (err) {
         console.error(`Error analyzing ${ticker}:`, err);
@@ -1089,7 +1101,11 @@ serve(async (req) => {
             conviction: s.confidence,
             strategy: s.strategy,
             entry_thesis: s.strategy, // strategy doubles as thesis tag for now
-            contributing_rules: { reasoning: s.reasoning },
+            contributing_rules: {
+              reasoning: s.reasoning,
+              danelfin: s.danelfin_delta ?? 0,
+              danelfin_score: s.danelfin_score ?? null,
+            },
             entry_price: s.entry_price,
             spy_at_entry: spyContext?.spyClose?.[spyContext.spyClose.length - 1] ?? null,
             macro_score: macro?.score ?? spyContext?.macro?.score ?? null,
