@@ -1204,7 +1204,9 @@ export function evaluateSignal(
     kellyFraction,
     atr: sig.atr,
     atrPct: atrPctNow,
-    reasoning: `${sig.strategy.replace("_", " ")} ${sigDir.toLowerCase()} | ${cls.classification} profile | ${sig.regime} regime | conviction ${sig.confidence} | kelly ${(kellyFraction * 100).toFixed(1)}%`,
+    reasoning: `${sig.strategy.replace("_", " ")} ${sigDir.toLowerCase()} | ${cls.classification} profile | ${sig.regime} regime | conviction ${sig.confidence} | kelly ${(kellyFraction * 100).toFixed(1)}%${danelfinDelta !== 0 ? ` | danelfinΔ=${danelfinDelta > 0 ? "+" : ""}${danelfinDelta}` : ""}`,
+    danelfinDelta,
+    danelfinScore: (danelfinScore !== undefined && danelfinScore !== null && Number.isFinite(danelfinScore)) ? danelfinScore : undefined,
   };
 }
 
