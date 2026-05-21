@@ -176,11 +176,20 @@ serve(async (req) => {
       chunks.push(survivors.slice(i, i + WORKER_CHUNK));
     }
 
+    // Pre-load Danelfin AI Scores for survivors once (one SELECT, no API hits).
+    // Forwarded to every worker so the engine can apply the supporting overlay
+    // without each worker hitting the DB independently.
+    const danelfinMap = await loadDanelfinScores(survivors);
+    const danelfinObj: Record<string, number> = {};
+    for (const [t, s] of danelfinMap.entries()) danelfinObj[t] = s;
+    console.log(`Danelfin coverage: ${danelfinMap.size}/${survivors.length}`);
+
     const workerPayloadBase = {
       spyContext: { spyBearish, spyClose: macro.spyClose.slice(-30) },
       macro,
       sectorMomentum,
       weights,
+      danelfinScores: danelfinObj,
       mode,
     };
 
