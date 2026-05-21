@@ -954,6 +954,12 @@ export interface EvaluateSignalResult {
   atr: number;
   atrPct: number;
   reasoning: string;
+  /** Conviction delta from the Danelfin AI Score overlay (long: +(s-5)*1.5,
+   *  short: -(s-5)*1.5, rounded). 0 when no score available. Exposed so
+   *  callers can persist it to contributing_rules for the calibration loop. */
+  danelfinDelta?: number;
+  /** Raw Danelfin AI Score 1..10 (or undefined when missing). */
+  danelfinScore?: number;
 }
 
 // ----------------------------------------------------------------------------
