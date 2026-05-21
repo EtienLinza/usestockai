@@ -1101,7 +1101,11 @@ serve(async (req) => {
             conviction: s.confidence,
             strategy: s.strategy,
             entry_thesis: s.strategy, // strategy doubles as thesis tag for now
-            contributing_rules: { reasoning: s.reasoning },
+            contributing_rules: {
+              reasoning: s.reasoning,
+              danelfin: s.danelfin_delta ?? 0,
+              danelfin_score: s.danelfin_score ?? null,
+            },
             entry_price: s.entry_price,
             spy_at_entry: spyContext?.spyClose?.[spyContext.spyClose.length - 1] ?? null,
             macro_score: macro?.score ?? spyContext?.macro?.score ?? null,
