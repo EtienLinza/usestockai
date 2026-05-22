@@ -1907,7 +1907,7 @@ async function processUser(
           return { pos, pnlPct, ageMs };
         })
         .filter((r): r is { pos: Position; pnlPct: number; ageMs: number } =>
-          !!r && !r.pos.opened_by_rotation && r.ageMs >= MIN_POSITION_AGE_MS,
+          !!r && !r.pos.opened_by_rotation && r.ageMs >= MIN_POSITION_AGE_MS && r.pnlPct > 0,
         )
         .sort((a, b) => a.pnlPct - b.pnlPct);
       const worst = ranked[0];
@@ -1915,7 +1915,7 @@ async function processUser(
         summary.blocked++; userSummary.blocked++;
         await supabase.from("autotrade_log").insert({
           user_id: userId, ticker: p.ticker, action: "BLOCKED",
-          reason: `Rotation skipped — no eligible position to displace (all rotated today or <30min old)`,
+          reason: `Rotation skipped — no eligible GREEN position to displace (never rotate on a loss)`,
           conviction: p.decision.conviction, strategy: p.decision.strategy, profile: p.decision.profile,
         });
         continue;
