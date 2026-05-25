@@ -1,111 +1,114 @@
-# Danelfin AI Score Integration
+# StockAI Payment Tiers — Brainstorm
 
-Danelfin is added as a **supporting conviction factor** — never a hard gate. It runs entirely in the background, nightly, and flows through every layer of the existing pipeline (signals, autotrader, UI, backtest) with small, calibrated weight so the adaptive weighting loop can tune it over time.
+A freemium ladder designed to serve **all three audiences in one funnel**: hobby traders try it for free → active traders convert to Pro → power users / semi-pros pay for Elite. No separate "Institutional" SKU at launch — keep it simple, add an Enterprise upsell later.
 
-Given the free API tier (low rate limit, US-only, current scores only, no history), the design is rate-limit-safe and degrades gracefully when Danelfin is unavailable.
-
----
-
-## 1. Secret + client
-
-- Add runtime secret `DANELFIN_API_KEY`.
-- New `supabase/functions/_shared/danelfin.ts`:
-  - `getAiScore(ticker)` → `{ aiScore, technical, fundamental, sentiment, lowRisk, asOf } | null`
-  - 6s timeout, in-memory 24h cache, returns `null` on any failure (mirrors `finnhub.ts` pattern).
-  - `isDanelfinConfigured()` helper.
-
-## 2. Database
-
-New table `danelfin_scores` (nightly snapshot, one row per ticker per day):
+## The Ladder
 
 ```text
-ticker        text       PK part 1
-as_of         date       PK part 2
-ai_score      int        1..10
-technical     int        1..10
-fundamental   int        1..10
-sentiment     int        1..10
-low_risk      int        1..10  nullable
-updated_at    timestamptz
+  FREE              PRO               ELITE
+  $0                $19 / mo          $49 / mo
+  Acquisition       Core conversion   Power users / autotrader
+  ──────────        ───────────       ───────────
+  Discover the      Track + act on    Automate + scale
+  signals           signals           the workflow
 ```
 
-RLS: `No client access` (server-only, like `ticker_bars_cache`).
-
-## 3. Nightly refresh cron
-
-New edge function `refresh-danelfin-scores` (`verify_jwt = false`, cron-auth header):
-- Pulls the union of: scan universe (last `scan_universe_log`), all watchlist tickers, all open `virtual_positions`.
-- Throttles requests (free-tier safe: ~1 req/sec, batched).
-- Upserts into `danelfin_scores` with today's `as_of`.
-- Writes to `cron_heartbeat`.
-- Scheduled via `pg_cron` at **22:30 ET on weekdays** (after US close + Danelfin's daily refresh).
-
-## 4. Signal engine overlay (the core of the integration)
-
-In `_shared/signal-engine-v2.ts`:
-- New helper `loadDanelfinScores(tickers)` → `Map<ticker, score>`, loaded once per scan (not per-ticker).
-- New conviction factor `danelfinFactor`:
-  - Long: `+ (aiScore - 5) * 1.5` → range roughly `-6 … +7.5`
-  - Short: `- (aiScore - 5) * 1.5`
-  - Missing score → `0` (neutral, never blocks).
-- Added to the existing weighted-sum conviction the same way every other factor is, so:
-  - Adaptive weighting loop already tunes it via `strategy_tilts` / `regime_floors`.
-  - Isotonic calibration sees it transparently.
-  - Backtest ↔ live parity is preserved (same code path).
-- `contributing_rules` JSON in `signal_outcomes` gets a `"danelfin": <delta>` entry, so we can later measure its incremental edge.
-
-## 5. Autotrader (background-only, supporting)
-
-Per your direction, **no hard gate**. Changes in `autotrader-scan/index.ts`:
-- Danelfin score is already baked into `conviction` (via #4), so it influences:
-  - Entry ranking (higher AI Score → higher conviction → preferred).
-  - Capital rotation (#10 you added earlier) — rotation candidates with higher AI Score than incumbents become eligible.
-  - Position sizing (Kelly fraction scales with conviction).
-- Logged to `autotrade_log.reason` as `"… danelfinΔ=+4"` for transparency.
-- No new Settings toggle. (We can add one later if you want to expose its weight.)
-
-## 6. UI (Trading Hub)
-
-Minimal, on-brand surface:
-- Small "AI 8" sage-green badge on each signal card and each open position card.
-- Hover/long-press → mini popover with the three sub-scores (T/F/S).
-- Sortable column in the signals table on desktop.
-- Hidden gracefully when score is missing.
-
-No new page, no new tab.
-
-## 7. Backtester
-
-Free tier has **no historical scores**, so:
-- Backtest reads `danelfin_scores` if a row exists for that `as_of` date, otherwise treats factor as `0`.
-- Going forward, the nightly job builds up history naturally → backtests over recent windows gain the factor automatically.
-- Documented in `autotrader_pipeline_and_math.md`.
-
-## 8. Memory
-
-Add `mem://architecture/prediction-engine/danelfin-overlay` describing: source, factor formula, neutral-on-miss behavior, free-tier constraints, and the rule that it must remain a supporting factor (not a gate).
+Suggested annual discount: **−20%** (Pro $15/mo billed yearly, Elite $39/mo billed yearly).
 
 ---
 
-## Technical notes
+## Tier 1 — Free (Acquisition)
 
-- **Rate limiting**: Free tier — refresh job batches with 1100ms delay between calls and a hard cap of ~300 tickers/night. Falls back to "skip" if budget exhausted; existing scores from yesterday are still served from `danelfin_scores` (max 7-day staleness allowed before treated as missing).
-- **Edge function isolation**: per project rule, the Danelfin client lives in `_shared/danelfin.ts` and is duplicated into any function directory that needs it (signal-engine call sites already import from `_shared`).
-- **No frontend secret**: all Danelfin calls happen server-side.
-- **Cost guard**: if Danelfin returns 401/402/429 three times in a row in one job, the job exits early and writes `status='degraded'` to `cron_heartbeat`.
+The "see the value" tier. Enough to prove the AI works; not enough to run a real workflow on.
 
-## Files touched
+- Browse the **live signal feed** (read-only, all 6,000+ tickers scanned)
+- View signal reasoning, confidence, regime, strategy
+- **Watchlist**: up to **5 tickers**
+- **Backtest**: up to **3 runs / month**, single ticker, max 1-year window, no Monte Carlo, no walk-forward
+- **Portfolio tracking**: up to **3 open virtual positions**, no equity curve / analytics
+- **No alerts**, no email digests, no autotrader
+- Branded "Powered by StockAI" on shared reports
 
-- new: `supabase/functions/_shared/danelfin.ts`
-- new: `supabase/functions/refresh-danelfin-scores/index.ts`
-- new migration: `danelfin_scores` table + RLS + cron schedule
-- edited: `supabase/functions/_shared/signal-engine-v2.ts` (factor + loader)
-- edited: `supabase/functions/autotrader-scan/index.ts` (log line only)
-- edited: `supabase/functions/backtest/index.ts` (lookup, no-op on miss)
-- edited: `src/components/dashboard/TradingTab.tsx` (badge + column)
-- edited: `autotrader_pipeline_and_math.md`
-- new memory: `mem://architecture/prediction-engine/danelfin-overlay`
+## Tier 2 — Pro — $29/mo (Core conversion)
 
-## What you'll need to provide
+The "I trade on this" tier. Where ~80% of paying users should land.
 
-- The `DANELFIN_API_KEY` value (I'll request it via the secret tool when you approve).
+Everything in Free, plus:
+
+- **Unlimited watchlist** + AI watchlist suggestions
+- **Portfolio & P&L tracking**: unlimited positions, equity curve, win rate, profit factor, drawdown, trade journal
+- **Alerts**: price alerts, sell alerts, real-time notification center, **email alerts**
+- **Weekly digest email**
+- **Backtest**: 20 runs / month, multi-ticker (up to 3), Monte Carlo, walk-forward, full institutional metrics (Sharpe / Sortino / Calmar)
+- Custom exit targets per position
+- Trading-style filters (scalping / day / swing / position)
+- Remove branding on shared reports
+
+## Tier 3 — Elite — $59/mo (Power users)
+
+The "automate my edge" tier.
+
+Everything in Pro, plus:
+
+- **AutoTrader**: paper-mode automated execution against live signals
+- **Portfolio risk caps**: sector limits, beta caps, correlation gating, kill-switch
+- **Unlimited backtests**, longer history windows, robustness/stress testing, parameter sensitivity
+- **Adaptive weighting visibility**: see calibration curves, regime tilts, strategy weights
+- Priority scan queue (their manual rescans run first)
+- Early access to new indicators / models
+- Email + in-app **support priority**
+
+## Future — Institutional (waitlist)
+
+Don't build at launch. Capture interest with a "Contact Sales" CTA. Likely needs:
+
+- API access to signals
+- Team seats / SSO
+- White-label reports
+- Custom universe + custom indicators
+
+---
+
+## Gating Map (technical view)
+
+
+| Capability                       | Free   | Pro | Elite |
+| -------------------------------- | ------ | --- | ----- |
+| Signal feed read                 | ✅      | ✅   | ✅     |
+| Watchlist size                   | 5      | ∞   | ∞     |
+| Virtual positions                | 3 open | ∞   | ∞     |
+| Portfolio analytics page         | ❌      | ✅   | ✅     |
+| Price alerts                     | ❌      | ✅   | ✅     |
+| Sell alerts + email              | ❌      | ✅   | ✅     |
+| Weekly digest                    | ❌      | ✅   | ✅     |
+| Backtests / mo                   | 3      | 20  | ∞     |
+| Backtest tickers per run         | 1      | 3   | 10    |
+| Monte Carlo / walk-forward       | ❌      | ✅   | ✅     |
+| Robustness / stress tests        | ❌      | ❌   | ✅     |
+| AutoTrader (paper)               | ❌      | ❌   | ✅     |
+| Portfolio risk caps              | ❌      | ❌   | ✅     |
+| Calibration / weights visibility | ❌      | ❌   | ✅     |
+
+
+## Why this shape
+
+- **Signal feed stays free** → strongest acquisition hook + SEO ("live AI signals"). The scan engine is already running regardless of who's logged in, so marginal cost is ~zero.
+- **Portfolio tracking on Pro** → it's the daily habit-forming surface. Once a user logs 5+ trades, churn drops sharply.
+- **Backtester split across tiers** → the meter (runs/month) does most of the upsell work without removing the feature outright. Heavy users self-select into Elite.
+- **AutoTrader exclusive to Elite** → highest perceived value, lowest support volume (advanced users only), and gives a clear reason to pay 2.5× Pro.
+- **$29 / $59** lands in the sweet spot vs comps (TrendSpider $48+, Trade Ideas $84+, Finviz Elite $39, TradingView Pro $15). Pro looks like a bargain; Elite looks like a deal vs Trade Ideas.
+
+## Open questions for you
+
+1. **Real-money autotrader (broker integration) later?** That would justify a 4th "Elite+" tier at $99+, or a usage fee.
+2. **Free trial on Pro?** 7-day no-card trial would lift conversion but adds support load.
+3. **Student / annual discount aggressiveness** — 20% standard, or push 30%+ to anchor on annual?
+
+## Technical implementation (when you're ready to build)
+
+- Add `subscription_tier` enum (`free | pro | elite`) on `profiles`, plus `current_period_end` for grace handling.
+- Use Lovable's built-in payments (Paddle recommended for digital-only SaaS, handles tax + MOR globally).
+- Gate server-side in edge functions (backtest, autotrader-scan, send-alert-email) and client-side for UI affordances.
+- Add a `usage_counters` table for monthly meters (backtests run, etc.) with month-bucket key.
+
+No code changes yet — just align on tiers + prices first.
