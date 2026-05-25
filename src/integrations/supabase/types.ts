@@ -493,6 +493,8 @@ export type Database = {
           email: string | null
           full_name: string | null
           id: string
+          subscription_tier: Database["public"]["Enums"]["subscription_tier"]
+          tier_updated_at: string
           updated_at: string
           user_id: string
           weekly_digest_enabled: boolean | null
@@ -505,6 +507,8 @@ export type Database = {
           email?: string | null
           full_name?: string | null
           id?: string
+          subscription_tier?: Database["public"]["Enums"]["subscription_tier"]
+          tier_updated_at?: string
           updated_at?: string
           user_id: string
           weekly_digest_enabled?: boolean | null
@@ -517,6 +521,8 @@ export type Database = {
           email?: string | null
           full_name?: string | null
           id?: string
+          subscription_tier?: Database["public"]["Enums"]["subscription_tier"]
+          tier_updated_at?: string
           updated_at?: string
           user_id?: string
           weekly_digest_enabled?: boolean | null
@@ -981,7 +987,7 @@ export type Database = {
       [_ in never]: never
     }
     Enums: {
-      [_ in never]: never
+      subscription_tier: "free" | "pro" | "elite"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -1108,6 +1114,8 @@ export type CompositeTypes<
 
 export const Constants = {
   public: {
-    Enums: {},
+    Enums: {
+      subscription_tier: ["free", "pro", "elite"],
+    },
   },
 } as const
