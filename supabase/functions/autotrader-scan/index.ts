@@ -1067,8 +1067,23 @@ serve(async (req) => {
       .eq("status", "open");
     const userIdsWithOpen = new Set((openPosUsers ?? []).map((r: any) => r.user_id));
 
+    // Tier gate: AutoTrader requires Elite. Filter out non-Elite users.
+    const candidateUserIds = (allSettings ?? []).map((s: any) => s.user_id);
+    let eliteUserIds = new Set<string>();
+    if (candidateUserIds.length > 0) {
+      const { data: tierRows } = await supabase
+        .from("profiles")
+        .select("user_id, subscription_tier")
+        .in("user_id", candidateUserIds);
+      eliteUserIds = new Set(
+        (tierRows ?? [])
+          .filter((r: any) => r.subscription_tier === "elite")
+          .map((r: any) => r.user_id),
+      );
+    }
+
     const settingsRows = (allSettings ?? []).filter((s: any) =>
-      s.enabled === true || userIdsWithOpen.has(s.user_id)
+      eliteUserIds.has(s.user_id) && (s.enabled === true || userIdsWithOpen.has(s.user_id))
     );
 
     if (!settingsRows || settingsRows.length === 0) {
