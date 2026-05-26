@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { Navbar } from "@/components/Navbar";
 import { SystemHealth } from "@/components/SystemHealth";
+import { PlanBillingSection } from "@/components/PlanBillingSection";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -264,6 +265,10 @@ const Settings = () => {
             <p className="text-sm text-muted-foreground">
               Configure how the bot trades, what risks you'll accept, and monitor system health.
             </p>
+          </div>
+
+          <div className="mb-6">
+            <PlanBillingSection />
           </div>
 
           {loading ? (

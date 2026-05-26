@@ -9,6 +9,7 @@ import { Bot, Loader2, ArrowDownRight, ArrowUpRight, Pause, Ban, Newspaper, Chev
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
+import { LockedFeature } from "@/components/LockedFeature";
 
 function sentimentTone(score: number): { cls: string; label: string } {
   if (score <= -60) return { cls: "text-destructive border-destructive/30 bg-destructive/10", label: "Very Negative" };
@@ -99,6 +100,7 @@ const AutotraderLog = () => {
       />
       <Navbar />
       <main className="container mx-auto px-6 pt-24 pb-12 max-w-5xl">
+        <LockedFeature requiredTier="elite" feature="AutoTrader">
         <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-5">
           <div className="flex items-center gap-2 mb-1">
             <Bot className="w-5 h-5 text-primary" />
@@ -236,6 +238,7 @@ const AutotraderLog = () => {
             </Card>
           )}
         </motion.div>
+        </LockedFeature>
       </main>
     </div>
   );

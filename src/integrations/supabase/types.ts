@@ -491,10 +491,14 @@ export type Database = {
           created_at: string
           dashboard_layout: Json | null
           email: string | null
+          focus_areas: string[] | null
           full_name: string | null
           id: string
+          onboarding_completed: boolean
           subscription_tier: Database["public"]["Enums"]["subscription_tier"]
+          tier_selected_at: string | null
           tier_updated_at: string
+          trading_experience: string | null
           updated_at: string
           user_id: string
           weekly_digest_enabled: boolean | null
@@ -505,10 +509,14 @@ export type Database = {
           created_at?: string
           dashboard_layout?: Json | null
           email?: string | null
+          focus_areas?: string[] | null
           full_name?: string | null
           id?: string
+          onboarding_completed?: boolean
           subscription_tier?: Database["public"]["Enums"]["subscription_tier"]
+          tier_selected_at?: string | null
           tier_updated_at?: string
+          trading_experience?: string | null
           updated_at?: string
           user_id: string
           weekly_digest_enabled?: boolean | null
@@ -519,10 +527,14 @@ export type Database = {
           created_at?: string
           dashboard_layout?: Json | null
           email?: string | null
+          focus_areas?: string[] | null
           full_name?: string | null
           id?: string
+          onboarding_completed?: boolean
           subscription_tier?: Database["public"]["Enums"]["subscription_tier"]
+          tier_selected_at?: string | null
           tier_updated_at?: string
+          trading_experience?: string | null
           updated_at?: string
           user_id?: string
           weekly_digest_enabled?: boolean | null
@@ -812,6 +824,63 @@ export type Database = {
         }
         Relationships: []
       }
+      upgrade_waitlist: {
+        Row: {
+          billing_cycle: string
+          created_at: string
+          id: string
+          notes: string | null
+          requested_tier: string
+          user_id: string
+        }
+        Insert: {
+          billing_cycle?: string
+          created_at?: string
+          id?: string
+          notes?: string | null
+          requested_tier: string
+          user_id: string
+        }
+        Update: {
+          billing_cycle?: string
+          created_at?: string
+          id?: string
+          notes?: string | null
+          requested_tier?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      usage_counters: {
+        Row: {
+          backtests_run: number
+          created_at: string
+          id: string
+          month_key: string
+          scans_run: number
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          backtests_run?: number
+          created_at?: string
+          id?: string
+          month_key: string
+          scans_run?: number
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          backtests_run?: number
+          created_at?: string
+          id?: string
+          month_key?: string
+          scans_run?: number
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       virtual_portfolio_log: {
         Row: {
           cash: number
@@ -984,7 +1053,10 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      get_user_tier: {
+        Args: { _user_id: string }
+        Returns: Database["public"]["Enums"]["subscription_tier"]
+      }
     }
     Enums: {
       subscription_tier: "free" | "pro" | "elite"

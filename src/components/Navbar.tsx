@@ -5,6 +5,8 @@ import { Button } from "@/components/ui/button";
 import { Logo } from "@/components/Logo";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { NotificationCenter } from "@/components/NotificationCenter";
+import { TierBadge } from "@/components/TierBadge";
+import { useTier } from "@/hooks/useTier";
 import { useAuth } from "@/hooks/useAuth";
 import { 
   DropdownMenu,
@@ -20,12 +22,13 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
-import { User, LogOut, LayoutDashboard, Heart, Menu, BarChart3, Shield, Bot } from "lucide-react";
+import { User, LogOut, LayoutDashboard, Heart, Menu, BarChart3, Shield, Bot, Sparkles } from "lucide-react";
 
 export const Navbar = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const { user, signOut } = useAuth();
+  const { tier } = useTier();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   // Primary nav (always visible on desktop)
@@ -84,6 +87,15 @@ export const Navbar = () => {
                 </Link>
               );
             })}
+            <Link to="/pricing">
+              <Button
+                variant={location.pathname === "/pricing" ? "secondary" : "ghost"}
+                size="sm"
+                className={location.pathname === "/pricing" ? "text-primary" : "text-muted-foreground hover:text-foreground"}
+              >
+                Pricing
+              </Button>
+            </Link>
           </nav>
 
           <div className="flex items-center gap-2">
@@ -171,9 +183,15 @@ export const Navbar = () => {
                     <span className="max-w-[100px] truncate text-muted-foreground">
                       {user.email}
                     </span>
+                    <TierBadge tier={tier} />
                   </button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-52">
+                <DropdownMenuContent align="end" className="w-56">
+                  <div className="px-2 py-1.5 flex items-center justify-between gap-2">
+                    <span className="text-xs text-muted-foreground">Current plan</span>
+                    <TierBadge tier={tier} />
+                  </div>
+                  <DropdownMenuSeparator />
                   <DropdownMenuItem onClick={() => navigate("/dashboard")}>
                     <LayoutDashboard className="w-4 h-4 mr-2" />
                     Dashboard
@@ -181,6 +199,10 @@ export const Navbar = () => {
                   <DropdownMenuItem onClick={() => navigate("/watchlist")}>
                     <Heart className="w-4 h-4 mr-2" />
                     Watchlist
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => navigate("/pricing")}>
+                    <Sparkles className="w-4 h-4 mr-2" />
+                    Plans & pricing
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   {secondaryLinks.map((link) => {

@@ -23,6 +23,7 @@ import {
   Trophy, Shield, Download, Clock, Crosshair, ShieldAlert, Zap, FlaskConical,
   BarChart2, PieChart, Repeat, Layers, Scale, Signal, Sparkles, Lock, SlidersHorizontal,
 } from "lucide-react";
+import { BacktestUsageBanner } from "@/components/BacktestUsageBanner";
 
 interface BacktestReport {
   periods: { start: string; end: string; accuracy: number; returnPct: number; trades: number }[];
@@ -277,9 +278,10 @@ const Backtest = () => {
               <BarChart3 className="w-5 h-5 text-primary" />
               Backtest Engine
             </h1>
-            <p className="text-xs sm:text-sm text-muted-foreground">
+            <p className="text-xs sm:text-sm text-muted-foreground mb-4">
               Institutional-grade walk-forward backtesting with anti-bias protection
             </p>
+            <BacktestUsageBanner />
           </motion.div>
 
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-8">

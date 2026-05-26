@@ -25,22 +25,16 @@ export const Footer = () => {
             © {new Date().getFullYear()} StockAI. Paper trading & market research.
           </p>
           <nav className="flex items-center gap-6 text-xs">
-            <Link
-              to="/terms"
-              className="text-muted-foreground hover:text-foreground transition-colors"
-            >
+            <Link to="/pricing" className="text-muted-foreground hover:text-foreground transition-colors">
+              Pricing
+            </Link>
+            <Link to="/terms" className="text-muted-foreground hover:text-foreground transition-colors">
               Terms
             </Link>
-            <Link
-              to="/privacy"
-              className="text-muted-foreground hover:text-foreground transition-colors"
-            >
+            <Link to="/privacy" className="text-muted-foreground hover:text-foreground transition-colors">
               Privacy
             </Link>
-            <Link
-              to="/disclosure"
-              className="text-muted-foreground hover:text-foreground transition-colors"
-            >
+            <Link to="/disclosure" className="text-muted-foreground hover:text-foreground transition-colors">
               Risk Disclosure
             </Link>
           </nav>
