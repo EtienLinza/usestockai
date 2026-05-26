@@ -1755,8 +1755,17 @@ serve(async (req) => {
   }
 
   // Require authenticated caller before doing any expensive work.
-  const authError = await requireAuth(req);
-  if (authError) return authError;
+  const authResult = await requireAuth(req);
+  if (authResult instanceof Response) return authResult;
+  const { userId } = authResult;
+
+  // Tier gating
+  const adminClient = createClient(
+    Deno.env.get("SUPABASE_URL")!,
+    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+  );
+  const tier = await getUserTier(adminClient, userId);
+  const tierLimits = TIER_LIMITS[tier];
 
   try {
     const startTime = Date.now();
@@ -1782,9 +1791,44 @@ serve(async (req) => {
       riskPerTrade = 0.01,
       strategyMode = "adaptive",
       explicitOverride = false,
+      walkForward = false,
+      includeRobustness = false,
     } = body;
 
-    console.log(`Backtest request: ${tickers.join(",")} from ${startYear} to ${endYear}, mode=${strategyMode}, buyThresh=${buyThreshold}, adx=${adxThreshold}`);
+    console.log(`Backtest request: ${tickers.join(",")} from ${startYear} to ${endYear}, mode=${strategyMode}, tier=${tier}`);
+
+    // Tier feature gates
+    if (tickers.length > tierLimits.maxTickers) {
+      return new Response(JSON.stringify({
+        error: "tier_required",
+        required: tickers.length <= 3 ? "pro" : "elite",
+        feature: `Multi-ticker backtests (up to ${tickers.length} tickers)`,
+        message: `Your ${tier} plan supports up to ${tierLimits.maxTickers} ticker(s) per backtest.`,
+      }), { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+    if ((endYear - startYear) > tierLimits.maxYears) {
+      return new Response(JSON.stringify({
+        error: "tier_required",
+        required: tier === "free" ? "pro" : "elite",
+        feature: "Extended backtest window",
+        message: `Your ${tier} plan supports up to ${tierLimits.maxYears}-year windows.`,
+      }), { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+    if (includeMonteCarlo && !tierLimits.allowMonteCarlo) {
+      return new Response(JSON.stringify({
+        error: "tier_required", required: "pro", feature: "Monte Carlo simulation",
+      }), { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+    if (walkForward && !tierLimits.allowWalkForward) {
+      return new Response(JSON.stringify({
+        error: "tier_required", required: "pro", feature: "Walk-forward analysis",
+      }), { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+    if (includeRobustness && !tierLimits.allowRobustness) {
+      return new Response(JSON.stringify({
+        error: "tier_required", required: "elite", feature: "Robustness & stress tests",
+      }), { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
 
     // Validate years
     if (startYear < 2000 || startYear > 2026) {
@@ -1792,6 +1836,17 @@ serve(async (req) => {
     }
     if (endYear <= startYear) {
       return new Response(JSON.stringify({ error: "End year must be after start year." }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
+    // Monthly usage gate (per tier)
+    const usage = await checkAndIncrementBacktests(adminClient, userId, tier);
+    if (!usage.ok) {
+      return new Response(JSON.stringify({
+        error: "tier_required",
+        required: tier === "free" ? "pro" : "elite",
+        feature: "Monthly backtest quota",
+        message: `You've used ${usage.used}/${usage.limit} backtests this month on the ${tier} plan.`,
+      }), { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
     const config: BacktestConfig & { strategyMode: string; explicitOverride: boolean } = {
