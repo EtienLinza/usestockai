@@ -28,6 +28,7 @@ export const Navbar = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const { user, signOut } = useAuth();
+  const { tier } = useTier();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   // Primary nav (always visible on desktop)
