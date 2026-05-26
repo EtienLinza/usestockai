@@ -257,6 +257,43 @@ const Landing = () => {
         </div>
       </section>
 
+      {/* Pricing snippet */}
+      <section className="py-24">
+        <div className="container mx-auto px-6 max-w-5xl">
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            className="text-center mb-10"
+          >
+            <h2 className="text-2xl sm:text-3xl font-medium mb-3">Pricing</h2>
+            <p className="text-sm text-muted-foreground">Start free. Upgrade when it pays for itself.</p>
+          </motion.div>
+          <div className="grid md:grid-cols-3 gap-4 mb-8">
+            {[
+              { name: "Free", price: 0, blurb: "Signals + 3 backtests/mo" },
+              { name: "Pro", price: 29, blurb: "Portfolio, alerts, Monte Carlo", popular: true },
+              { name: "Elite", price: 59, blurb: "AutoTrader + unlimited backtests" },
+            ].map((t) => (
+              <Card key={t.name} className={`p-6 ${t.popular ? "border-primary/50 shadow-[0_0_40px_-15px_hsl(var(--primary))]" : ""}`}>
+                {t.popular && <Badge className="mb-2 bg-primary text-primary-foreground">Most popular</Badge>}
+                <div className="text-sm font-medium">{t.name}</div>
+                <div className="flex items-baseline gap-1 my-2">
+                  <span className="text-3xl font-light">${t.price}</span>
+                  <span className="text-xs text-muted-foreground">/mo</span>
+                </div>
+                <p className="text-xs text-muted-foreground">{t.blurb}</p>
+              </Card>
+            ))}
+          </div>
+          <div className="text-center">
+            <Button variant="outline" onClick={() => navigate("/pricing")}>
+              See full pricing <ArrowRight className="w-4 h-4 ml-1" />
+            </Button>
+          </div>
+        </div>
+      </section>
+
       {/* FAQ */}
       <section className="py-24 bg-secondary/20">
         <div className="container mx-auto px-6 max-w-3xl">
