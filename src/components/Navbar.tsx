@@ -5,6 +5,8 @@ import { Button } from "@/components/ui/button";
 import { Logo } from "@/components/Logo";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { NotificationCenter } from "@/components/NotificationCenter";
+import { TierBadge } from "@/components/TierBadge";
+import { useTier } from "@/hooks/useTier";
 import { useAuth } from "@/hooks/useAuth";
 import { 
   DropdownMenu,
