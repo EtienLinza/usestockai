@@ -16,7 +16,10 @@ import AutotraderLog from "./pages/AutotraderLog";
 import Terms from "./pages/Terms";
 import Privacy from "./pages/Privacy";
 import Disclosure from "./pages/Disclosure";
+import Pricing from "./pages/Pricing";
+import Onboarding from "./pages/Onboarding";
 import NotFound from "./pages/NotFound";
+import { RequireOnboarding } from "./components/RequireOnboarding";
 
 const queryClient = new QueryClient();
 
