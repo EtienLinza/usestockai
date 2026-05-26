@@ -8,7 +8,7 @@ const corsHeaders = {
 
 // Verify the caller is an authenticated user. Backtests are CPU-heavy and
 // hit Yahoo Finance — leaving this open would let anyone DoS the function.
-async function requireAuth(req: Request): Promise<Response | null> {
+async function requireAuth(req: Request): Promise<Response | { userId: string }> {
   const authHeader = req.headers.get("Authorization");
   if (!authHeader?.startsWith("Bearer ")) {
     return new Response(JSON.stringify({ error: "Unauthorized" }), {
@@ -29,7 +29,48 @@ async function requireAuth(req: Request): Promise<Response | null> {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
-  return null;
+  return { userId: data.user.id };
+}
+
+type Tier = "free" | "pro" | "elite";
+const TIER_LIMITS: Record<Tier, { backtests: number; maxTickers: number; maxYears: number; allowMonteCarlo: boolean; allowWalkForward: boolean; allowRobustness: boolean }> = {
+  free: { backtests: 3, maxTickers: 1, maxYears: 1, allowMonteCarlo: false, allowWalkForward: false, allowRobustness: false },
+  pro: { backtests: 20, maxTickers: 3, maxYears: 10, allowMonteCarlo: true, allowWalkForward: true, allowRobustness: false },
+  elite: { backtests: Number.POSITIVE_INFINITY, maxTickers: 10, maxYears: 25, allowMonteCarlo: true, allowWalkForward: true, allowRobustness: true },
+};
+
+async function getUserTier(adminClient: ReturnType<typeof createClient>, userId: string): Promise<Tier> {
+  const { data } = await adminClient.rpc("get_user_tier", { _user_id: userId });
+  return ((data as Tier) ?? "free");
+}
+
+async function checkAndIncrementBacktests(
+  adminClient: ReturnType<typeof createClient>,
+  userId: string,
+  tier: Tier,
+): Promise<{ ok: true; used: number } | { ok: false; used: number; limit: number }> {
+  const monthKey = new Date().toISOString().slice(0, 7);
+  const limit = TIER_LIMITS[tier].backtests;
+  const { data: existing } = await adminClient
+    .from("usage_counters")
+    .select("backtests_run")
+    .eq("user_id", userId)
+    .eq("month_key", monthKey)
+    .maybeSingle();
+  const used = (existing as any)?.backtests_run ?? 0;
+  if (used >= limit) return { ok: false, used, limit };
+  if (existing) {
+    await adminClient
+      .from("usage_counters")
+      .update({ backtests_run: used + 1 })
+      .eq("user_id", userId)
+      .eq("month_key", monthKey);
+  } else {
+    await adminClient
+      .from("usage_counters")
+      .insert({ user_id: userId, month_key: monthKey, backtests_run: 1 });
+  }
+  return { ok: true, used: used + 1 };
 }
 
 // ============================================================================
