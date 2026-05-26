@@ -266,6 +266,10 @@ const Settings = () => {
             </p>
           </div>
 
+          <div className="mb-6">
+            <PlanBillingSection />
+          </div>
+
           {loading ? (
             <Card className="glass-card p-12 flex items-center justify-center">
               <Loader2 className="w-5 h-5 animate-spin text-primary" />
