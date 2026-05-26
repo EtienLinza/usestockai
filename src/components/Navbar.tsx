@@ -183,9 +183,15 @@ export const Navbar = () => {
                     <span className="max-w-[100px] truncate text-muted-foreground">
                       {user.email}
                     </span>
+                    <TierBadge tier={tier} />
                   </button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-52">
+                <DropdownMenuContent align="end" className="w-56">
+                  <div className="px-2 py-1.5 flex items-center justify-between gap-2">
+                    <span className="text-xs text-muted-foreground">Current plan</span>
+                    <TierBadge tier={tier} />
+                  </div>
+                  <DropdownMenuSeparator />
                   <DropdownMenuItem onClick={() => navigate("/dashboard")}>
                     <LayoutDashboard className="w-4 h-4 mr-2" />
                     Dashboard
@@ -193,6 +199,10 @@ export const Navbar = () => {
                   <DropdownMenuItem onClick={() => navigate("/watchlist")}>
                     <Heart className="w-4 h-4 mr-2" />
                     Watchlist
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => navigate("/pricing")}>
+                    <Sparkles className="w-4 h-4 mr-2" />
+                    Plans & pricing
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   {secondaryLinks.map((link) => {
