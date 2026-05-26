@@ -75,7 +75,7 @@ export default function Pricing() {
     <div className="min-h-screen bg-background flex flex-col">
       <SEO
         title="Pricing — StockAI"
-        description="Simple, transparent pricing for AI-powered stock signals, backtesting, and portfolio analytics. Free forever, Pro $29/mo, Elite $59/mo."
+        description="Simple, transparent pricing for AI-powered stock signals, backtesting, and portfolio analytics. Free forever, Pro $29/mo, Elite $59/mo." path="/pricing"
       />
       <Navbar />
 

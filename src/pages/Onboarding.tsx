@@ -90,7 +90,7 @@ export default function Onboarding() {
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
-      <SEO title="Get started — StockAI" description="Set up your StockAI account." />
+      <SEO title="Get started — StockAI" description="Set up your StockAI account." path="/onboarding" />
 
       <header className="border-b border-border/30 py-4">
         <div className="container mx-auto px-6 flex items-center justify-between">
