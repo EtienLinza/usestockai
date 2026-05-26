@@ -31,22 +31,23 @@ const App = () => (
           <Toaster />
           <Sonner />
           <BrowserRouter>
-            <Routes>
-              <Route path="/" element={<Landing />} />
-              <Route path="/auth" element={<Auth />} />
-              <Route path="/dashboard" element={<Dashboard />} />
-              
-              <Route path="/watchlist" element={<Watchlist />} />
-              
-              <Route path="/backtest" element={<Backtest />} />
-              <Route path="/settings" element={<Settings />} />
-              <Route path="/autotrader-log" element={<AutotraderLog />} />
-              <Route path="/terms" element={<Terms />} />
-              <Route path="/privacy" element={<Privacy />} />
-              <Route path="/disclosure" element={<Disclosure />} />
-              
-              <Route path="*" element={<NotFound />} />
-            </Routes>
+            <RequireOnboarding>
+              <Routes>
+                <Route path="/" element={<Landing />} />
+                <Route path="/auth" element={<Auth />} />
+                <Route path="/pricing" element={<Pricing />} />
+                <Route path="/onboarding" element={<Onboarding />} />
+                <Route path="/dashboard" element={<Dashboard />} />
+                <Route path="/watchlist" element={<Watchlist />} />
+                <Route path="/backtest" element={<Backtest />} />
+                <Route path="/settings" element={<Settings />} />
+                <Route path="/autotrader-log" element={<AutotraderLog />} />
+                <Route path="/terms" element={<Terms />} />
+                <Route path="/privacy" element={<Privacy />} />
+                <Route path="/disclosure" element={<Disclosure />} />
+                <Route path="*" element={<NotFound />} />
+              </Routes>
+            </RequireOnboarding>
           </BrowserRouter>
         </TooltipProvider>
       </AuthProvider>
