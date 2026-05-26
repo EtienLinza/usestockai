@@ -99,6 +99,7 @@ const AutotraderLog = () => {
       />
       <Navbar />
       <main className="container mx-auto px-6 pt-24 pb-12 max-w-5xl">
+        <LockedFeature requiredTier="elite" feature="AutoTrader">
         <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-5">
           <div className="flex items-center gap-2 mb-1">
             <Bot className="w-5 h-5 text-primary" />
