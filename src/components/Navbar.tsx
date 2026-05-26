@@ -87,6 +87,15 @@ export const Navbar = () => {
                 </Link>
               );
             })}
+            <Link to="/pricing">
+              <Button
+                variant={location.pathname === "/pricing" ? "secondary" : "ghost"}
+                size="sm"
+                className={location.pathname === "/pricing" ? "text-primary" : "text-muted-foreground hover:text-foreground"}
+              >
+                Pricing
+              </Button>
+            </Link>
           </nav>
 
           <div className="flex items-center gap-2">
