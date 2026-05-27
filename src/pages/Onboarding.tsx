@@ -49,16 +49,18 @@ export default function Onboarding() {
     setFocuses((prev) => (prev.includes(id) ? prev.filter((f) => f !== id) : [...prev, id]));
   };
 
-  const finishOnboarding = async (selectedTier: Tier) => {
+  const finishOnboarding = async (waitlistedFor?: Tier) => {
     if (!user) return;
     setSaving(true);
+    // Payments aren't live yet — even users who picked Pro/Elite stay on Free
+    // until checkout ships. Their waitlist row already captures the intent.
     const { error } = await supabase
       .from("profiles")
       .update({
         full_name: fullName || null,
         trading_experience: experience || null,
         focus_areas: focuses,
-        subscription_tier: selectedTier === "free" ? "free" : "free", // paid tiers go to waitlist only
+        subscription_tier: "free",
         tier_selected_at: new Date().toISOString(),
         onboarding_completed: true,
       })
@@ -69,7 +71,7 @@ export default function Onboarding() {
       return;
     }
     invalidate();
-    toast.success("Welcome to StockAI");
+    toast.success(waitlistedFor ? `You're on the ${waitlistedFor} waitlist` : "Welcome to StockAI");
     navigate("/dashboard");
   };
 
@@ -225,7 +227,7 @@ export default function Onboarding() {
                             <Button
                               className="w-full"
                               variant={popular ? "default" : "outline"}
-                              onClick={() => finishOnboarding("free")}
+                              onClick={() => finishOnboarding()}
                               disabled={saving}
                             >
                               Continue on Free
@@ -246,7 +248,7 @@ export default function Onboarding() {
                   </div>
                   <div className="text-center mt-6">
                     <button
-                      onClick={() => finishOnboarding("free")}
+                      onClick={() => finishOnboarding()}
                       className="text-sm text-muted-foreground hover:text-foreground underline"
                       disabled={saving}
                     >
@@ -265,8 +267,9 @@ export default function Onboarding() {
           open={!!waitlistTier}
           onOpenChange={(o) => {
             if (!o) {
+              const t = waitlistTier;
               setWaitlistTier(null);
-              finishOnboarding("free");
+              finishOnboarding(t);
             }
           }}
           tier={waitlistTier}

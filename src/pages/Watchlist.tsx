@@ -24,6 +24,8 @@ import {
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
+import { useTier } from "@/hooks/useTier";
+import { UpgradeRequiredModal } from "@/components/UpgradeRequiredModal";
 
 interface WatchlistItem {
   id: string;
@@ -55,6 +57,8 @@ const Watchlist = () => {
   const [isAdding, setIsAdding] = useState(false);
   const [alertModalOpen, setAlertModalOpen] = useState(false);
   const [selectedItem, setSelectedItem] = useState<WatchlistItem | null>(null);
+  const [upgradeOpen, setUpgradeOpen] = useState(false);
+  const { canUse } = useTier();
 
   useEffect(() => {
     if (!session) {
@@ -207,6 +211,10 @@ const Watchlist = () => {
   };
 
   const handleSetAlert = (item: WatchlistItem) => {
+    if (!canUse("price_alerts")) {
+      setUpgradeOpen(true);
+      return;
+    }
     setSelectedItem(item);
     setAlertModalOpen(true);
   };
@@ -524,6 +532,12 @@ const Watchlist = () => {
         }}
         onSubmit={createAlert}
         ticker={selectedItem?.ticker || ""}
+      />
+      <UpgradeRequiredModal
+        open={upgradeOpen}
+        onOpenChange={setUpgradeOpen}
+        requiredTier="pro"
+        feature="Price alerts"
       />
     </div>
   );

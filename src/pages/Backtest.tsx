@@ -23,7 +23,10 @@ import {
   Trophy, Shield, Download, Clock, Crosshair, ShieldAlert, Zap, FlaskConical,
   BarChart2, PieChart, Repeat, Layers, Scale, Signal, Sparkles, Lock, SlidersHorizontal,
 } from "lucide-react";
-import { BacktestUsageBanner } from "@/components/BacktestUsageBanner";
+import { BacktestUsageBanner, USAGE_QUERY_KEY } from "@/components/BacktestUsageBanner";
+import { UpgradeRequiredModal } from "@/components/UpgradeRequiredModal";
+import { useQueryClient } from "@tanstack/react-query";
+import type { Tier } from "@/lib/tier-features";
 
 interface BacktestReport {
   periods: { start: string; end: string; accuracy: number; returnPct: number; trades: number }[];
@@ -146,6 +149,8 @@ const Backtest = () => {
   const [report, setReport] = useState<BacktestReport | null>(null);
   const [showTradeLog, setShowTradeLog] = useState(false);
   const [strategyMode, setStrategyMode] = useState<"adaptive" | "conservative" | "aggressive" | "custom">("adaptive");
+  const [upgradeGate, setUpgradeGate] = useState<{ tier: Tier; feature: string } | null>(null);
+  const qc = useQueryClient();
 
   const [tickerInput, setTickerInput] = useState("AAPL");
   const [startYear, setStartYear] = useState(2020);
@@ -229,11 +234,23 @@ const Backtest = () => {
       );
 
       if (!resp.ok) {
+        // Tier gate from edge function — show upgrade modal instead of generic toast
+        if (resp.status === 403) {
+          try {
+            const errData = await resp.clone().json();
+            if (errData?.error === "tier_required" && errData?.required) {
+              setUpgradeGate({ tier: errData.required as Tier, feature: errData.feature || "This backtest option" });
+              setIsLoading(false);
+              return;
+            }
+          } catch {}
+        }
         await handleResponseError(resp, navigate);
       }
 
       const data: BacktestReport = await resp.json();
       setReport(data);
+      qc.invalidateQueries({ queryKey: USAGE_QUERY_KEY });
       toast.success(`Backtest complete: ${data.totalTrades} trades analyzed`);
     } catch (e: any) {
       console.error("Backtest error:", e);
@@ -1258,6 +1275,12 @@ const Backtest = () => {
           </div>
         </div>
       </main>
+      <UpgradeRequiredModal
+        open={!!upgradeGate}
+        onOpenChange={(o) => !o && setUpgradeGate(null)}
+        requiredTier={upgradeGate?.tier ?? "pro"}
+        feature={upgradeGate?.feature}
+      />
     </div>
   );
 };
