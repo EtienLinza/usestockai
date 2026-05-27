@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -10,23 +10,28 @@ import { TierBadge } from "@/components/TierBadge";
 import { TIER_LIMITS } from "@/lib/tier-features";
 import { Sparkles, ArrowRight } from "lucide-react";
 
+export const USAGE_QUERY_KEY = ["usage_counters", "backtests_this_month"] as const;
+
 export const BacktestUsageBanner = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
   const { tier } = useTier();
-  const [used, setUsed] = useState(0);
 
-  useEffect(() => {
-    if (!user) return;
-    const monthKey = new Date().toISOString().slice(0, 7);
-    supabase
-      .from("usage_counters")
-      .select("backtests_run")
-      .eq("user_id", user.id)
-      .eq("month_key", monthKey)
-      .maybeSingle()
-      .then(({ data }) => setUsed(data?.backtests_run ?? 0));
-  }, [user]);
+  const { data: used = 0 } = useQuery({
+    queryKey: [...USAGE_QUERY_KEY, user?.id],
+    enabled: !!user,
+    staleTime: 30 * 1000,
+    queryFn: async () => {
+      const monthKey = new Date().toISOString().slice(0, 7);
+      const { data } = await supabase
+        .from("usage_counters")
+        .select("backtests_run")
+        .eq("user_id", user!.id)
+        .eq("month_key", monthKey)
+        .maybeSingle();
+      return data?.backtests_run ?? 0;
+    },
+  });
 
   const limit = TIER_LIMITS[tier].backtests_per_month;
   const limitDisplay = limit === Infinity ? "Unlimited" : limit;
