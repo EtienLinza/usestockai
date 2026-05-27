@@ -533,6 +533,12 @@ const Watchlist = () => {
         onSubmit={createAlert}
         ticker={selectedItem?.ticker || ""}
       />
+      <UpgradeRequiredModal
+        open={upgradeOpen}
+        onOpenChange={setUpgradeOpen}
+        requiredTier="pro"
+        feature="Price alerts"
+      />
     </div>
   );
 };
