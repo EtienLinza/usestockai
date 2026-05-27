@@ -1275,6 +1275,12 @@ const Backtest = () => {
           </div>
         </div>
       </main>
+      <UpgradeRequiredModal
+        open={!!upgradeGate}
+        onOpenChange={(o) => !o && setUpgradeGate(null)}
+        requiredTier={upgradeGate?.tier ?? "pro"}
+        feature={upgradeGate?.feature}
+      />
     </div>
   );
 };
