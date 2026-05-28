@@ -266,17 +266,26 @@ const Dashboard = () => {
     await Promise.all(
       tickers.map(async (ticker) => {
         try {
-          const { data } = await supabase.functions.invoke("fetch-stock-price", { body: { ticker } });
-          if (data?.latestPrice) prices[ticker] = data.latestPrice;
+          const { data, error } = await supabase.functions.invoke("fetch-stock-price", { body: { ticker } });
+          if (error) { console.error(`Price fetch failed for ${ticker}:`, error); return; }
+          // Prefer live quote (Finnhub real-time); fall back to last daily close.
+          const px = (typeof data?.liveQuote === "number" && data.liveQuote > 0)
+            ? data.liveQuote
+            : (typeof data?.latestPrice === "number" ? data.latestPrice : null);
+          if (px) prices[ticker] = px;
         } catch (e) { console.error(`Price fetch failed for ${ticker}:`, e); }
       })
     );
-    setCurrentPrices(prices);
+    setCurrentPrices(prev => ({ ...prev, ...prices }));
     setPricesLoading(false);
   }, [openPositions]);
 
   useEffect(() => {
-    if (openPositions.length > 0) fetchCurrentPrices();
+    if (openPositions.length === 0) return;
+    fetchCurrentPrices();
+    // Re-fetch live prices every 60s so unrealized P&L stays current.
+    const id = setInterval(fetchCurrentPrices, 60_000);
+    return () => clearInterval(id);
   }, [openPositions.length, fetchCurrentPrices]);
 
   // ── Market scan ──────────────────────────────────────────────────────────────
