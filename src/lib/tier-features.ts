@@ -8,10 +8,11 @@ export const TIER_LABELS: Record<Tier, string> = {
   elite: "Elite",
 };
 
+// Annual = monthly × 10 (i.e. 2 months free), divided by 12 for the displayed /mo rate.
 export const TIER_PRICES = {
-  free: { monthly: 0, annual: 0 },
-  pro: { monthly: 29, annual: 23 }, // 29 * 12 * 0.8 / 12 ≈ 23.2
-  elite: { monthly: 59, annual: 47 },
+  free: { monthly: 0, annual: 0, monthlyPriceId: null, annualPriceId: null },
+  pro: { monthly: 29, annual: 24, monthlyPriceId: "pro_monthly", annualPriceId: "pro_yearly" },
+  elite: { monthly: 59, annual: 49, monthlyPriceId: "elite_monthly", annualPriceId: "elite_yearly" },
 } as const;
 
 export type FeatureKey =

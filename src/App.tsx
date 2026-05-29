@@ -18,8 +18,10 @@ import Privacy from "./pages/Privacy";
 import Disclosure from "./pages/Disclosure";
 import Pricing from "./pages/Pricing";
 import Onboarding from "./pages/Onboarding";
+import CheckoutReturn from "./pages/CheckoutReturn";
 import NotFound from "./pages/NotFound";
 import { RequireOnboarding } from "./components/RequireOnboarding";
+import { PaymentTestModeBanner } from "./components/PaymentTestModeBanner";
 
 const queryClient = new QueryClient();
 
@@ -31,12 +33,14 @@ const App = () => (
           <Toaster />
           <Sonner />
           <BrowserRouter>
+            <PaymentTestModeBanner />
             <RequireOnboarding>
               <Routes>
                 <Route path="/" element={<Landing />} />
                 <Route path="/auth" element={<Auth />} />
                 <Route path="/pricing" element={<Pricing />} />
                 <Route path="/onboarding" element={<Onboarding />} />
+                <Route path="/checkout/return" element={<CheckoutReturn />} />
                 <Route path="/dashboard" element={<Dashboard />} />
                 <Route path="/watchlist" element={<Watchlist />} />
                 <Route path="/backtest" element={<Backtest />} />

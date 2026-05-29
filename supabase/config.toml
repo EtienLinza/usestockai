@@ -47,3 +47,12 @@ verify_jwt = false
 
 [functions.refresh-danelfin-scores]
 verify_jwt = false
+
+[functions.create-checkout]
+verify_jwt = false
+
+[functions.create-portal-session]
+verify_jwt = false
+
+[functions.payments-webhook]
+verify_jwt = false
