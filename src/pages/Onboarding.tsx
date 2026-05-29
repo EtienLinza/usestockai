@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Logo } from "@/components/Logo";
 import { SEO } from "@/components/SEO";
-import { JoinWaitlistModal } from "@/components/JoinWaitlistModal";
+import { useStripeCheckout } from "@/hooks/useStripeCheckout";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { useTier } from "@/hooks/useTier";
@@ -38,8 +38,8 @@ export default function Onboarding() {
   const [fullName, setFullName] = useState("");
   const [experience, setExperience] = useState<string>("");
   const [focuses, setFocuses] = useState<string[]>([]);
-  const [waitlistTier, setWaitlistTier] = useState<Tier | null>(null);
   const [saving, setSaving] = useState(false);
+  const { openCheckout, checkoutElement } = useStripeCheckout();
 
   useEffect(() => {
     if (!authLoading && !user) navigate("/auth?mode=signup");
@@ -49,18 +49,17 @@ export default function Onboarding() {
     setFocuses((prev) => (prev.includes(id) ? prev.filter((f) => f !== id) : [...prev, id]));
   };
 
-  const finishOnboarding = async (waitlistedFor?: Tier) => {
+  const finishOnboarding = async (chosenTier?: Tier) => {
     if (!user) return;
     setSaving(true);
-    // Payments aren't live yet — even users who picked Pro/Elite stay on Free
-    // until checkout ships. Their waitlist row already captures the intent.
+    // Mark onboarding complete on Free. Paid tiers will be set by the Stripe
+    // webhook once checkout completes — until then, the user remains Free.
     const { error } = await supabase
       .from("profiles")
       .update({
         full_name: fullName || null,
         trading_experience: experience || null,
         focus_areas: focuses,
-        subscription_tier: "free",
         tier_selected_at: new Date().toISOString(),
         onboarding_completed: true,
       })
@@ -71,8 +70,17 @@ export default function Onboarding() {
       return;
     }
     invalidate();
-    toast.success(waitlistedFor ? `You're on the ${waitlistedFor} waitlist` : "Welcome to StockAI");
-    navigate("/dashboard");
+    if (chosenTier && chosenTier !== "free") {
+      // Open Stripe checkout inline; user lands on /checkout/return after paying.
+      openCheckout({
+        priceId: TIER_PRICES[chosenTier].monthlyPriceId!,
+        customerEmail: user.email,
+        userId: user.id,
+      });
+    } else {
+      toast.success("Welcome to StockAI");
+      navigate("/dashboard");
+    }
   };
 
   const steps = [
@@ -236,10 +244,10 @@ export default function Onboarding() {
                             <Button
                               className="w-full"
                               variant={popular ? "default" : "outline"}
-                              onClick={() => setWaitlistTier(t)}
+                              onClick={() => finishOnboarding(t)}
                               disabled={saving}
                             >
-                              Join {t} waitlist
+                              Start with {t === "pro" ? "Pro" : "Elite"}
                             </Button>
                           )}
                         </Card>
@@ -262,19 +270,7 @@ export default function Onboarding() {
         </div>
       </main>
 
-      {waitlistTier && (
-        <JoinWaitlistModal
-          open={!!waitlistTier}
-          onOpenChange={(o) => {
-            if (!o) {
-              const t = waitlistTier;
-              setWaitlistTier(null);
-              finishOnboarding(t);
-            }
-          }}
-          tier={waitlistTier}
-        />
-      )}
+      {checkoutElement}
     </div>
   );
 }
