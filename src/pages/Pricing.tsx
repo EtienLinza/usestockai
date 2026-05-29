@@ -9,18 +9,18 @@ import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { SEO } from "@/components/SEO";
-import { JoinWaitlistModal } from "@/components/JoinWaitlistModal";
+import { useStripeCheckout } from "@/hooks/useStripeCheckout";
 import { useAuth } from "@/hooks/useAuth";
 import { useTier } from "@/hooks/useTier";
 import { Tier, TIER_PRICES, FEATURE_LABELS, FEATURE_REQUIRES, TIER_RANK } from "@/lib/tier-features";
 import { Check, X, Sparkles, Crown, ArrowRight } from "lucide-react";
 
 const FAQS = [
-  { q: "Can I cancel anytime?", a: "Yes. Plans are month-to-month or annual. Cancel from Settings — you keep access through the end of your billing period." },
+  { q: "Can I cancel anytime?", a: "Yes. Plans are month-to-month or annual. Cancel anytime from Settings — you keep access through the end of your billing period." },
   { q: "Do you offer refunds?", a: "We offer a 14-day refund on annual plans, no questions asked. Monthly plans are non-refundable but can be cancelled at any time." },
   { q: "Is there a free trial?", a: "The Free plan is free forever and lets you test signals, watchlist and basic backtests. No credit card required." },
   { q: "What counts as a backtest?", a: "Each completed backtest run (any ticker, any timeframe) counts as one. Failed or aborted runs don't count against your monthly quota." },
-  { q: "When does AutoTrader go live?", a: "AutoTrader is currently in private beta with Elite waitlist members. Public Elite launch is targeted for Q3 — join the waitlist to lock in early pricing." },
+  { q: "How does annual billing work?", a: "Annual plans are billed once per year and include 2 months free (you pay for 10, get 12)." },
 ];
 
 const tiers: { id: Tier; name: string; tagline: string; popular?: boolean; icon: any }[] = [
@@ -51,7 +51,7 @@ export default function Pricing() {
   const { user } = useAuth();
   const { tier: currentTier } = useTier();
   const [annual, setAnnual] = useState(false);
-  const [waitlistTier, setWaitlistTier] = useState<Tier | null>(null);
+  const { openCheckout, checkoutElement } = useStripeCheckout();
 
   const handleCTA = (t: Tier) => {
     if (t === "free") {
@@ -62,13 +62,20 @@ export default function Pricing() {
       navigate("/auth?mode=signup");
       return;
     }
-    setWaitlistTier(t);
+    const priceId = annual ? TIER_PRICES[t].annualPriceId : TIER_PRICES[t].monthlyPriceId;
+    if (!priceId) return;
+    openCheckout({
+      priceId,
+      customerEmail: user.email,
+      userId: user.id,
+    });
   };
 
   const ctaLabel = (t: Tier) => {
     if (currentTier === t) return "Current plan";
     if (t === "free") return user ? "Continue on Free" : "Get started";
-    return `Join ${t === "pro" ? "Pro" : "Elite"} waitlist`;
+    const above = TIER_RANK[t] > TIER_RANK[currentTier];
+    return above ? `Upgrade to ${t === "pro" ? "Pro" : "Elite"}` : `Switch to ${t === "pro" ? "Pro" : "Elite"}`;
   };
 
   return (
@@ -99,7 +106,7 @@ export default function Pricing() {
               <span className={!annual ? "text-foreground text-sm" : "text-muted-foreground text-sm"}>Monthly</span>
               <Switch checked={annual} onCheckedChange={setAnnual} />
               <span className={annual ? "text-foreground text-sm" : "text-muted-foreground text-sm"}>Annual</span>
-              <Badge variant="outline" className="text-[10px] bg-primary/10 text-primary border-primary/30">−20%</Badge>
+              <Badge variant="outline" className="text-[10px] bg-primary/10 text-primary border-primary/30">2 months free</Badge>
             </div>
           </motion.div>
 
@@ -233,14 +240,7 @@ export default function Pricing() {
 
       <Footer />
 
-      {waitlistTier && (
-        <JoinWaitlistModal
-          open={!!waitlistTier}
-          onOpenChange={(o) => !o && setWaitlistTier(null)}
-          tier={waitlistTier}
-          billingCycle={annual ? "annual" : "monthly"}
-        />
-      )}
+      {checkoutElement}
     </div>
   );
 }

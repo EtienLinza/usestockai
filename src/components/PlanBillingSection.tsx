@@ -8,13 +8,16 @@ import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
 import { TierBadge } from "@/components/TierBadge";
 import { TIER_LIMITS, TIER_PRICES, TIER_LABELS } from "@/lib/tier-features";
-import { Sparkles, ArrowRight } from "lucide-react";
+import { getStripeEnvironment, isPaymentsConfigured } from "@/lib/stripe";
+import { Sparkles, ArrowRight, ExternalLink } from "lucide-react";
+import { toast } from "sonner";
 
 export const PlanBillingSection = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
   const { tier } = useTier();
   const [backtestsThisMonth, setBacktestsThisMonth] = useState<number>(0);
+  const [openingPortal, setOpeningPortal] = useState(false);
 
   useEffect(() => {
     if (!user) return;
@@ -33,6 +36,29 @@ export const PlanBillingSection = () => {
   const limitDisplay = limit === Infinity ? "∞" : limit;
   const pct = limit === Infinity ? 0 : Math.min(100, (backtestsThisMonth / limit) * 100);
   const price = TIER_PRICES[tier].monthly;
+  const isPaid = tier !== "free";
+
+  const openBillingPortal = async () => {
+    if (!isPaymentsConfigured()) {
+      toast.error("Payments aren't configured for this build.");
+      return;
+    }
+    setOpeningPortal(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("create-portal-session", {
+        body: {
+          environment: getStripeEnvironment(),
+          returnUrl: `${window.location.origin}/settings`,
+        },
+      });
+      if (error || !data?.url) throw new Error(error?.message || data?.error || "Failed to open billing portal");
+      window.open(data.url as string, "_blank");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not open billing portal");
+    } finally {
+      setOpeningPortal(false);
+    }
+  };
 
   return (
     <Card className="p-6">
@@ -65,10 +91,18 @@ export const PlanBillingSection = () => {
         </div>
       </div>
 
-      <Button onClick={() => navigate("/pricing")} variant={tier === "elite" ? "outline" : "default"}>
-        {tier === "elite" ? "View plans" : "Manage plan"}
-        <ArrowRight className="w-4 h-4 ml-1" />
-      </Button>
+      <div className="flex flex-wrap gap-2">
+        <Button onClick={() => navigate("/pricing")} variant={isPaid ? "outline" : "default"}>
+          {isPaid ? "Change plan" : "Upgrade plan"}
+          <ArrowRight className="w-4 h-4 ml-1" />
+        </Button>
+        {isPaid && (
+          <Button onClick={openBillingPortal} variant="outline" disabled={openingPortal}>
+            {openingPortal ? "Opening…" : "Manage billing"}
+            <ExternalLink className="w-4 h-4 ml-1" />
+          </Button>
+        )}
+      </div>
     </Card>
   );
 };
