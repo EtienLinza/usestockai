@@ -244,10 +244,10 @@ export default function Onboarding() {
                             <Button
                               className="w-full"
                               variant={popular ? "default" : "outline"}
-                              onClick={() => setWaitlistTier(t)}
+                              onClick={() => finishOnboarding(t)}
                               disabled={saving}
                             >
-                              Join {t} waitlist
+                              Start with {t === "pro" ? "Pro" : "Elite"}
                             </Button>
                           )}
                         </Card>
@@ -270,19 +270,7 @@ export default function Onboarding() {
         </div>
       </main>
 
-      {waitlistTier && (
-        <JoinWaitlistModal
-          open={!!waitlistTier}
-          onOpenChange={(o) => {
-            if (!o) {
-              const t = waitlistTier;
-              setWaitlistTier(null);
-              finishOnboarding(t);
-            }
-          }}
-          tier={waitlistTier}
-        />
-      )}
+      {checkoutElement}
     </div>
   );
 }
