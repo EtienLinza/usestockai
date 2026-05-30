@@ -61,11 +61,15 @@ export interface FinnhubQuote {
 }
 
 export async function getQuote(ticker: string): Promise<FinnhubQuote | null> {
-  const j = await finnhubFetch(`/quote?symbol=${encodeURIComponent(ticker)}`) as
+  const t = ticker.toUpperCase();
+  const cached = await cacheGet<FinnhubQuote>("quote", t);
+  if (cached) return cached;
+
+  const j = await finnhubFetch(`/quote?symbol=${encodeURIComponent(t)}`) as
     | { c?: number; pc?: number; o?: number; h?: number; l?: number; dp?: number; t?: number }
     | null;
   if (!j || typeof j.c !== "number" || j.c <= 0) return null;
-  return {
+  const quote: FinnhubQuote = {
     current: j.c,
     previousClose: typeof j.pc === "number" ? j.pc : 0,
     open: typeof j.o === "number" ? j.o : 0,
@@ -74,6 +78,8 @@ export async function getQuote(ticker: string): Promise<FinnhubQuote | null> {
     changePct: typeof j.dp === "number" ? j.dp : 0,
     timestamp: typeof j.t === "number" ? j.t : Math.floor(Date.now() / 1000),
   };
+  await cacheSet("quote", t, quote, QUOTE_TTL_MS);
+  return quote;
 }
 
 // ── Company News ─────────────────────────────────────────────────────────────
