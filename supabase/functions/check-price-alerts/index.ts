@@ -100,82 +100,75 @@ serve(async (req) => {
 
     const triggeredAlerts: { id: string; ticker: string; target_price: number; current_price: number }[] = [];
 
-    // Check each ticker
-    for (const [ticker, tickerAlerts] of tickerMap) {
-      const quote = await fetchCurrentPrice(ticker);
+    // Fetch all prices in parallel (chunked) — quotes are cached in Postgres
+    // so duplicates collapse to one Finnhub call per ticker per minute.
+    const tickers = [...tickerMap.keys()];
+    const CHUNK = 10;
+    const priceByTicker = new Map<string, number>();
+    for (let i = 0; i < tickers.length; i += CHUNK) {
+      const slice = tickers.slice(i, i + CHUNK);
+      const results = await Promise.all(slice.map(async (tk) => {
+        const q = await fetchCurrentPrice(tk);
+        return { tk, q };
+      }));
+      for (const { tk, q } of results) {
+        if (q !== null) priceByTicker.set(tk, q.price);
+      }
+    }
 
-      if (quote === null) {
+    // Evaluate alerts, claim atomically, send email exactly once per claim
+    for (const [ticker, tickerAlerts] of tickerMap) {
+      const currentPrice = priceByTicker.get(ticker);
+      if (currentPrice === undefined) {
         console.warn(`Could not fetch price for ${ticker}, skipping`);
         continue;
       }
-      const currentPrice = quote.price;
-
-      console.log(`${ticker}: current price $${currentPrice.toFixed(2)} (src=${quote.source})`);
 
       for (const alert of tickerAlerts) {
-        let isTriggered = false;
+        const shouldFire =
+          (alert.direction === "above" && currentPrice >= alert.target_price) ||
+          (alert.direction === "below" && currentPrice <= alert.target_price);
+        if (!shouldFire) continue;
 
-        if (alert.direction === "above" && currentPrice >= alert.target_price) {
-          isTriggered = true;
-        } else if (alert.direction === "below" && currentPrice <= alert.target_price) {
-          isTriggered = true;
+        // Atomic claim — returns true only for the caller that flips the row.
+        // Concurrent crons race safely; loser gets `false` and skips email.
+        const { data: claimed, error: claimErr } = await supabase
+          .rpc("claim_price_alert", { _alert_id: alert.id });
+
+        if (claimErr) {
+          console.error(`Failed to claim alert ${alert.id}:`, claimErr);
+          continue;
         }
+        if (!claimed) continue;
 
-        if (isTriggered) {
-          console.log(
-            `TRIGGERED: ${ticker} ${alert.direction} $${alert.target_price} (current: $${currentPrice})`
-          );
+        console.log(`TRIGGERED: ${ticker} ${alert.direction} $${alert.target_price} (current: $${currentPrice})`);
+        triggeredAlerts.push({
+          id: alert.id,
+          ticker: alert.ticker,
+          target_price: alert.target_price,
+          current_price: currentPrice,
+        });
 
-          // Update alert as triggered
-          const { error: updateError } = await supabase
-            .from("price_alerts")
-            .update({
-              is_triggered: true,
-              triggered_at: new Date().toISOString(),
-            })
-            .eq("id", alert.id);
-
-          if (updateError) {
-            console.error(`Failed to update alert ${alert.id}:`, updateError);
-          } else {
-            triggeredAlerts.push({
-              id: alert.id,
+        try {
+          await fetch(`${supabaseUrl}/functions/v1/send-alert-email`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${supabaseServiceKey}`,
+              ...cronSecretHeader(),
+            },
+            body: JSON.stringify({
+              userId: alert.user_id,
               ticker: alert.ticker,
-              target_price: alert.target_price,
-              current_price: currentPrice,
-            });
-
-            // Send email notification
-            try {
-              const emailResponse = await fetch(
-                `${supabaseUrl}/functions/v1/send-alert-email`,
-                {
-                  method: "POST",
-                  headers: {
-                    "Content-Type": "application/json",
-                    Authorization: `Bearer ${supabaseServiceKey}`,
-                    ...cronSecretHeader(),
-                  },
-                  body: JSON.stringify({
-                    userId: alert.user_id,
-                    ticker: alert.ticker,
-                    targetPrice: alert.target_price,
-                    currentPrice: currentPrice,
-                    direction: alert.direction,
-                  }),
-                }
-              );
-              const emailResult = await emailResponse.json();
-              console.log(`Email notification result for ${alert.ticker}:`, emailResult);
-            } catch (emailError) {
-              console.error(`Failed to send email for alert ${alert.id}:`, emailError);
-            }
-          }
+              targetPrice: alert.target_price,
+              currentPrice,
+              direction: alert.direction,
+            }),
+          });
+        } catch (emailError) {
+          console.error(`Failed to send email for alert ${alert.id}:`, emailError);
         }
       }
-
-      // Small delay between tickers to avoid rate limiting
-      await new Promise((resolve) => setTimeout(resolve, 200));
     }
 
     console.log(`Triggered ${triggeredAlerts.length} alerts`);
