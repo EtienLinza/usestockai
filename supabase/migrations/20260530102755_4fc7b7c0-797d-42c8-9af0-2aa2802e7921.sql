@@ -1,0 +1,2 @@
+REVOKE EXECUTE ON FUNCTION public.increment_backtest_usage(uuid, text, int) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.increment_backtest_usage(uuid, text, int) TO service_role;
