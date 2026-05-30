@@ -299,6 +299,39 @@ export type Database = {
         }
         Relationships: []
       }
+      historical_constituents: {
+        Row: {
+          company: string | null
+          created_at: string
+          effective_from: string
+          effective_to: string | null
+          id: string
+          index_name: string
+          sector: string | null
+          ticker: string
+        }
+        Insert: {
+          company?: string | null
+          created_at?: string
+          effective_from: string
+          effective_to?: string | null
+          id?: string
+          index_name?: string
+          sector?: string | null
+          ticker: string
+        }
+        Update: {
+          company?: string | null
+          created_at?: string
+          effective_from?: string
+          effective_to?: string | null
+          id?: string
+          index_name?: string
+          sector?: string | null
+          ticker?: string
+        }
+        Relationships: []
+      }
       live_signals: {
         Row: {
           confidence: number
@@ -1126,6 +1159,12 @@ export type Database = {
     }
     Functions: {
       claim_price_alert: { Args: { _alert_id: string }; Returns: boolean }
+      constituents_as_of: {
+        Args: { _as_of: string; _index_name: string }
+        Returns: {
+          ticker: string
+        }[]
+      }
       get_user_tier: {
         Args: { _user_id: string }
         Returns: Database["public"]["Enums"]["subscription_tier"]
