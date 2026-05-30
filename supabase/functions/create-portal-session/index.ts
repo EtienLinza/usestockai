@@ -12,6 +12,26 @@ const supabase = createClient(
   Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
 );
 
+const ALLOWED_RETURN_ORIGINS = [
+  "https://usestockai.lovable.app",
+  "https://id-preview--138571be-2acf-489f-a179-4a5c3d779ba1.lovable.app",
+  "http://localhost:5173",
+  "http://localhost:3000",
+];
+
+function isAllowedReturnUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    if (ALLOWED_RETURN_ORIGINS.includes(parsed.origin)) return true;
+    if (parsed.origin.endsWith(".lovable.app") || parsed.origin.endsWith(".lovableproject.com")) {
+      return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") {
@@ -44,9 +64,12 @@ Deno.serve(async (req) => {
     if (!sub?.stripe_customer_id) throw new Error("No subscription found");
 
     const stripe = createStripeClient(env);
+    const safeReturnUrl = returnUrl && typeof returnUrl === "string" && isAllowedReturnUrl(returnUrl)
+      ? returnUrl
+      : undefined;
     const portal = await stripe.billingPortal.sessions.create({
       customer: sub.stripe_customer_id as string,
-      ...(returnUrl && { return_url: returnUrl }),
+      ...(safeReturnUrl && { return_url: safeReturnUrl }),
     });
 
     return new Response(JSON.stringify({ url: portal.url }), {
