@@ -5,7 +5,7 @@ interface MarketData {
   sp500Change: number;
   nasdaqChange: number;
   dowChange: number;
-  vixValue: number;
+  vixValue: number | null;
 }
 
 interface MarketIndicatorsProps {
@@ -26,7 +26,8 @@ export function MarketIndicators({ data }: MarketIndicatorsProps) {
     );
   };
 
-  const getVixStatus = (vix: number) => {
+  const getVixStatus = (vix: number | null) => {
+    if (vix === null) return { label: "Unavailable", color: "text-muted-foreground" };
     if (vix < 15) return { label: "Low Volatility", color: "text-success" };
     if (vix < 25) return { label: "Normal", color: "text-muted-foreground" };
     if (vix < 35) return { label: "Elevated", color: "text-warning" };
@@ -52,7 +53,9 @@ export function MarketIndicators({ data }: MarketIndicatorsProps) {
       
       <Card className="glass-card p-4">
         <div className="text-xs text-muted-foreground mb-1">VIX</div>
-        <div className="font-mono text-lg">{data.vixValue.toFixed(2)}</div>
+        <div className="font-mono text-lg">
+          {data.vixValue !== null ? data.vixValue.toFixed(2) : "—"}
+        </div>
         <div className={`text-xs ${vixStatus.color}`}>{vixStatus.label}</div>
       </Card>
     </div>

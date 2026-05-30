@@ -76,6 +76,68 @@ async function fetchScreenerData(screenerId: string): Promise<any[]> {
   }
 }
 
+// ── CNN Fear & Greed Index (real) ────────────────────────────────────────────
+// CNN's public dataviz endpoint also returns the live VIX series, so we use it
+// for both the F&G score AND as one of the VIX fallbacks.
+interface CnnFearGreed {
+  score: number | null;
+  vix: number | null;
+}
+
+async function fetchCnnFearGreedAndVix(): Promise<CnnFearGreed> {
+  try {
+    const r = await fetch(
+      "https://production.dataviz.cnn.io/index/fearandgreed/graphdata",
+      {
+        headers: {
+          "User-Agent":
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+          "Accept": "application/json, text/plain, */*",
+          "Origin": "https://www.cnn.com",
+          "Referer": "https://www.cnn.com/",
+        },
+      },
+    );
+    if (!r.ok) {
+      console.warn("CNN F&G HTTP", r.status);
+      return { score: null, vix: null };
+    }
+    const j: any = await r.json();
+    const score =
+      typeof j?.fear_and_greed?.score === "number"
+        ? Math.round(j.fear_and_greed.score)
+        : null;
+    const vixSeries: Array<{ x: number; y: number }> =
+      j?.market_volatility_vix?.data ?? [];
+    const lastVix = vixSeries.length ? vixSeries[vixSeries.length - 1]?.y : null;
+    const vix = typeof lastVix === "number" && lastVix > 0 ? lastVix : null;
+    return { score, vix };
+  } catch (e) {
+    console.warn("CNN F&G error:", e instanceof Error ? e.message : e);
+    return { score: null, vix: null };
+  }
+}
+
+// Stooq fallback for VIX — returns CSV with the latest close.
+async function fetchVixFromStooq(): Promise<number | null> {
+  try {
+    const r = await fetch("https://stooq.com/q/l/?s=^vix&f=sd2t2ohlcv&h&e=csv", {
+      headers: { "User-Agent": "Mozilla/5.0" },
+    });
+    if (!r.ok) return null;
+    const text = await r.text();
+    const lines = text.trim().split("\n");
+    if (lines.length < 2) return null;
+    const cols = lines[1].split(",");
+    // Header: Symbol,Date,Time,Open,High,Low,Close,Volume
+    const close = parseFloat(cols[6]);
+    return Number.isFinite(close) && close > 0 ? close : null;
+  } catch (e) {
+    console.warn("Stooq VIX error:", e instanceof Error ? e.message : e);
+    return null;
+  }
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -84,47 +146,49 @@ serve(async (req) => {
   try {
     console.log("Fetching market sentiment data...");
 
-    // Fetch major indices
-    const [sp500, nasdaq, dow, vix] = await Promise.all([
-      fetchYahooQuote("^GSPC"),
-      fetchYahooQuote("^IXIC"),
-      fetchYahooQuote("^DJI"),
-      fetchYahooQuote("^VIX"),
-    ]);
+    const [sp500, nasdaq, dow, vixYahoo, cnn, gainersData, losersData] =
+      await Promise.all([
+        fetchYahooQuote("^GSPC"),
+        fetchYahooQuote("^IXIC"),
+        fetchYahooQuote("^DJI"),
+        fetchYahooQuote("^VIX"),
+        fetchCnnFearGreedAndVix(),
+        fetchScreenerData("day_gainers"),
+        fetchScreenerData("day_losers"),
+      ]);
 
-    // Fetch gainers and losers
-    const [gainersData, losersData] = await Promise.all([
-      fetchScreenerData("day_gainers"),
-      fetchScreenerData("day_losers"),
-    ]);
+    // VIX: prefer Yahoo (intraday), then CNN, then Stooq. No fake default.
+    let vixValue: number | null =
+      vixYahoo?.price && vixYahoo.price > 0 ? vixYahoo.price : null;
+    if (vixValue === null) vixValue = cnn.vix;
+    if (vixValue === null) vixValue = await fetchVixFromStooq();
 
-    // Calculate fear/greed score based on:
-    // 1. VIX level (inverted - high VIX = fear)
-    // 2. Market momentum (positive = greed)
-    // 3. Market breadth approximation from gainers/losers
-    let fearGreedScore = 50; // neutral baseline
+    // Fear/Greed: prefer CNN's real index. Fall back to internal heuristic
+    // only if CNN is unreachable so the UI never shows a hard error.
+    let fearGreedScore: number;
+    if (cnn.score !== null) {
+      fearGreedScore = cnn.score;
+    } else {
+      fearGreedScore = 50;
+      const v = vixValue ?? 20;
+      if (v < 15) fearGreedScore += 25;
+      else if (v < 20) fearGreedScore += 15;
+      else if (v < 25) fearGreedScore += 5;
+      else if (v < 30) fearGreedScore -= 10;
+      else fearGreedScore -= 25;
 
-    // VIX component (0-25 points)
-    const vixValue = vix?.price || 20;
-    if (vixValue < 15) fearGreedScore += 25;
-    else if (vixValue < 20) fearGreedScore += 15;
-    else if (vixValue < 25) fearGreedScore += 5;
-    else if (vixValue < 30) fearGreedScore -= 10;
-    else fearGreedScore -= 25;
+      const avgChange =
+        ((sp500?.change || 0) + (nasdaq?.change || 0) + (dow?.change || 0)) / 3;
+      if (avgChange > 1.5) fearGreedScore += 25;
+      else if (avgChange > 0.5) fearGreedScore += 15;
+      else if (avgChange > 0) fearGreedScore += 5;
+      else if (avgChange > -0.5) fearGreedScore -= 5;
+      else if (avgChange > -1.5) fearGreedScore -= 15;
+      else fearGreedScore -= 25;
 
-    // Market momentum component (0-25 points)
-    const avgChange = ((sp500?.change || 0) + (nasdaq?.change || 0) + (dow?.change || 0)) / 3;
-    if (avgChange > 1.5) fearGreedScore += 25;
-    else if (avgChange > 0.5) fearGreedScore += 15;
-    else if (avgChange > 0) fearGreedScore += 5;
-    else if (avgChange > -0.5) fearGreedScore -= 5;
-    else if (avgChange > -1.5) fearGreedScore -= 15;
-    else fearGreedScore -= 25;
+      fearGreedScore = Math.max(0, Math.min(100, fearGreedScore));
+    }
 
-    // Clamp to 0-100
-    fearGreedScore = Math.max(0, Math.min(100, fearGreedScore));
-
-    // Format gainers/losers
     const gainers = gainersData.slice(0, 5).map((q: any) => ({
       ticker: q.symbol,
       name: q.shortName || q.longName || q.symbol,
@@ -141,16 +205,21 @@ serve(async (req) => {
 
     const result = {
       fearGreedScore,
+      fearGreedSource: cnn.score !== null ? "cnn" : "internal",
       sp500Change: sp500?.change || 0,
       nasdaqChange: nasdaq?.change || 0,
       dowChange: dow?.change || 0,
-      vixValue: vixValue,
+      vixValue, // may be null if every source failed — UI shows "—"
       gainers,
       losers,
       updatedAt: new Date().toISOString(),
     };
 
-    console.log("Market sentiment data fetched successfully");
+    console.log("Market sentiment data fetched successfully", {
+      fearGreedScore,
+      vixValue,
+      source: result.fearGreedSource,
+    });
 
     return new Response(JSON.stringify(result), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },

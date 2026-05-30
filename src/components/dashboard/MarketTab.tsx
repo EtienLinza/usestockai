@@ -20,7 +20,7 @@ interface MarketData {
   sp500Change: number;
   nasdaqChange: number;
   dowChange: number;
-  vixValue: number;
+  vixValue: number | null;
   gainers: { ticker: string; name: string; change: number; volume: number }[];
   losers: { ticker: string; name: string; change: number; volume: number }[];
   updatedAt: string;
