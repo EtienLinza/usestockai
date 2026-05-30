@@ -1115,7 +1115,11 @@ serve(async (req) => {
           }));
 
         if (outcomeRows.length > 0) {
-          const { error: outErr } = await supabase.from("signal_outcomes").insert(outcomeRows);
+          // Upsert on the unique partial index (signal_id WHERE status='open')
+          // so retries don't create duplicate open outcomes for the same signal.
+          const { error: outErr } = await supabase
+            .from("signal_outcomes")
+            .upsert(outcomeRows, { onConflict: "signal_id", ignoreDuplicates: true });
           if (outErr) console.error("Failed to log signal outcomes:", outErr);
           else console.log(`Logged ${outcomeRows.length} new outcome rows`);
         }

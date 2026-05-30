@@ -1,9 +1,10 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { fetchDailyCloses } from "../_shared/yahoo-history.ts";
+import { requireCronOrUser } from "../_shared/cron-auth.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-cron-secret",
 };
 
 const SECTOR_ETFS = [
@@ -45,6 +46,11 @@ serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
+
+  // Gate to authenticated users + cron so anon traffic can't drain Yahoo quota.
+  const denied = await requireCronOrUser(req, { allowAuthenticatedUser: true });
+  if (denied) return denied;
+
 
   try {
     console.log("Fetching sector analysis data...");

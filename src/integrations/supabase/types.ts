@@ -1109,6 +1109,10 @@ export type Database = {
         Args: { check_env?: string; user_uuid: string }
         Returns: boolean
       }
+      increment_backtest_usage: {
+        Args: { _limit: number; _month_key: string; _user_id: string }
+        Returns: number
+      }
       tier_from_price_id: {
         Args: { _price_id: string }
         Returns: Database["public"]["Enums"]["subscription_tier"]

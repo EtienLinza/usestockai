@@ -72,7 +72,18 @@ Deno.serve(async (req) => {
   const env: StripeEnv = rawEnv;
 
   try {
-    const event = await verifyWebhook(req, env);
+    const event = await verifyWebhook(req, env) as { type: string; livemode?: boolean; data: { object: any } };
+
+    // Cross-check the event's livemode flag against the env query parameter so
+    // a sandbox-secret-signed event can't be replayed at the ?env=live URL.
+    const expectLive = env === "live";
+    if (typeof event.livemode === "boolean" && event.livemode !== expectLive) {
+      console.error(`Webhook livemode mismatch: event.livemode=${event.livemode} env=${env}`);
+      return new Response(JSON.stringify({ received: true, ignored: "env/livemode mismatch" }), {
+        status: 200, headers: { "Content-Type": "application/json" },
+      });
+    }
+
     switch (event.type) {
       case "customer.subscription.created":
       case "customer.subscription.updated":
@@ -81,6 +92,16 @@ Deno.serve(async (req) => {
       case "customer.subscription.deleted":
         await handleSubscriptionDeleted(event.data.object, env);
         break;
+      case "checkout.session.completed": {
+        // For subscription checkouts, the customer.subscription.* events
+        // already drive entitlement, so we just log here. If one-time
+        // products are added later, branch on session.mode === "payment".
+        const session = event.data.object;
+        console.log(
+          `checkout.session.completed: mode=${session?.mode} id=${session?.id} userId=${session?.metadata?.userId ?? "?"}`,
+        );
+        break;
+      }
       default:
         console.log("Unhandled event:", event.type);
     }

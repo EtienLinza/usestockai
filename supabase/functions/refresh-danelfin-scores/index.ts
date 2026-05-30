@@ -41,10 +41,12 @@ serve(async (req) => {
 
   const started = Date.now();
 
-  // Cron auth — match other cron-driven functions in this project.
+  // Cron auth — require BOTH the secret to be configured AND a matching header.
+  // (The previous `cronSecret && provided !== cronSecret` check let anyone in
+  // when CRON_SECRET was not yet configured.)
   const cronSecret = Deno.env.get("CRON_SECRET");
   const provided = req.headers.get("x-cron-secret");
-  if (cronSecret && provided !== cronSecret) {
+  if (!cronSecret || !provided || provided !== cronSecret) {
     return new Response(JSON.stringify({ error: "Unauthorized" }), {
       status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });

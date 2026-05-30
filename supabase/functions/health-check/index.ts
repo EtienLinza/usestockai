@@ -5,6 +5,7 @@
 // only reveals job names + timestamps, never user data.
 // ============================================================================
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { etDayOfWeek, etMinuteOfDay } from "../_shared/market-calendar.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -29,12 +30,12 @@ const KNOWN_JOBS: JobConfig[] = [
   { name: "weekly-digest", maxAgeMinutesMarket: 60 * 24 * 7 + 60, alwaysOn: true },
 ];
 
-function isMarketHoursUTC(d: Date): boolean {
-  // Rough US market hours: Mon-Fri 13:30–20:00 UTC (9:30-16:00 ET, ignoring DST).
-  const day = d.getUTCDay();
-  if (day === 0 || day === 6) return false;
-  const minutes = d.getUTCHours() * 60 + d.getUTCMinutes();
-  return minutes >= 13 * 60 + 30 && minutes <= 20 * 60;
+function isMarketHours(d: Date): boolean {
+  // DST-correct: convert to America/New_York and gate on 9:30–16:00 ET, Mon–Fri.
+  const dow = etDayOfWeek(d);
+  if (dow === 0 || dow === 6) return false;
+  const m = etMinuteOfDay(d);
+  return m >= 9 * 60 + 30 && m <= 16 * 60;
 }
 
 Deno.serve(async (req) => {
@@ -42,7 +43,11 @@ Deno.serve(async (req) => {
 
   try {
     const url = Deno.env.get("SUPABASE_URL");
-    const key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    // Use anon key for this public endpoint — heartbeat reads work for
+    // authenticated callers, but the function is also fronted by `verify_jwt`,
+    // so service-role isn't necessary. If a future check needs broader reads
+    // we can re-introduce it, but only for the specific call.
+    const key = Deno.env.get("SUPABASE_ANON_KEY");
     if (!url || !key) {
       return new Response(JSON.stringify({ error: "Backend not configured" }), {
         status: 500,
@@ -57,7 +62,7 @@ Deno.serve(async (req) => {
 
     const byName = new Map((rows ?? []).map((r) => [r.job_name, r]));
     const now = new Date();
-    const marketOpen = isMarketHoursUTC(now);
+    const marketOpen = isMarketHours(now);
 
     const jobs = KNOWN_JOBS.map((cfg) => {
       const row = byName.get(cfg.name);

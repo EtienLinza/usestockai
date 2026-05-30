@@ -22,10 +22,11 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import { getCompanyNews, isFinnhubConfigured } from "../_shared/finnhub.ts";
+import { requireCronOrUser } from "../_shared/cron-auth.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-cron-secret",
 };
 
 const CACHE_TTL_MIN = 30;
@@ -427,6 +428,12 @@ function aggregate(ticker: string, headlines: Headline[]): SentimentResult {
 // ── Main ──────────────────────────────────────────────────────────────────
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+
+  // Auth gate: authenticated users or cron callers only — keeps anon traffic
+  // from draining Finnhub/NewsAPI free-tier quota.
+  const denied = await requireCronOrUser(req, { allowAuthenticatedUser: true });
+  if (denied) return denied;
+
 
   try {
     const { ticker: rawTicker } = await req.json().catch(() => ({}));

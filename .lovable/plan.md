@@ -1,114 +1,61 @@
-# StockAI Payment Tiers — Brainstorm
+## Goal
+Fix the highest-impact security and correctness issues from the audit. Focus on the 5 Criticals + Top 10 quick wins, grouped by area.
 
-A freemium ladder designed to serve **all three audiences in one funnel**: hobby traders try it for free → active traders convert to Pro → power users / semi-pros pay for Elite. No separate "Institutional" SKU at launch — keep it simple, add an Enterprise upsell later.
+## Scope
 
-## The Ladder
+### A. Edge function security (critical)
+1. **`refresh-danelfin-scores` auth bypass** — current guard only rejects when `CRON_SECRET` is set AND mismatched. Flip to reject when secret is unset OR provided header missing/mismatched. Apply same pattern audit to other cron functions (`calibrate-weights`, `check-price-alerts`, `weekly-digest`, `market-scanner`, `scan-orchestrator`, `clear-signals`).
+2. **Stripe webhook signature timing attack** — `payments-webhook` / `_shared/stripe.ts` uses `v1Signatures.includes(expected)`. Replace with constant-time compare (byte-wise XOR over equal-length buffers).
+3. **Finnhub API key in URL query string** — move `token=` from query to `X-Finnhub-Token` header in `_shared/finnhub.ts` (and any direct call sites) so it stops appearing in edge logs.
+4. **Stripe `checkout.session.completed` not handled** — one-time purchases never unlock features. Add handler in `payments-webhook` that, for `mode === "payment"` sessions, records the purchase (insert into `subscriptions` with a synthetic id, or new `one_time_purchases` table — see Open question 1).
+5. **Backtest quota TOCTOU race** — replace read-then-write in `backtest/index.ts` with an atomic Postgres RPC `increment_backtest_usage(user_id, month_key, limit)` that does `UPDATE ... WHERE backtests_run < limit RETURNING ...` and returns null when over quota.
 
-```text
-  FREE              PRO               ELITE
-  $0                $19 / mo          $49 / mo
-  Acquisition       Core conversion   Power users / autotrader
-  ──────────        ───────────       ───────────
-  Discover the      Track + act on    Automate + scale
-  signals           signals           the workflow
-```
+### B. Edge function security (high — same pass)
+6. **`send-alert-email` IDOR** — stop accepting `userId` from body; require JWT and derive from `auth.getUser(token)`.
+7. **`payments-webhook` env from query param** — keep `?env=` but additionally cross-check the Stripe signature against the matching secret (already does); reject if Stripe livemode flag on event disagrees with `env`.
+8. **`clear-signals` anon-key auth** — require `x-cron-secret` (use `requireCronOrUser` from `_shared/cron-auth.ts`).
+9. **`news-sentiment`, `market-sentiment`, `sector-analysis` unauthenticated** — add `requireCronOrUser({ allowAuthenticatedUser: true })` so anon can't hammer them; keep `verify_jwt = false` so authed users still work.
+10. **`health-check` service-role exposure** — switch to anon key + restrict response to non-sensitive boolean health flags.
 
-Suggested annual discount: **−20%** (Pro $15/mo billed yearly, Elite $39/mo billed yearly).
+### C. Quant correctness (top wins)
+11. **Static Sharpe annualization + Sortino denominator** — `_shared/signal-engine-v2.ts` (or wherever metrics live): use `Math.sqrt(252)` constant; Sortino downside std must divide by count of negative returns, not `N`.
+12. **DST-correct ET conversion** — replace hardcoded `-4` offsets with shared `etMinuteOfDay()` helper that uses `Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York' })`. Apply across `market-calendar.ts`, scanners, premarket cron sites.
+13. **`signal_outcomes` upsert** — change `.insert` → `.upsert({ onConflict: 'signal_id' })` (requires unique index on `signal_id`, included in migration).
 
----
+## Out of scope this pass
+- Survivorship bias rewrite (#4) — needs historical S&P 500 constituent dataset; large project.
+- Look-ahead bias on same-bar entries (#1-3) — requires bar-shift refactor across engine + backtest.
+- Double vol-scaling, ATR-units bug, Kelly rewrite — bundled for a follow-up "quant correctness v2" pass.
+- Finnhub cache migration to Postgres — follow-up.
+- `autotrader-scan` monolith refactor.
 
-## Tier 1 — Free (Acquisition)
+## Technical details
 
-The "see the value" tier. Enough to prove the AI works; not enough to run a real workflow on.
+**Migrations needed (single file):**
+- `CREATE UNIQUE INDEX IF NOT EXISTS signal_outcomes_signal_id_uniq ON signal_outcomes(signal_id) WHERE signal_id IS NOT NULL;`
+- `CREATE OR REPLACE FUNCTION public.increment_backtest_usage(_user_id uuid, _month_key text, _limit int) RETURNS int` — atomic upsert + bounded increment, returns new count or `-1` if over limit. `SECURITY DEFINER`, grant EXECUTE to `authenticated`.
+- (If we go with new table for option B in Open Q1) `CREATE TABLE public.one_time_purchases (...)` + GRANTs + RLS.
 
-- Browse the **live signal feed** (read-only, all 6,000+ tickers scanned)
-- View signal reasoning, confidence, regime, strategy
-- **Watchlist**: up to **5 tickers**
-- **Backtest**: up to **3 runs / month**, single ticker, max 1-year window, no Monte Carlo, no walk-forward
-- **Portfolio tracking**: up to **3 open virtual positions**, no equity curve / analytics
-- **No alerts**, no email digests, no autotrader
-- Branded "Powered by StockAI" on shared reports
+**Files touched (estimated):**
+- `supabase/functions/_shared/stripe.ts` — constant-time compare
+- `supabase/functions/_shared/finnhub.ts` — header auth
+- `supabase/functions/_shared/cron-auth.ts` — fix unset-secret bypass
+- `supabase/functions/_shared/market-calendar.ts` — DST helper (likely already exists; verify)
+- `supabase/functions/_shared/signal-engine-v2.ts` — Sharpe/Sortino
+- `supabase/functions/refresh-danelfin-scores/index.ts`
+- `supabase/functions/payments-webhook/index.ts`
+- `supabase/functions/backtest/index.ts`
+- `supabase/functions/send-alert-email/index.ts`
+- `supabase/functions/clear-signals/index.ts`
+- `supabase/functions/news-sentiment/index.ts`
+- `supabase/functions/market-sentiment/index.ts`
+- `supabase/functions/sector-analysis/index.ts`
+- `supabase/functions/health-check/index.ts`
+- Any callers of `signal_outcomes.insert`
+- Any sites still using hardcoded `-4` ET offset
 
-## Tier 2 — Pro — $29/mo (Core conversion)
+## Open questions
+1. **One-time purchases**: do you sell any one-time products today, or is it 100% subscriptions? If subscriptions only, I'll just log+ignore `checkout.session.completed` and skip the new table. If you sell one-offs (or plan to), I'll add a `one_time_purchases` table.
+2. **Order**: ship all of A+B+C as one PR, or split into (1) security pass (A+B) then (2) quant correctness (C)?
 
-The "I trade on this" tier. Where ~80% of paying users should land.
-
-Everything in Free, plus:
-
-- **Unlimited watchlist** + AI watchlist suggestions
-- **Portfolio & P&L tracking**: unlimited positions, equity curve, win rate, profit factor, drawdown, trade journal
-- **Alerts**: price alerts, sell alerts, real-time notification center, **email alerts**
-- **Weekly digest email**
-- **Backtest**: 20 runs / month, multi-ticker (up to 3), Monte Carlo, walk-forward, full institutional metrics (Sharpe / Sortino / Calmar)
-- Custom exit targets per position
-- Trading-style filters (scalping / day / swing / position)
-- Remove branding on shared reports
-
-## Tier 3 — Elite — $59/mo (Power users)
-
-The "automate my edge" tier.
-
-Everything in Pro, plus:
-
-- **AutoTrader**: paper-mode automated execution against live signals
-- **Portfolio risk caps**: sector limits, beta caps, correlation gating, kill-switch
-- **Unlimited backtests**, longer history windows, robustness/stress testing, parameter sensitivity
-- **Adaptive weighting visibility**: see calibration curves, regime tilts, strategy weights
-- Priority scan queue (their manual rescans run first)
-- Early access to new indicators / models
-- Email + in-app **support priority**
-
-## Future — Institutional (waitlist)
-
-Don't build at launch. Capture interest with a "Contact Sales" CTA. Likely needs:
-
-- API access to signals
-- Team seats / SSO
-- White-label reports
-- Custom universe + custom indicators
-
----
-
-## Gating Map (technical view)
-
-
-| Capability                       | Free   | Pro | Elite |
-| -------------------------------- | ------ | --- | ----- |
-| Signal feed read                 | ✅      | ✅   | ✅     |
-| Watchlist size                   | 5      | ∞   | ∞     |
-| Virtual positions                | 3 open | ∞   | ∞     |
-| Portfolio analytics page         | ❌      | ✅   | ✅     |
-| Price alerts                     | ❌      | ✅   | ✅     |
-| Sell alerts + email              | ❌      | ✅   | ✅     |
-| Weekly digest                    | ❌      | ✅   | ✅     |
-| Backtests / mo                   | 3      | 20  | ∞     |
-| Backtest tickers per run         | 1      | 3   | 10    |
-| Monte Carlo / walk-forward       | ❌      | ✅   | ✅     |
-| Robustness / stress tests        | ❌      | ❌   | ✅     |
-| AutoTrader (paper)               | ❌      | ❌   | ✅     |
-| Portfolio risk caps              | ❌      | ❌   | ✅     |
-| Calibration / weights visibility | ❌      | ❌   | ✅     |
-
-
-## Why this shape
-
-- **Signal feed stays free** → strongest acquisition hook + SEO ("live AI signals"). The scan engine is already running regardless of who's logged in, so marginal cost is ~zero.
-- **Portfolio tracking on Pro** → it's the daily habit-forming surface. Once a user logs 5+ trades, churn drops sharply.
-- **Backtester split across tiers** → the meter (runs/month) does most of the upsell work without removing the feature outright. Heavy users self-select into Elite.
-- **AutoTrader exclusive to Elite** → highest perceived value, lowest support volume (advanced users only), and gives a clear reason to pay 2.5× Pro.
-- **$29 / $59** lands in the sweet spot vs comps (TrendSpider $48+, Trade Ideas $84+, Finviz Elite $39, TradingView Pro $15). Pro looks like a bargain; Elite looks like a deal vs Trade Ideas.
-
-## Open questions for you
-
-1. **Real-money autotrader (broker integration) later?** That would justify a 4th "Elite+" tier at $99+, or a usage fee.
-2. **Free trial on Pro?** 7-day no-card trial would lift conversion but adds support load.
-3. **Student / annual discount aggressiveness** — 20% standard, or push 30%+ to anchor on annual?
-
-## Technical implementation (when you're ready to build)
-
-- Add `subscription_tier` enum (`free | pro | elite`) on `profiles`, plus `current_period_end` for grace handling.
-- Use Lovable's built-in payments (Paddle recommended for digital-only SaaS, handles tax + MOR globally).
-- Gate server-side in edge functions (backtest, autotrader-scan, send-alert-email) and client-side for UI affordances.
-- Add a `usage_counters` table for monthly meters (backtests run, etc.) with month-bucket key.
-
-No code changes yet — just align on tiers + prices first.
+Once you answer those (or say "ship all, subs only"), I'll switch to build mode and execute.

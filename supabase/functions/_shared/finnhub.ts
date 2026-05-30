@@ -23,11 +23,16 @@ function getKey(): string | null {
 async function finnhubFetch(path: string, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<unknown | null> {
   const key = getKey();
   if (!key) return null;
-  const url = `${FINNHUB_BASE}${path}${path.includes("?") ? "&" : "?"}token=${key}`;
+  // Pass the API key as a header rather than a query string so it never
+  // appears in edge-function logs, request traces, or downstream proxies.
+  const url = `${FINNHUB_BASE}${path}`;
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
-    const r = await fetch(url, { signal: ctrl.signal });
+    const r = await fetch(url, {
+      signal: ctrl.signal,
+      headers: { "X-Finnhub-Token": key },
+    });
     clearTimeout(t);
     if (!r.ok) {
       console.warn(`finnhub ${path} → HTTP ${r.status}`);
