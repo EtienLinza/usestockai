@@ -2140,6 +2140,12 @@ serve(async (req) => {
         stressReturnsPlausible,
         notes: healthNotes,
       },
+      executionModel: tradeConfig.executionModel,
+      // Survivorship: backtest operates on a user-supplied ticker list (not an
+      // index universe), so survivorship bias only applies if the caller
+      // pre-filtered to today's S&P 500 members. We surface the flag for the
+      // UI to label runs once universe-based backtesting lands.
+      survivorshipAdjusted: false,
     };
 
     const profileSummary = Object.entries(stockProfiles).map(([t, p]) => `${t}:${p.classification}`).join(', ');
