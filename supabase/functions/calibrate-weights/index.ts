@@ -186,14 +186,25 @@ serve(async (req) => {
     (calibration_curve as any).__isotonic = isotonic;
 
     // ─── 2) STRATEGY TILTS (walk-forward weighted) ─────────────────────────
-    const strats: Record<string, { wWins: number; wCount: number; wSumRet: number; raw: number }> = {};
+    const strats: Record<string, {
+      wWins: number; wCount: number; wSumRet: number; raw: number;
+      wWinSumRet: number; wWinCount: number;
+      wLossSumRet: number; wLossCount: number;
+    }> = {};
     rows.forEach((r, i) => {
       const k = r.strategy ?? "unknown";
-      strats[k] ??= { wWins: 0, wCount: 0, wSumRet: 0, raw: 0 };
+      strats[k] ??= { wWins: 0, wCount: 0, wSumRet: 0, raw: 0, wWinSumRet: 0, wWinCount: 0, wLossSumRet: 0, wLossCount: 0 };
       strats[k].raw++;
       strats[k].wCount += tw[i];
       const ret = Number(r.realized_pnl_pct ?? 0);
-      if (ret > 0) strats[k].wWins += tw[i];
+      if (ret > 0) {
+        strats[k].wWins += tw[i];
+        strats[k].wWinSumRet += ret * tw[i];
+        strats[k].wWinCount += tw[i];
+      } else if (ret < 0) {
+        strats[k].wLossSumRet += Math.abs(ret) * tw[i];
+        strats[k].wLossCount += tw[i];
+      }
       strats[k].wSumRet += ret * tw[i];
     });
 
@@ -203,21 +214,25 @@ serve(async (req) => {
       ? rows.reduce((s, r, i) => s + Number(r.realized_pnl_pct ?? 0) * tw[i], 0) / totW
       : 0;
 
-    const strategy_tilts: Record<string, { multiplier: number; winRate: number; avgReturn: number; count: number }> = {};
+    // strategy_tilts now carries avgWin / avgLoss so downstream sizing can
+    // engage the real fractional-Kelly path in computePositionSize.
+    const strategy_tilts: Record<string, { multiplier: number; winRate: number; avgReturn: number; avgWin: number; avgLoss: number; count: number }> = {};
     for (const [k, v] of Object.entries(strats)) {
       if (v.raw < MIN_SAMPLES_STRATEGY) {
-        strategy_tilts[k] = { multiplier: 1.0, winRate: 0, avgReturn: 0, count: v.raw };
+        strategy_tilts[k] = { multiplier: 1.0, winRate: 0, avgReturn: 0, avgWin: 0, avgLoss: 0, count: v.raw };
         continue;
       }
       const winRate = (v.wWins / v.wCount) * 100;
       const avgRet = v.wSumRet / v.wCount;
+      const avgWin = v.wWinCount > 0 ? v.wWinSumRet / v.wWinCount : 0;
+      const avgLoss = v.wLossCount > 0 ? v.wLossSumRet / v.wLossCount : 0;
       const winRateZ = (winRate - 50) / 50;
       const retZ = universeAvgRet !== 0
         ? Math.max(-1, Math.min(1, (avgRet - universeAvgRet) / Math.max(0.5, Math.abs(universeAvgRet))))
         : Math.max(-1, Math.min(1, avgRet / 2));
       const score = (winRateZ + retZ) / 2;
       const multiplier = Math.max(TILT_MIN, Math.min(TILT_MAX, 1 + score * 0.15));
-      strategy_tilts[k] = { multiplier, winRate, avgReturn: avgRet, count: v.raw };
+      strategy_tilts[k] = { multiplier, winRate, avgReturn: avgRet, avgWin, avgLoss, count: v.raw };
     }
 
     // ─── 2b) STRATEGY × REGIME TILTS (walk-forward weighted) ───────────────
