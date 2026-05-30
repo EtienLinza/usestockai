@@ -13,8 +13,11 @@
 // every helper returns null/empty on failure so callers can fall back.
 // ============================================================================
 
+import { cacheGet, cacheSet } from "./finnhub-cache.ts";
+
 const FINNHUB_BASE = "https://finnhub.io/api/v1";
 const DEFAULT_TIMEOUT_MS = 6000;
+const QUOTE_TTL_MS = 60 * 1000; // 60s
 
 function getKey(): string | null {
   return Deno.env.get("FINNHUB_API_KEY") ?? null;
