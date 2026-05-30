@@ -1821,7 +1821,7 @@ serve(async (req) => {
       explicitOverride = false,
       walkForward = false,
       includeRobustness = false,
-      executionModel = "legacy", // 'legacy' | 'intrabar' — see TradeConfig
+      executionModel = "intrabar", // 'intrabar' (default, realistic) | 'legacy' (close-fill, opt-in for A/B)
     } = body;
 
     console.log(`Backtest request: ${tickers.join(",")} from ${startYear} to ${endYear}, mode=${strategyMode}, tier=${tier}`);
