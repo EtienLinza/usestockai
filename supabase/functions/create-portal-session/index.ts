@@ -64,9 +64,12 @@ Deno.serve(async (req) => {
     if (!sub?.stripe_customer_id) throw new Error("No subscription found");
 
     const stripe = createStripeClient(env);
+    const safeReturnUrl = returnUrl && typeof returnUrl === "string" && isAllowedReturnUrl(returnUrl)
+      ? returnUrl
+      : undefined;
     const portal = await stripe.billingPortal.sessions.create({
       customer: sub.stripe_customer_id as string,
-      ...(returnUrl && { return_url: returnUrl }),
+      ...(safeReturnUrl && { return_url: safeReturnUrl }),
     });
 
     return new Response(JSON.stringify({ url: portal.url }), {
