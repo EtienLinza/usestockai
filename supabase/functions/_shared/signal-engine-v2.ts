@@ -159,7 +159,11 @@ export function aggregateToWeekly(data: DataSet): DataSet {
   for (let i = 1; i < data.close.length; i++) {
     const prevDay = new Date(data.timestamps[i - 1]);
     const currDay = new Date(data.timestamps[i]);
-    const isNewWeek = currDay.getUTCDay() < prevDay.getUTCDay() || (currDay.getTime() - prevDay.getTime() > 4 * 86400000);
+    // Use ET day-of-week so Monday US bars (after midnight UTC Sunday) don't
+    // roll into the prior week. Falls back to UTC if helper unavailable.
+    const prevDow = etDayOfWeekSafe(prevDay);
+    const currDow = etDayOfWeekSafe(currDay);
+    const isNewWeek = currDow < prevDow || (currDay.getTime() - prevDay.getTime() > 4 * 86400000);
 
     if (isNewWeek) {
       weeks.push({ open: weekOpen, high: weekHigh, low: weekLow, close: data.close[i - 1], volume: weekVolume, date: weekStartDate });
