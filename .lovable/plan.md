@@ -1,61 +1,85 @@
-## Goal
-Fix the highest-impact security and correctness issues from the audit. Focus on the 5 Criticals + Top 10 quick wins, grouped by area.
+# Next Fix Batch — Quant Correctness + Infra
 
-## Scope
+Building on the security/correctness pass already shipped. This batch tackles the remaining **Critical quant bugs** and **High-impact infra** items from the 97-issue audit.
 
-### A. Edge function security (critical)
-1. **`refresh-danelfin-scores` auth bypass** — current guard only rejects when `CRON_SECRET` is set AND mismatched. Flip to reject when secret is unset OR provided header missing/mismatched. Apply same pattern audit to other cron functions (`calibrate-weights`, `check-price-alerts`, `weekly-digest`, `market-scanner`, `scan-orchestrator`, `clear-signals`).
-2. **Stripe webhook signature timing attack** — `payments-webhook` / `_shared/stripe.ts` uses `v1Signatures.includes(expected)`. Replace with constant-time compare (byte-wise XOR over equal-length buffers).
-3. **Finnhub API key in URL query string** — move `token=` from query to `X-Finnhub-Token` header in `_shared/finnhub.ts` (and any direct call sites) so it stops appearing in edge logs.
-4. **Stripe `checkout.session.completed` not handled** — one-time purchases never unlock features. Add handler in `payments-webhook` that, for `mode === "payment"` sessions, records the purchase (insert into `subscriptions` with a synthetic id, or new `one_time_purchases` table — see Open question 1).
-5. **Backtest quota TOCTOU race** — replace read-then-write in `backtest/index.ts` with an atomic Postgres RPC `increment_backtest_usage(user_id, month_key, limit)` that does `UPDATE ... WHERE backtests_run < limit RETURNING ...` and returns null when over quota.
+## A. Quant correctness (Critical)
 
-### B. Edge function security (high — same pass)
-6. **`send-alert-email` IDOR** — stop accepting `userId` from body; require JWT and derive from `auth.getUser(token)`.
-7. **`payments-webhook` env from query param** — keep `?env=` but additionally cross-check the Stripe signature against the matching secret (already does); reject if Stripe livemode flag on event disagrees with `env`.
-8. **`clear-signals` anon-key auth** — require `x-cron-secret` (use `requireCronOrUser` from `_shared/cron-auth.ts`).
-9. **`news-sentiment`, `market-sentiment`, `sector-analysis` unauthenticated** — add `requireCronOrUser({ allowAuthenticatedUser: true })` so anon can't hammer them; keep `verify_jwt = false` so authed users still work.
-10. **`health-check` service-role exposure** — switch to anon key + restrict response to non-sensitive boolean health flags.
+### 1. Survivorship bias in backtest universe (#4)
+**Problem:** Backtest pulls today's S&P 500 constituents → win-rates inflated because delisted/failed names never appear.
+**Fix:**
+- Add `historical_constituents` table: `(ticker, index_name, start_date, end_date)`.
+- Seed with point-in-time S&P 500 membership (use a static snapshot file checked into `supabase/functions/_shared/sp500-history.json` — small, ~10KB).
+- `backtest` and `walk-forward` resolve universe per-date from this table instead of today's CSV.
+- Add `survivorship_adjusted: true` flag in result payload so UI can label runs.
 
-### C. Quant correctness (top wins)
-11. **Static Sharpe annualization + Sortino denominator** — `_shared/signal-engine-v2.ts` (or wherever metrics live): use `Math.sqrt(252)` constant; Sortino downside std must divide by count of negative returns, not `N`.
-12. **DST-correct ET conversion** — replace hardcoded `-4` offsets with shared `etMinuteOfDay()` helper that uses `Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York' })`. Apply across `market-calendar.ts`, scanners, premarket cron sites.
-13. **`signal_outcomes` upsert** — change `.insert` → `.upsert({ onConflict: 'signal_id' })` (requires unique index on `signal_id`, included in migration).
+### 2. Look-ahead bias — same-bar close entry (#1, #2, #3)
+**Problem:** Signal computed on bar `T` close, then "filled" at bar `T` close → uses information that wouldn't exist at decision time.
+**Fix in `_shared/signal-engine-v2.ts` + `backtest`:**
+- Shift entry to bar `T+1` open (or `T+1` close as fallback when open missing).
+- Same shift for exits triggered by indicator flips.
+- Hard-stop/take-profit intrabar fills stay on bar `T+1` (use bar high/low, not close — see #3).
+- Add `executionModel: 'next_open' | 'next_close'` to backtest config; default `next_open`.
 
-## Out of scope this pass
-- Survivorship bias rewrite (#4) — needs historical S&P 500 constituent dataset; large project.
-- Look-ahead bias on same-bar entries (#1-3) — requires bar-shift refactor across engine + backtest.
-- Double vol-scaling, ATR-units bug, Kelly rewrite — bundled for a follow-up "quant correctness v2" pass.
-- Finnhub cache migration to Postgres — follow-up.
-- `autotrader-scan` monolith refactor.
+### 3. Stop-loss P&L understated (#21)
+**Problem:** Hard stops fill at end-of-day close, so a stop hit at 10am gives you the 4pm price.
+**Fix:** When `bar.low <= hardStop` (long) or `bar.high >= hardStop` (short), fill at `hardStop` price exactly. Same for take-profit using `bar.high`/`bar.low`.
 
-## Technical details
+### 4. Double vol-scaling (#25)
+**Problem:** Position size = `kellyFraction × spyVolScalar × atrScalar` — SPY vol is already embedded in per-name ATR for most tickers, so we shrink twice in high-vol regimes.
+**Fix in `vol-target-sizing.ts`:** Use **either** SPY scalar (for index/ETF positions) **or** per-name ATR scalar (for single names). Pick by `assetType`. Add unit test asserting product never multiplies both.
 
-**Migrations needed (single file):**
-- `CREATE UNIQUE INDEX IF NOT EXISTS signal_outcomes_signal_id_uniq ON signal_outcomes(signal_id) WHERE signal_id IS NOT NULL;`
-- `CREATE OR REPLACE FUNCTION public.increment_backtest_usage(_user_id uuid, _month_key text, _limit int) RETURNS int` — atomic upsert + bounded increment, returns new count or `-1` if over limit. `SECURITY DEFINER`, grant EXECUTE to `authenticated`.
-- (If we go with new table for option B in Open Q1) `CREATE TABLE public.one_time_purchases (...)` + GRANTs + RLS.
+### 5. ATR units bug (#23)
+**Problem:** ATR fallback returns dollar amount instead of percent → divisor becomes huge → position size collapses to near-zero shares.
+**Fix:** Audit `computeATR` / `atrPct` helpers in `_shared/indicators.ts`. Standardize on `atrPct = atr / price`. Add guard `if (atrPct > 1) atrPct = atrPct / price` defensive fallback + log warning.
 
-**Files touched (estimated):**
-- `supabase/functions/_shared/stripe.ts` — constant-time compare
-- `supabase/functions/_shared/finnhub.ts` — header auth
-- `supabase/functions/_shared/cron-auth.ts` — fix unset-secret bypass
-- `supabase/functions/_shared/market-calendar.ts` — DST helper (likely already exists; verify)
-- `supabase/functions/_shared/signal-engine-v2.ts` — Sharpe/Sortino
-- `supabase/functions/refresh-danelfin-scores/index.ts`
-- `supabase/functions/payments-webhook/index.ts`
-- `supabase/functions/backtest/index.ts`
-- `supabase/functions/send-alert-email/index.ts`
-- `supabase/functions/clear-signals/index.ts`
-- `supabase/functions/news-sentiment/index.ts`
-- `supabase/functions/market-sentiment/index.ts`
-- `supabase/functions/sector-analysis/index.ts`
-- `supabase/functions/health-check/index.ts`
-- Any callers of `signal_outcomes.insert`
-- Any sites still using hardcoded `-4` ET offset
+### 6. Kelly is a linear ramp, not Kelly (#17)
+**Problem:** `kellyFraction = (conviction - 50) / 50` is just a ramp; no edge/odds math.
+**Fix:** Real fractional Kelly:
+```
+edge = winRate × avgWin - (1 - winRate) × avgLoss
+kelly = edge / (avgWin × avgLoss)
+fraction = clamp(0.25 × kelly, 0, 0.20)  // quarter-Kelly, capped 20%
+```
+Source `winRate`, `avgWin`, `avgLoss` from `signal_outcomes` calibration buckets (already exist via isotonic calibration). Fall back to conviction-ramp only when sample size < 30.
 
-## Open questions
-1. **One-time purchases**: do you sell any one-time products today, or is it 100% subscriptions? If subscriptions only, I'll just log+ignore `checkout.session.completed` and skip the new table. If you sell one-offs (or plan to), I'll add a `one_time_purchases` table.
-2. **Order**: ship all of A+B+C as one PR, or split into (1) security pass (A+B) then (2) quant correctness (C)?
+## B. Infra (High impact)
 
-Once you answer those (or say "ship all, subs only"), I'll switch to build mode and execute.
+### 7. Move Finnhub in-memory caches to Postgres (#22, #23 ops)
+**Problem:** Each edge-function cold start re-fetches every ticker → O(users × tickers) Finnhub calls → 429 storms.
+**Fix:**
+- New table `finnhub_quote_cache(ticker PK, quote jsonb, fetched_at)`.
+- `_shared/finnhub.ts` reads cache (TTL 60s for quotes, 1h for profiles), writes-through on miss.
+- Service-role only; RLS denies all client access.
+
+### 8. `send-alert-email` IDOR (#F-03 — leftover)
+**Fix:** Already partially audited; ensure `userId` is derived from JWT only, never from request body. Reject if missing.
+
+### 9. `clear-signals` anon-key auth (#F-from-audit)
+**Fix:** Require `x-cron-secret` header matching `CRON_SECRET`; reject otherwise.
+
+### 10. `check-price-alerts` serial loop + no idempotency (#F-29)
+**Fix:**
+- Add unique partial index on `price_alerts(id) WHERE triggered_at IS NOT NULL` (already triggered → no double-fire).
+- Process in `Promise.all` chunks of 10.
+- Set `triggered_at` atomically with `UPDATE ... WHERE triggered_at IS NULL RETURNING id`; only send email on rows we won.
+
+### 11. `aggregateToWeekly` UTC weekday bug (#low)
+**Problem:** Uses UTC `getDay()` → Monday US bars (after midnight UTC Sunday) roll into prior week.
+**Fix:** Compute weekday in ET via `etDayOfWeek()` helper before bucketing.
+
+## C. DB migrations needed
+
+1. `historical_constituents` table + seed
+2. `finnhub_quote_cache` table
+3. Unique partial index on `price_alerts(id) WHERE triggered_at IS NOT NULL`
+
+## Out of scope (defer to next round)
+
+- `payments-webhook` `checkout.session.completed` (waiting on answer: do you sell one-time products? If no, just log+ignore).
+- `autotrader-scan` 2,316-line refactor (architectural, not a bug).
+- `bars-cache` `as_of` filter (low impact).
+- Stress-test cron-secret rotation across all 12 cron functions (separate hardening pass).
+
+## Open question
+
+**Survivorship seed data:** OK to bootstrap with a static S&P 500 membership JSON I commit (covers 2010→today, ~500 add/drop events)? Or do you want me to skip backtest survivorship for now and only ship items 2–11?
