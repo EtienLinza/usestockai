@@ -23,6 +23,22 @@ import {
   safeGet,
 } from "./indicators.ts";
 
+// Lightweight inline helper so this file stays free of cross-module cycles.
+// Returns 0..6 (Sun..Sat) in America/New_York. Used by aggregateToWeekly
+// to bucket bars in the same trading week even when UTC midnight already
+// crossed (Asian/European-listed timestamps for US bars near midnight).
+function etDayOfWeekSafe(d: Date): number {
+  try {
+    const fmt = new Intl.DateTimeFormat("en-US", {
+      timeZone: "America/New_York",
+      weekday: "short",
+    }).format(d);
+    return ({ Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 } as Record<string, number>)[fmt] ?? d.getUTCDay();
+  } catch {
+    return d.getUTCDay();
+  }
+}
+
 // ============================================================================
 // SHARED DATA TYPES
 // ============================================================================
