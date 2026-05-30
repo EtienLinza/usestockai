@@ -1,9 +1,10 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { getQuoteWithFallback } from "../_shared/finnhub.ts";
+import { requireCronOrUser } from "../_shared/cron-auth.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-cron-secret",
 };
 
 // Live index quote — Finnhub primary, Yahoo fallback.
@@ -142,6 +143,11 @@ serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
+
+  // Gate to authenticated users + cron — stops anonymous hammering of CNN/Yahoo/Stooq.
+  const denied = await requireCronOrUser(req, { allowAuthenticatedUser: true });
+  if (denied) return denied;
+
 
   try {
     console.log("Fetching market sentiment data...");
