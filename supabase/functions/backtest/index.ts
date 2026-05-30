@@ -1799,7 +1799,8 @@ serve(async (req) => {
     const startTime = Date.now();
     const body = await req.json();
     const {
-      tickers = ["AAPL"],
+      tickers: tickersInput = ["AAPL"],
+      universe, // optional: 'sp500' → resolve via constituents_as_of(startYear-01-01)
       startYear = 2020,
       endYear = 2025,
       initialCapital = 10000,
@@ -1824,7 +1825,25 @@ serve(async (req) => {
       executionModel = "intrabar", // 'intrabar' (default, realistic) | 'legacy' (close-fill, opt-in for A/B)
     } = body;
 
-    console.log(`Backtest request: ${tickers.join(",")} from ${startYear} to ${endYear}, mode=${strategyMode}, tier=${tier}`);
+    // Survivorship-aware universe resolution. When universe='sp500', resolve
+    // tickers to S&P 500 constituents as-of startYear-01-01 (point-in-time)
+    // rather than today's members — removes survivorship bias.
+    let tickers: string[] = tickersInput;
+    let survivorshipAdjusted = false;
+    if (universe === "sp500") {
+      const asOf = `${startYear}-01-01`;
+      const { data: rows, error: uErr } = await adminClient
+        .rpc("constituents_as_of", { _index_name: "SP500", _as_of: asOf });
+      if (uErr) {
+        console.error("constituents_as_of failed:", uErr);
+      } else if (rows && rows.length > 0) {
+        tickers = (rows as Array<{ ticker: string }>).map(r => r.ticker);
+        survivorshipAdjusted = true;
+        console.log(`Resolved sp500 universe as-of ${asOf}: ${tickers.length} tickers`);
+      }
+    }
+
+    console.log(`Backtest request: ${tickers.length} tickers from ${startYear} to ${endYear}, mode=${strategyMode}, tier=${tier}, universe=${universe ?? "explicit"}`);
 
     // Tier feature gates
     if (tickers.length > tierLimits.maxTickers) {
