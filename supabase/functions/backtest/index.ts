@@ -1899,7 +1899,7 @@ serve(async (req) => {
       commissionPct: 0.02,
       spreadPct: 0.01,
       slippagePct: 0.02,
-      executionModel: executionModel === "intrabar" ? "intrabar" : "legacy",
+      executionModel: executionModel === "legacy" ? "legacy" : "intrabar",
     };
 
     const startDate = Math.floor(new Date(`${startYear}-01-01`).getTime() / 1000);
