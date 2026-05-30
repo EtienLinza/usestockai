@@ -14,7 +14,8 @@ import { Input } from "@/components/ui/input";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { Shield, Loader2, Info, Bot, Sparkles, Clock, Activity, TrendingUp, TrendingDown, Minus, Wallet, AlertTriangle, ChevronDown, Settings as SettingsIcon, Heart } from "lucide-react";
+import { Shield, Loader2, Info, Bot, Sparkles, Clock, Activity, TrendingUp, TrendingDown, Minus, Wallet, AlertTriangle, ChevronDown, Settings as SettingsIcon, Heart, User as UserIcon } from "lucide-react";
+import { AccountSection } from "@/components/AccountSection";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { useAuth } from "@/hooks/useAuth";
@@ -276,8 +277,13 @@ const Settings = () => {
               <Loader2 className="w-5 h-5 animate-spin text-primary" />
             </Card>
           ) : (
-            <Tabs defaultValue="autotrader" className="space-y-6">
-              <TabsList className="grid w-full grid-cols-3">
+            <Tabs defaultValue="account" className="space-y-6">
+              <TabsList className="grid w-full grid-cols-4">
+                <TabsTrigger value="account" className="gap-2">
+                  <UserIcon className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Account</span>
+                  <span className="sm:hidden">You</span>
+                </TabsTrigger>
                 <TabsTrigger value="autotrader" className="gap-2">
                   <Bot className="w-3.5 h-3.5" />
                   <span className="hidden sm:inline">AutoTrader</span>
@@ -294,6 +300,11 @@ const Settings = () => {
                   <span className="sm:hidden">Health</span>
                 </TabsTrigger>
               </TabsList>
+
+              {/* ─────────── ACCOUNT TAB ─────────── */}
+              <TabsContent value="account" className="space-y-6 mt-0">
+                <AccountSection />
+              </TabsContent>
 
               {/* ─────────── AUTOTRADER TAB ─────────── */}
               <TabsContent value="autotrader" className="space-y-6 mt-0">
