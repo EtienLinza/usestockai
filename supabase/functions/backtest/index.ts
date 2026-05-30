@@ -180,6 +180,10 @@ interface TradeConfig {
   commissionPct: number;
   spreadPct: number;
   slippagePct: number;
+  // 'legacy'  = stop/TP fills at the bar's close price (understated drawdowns).
+  // 'intrabar' = stop/TP fills at the trigger price when bar.low/bar.high crosses it,
+  //              which is the realistic model. Default 'legacy' until validated.
+  executionModel?: "legacy" | "intrabar";
 }
 
 interface Trade {
@@ -516,9 +520,9 @@ function runWalkForwardBacktest(
   let cooldownUntil = 0; // bar index to wait until after a full exit
 
   // --- Helper: close entire position ---
-  const closeFullPosition = (pos: AllocationPosition, barIdx: number, reason: Trade["exitReason"]) => {
+  const closeFullPosition = (pos: AllocationPosition, barIdx: number, reason: Trade["exitReason"], forcedExitPriceRaw?: number) => {
     const exitIdx = Math.min(barIdx, close.length - 1);
-    const exitPriceRaw = close[exitIdx];
+    const exitPriceRaw = forcedExitPriceRaw ?? close[exitIdx];
     const exitPrice = applyTradingCosts(exitPriceRaw, pos.direction !== "long", tradeConfig);
 
     for (const block of pos.blocks) {
@@ -604,10 +608,10 @@ function runWalkForwardBacktest(
   // a "sold" portion (booked as a trade) and a "remaining" portion
   // (kept open). Used by tiered take-profit at +1R.
   // ============================================================
-  const partialClosePosition = (pos: AllocationPosition, barIdx: number, fractionToClose: number, reason: Trade["exitReason"]) => {
+  const partialClosePosition = (pos: AllocationPosition, barIdx: number, fractionToClose: number, reason: Trade["exitReason"], forcedExitPriceRaw?: number) => {
     if (pos.blocks.length === 0 || fractionToClose <= 0 || fractionToClose >= 1) return;
     const exitIdx = Math.min(barIdx, close.length - 1);
-    const exitPriceRaw = close[exitIdx];
+    const exitPriceRaw = forcedExitPriceRaw ?? close[exitIdx];
     const exitPrice = applyTradingCosts(exitPriceRaw, pos.direction !== "long", tradeConfig);
 
     // Split each block proportionally
@@ -761,23 +765,43 @@ function runWalkForwardBacktest(
         position.troughPrice = Math.min(position.troughPrice, close[i]);
       }
 
+      // Intrabar execution: fills happen at the trigger price when bar.high/low
+      // crosses it, not at the close. Avoids understated drawdowns on gap days.
+      const intrabar = tradeConfig.executionModel === "intrabar";
+      const tp1TriggerPrice = position.direction === "long"
+        ? position.avgEntryPrice * (1 + position.riskDistance)
+        : position.avgEntryPrice * (1 - position.riskDistance);
+      const hardStopTriggerPrice = position.direction === "long"
+        ? position.avgEntryPrice * (1 - hardStopDist)
+        : position.avgEntryPrice * (1 + hardStopDist);
+
       // Tiered take-profit: at +1R, close 50% of remaining position, arm breakeven stop on rest
-      if (!position.firstTargetHit && priceChange >= position.riskDistance && position.currentAllocation > 0) {
-        partialClosePosition(position, i, 0.5, "tp1_partial");
+      const tp1Hit = intrabar
+        ? (position.direction === "long" ? high[i] >= tp1TriggerPrice : low[i] <= tp1TriggerPrice)
+        : priceChange >= position.riskDistance;
+      if (!position.firstTargetHit && tp1Hit && position.currentAllocation > 0) {
+        partialClosePosition(position, i, 0.5, "tp1_partial", intrabar ? tp1TriggerPrice : undefined);
         position.firstTargetHit = true;
         position.breakevenStopActive = true;
       }
 
       // Breakeven stop: once TP1 hit, exit remainder if price retraces back through entry
-      if (position.breakevenStopActive && priceChange <= 0) {
-        closeFullPosition(position, i, "breakeven_stop");
+      const beTrigger = position.avgEntryPrice;
+      const beHit = intrabar
+        ? (position.direction === "long" ? low[i] <= beTrigger : high[i] >= beTrigger)
+        : priceChange <= 0;
+      if (position.breakevenStopActive && beHit) {
+        closeFullPosition(position, i, "breakeven_stop", intrabar ? beTrigger : undefined);
         position = null;
         continue;
       }
 
       // Hard stop: drawdown from avg entry exceeds threshold (skip if breakeven stop already armed)
-      if (!position?.breakevenStopActive && priceChange < -hardStopDist) {
-        closeFullPosition(position!, i, "hard_stop");
+      const hardHit = intrabar
+        ? (position.direction === "long" ? low[i] <= hardStopTriggerPrice : high[i] >= hardStopTriggerPrice)
+        : priceChange < -hardStopDist;
+      if (!position?.breakevenStopActive && hardHit) {
+        closeFullPosition(position!, i, "hard_stop", intrabar ? hardStopTriggerPrice : undefined);
         position = null;
         continue;
       }
@@ -1797,6 +1821,7 @@ serve(async (req) => {
       explicitOverride = false,
       walkForward = false,
       includeRobustness = false,
+      executionModel = "legacy", // 'legacy' | 'intrabar' — see TradeConfig
     } = body;
 
     console.log(`Backtest request: ${tickers.join(",")} from ${startYear} to ${endYear}, mode=${strategyMode}, tier=${tier}`);
@@ -1874,6 +1899,7 @@ serve(async (req) => {
       commissionPct: 0.02,
       spreadPct: 0.01,
       slippagePct: 0.02,
+      executionModel: executionModel === "intrabar" ? "intrabar" : "legacy",
     };
 
     const startDate = Math.floor(new Date(`${startYear}-01-01`).getTime() / 1000);
