@@ -1821,7 +1821,7 @@ serve(async (req) => {
       explicitOverride = false,
       walkForward = false,
       includeRobustness = false,
-      executionModel = "legacy", // 'legacy' | 'intrabar' — see TradeConfig
+      executionModel = "intrabar", // 'intrabar' (default, realistic) | 'legacy' (close-fill, opt-in for A/B)
     } = body;
 
     console.log(`Backtest request: ${tickers.join(",")} from ${startYear} to ${endYear}, mode=${strategyMode}, tier=${tier}`);
@@ -1899,7 +1899,7 @@ serve(async (req) => {
       commissionPct: 0.02,
       spreadPct: 0.01,
       slippagePct: 0.02,
-      executionModel: executionModel === "intrabar" ? "intrabar" : "legacy",
+      executionModel: executionModel === "legacy" ? "legacy" : "intrabar",
     };
 
     const startDate = Math.floor(new Date(`${startYear}-01-01`).getTime() / 1000);
@@ -2140,6 +2140,12 @@ serve(async (req) => {
         stressReturnsPlausible,
         notes: healthNotes,
       },
+      executionModel: tradeConfig.executionModel,
+      // Survivorship: backtest operates on a user-supplied ticker list (not an
+      // index universe), so survivorship bias only applies if the caller
+      // pre-filtered to today's S&P 500 members. We surface the flag for the
+      // UI to label runs once universe-based backtesting lands.
+      survivorshipAdjusted: false,
     };
 
     const profileSummary = Object.entries(stockProfiles).map(([t, p]) => `${t}:${p.classification}`).join(', ');

@@ -933,6 +933,30 @@ export function computeStrategySignal(
 // to target a constant per-name daily vol contribution.
 // ============================================================================
 
+/** Optional realized-edge calibration passed in from `strategy_weights`.
+ *  When `sampleSize >= 30` we use a true fractional Kelly formula derived
+ *  from realized win-rate + avg-win / avg-loss. Otherwise we fall back to
+ *  the legacy conviction ramp. All three fields must be present (in %)
+ *  for the Kelly path to engage. */
+export interface RealizedEdge {
+  winRate: number;    // 0..100
+  avgWin: number;     // mean realized return on winners, in % (positive)
+  avgLoss: number;    // mean realized loss on losers, in % (positive number)
+  sampleSize: number;
+}
+
+function realKelly(edge: RealizedEdge): number {
+  const p = Math.max(0, Math.min(1, edge.winRate / 100));
+  const w = Math.max(0.01, edge.avgWin);   // avoid div-by-zero
+  const l = Math.max(0.01, edge.avgLoss);
+  // Standard fractional Kelly with payoff ratio b = w / l:
+  //   f* = (p*b - (1-p)) / b
+  const b = w / l;
+  const fStar = (p * b - (1 - p)) / b;
+  // Quarter-Kelly, capped at 0.20 to keep within the legacy sizing envelope.
+  return Math.max(0, Math.min(0.20, 0.25 * fStar));
+}
+
 export function computePositionSize(
   conviction: number,
   atrPct: number,
@@ -943,9 +967,15 @@ export function computePositionSize(
   // a per-name ATR scalar AND a portfolio SPY-vol scalar systematically
   // under-sizes high-vol names. Default true preserves legacy behaviour.
   applyVolScaling: boolean = true,
+  edge?: RealizedEdge | null,
 ): number {
   if (conviction < 60 || atrPct <= 0) return 0;
-  const kellyBase = 0.10 + ((conviction - 60) / 40) * 0.15;
+  // Prefer realized-edge Kelly when we have enough samples; fall back to the
+  // conviction ramp otherwise. The ramp is intentionally conservative and
+  // serves as the cold-start sizing model before calibration matures.
+  const kellyBase = (edge && edge.sampleSize >= 30 && edge.avgWin > 0 && edge.avgLoss > 0)
+    ? realKelly(edge)
+    : 0.10 + ((conviction - 60) / 40) * 0.15;
   const volScalar = applyVolScaling ? Math.min(1.5, targetVol / atrPct) : 1;
   const raw = kellyBase * volScalar;
   const capped = Math.min(0.25, Math.max(0, raw));
