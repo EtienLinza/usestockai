@@ -21,17 +21,28 @@ function todayUtc(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
+// Cache entries are considered fresh when as_of >= (today − 1 day). This
+// keeps yesterday's close usable through the next day's pre-market window
+// (writes are stamped today_utc when the scanner backfills) but rejects
+// rows older than that so a long-stale cache can't silently leak into a
+// fresh scan and produce signals on prices that are days out of date.
+function staleCutoff(): string {
+  return new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
 export async function loadCachedBars(tickers: string[]): Promise<Map<string, DataSet>> {
   if (tickers.length === 0) return new Map();
   const out = new Map<string, DataSet>();
   // Chunk to avoid URL length limits
   const CHUNK = 200;
+  const cutoff = staleCutoff();
   for (let i = 0; i < tickers.length; i += CHUNK) {
     const slice = tickers.slice(i, i + CHUNK);
     const { data, error } = await client()
       .from("ticker_bars_cache")
       .select("ticker, as_of, bars")
-      .in("ticker", slice);
+      .in("ticker", slice)
+      .gte("as_of", cutoff);
     if (error) { console.warn("bars-cache load err", error.message); continue; }
     for (const row of data ?? []) {
       out.set((row as any).ticker, (row as any).bars as DataSet);
