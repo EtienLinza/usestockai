@@ -938,10 +938,15 @@ export function computePositionSize(
   atrPct: number,
   direction: "long" | "short",
   targetVol: number = 0.01,
+  // Set false when the caller is already applying a portfolio-level vol scalar
+  // (e.g. SPY-vol target for indices/ETFs). Avoids double-scaling: applying both
+  // a per-name ATR scalar AND a portfolio SPY-vol scalar systematically
+  // under-sizes high-vol names. Default true preserves legacy behaviour.
+  applyVolScaling: boolean = true,
 ): number {
   if (conviction < 60 || atrPct <= 0) return 0;
   const kellyBase = 0.10 + ((conviction - 60) / 40) * 0.15;
-  const volScalar = Math.min(1.5, targetVol / atrPct);
+  const volScalar = applyVolScaling ? Math.min(1.5, targetVol / atrPct) : 1;
   const raw = kellyBase * volScalar;
   const capped = Math.min(0.25, Math.max(0, raw));
   return direction === "short" ? -capped : capped;
