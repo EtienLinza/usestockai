@@ -5,7 +5,7 @@ interface MarketData {
   sp500Change: number;
   nasdaqChange: number;
   dowChange: number;
-  vixValue: number;
+  vixValue: number | null;
 }
 
 interface MarketIndicatorsProps {
