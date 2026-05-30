@@ -300,6 +300,21 @@ export function calculateATR(
   return atr;
 }
 
+// Safe ATR-as-percent helper. Some legacy callers expected `atr / price` but
+// passed raw dollar ATR by mistake — divisor blew up and position sizes
+// collapsed to near-zero shares. This normalizes either form into a sane
+// percent in [0, 1]. Returns null when both price and ATR are unusable.
+export function atrPct(atr: number, price: number): number | null {
+  if (!Number.isFinite(atr) || atr <= 0) return null;
+  if (!Number.isFinite(price) || price <= 0) return null;
+  // If the value is already a fraction (<= 1) treat it as a pct already.
+  // Otherwise interpret it as a dollar ATR and divide by price.
+  const pct = atr <= 1 ? atr : atr / price;
+  // Hard clamp: anything beyond 50% daily ATR is data noise.
+  if (pct <= 0 || pct > 0.5) return null;
+  return pct;
+}
+
 export function calculateOBV(close: number[], volume: number[]): number[] {
   const obv: number[] = [volume[0] || 0];
   for (let i = 1; i < close.length; i++) {

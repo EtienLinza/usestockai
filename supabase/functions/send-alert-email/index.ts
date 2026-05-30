@@ -21,12 +21,12 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
-  const denied = await requireCronOrUser(req);
+  const denied = await requireCronOrUser(req, { allowAuthenticatedUser: true });
   if (denied) return denied;
 
   try {
     const resendApiKey = Deno.env.get("RESEND_API_KEY");
-    
+
     if (!resendApiKey) {
       console.log("RESEND_API_KEY not configured, skipping email");
       return new Response(
@@ -35,12 +35,54 @@ serve(async (req) => {
       );
     }
 
-    const { userId, ticker, targetPrice, currentPrice, direction }: AlertEmailRequest = await req.json();
+    const body: Partial<AlertEmailRequest> = await req.json().catch(() => ({}));
+    const { ticker, targetPrice, currentPrice, direction } = body;
+
+    if (!ticker || typeof targetPrice !== "number" || typeof currentPrice !== "number" || (direction !== "above" && direction !== "below")) {
+      return new Response(
+        JSON.stringify({ error: "Invalid payload" }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
 
     // Get user email from Supabase
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
+    // Resolve userId: cron callers (system) trust body.userId. End-user JWT
+    // callers can only ever email themselves — userId is taken from the JWT,
+    // ignoring whatever was posted in the body (prevents IDOR).
+    const cronSecret = Deno.env.get("CRON_SECRET");
+    const isCron = !!cronSecret && req.headers.get("x-cron-secret") === cronSecret;
+
+    let userId: string | undefined;
+    if (isCron) {
+      userId = body.userId;
+      if (!userId) {
+        return new Response(
+          JSON.stringify({ error: "userId required for cron callers" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+    } else {
+      const authHeader = req.headers.get("Authorization");
+      const token = authHeader?.replace("Bearer ", "");
+      if (!token) {
+        return new Response(
+          JSON.stringify({ error: "Unauthorized" }),
+          { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+      const { data: userRes } = await supabase.auth.getUser(token);
+      userId = userRes?.user?.id;
+      if (!userId) {
+        return new Response(
+          JSON.stringify({ error: "Unauthorized" }),
+          { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+    }
 
     // Check if user has email alerts enabled
     const { data: profile, error: profileError } = await supabase

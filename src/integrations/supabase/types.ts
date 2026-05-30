@@ -275,6 +275,30 @@ export type Database = {
         }
         Relationships: []
       }
+      finnhub_cache: {
+        Row: {
+          cache_key: string
+          category: string
+          expires_at: string
+          payload: Json
+          updated_at: string
+        }
+        Insert: {
+          cache_key: string
+          category: string
+          expires_at: string
+          payload: Json
+          updated_at?: string
+        }
+        Update: {
+          cache_key?: string
+          category?: string
+          expires_at?: string
+          payload?: Json
+          updated_at?: string
+        }
+        Relationships: []
+      }
       live_signals: {
         Row: {
           confidence: number
@@ -1101,6 +1125,7 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      claim_price_alert: { Args: { _alert_id: string }; Returns: boolean }
       get_user_tier: {
         Args: { _user_id: string }
         Returns: Database["public"]["Enums"]["subscription_tier"]

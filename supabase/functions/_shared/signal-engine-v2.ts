@@ -23,6 +23,22 @@ import {
   safeGet,
 } from "./indicators.ts";
 
+// Lightweight inline helper so this file stays free of cross-module cycles.
+// Returns 0..6 (Sun..Sat) in America/New_York. Used by aggregateToWeekly
+// to bucket bars in the same trading week even when UTC midnight already
+// crossed (Asian/European-listed timestamps for US bars near midnight).
+function etDayOfWeekSafe(d: Date): number {
+  try {
+    const fmt = new Intl.DateTimeFormat("en-US", {
+      timeZone: "America/New_York",
+      weekday: "short",
+    }).format(d);
+    return ({ Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 } as Record<string, number>)[fmt] ?? d.getUTCDay();
+  } catch {
+    return d.getUTCDay();
+  }
+}
+
 // ============================================================================
 // SHARED DATA TYPES
 // ============================================================================
@@ -159,7 +175,11 @@ export function aggregateToWeekly(data: DataSet): DataSet {
   for (let i = 1; i < data.close.length; i++) {
     const prevDay = new Date(data.timestamps[i - 1]);
     const currDay = new Date(data.timestamps[i]);
-    const isNewWeek = currDay.getUTCDay() < prevDay.getUTCDay() || (currDay.getTime() - prevDay.getTime() > 4 * 86400000);
+    // Use ET day-of-week so Monday US bars (after midnight UTC Sunday) don't
+    // roll into the prior week. Falls back to UTC if helper unavailable.
+    const prevDow = etDayOfWeekSafe(prevDay);
+    const currDow = etDayOfWeekSafe(currDay);
+    const isNewWeek = currDow < prevDow || (currDay.getTime() - prevDay.getTime() > 4 * 86400000);
 
     if (isNewWeek) {
       weeks.push({ open: weekOpen, high: weekHigh, low: weekLow, close: data.close[i - 1], volume: weekVolume, date: weekStartDate });

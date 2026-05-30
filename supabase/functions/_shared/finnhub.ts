@@ -13,8 +13,11 @@
 // every helper returns null/empty on failure so callers can fall back.
 // ============================================================================
 
+import { cacheGet, cacheSet } from "./finnhub-cache.ts";
+
 const FINNHUB_BASE = "https://finnhub.io/api/v1";
 const DEFAULT_TIMEOUT_MS = 6000;
+const QUOTE_TTL_MS = 60 * 1000; // 60s
 
 function getKey(): string | null {
   return Deno.env.get("FINNHUB_API_KEY") ?? null;
@@ -58,11 +61,15 @@ export interface FinnhubQuote {
 }
 
 export async function getQuote(ticker: string): Promise<FinnhubQuote | null> {
-  const j = await finnhubFetch(`/quote?symbol=${encodeURIComponent(ticker)}`) as
+  const t = ticker.toUpperCase();
+  const cached = await cacheGet<FinnhubQuote>("quote", t);
+  if (cached) return cached;
+
+  const j = await finnhubFetch(`/quote?symbol=${encodeURIComponent(t)}`) as
     | { c?: number; pc?: number; o?: number; h?: number; l?: number; dp?: number; t?: number }
     | null;
   if (!j || typeof j.c !== "number" || j.c <= 0) return null;
-  return {
+  const quote: FinnhubQuote = {
     current: j.c,
     previousClose: typeof j.pc === "number" ? j.pc : 0,
     open: typeof j.o === "number" ? j.o : 0,
@@ -71,6 +78,8 @@ export async function getQuote(ticker: string): Promise<FinnhubQuote | null> {
     changePct: typeof j.dp === "number" ? j.dp : 0,
     timestamp: typeof j.t === "number" ? j.t : Math.floor(Date.now() / 1000),
   };
+  await cacheSet("quote", t, quote, QUOTE_TTL_MS);
+  return quote;
 }
 
 // ── Company News ─────────────────────────────────────────────────────────────
@@ -221,15 +230,14 @@ export async function getQuoteWithFallback(ticker: string): Promise<LiveQuote | 
 
 // ── Earnings Calendar (Phase 1 #4) ──────────────────────────────────────────
 // Returns the next earnings date (YYYY-MM-DD) within the next 21 days for the
-// given ticker, or null if none scheduled / API unavailable. Cached in-memory
-// for 6 hours per ticker to stay well under Finnhub's 60 req/min free tier.
-const earningsCache = new Map<string, { date: string | null; cachedAt: number }>();
+// given ticker, or null if none scheduled / API unavailable. Cached in the
+// shared Postgres cache so cold starts don't re-hammer Finnhub.
 const EARNINGS_TTL_MS = 6 * 60 * 60 * 1000;
 
 export async function getNextEarningsDate(ticker: string): Promise<string | null> {
   const t = ticker.toUpperCase();
-  const cached = earningsCache.get(t);
-  if (cached && Date.now() - cached.cachedAt < EARNINGS_TTL_MS) return cached.date;
+  const cached = await cacheGet<{ date: string | null }>("earnings", t);
+  if (cached) return cached.date;
 
   const today = new Date();
   const horizon = new Date(today.getTime() + 21 * 86400000);
@@ -246,7 +254,7 @@ export async function getNextEarningsDate(ticker: string): Promise<string | null
       .sort();
     next = dates[0] ?? null;
   }
-  earningsCache.set(t, { date: next, cachedAt: Date.now() });
+  await cacheSet("earnings", t, { date: next }, EARNINGS_TTL_MS);
   return next;
 }
 
@@ -262,32 +270,24 @@ export async function getEarningsBlackoutDays(ticker: string): Promise<number | 
 }
 
 // ── Sector classification (Phase 3 #14) ──────────────────────────────────────
-// Maps a ticker to a broad sector bucket (~GICS Level 1) using Finnhub's
-// `finnhubIndustry` field. Cached in-memory for 24 h. Returns null only if
-// Finnhub is unconfigured or both the cache and API miss.
-const sectorCache = new Map<string, { sector: string | null; cachedAt: number }>();
 const SECTOR_TTL_MS = 24 * 60 * 60 * 1000;
 
 const INDUSTRY_TO_SECTOR: Record<string, string> = {
-  // Technology
   "Technology": "Technology",
   "Semiconductors": "Technology",
   "Software": "Technology",
   "Hardware Equipment & Parts": "Technology",
   "Communications": "Technology",
   "Telecommunication": "Technology",
-  // Financials
   "Banking": "Financials",
   "Finance": "Financials",
   "Insurance": "Financials",
   "Real Estate": "Real Estate",
   "Holding Companies": "Financials",
-  // Healthcare
   "Health Care": "Healthcare",
   "Pharmaceuticals": "Healthcare",
   "Biotechnology": "Healthcare",
   "Medical Devices": "Healthcare",
-  // Consumer
   "Retail": "Consumer Discretionary",
   "Consumer products": "Consumer Discretionary",
   "Automobiles": "Consumer Discretionary",
@@ -296,7 +296,6 @@ const INDUSTRY_TO_SECTOR: Record<string, string> = {
   "Beverages": "Consumer Staples",
   "Food Products": "Consumer Staples",
   "Tobacco": "Consumer Staples",
-  // Energy / materials / industrial
   "Energy": "Energy",
   "Oil & Gas": "Energy",
   "Utilities": "Utilities",
@@ -309,7 +308,6 @@ const INDUSTRY_TO_SECTOR: Record<string, string> = {
   "Logistics & Transportation": "Industrials",
   "Construction": "Industrials",
   "Machinery": "Industrials",
-  // Misc / fallback
   "Media": "Communication Services",
   "Internet": "Communication Services",
 };
@@ -317,7 +315,6 @@ const INDUSTRY_TO_SECTOR: Record<string, string> = {
 function bucketIndustry(industry: string | null): string | null {
   if (!industry) return null;
   if (INDUSTRY_TO_SECTOR[industry]) return INDUSTRY_TO_SECTOR[industry];
-  // Fuzzy contains-match
   const lower = industry.toLowerCase();
   for (const [k, v] of Object.entries(INDUSTRY_TO_SECTOR)) {
     if (lower.includes(k.toLowerCase())) return v;
@@ -327,34 +324,31 @@ function bucketIndustry(industry: string | null): string | null {
 
 export async function getSector(ticker: string): Promise<string | null> {
   const t = ticker.toUpperCase();
-  const cached = sectorCache.get(t);
-  if (cached && Date.now() - cached.cachedAt < SECTOR_TTL_MS) return cached.sector;
+  const cached = await cacheGet<{ sector: string | null }>("sector", t);
+  if (cached) return cached.sector;
 
   const profile = await finnhubFetch(
     `/stock/profile2?symbol=${encodeURIComponent(t)}`,
   ) as { finnhubIndustry?: string } | null;
   const sector = bucketIndustry(profile?.finnhubIndustry ?? null);
-  sectorCache.set(t, { sector, cachedAt: Date.now() });
+  await cacheSet("sector", t, { sector }, SECTOR_TTL_MS);
   return sector;
 }
 
 // ── Beta lookup (Phase 3 #15) ────────────────────────────────────────────────
-// Returns Finnhub's published beta for the ticker (vs S&P 500), cached for 24h.
-// Returns null if Finnhub returns no beta or is unconfigured — caller should
-// fall back to assuming beta = 1 in that case.
-const betaCache = new Map<string, { beta: number | null; cachedAt: number }>();
 const BETA_TTL_MS = 24 * 60 * 60 * 1000;
 
 export async function getBeta(ticker: string): Promise<number | null> {
   const t = ticker.toUpperCase();
-  const cached = betaCache.get(t);
-  if (cached && Date.now() - cached.cachedAt < BETA_TTL_MS) return cached.beta;
+  const cached = await cacheGet<{ beta: number | null }>("beta", t);
+  if (cached) return cached.beta;
 
   const j = await finnhubFetch(
     `/stock/metric?symbol=${encodeURIComponent(t)}&metric=all`,
   ) as { metric?: { beta?: number } } | null;
   const raw = j?.metric?.beta;
   const beta = typeof raw === "number" && Number.isFinite(raw) ? raw : null;
-  betaCache.set(t, { beta, cachedAt: Date.now() });
+  await cacheSet("beta", t, { beta }, BETA_TTL_MS);
   return beta;
 }
+
