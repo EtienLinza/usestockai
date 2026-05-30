@@ -51,26 +51,28 @@ async function checkAndIncrementBacktests(
 ): Promise<{ ok: true; used: number } | { ok: false; used: number; limit: number }> {
   const monthKey = new Date().toISOString().slice(0, 7);
   const limit = TIER_LIMITS[tier].backtests;
-  const { data: existing } = await adminClient
-    .from("usage_counters")
-    .select("backtests_run")
-    .eq("user_id", userId)
-    .eq("month_key", monthKey)
-    .maybeSingle();
-  const used = (existing as any)?.backtests_run ?? 0;
-  if (used >= limit) return { ok: false, used, limit };
-  if (existing) {
-    await adminClient
-      .from("usage_counters")
-      .update({ backtests_run: used + 1 })
-      .eq("user_id", userId)
-      .eq("month_key", monthKey);
-  } else {
-    await adminClient
-      .from("usage_counters")
-      .insert({ user_id: userId, month_key: monthKey, backtests_run: 1 });
+  // Elite is unlimited — skip the RPC entirely so Number.POSITIVE_INFINITY
+  // doesn't get cast to a Postgres int.
+  if (!Number.isFinite(limit)) {
+    return { ok: true, used: 0 };
   }
-  return { ok: true, used: used + 1 };
+  // Atomic increment-with-cap via Postgres function. Eliminates the
+  // read-then-write race that previously let users sneak past the quota.
+  const { data, error } = await adminClient.rpc("increment_backtest_usage", {
+    _user_id: userId,
+    _month_key: monthKey,
+    _limit: limit,
+  });
+  if (error) {
+    console.error("increment_backtest_usage failed:", error);
+    // Fail closed: treat as over-quota to avoid bypassing the limit on RPC error.
+    return { ok: false, used: limit, limit };
+  }
+  const newCount = typeof data === "number" ? data : -1;
+  if (newCount === -1) {
+    return { ok: false, used: limit, limit };
+  }
+  return { ok: true, used: newCount };
 }
 
 // ============================================================================
@@ -993,22 +995,24 @@ function computeMetrics(
   }
 
   if (dailyEqReturns.length > 10) {
-    // Determine annualization factor based on actual sampling frequency
-    // Equity curve records every 5 bars, so each "step" ≈ 5 trading days
-    const totalDays = dailyEqReturns.length;
-    const periodsPerYear = Math.min(252, Math.max(52, totalDays / Math.max(years, 1)));
+    // Static annualization. Equity curve is sampled per trading day, so 252 is
+    // the correct factor regardless of run length. The previous adaptive
+    // periodsPerYear (52..252) inflated Sharpe by ~2× for short runs.
+    const periodsPerYear = 252;
     const annFactor = Math.sqrt(periodsPerYear);
 
     const eqMean = dailyEqReturns.reduce((a, b) => a + b, 0) / dailyEqReturns.length;
     const eqStd = Math.sqrt(dailyEqReturns.reduce((a, b) => a + (b - eqMean) ** 2, 0) / dailyEqReturns.length);
-    const rfPerPeriod = riskFreeDaily * (252 / periodsPerYear);
+    const rfPerPeriod = riskFreeDaily;
     sharpeRatio = eqStd > 0 ? ((eqMean - rfPerPeriod) / eqStd) * annFactor : 0;
 
-    // Sortino: only downside deviation
+    // Sortino: divide downside sum-of-squares by the COUNT OF DOWNSIDE RETURNS,
+    // not by total N. Dividing by N understates downside vol and inflates the
+    // ratio whenever most bars are positive.
     const eqDownside = dailyEqReturns.filter(r => r < rfPerPeriod);
     const downsideStd = eqDownside.length > 0
-      ? Math.sqrt(eqDownside.reduce((a, b) => a + (b - rfPerPeriod) ** 2, 0) / dailyEqReturns.length)
-      : 0.001;
+      ? Math.sqrt(eqDownside.reduce((a, b) => a + (b - rfPerPeriod) ** 2, 0) / eqDownside.length)
+      : 0;
     sortinoRatio = downsideStd > 0 ? ((eqMean - rfPerPeriod) / downsideStd) * annFactor : 0;
   }
 

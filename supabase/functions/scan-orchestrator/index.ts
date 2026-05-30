@@ -257,8 +257,12 @@ serve(async (req) => {
           weights_id: weights.activeWeightsId, status: "open",
         }));
         if (outcomeRows.length > 0) {
-          const { error: oe } = await supabase.from("signal_outcomes").insert(outcomeRows);
-          if (oe) console.error("signal_outcomes insert err:", oe);
+          // Upsert on the unique partial index (signal_id WHERE status='open')
+          // so retries after partial writes don't create duplicates.
+          const { error: oe } = await supabase
+            .from("signal_outcomes")
+            .upsert(outcomeRows, { onConflict: "signal_id", ignoreDuplicates: true });
+          if (oe) console.error("signal_outcomes upsert err:", oe);
         }
       } catch (e) { console.error("outcome logging:", e); }
     }
