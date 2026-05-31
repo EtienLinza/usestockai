@@ -26,6 +26,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { useTier } from "@/hooks/useTier";
 import { UpgradeRequiredModal } from "@/components/UpgradeRequiredModal";
+import { TickerLink } from "@/components/TickerLink";
 
 interface WatchlistItem {
   id: string;
@@ -266,7 +267,7 @@ const Watchlist = () => {
   };
 
   const handleAnalyze = (ticker: string) => {
-    navigate(`/dashboard?ticker=${ticker}`);
+    navigate(`/stock/${ticker}`);
   };
 
   const activeAlertsCount = alerts.filter(a => !a.is_triggered).length;
@@ -447,9 +448,7 @@ const Watchlist = () => {
                             </div>
                             <div>
                               <div className="flex items-center gap-2">
-                                <span className="font-mono text-base font-medium text-primary">
-                                  {item.ticker}
-                                </span>
+                                <TickerLink ticker={item.ticker} className="font-mono text-base font-medium text-primary" />
                                 <Badge variant="outline" className="text-xs">
                                   {item.asset_type === "crypto" ? "Crypto" : "Stock"}
                                 </Badge>

@@ -1,49 +1,88 @@
+## Goal
 
-# Final Fix Batch — Remaining Audit Items
+A dedicated detail page for every ticker with an interactive price chart, key stats, news, and the latest AI signal. Every ticker shown anywhere on the site becomes a link to that page.
 
-Building on what already shipped (survivorship table, intrabar execution opt-in, vol-scaling guard, Finnhub Postgres cache, atomic price-alert claim, IDOR fix, ET weekday bug, ATR guard). This batch closes the rest of the 97-issue audit.
+## Data sources (free, no new keys)
 
-## A. Quant correctness (finish what was started)
+- **Yahoo Finance** (unofficial, server-side via edge function) — price candles for all timeframes. Already used by `fetch-stock-price` and `yahoo-history.ts`.
+- **Finnhub** (existing `FINNHUB_API_KEY`) — fundamentals (PE, market cap, 52w range, beta, industry) and company news.
+- **Existing `live_signals` table** — latest AI signal for the ticker, if any.
 
-1. **Make intrabar execution the default** in `backtest/index.ts`. Flip `executionModel` default from `legacy` → `intrabar`. Keep `legacy` as opt-in for A/B. Stamp `executionModel` into the result payload so the UI can label runs.
+No new secrets required.
 
-2. **Look-ahead bias on entries (#1, #2)** — currently still fills at bar `T` close in both live engine and backtest. Shift entries to `T+1 open` (fallback `T+1 close`) under the same `intrabar` flag. Indicator-flip exits also shift to `T+1`.
+## New route
 
-3. **Real Kelly sizing (#17)** in `_shared/signal-engine-v2.ts` `computePositionSize`:
-   ```
-   edge = winRate*avgWin - (1-winRate)*avgLoss
-   kelly = edge / (avgWin*avgLoss)
-   fraction = clamp(0.25*kelly, 0, 0.20)
-   ```
-   Pull `winRate`, `avgWin`, `avgLoss` from `signal_outcomes` calibration buckets passed via `weights`. Fall back to the existing conviction-ramp when sample size < 30.
+`/stock/:ticker` → `src/pages/StockDetail.tsx`. Added to `src/App.tsx`. Wrapped in `RequireOnboarding` like other pages.
 
-4. **Survivorship-aware backtest universe (#4 part 2)** — wire `constituents_as_of('SP500', bar_date)` into `backtest` universe resolution when `universe = 'sp500'`. Stamp `survivorship_adjusted: true` in result payload.
+## New edge function: `fetch-stock-chart`
 
-5. **Double vol-scaling default** — flip `applyVolScaling` default off for single names when portfolio-level SPY scalar is already applied; keep on for index/ETF.
+`supabase/functions/fetch-stock-chart/index.ts` — accepts `{ ticker, range }`, server-side Yahoo fetch to bypass CORS.
 
-## B. Infra / security (remaining)
+| Range | Yahoo interval | Yahoo range |
+|---|---|---|
+| 1D  | 5m  | 1d  |
+| 5D  | 15m | 5d  |
+| 1M  | 1d  | 1mo |
+| 6M  | 1d  | 6mo |
+| 1Y  | 1d  | 1y  |
+| 5Y  | 1wk | 5y  |
 
-6. **`clear-signals` anon-key auth** — require `x-cron-secret` via shared `requireCronOrUser` (currently the audit flagged it as accepting anon key). Same hardening pass on any cron function still missing it: `weekly-digest`, `calibrate-weights`, `prefetch-bars`, `refresh-danelfin-scores`. Audit each, add `requireCronOrUser` where missing.
+Returns `{ ticker, range, candles: [{t, o, h, l, c, v}] }`. CORS + ticker regex validation, same pattern as `fetch-stock-price`.
 
-7. **`payments-webhook` `checkout.session.completed`** — user confirmed subscription-only. Log and ignore the event explicitly (no error, no silent miss) and add a comment documenting the decision.
+## Page layout (`StockDetail.tsx`)
 
-8. **`bars-cache` `as_of` filter** — current cache lookup ignores `as_of`, so stale bars can leak into fresh scans. Add `as_of >= today_et()` predicate on read; backfill writes already stamp `as_of`.
+```text
+┌─ Navbar ────────────────────────────────────────┐
+│ AAPL · Apple Inc.        [+ Watchlist] [Alert] │
+│ $xxx.xx  +x.xx (+x.xx%)   Market: REGULAR      │
+├─ Range tabs: 1D 5D 1M 6M 1Y 5Y ────────────────┤
+│                                                 │
+│           Recharts AreaChart (themed)           │
+│                                                 │
+├─ Key stats grid (MetricCard) ──┬─ Latest AI ──┤
+│  PE · Mkt Cap · 52w · Beta ... │  Signal card  │
+├─ News headlines (Finnhub) ─────────────────────┤
+└────────────────────────────────────────────────┘
+```
 
-9. **`autotrader-scan` quick wins** — defer the 2,316-line refactor, but extract the two clearest bugs surfaced in the audit (duplicated stop math, unawaited promise in the rotation branch) into targeted fixes. No structural change.
+- Chart: Recharts `AreaChart`, sage-green stroke + gradient fill, themed via existing tokens.
+- Stats: reuse `MetricCard`.
+- Buttons: reuse `AddToWatchlistButton`, `PriceAlertModal`.
+- Signal: query latest row from `live_signals` for that ticker; show `LockedFeature` placeholder if free tier (consistent with existing tier gating).
+- Loading: `Skeleton` blocks.
+- SEO: `<SEO />` with `Title: {Ticker} Stock Analysis · usestockai`, dynamic meta description.
 
-10. **`scan-worker` Danelfin lookup** — currently uppercases ticker on read but not on write; normalize at the orchestrator boundary so a single source of truth.
+## Click-through wiring
 
-## C. DB migrations needed
+Add a tiny `<TickerLink ticker="AAPL" />` component (`src/components/TickerLink.tsx`) that wraps children in a `react-router-dom` `<Link to={`/stock/${ticker}`}>` with `stopPropagation` so it works inside clickable rows. Apply across:
 
-- None new. All tables (`historical_constituents`, `finnhub_cache`, `claim_price_alert` RPC) already exist.
-- One data backfill: seed `historical_constituents` add/drop events 2010→today (currently only holds today's 503 rows). Will commit a static JSON under `supabase/functions/_shared/sp500-history.json` and a one-shot `insert` migration.
+- `src/components/dashboard/TradingTab.tsx` — signal cards/rows
+- `src/components/dashboard/MarketTab.tsx`
+- `src/components/market/TrendingTickers.tsx`
+- `src/components/sectors/SectorCard.tsx` / `SectorHeatmap.tsx` (ticker chips)
+- `src/pages/Watchlist.tsx`
+- `src/pages/AutotraderLog.tsx`
+- `src/components/PriceAlertModal` lists, virtual-positions table, sell-alerts panel
 
-## Out of scope (explicitly deferred)
+Anywhere a ticker symbol is rendered as text today, it becomes a link. Hover state: subtle underline + sage accent — no layout change.
 
-- Full `autotrader-scan` architectural refactor.
-- Cron-secret rotation across all 12 cron functions (separate hardening pass).
-- Replacing `signal-engine-v2` duplicated indicator math with a shared package (Deno edge-function isolation makes this non-trivial; current replication is intentional).
+## Out of scope (this pass)
 
-## Open question
+- Intraday websocket streaming (Yahoo 5m polling on 1D is enough).
+- Options chain, insider trades, earnings calendar.
+- Comparison/overlay charts.
+- Adding the detail page to the sitemap dynamically (current `sitemap.xml` is static).
 
-For item 4 (survivorship): the table currently has only **today's** 503 rows. To make the backtest actually survivorship-adjusted I need to seed historical add/drop events. **OK to commit a static `sp500-history.json` covering 2010→today (~500 events, ~12KB)?** If you'd rather defer, I'll ship items 1–3 and 5–10 and leave the universe resolution behind a `survivorship: false` default until the seed lands.
+## Files touched
+
+**New:**
+- `supabase/functions/fetch-stock-chart/index.ts`
+- `src/pages/StockDetail.tsx`
+- `src/components/StockChart.tsx`
+- `src/components/TickerLink.tsx`
+
+**Edited:**
+- `src/App.tsx` (route)
+- ~7 components/pages listed above to wrap tickers in `TickerLink`
+
+No DB migrations. No new secrets.

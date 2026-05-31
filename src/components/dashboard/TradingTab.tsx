@@ -20,6 +20,7 @@ import {
   Trophy, ChevronDown, Activity, Sparkles, Trash2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { TickerLink } from "@/components/TickerLink";
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine,
 } from "recharts";
@@ -568,7 +569,7 @@ export function TradingTab({
                     <div className="flex items-start sm:items-center justify-between gap-2">
                       <div className="flex items-center gap-2 min-w-0">
                         {signal.signal_type === "BUY" ? <ArrowUpRight className="w-4 h-4 sm:w-5 sm:h-5 text-success shrink-0" /> : <ArrowDownRight className="w-4 h-4 sm:w-5 sm:h-5 text-destructive shrink-0" />}
-                        <span className="text-base sm:text-lg font-bold font-mono">{signal.ticker}</span>
+                        <TickerLink ticker={signal.ticker} className="text-base sm:text-lg font-bold font-mono" />
                         <Badge variant="outline" className={cn("text-[10px]", signal.signal_type === "BUY" ? "bg-success/10 text-success border-success/30" : "bg-destructive/10 text-destructive border-destructive/30")}>
                           {signal.signal_type}
                         </Badge>
@@ -653,7 +654,7 @@ export function TradingTab({
                     <div key={pos.id} className={cn("p-3 space-y-2", hasSellAlert && "bg-warning/5")}>
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
-                          <span className="font-mono font-bold text-sm">{pos.ticker}</span>
+                          <TickerLink ticker={pos.ticker} className="font-mono font-bold text-sm" />
                           {hasSellAlert && <AlertTriangle className="w-3 h-3 text-warning" />}
                           <Badge variant="outline" className={cn("text-[9px]", pos.position_type === "long" ? "text-success" : "text-destructive")}>{pos.position_type}</Badge>
                         </div>
@@ -715,7 +716,7 @@ export function TradingTab({
                       return (
                         <TableRow key={pos.id} className={cn("border-border/10", hasSellAlert && "bg-warning/5")}>
                           <TableCell className="font-mono font-bold text-sm">
-                            <div className="flex items-center gap-2">{pos.ticker}{hasSellAlert && <AlertTriangle className="w-3 h-3 text-warning" />}</div>
+                            <div className="flex items-center gap-2"><TickerLink ticker={pos.ticker} />{hasSellAlert && <AlertTriangle className="w-3 h-3 text-warning" />}</div>
                           </TableCell>
                           <TableCell><Badge variant="outline" className={cn("text-[10px]", pos.position_type === "long" ? "text-success" : "text-destructive")}>{pos.position_type}</Badge></TableCell>
                           <TableCell className="font-mono text-sm">${Number(pos.entry_price).toFixed(2)}</TableCell>
@@ -790,7 +791,7 @@ export function TradingTab({
                       <div key={pos.id} className="p-3 space-y-1.5">
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-2">
-                            <span className="font-mono font-bold text-sm">{pos.ticker}</span>
+                            <TickerLink ticker={pos.ticker} className="font-mono font-bold text-sm" />
                             <Badge variant="outline" className={cn("text-[9px]", pos.position_type === "long" ? "text-success" : "text-destructive")}>{pos.position_type}</Badge>
                           </div>
                           <span className={cn("font-mono font-bold text-sm", (Number(pos.pnl) || 0) >= 0 ? "text-success" : "text-destructive")}>
@@ -824,7 +825,7 @@ export function TradingTab({
                       <TableBody>
                         {closedPositions.map((pos) => (
                           <TableRow key={pos.id} className="border-border/10">
-                            <TableCell className="font-mono font-bold text-sm">{pos.ticker}</TableCell>
+                            <TableCell className="font-mono font-bold text-sm"><TickerLink ticker={pos.ticker} /></TableCell>
                             <TableCell><Badge variant="outline" className={cn("text-[10px]", pos.position_type === "long" ? "text-success" : "text-destructive")}>{pos.position_type}</Badge></TableCell>
                             <TableCell className="font-mono text-sm">${Number(pos.entry_price).toFixed(2)}</TableCell>
                             <TableCell className="font-mono text-sm">${pos.exit_price ? Number(pos.exit_price).toFixed(2) : "—"}</TableCell>

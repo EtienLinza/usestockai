@@ -1,6 +1,5 @@
 import { useNavigate } from "react-router-dom";
 import { Card } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { TrendingUp, TrendingDown, ChevronRight } from "lucide-react";
 
@@ -31,7 +30,7 @@ export function TrendingTickers({ gainers, losers }: TrendingTickersProps) {
     return (
       <div 
         className="flex items-center justify-between py-2 px-1 hover:bg-primary/5 rounded cursor-pointer transition-colors group"
-        onClick={() => navigate(`/dashboard?ticker=${ticker.ticker}`)}
+        onClick={() => navigate(`/stock/${ticker.ticker}`)}
       >
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 rounded bg-primary/10 flex items-center justify-center">

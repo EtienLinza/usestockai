@@ -1,6 +1,7 @@
 import { Card } from "@/components/ui/card";
 import { TrendingUp, TrendingDown, Minus } from "lucide-react";
 import { motion } from "framer-motion";
+import { TickerLink } from "@/components/TickerLink";
 
 interface SectorCardProps {
   sector: string;
@@ -34,7 +35,7 @@ export function SectorCard({ sector, etfTicker, dailyChange, weeklyChange, month
         <div className="flex items-start justify-between mb-3">
           <div>
             <h3 className="font-medium text-sm">{sector}</h3>
-            <span className="text-xs text-muted-foreground font-mono">{etfTicker}</span>
+            <TickerLink ticker={etfTicker} className="text-xs text-muted-foreground font-mono" />
           </div>
           <div className={`flex items-center gap-1 ${getChangeColor(dailyChange)}`}>
             <DailyIcon className="w-4 h-4" />
