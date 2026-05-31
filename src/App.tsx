@@ -9,6 +9,7 @@ import Landing from "./pages/Landing";
 import Auth from "./pages/Auth";
 import Dashboard from "./pages/Dashboard";
 import Watchlist from "./pages/Watchlist";
+import StockDetail from "./pages/StockDetail";
 
 import Backtest from "./pages/Backtest";
 import Settings from "./pages/Settings";
@@ -43,6 +44,7 @@ const App = () => (
                 <Route path="/checkout/return" element={<CheckoutReturn />} />
                 <Route path="/dashboard" element={<Dashboard />} />
                 <Route path="/watchlist" element={<Watchlist />} />
+                <Route path="/stock/:ticker" element={<StockDetail />} />
                 <Route path="/backtest" element={<Backtest />} />
                 <Route path="/settings" element={<Settings />} />
                 <Route path="/autotrader-log" element={<AutotraderLog />} />
