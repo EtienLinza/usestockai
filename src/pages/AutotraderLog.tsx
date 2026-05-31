@@ -10,6 +10,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
 import { LockedFeature } from "@/components/LockedFeature";
+import { TickerLink } from "@/components/TickerLink";
 
 function sentimentTone(score: number): { cls: string; label: string } {
   if (score <= -60) return { cls: "text-destructive border-destructive/30 bg-destructive/10", label: "Very Negative" };
@@ -143,7 +144,7 @@ const AutotraderLog = () => {
                         </div>
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 flex-wrap">
-                            <span className="font-mono text-sm font-medium">{isScanRollup ? "AutoTrader" : r.ticker}</span>
+                            <span className="font-mono text-sm font-medium">{isScanRollup ? "AutoTrader" : <TickerLink ticker={r.ticker} />}</span>
                             <Badge variant="outline" className={cn("text-[10px] uppercase tracking-wide", m.cls)}>
                               {m.label}
                             </Badge>
