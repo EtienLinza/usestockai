@@ -266,7 +266,7 @@ const Watchlist = () => {
   };
 
   const handleAnalyze = (ticker: string) => {
-    navigate(`/dashboard?ticker=${ticker}`);
+    navigate(`/stock/${ticker}`);
   };
 
   const activeAlertsCount = alerts.filter(a => !a.is_triggered).length;
