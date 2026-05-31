@@ -382,8 +382,8 @@ const StockDetail = () => {
         currentPrice={quote?.price}
       />
       <UpgradeRequiredModal
-        isOpen={upgradeOpen}
-        onClose={() => setUpgradeOpen(false)}
+        open={upgradeOpen}
+        onOpenChange={setUpgradeOpen}
         feature="Price Alerts"
         requiredTier="pro"
       />
