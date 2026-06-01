@@ -1,88 +1,58 @@
-## Goal
+# Ticker Search + On-Demand Analysis
 
-A dedicated detail page for every ticker with an interactive price chart, key stats, news, and the latest AI signal. Every ticker shown anywhere on the site becomes a link to that page.
+Add a search bar at the top of the Dashboard that lets you type any ticker, jump to its `/stock/:ticker` page, and run a fresh BUY / SELL / HOLD analysis on demand (independent of the scheduled market scanner).
 
-## Data sources (free, no new keys)
+## UX
 
-- **Yahoo Finance** (unofficial, server-side via edge function) — price candles for all timeframes. Already used by `fetch-stock-price` and `yahoo-history.ts`.
-- **Finnhub** (existing `FINNHUB_API_KEY`) — fundamentals (PE, market cap, 52w range, beta, industry) and company news.
-- **Existing `live_signals` table** — latest AI signal for the ticker, if any.
-
-No new secrets required.
-
-## New route
-
-`/stock/:ticker` → `src/pages/StockDetail.tsx`. Added to `src/App.tsx`. Wrapped in `RequireOnboarding` like other pages.
-
-## New edge function: `fetch-stock-chart`
-
-`supabase/functions/fetch-stock-chart/index.ts` — accepts `{ ticker, range }`, server-side Yahoo fetch to bypass CORS.
-
-| Range | Yahoo interval | Yahoo range |
-|---|---|---|
-| 1D  | 5m  | 1d  |
-| 5D  | 15m | 5d  |
-| 1M  | 1d  | 1mo |
-| 6M  | 1d  | 6mo |
-| 1Y  | 1d  | 1y  |
-| 5Y  | 1wk | 5y  |
-
-Returns `{ ticker, range, candles: [{t, o, h, l, c, v}] }`. CORS + ticker regex validation, same pattern as `fetch-stock-price`.
-
-## Page layout (`StockDetail.tsx`)
+New `TickerSearchBar` placed above the Trading/Market tabs:
 
 ```text
-┌─ Navbar ────────────────────────────────────────┐
-│ AAPL · Apple Inc.        [+ Watchlist] [Alert] │
-│ $xxx.xx  +x.xx (+x.xx%)   Market: REGULAR      │
-├─ Range tabs: 1D 5D 1M 6M 1Y 5Y ────────────────┤
-│                                                 │
-│           Recharts AreaChart (themed)           │
-│                                                 │
-├─ Key stats grid (MetricCard) ──┬─ Latest AI ──┤
-│  PE · Mkt Cap · 52w · Beta ... │  Signal card  │
-├─ News headlines (Finnhub) ─────────────────────┤
-└────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│  🔍  Search any ticker (e.g. AAPL, NVDA, BTC-USD)            │
+│  [   input   ]   [ View ]   [ Analyze ]                       │
+└──────────────────────────────────────────────────────────────┘
 ```
 
-- Chart: Recharts `AreaChart`, sage-green stroke + gradient fill, themed via existing tokens.
-- Stats: reuse `MetricCard`.
-- Buttons: reuse `AddToWatchlistButton`, `PriceAlertModal`.
-- Signal: query latest row from `live_signals` for that ticker; show `LockedFeature` placeholder if free tier (consistent with existing tier gating).
-- Loading: `Skeleton` blocks.
-- SEO: `<SEO />` with `Title: {Ticker} Stock Analysis · usestockai`, dynamic meta description.
+- `View` → navigates to `/stock/<TICKER>` (existing detail page).
+- `Analyze` → calls new edge function, then shows an inline `AnalysisResultCard` directly under the search:
+  - Big BUY / SELL / HOLD badge (green / red / amber)
+  - Confidence %, current price, suggested entry, stop, take-profit
+  - Regime, strategy, key bullish/bearish drivers (RSI, MACD, trend, vol, sentiment)
+  - Short reasoning paragraph
+  - Buttons: "Open full page", "Add to watchlist", "Set price alert"
+- Validation: regex `^[A-Z]{1,10}(-[A-Z]{2,4})?$`; auto-uppercase; Enter key triggers `Analyze`.
+- Loading skeleton while analyzing (typical 4-8s).
+- Same `AnalysisResultCard` also dropped into `StockDetail.tsx` with its own "Run analysis" button, so the analysis is reachable from both places.
 
-## Click-through wiring
+## Backend
 
-Add a tiny `<TickerLink ticker="AAPL" />` component (`src/components/TickerLink.tsx`) that wraps children in a `react-router-dom` `<Link to={`/stock/${ticker}`}>` with `stopPropagation` so it works inside clickable rows. Apply across:
+New edge function `analyze-ticker` (Yahoo + Finnhub, no new secrets):
 
-- `src/components/dashboard/TradingTab.tsx` — signal cards/rows
-- `src/components/dashboard/MarketTab.tsx`
-- `src/components/market/TrendingTickers.tsx`
-- `src/components/sectors/SectorCard.tsx` / `SectorHeatmap.tsx` (ticker chips)
-- `src/pages/Watchlist.tsx`
-- `src/pages/AutotraderLog.tsx`
-- `src/components/PriceAlertModal` lists, virtual-positions table, sell-alerts panel
+1. Validate ticker.
+2. Fetch ~250 daily bars via existing `_shared/yahoo-history.ts` + live quote via `_shared/finnhub.ts`.
+3. Run the same `runSignalEngineV2` used by the scanner (single source of truth — keeps live scan and on-demand analysis identical).
+4. If the engine returns a signal → map to `BUY` / `SELL` with its entry/stop/target/confidence/reasoning. If it returns nothing → return `HOLD` with the highest scoring rationale (why no setup).
+5. Return JSON; **do not persist** to `live_signals` (avoids polluting the scanner table and bypasses the per-user rate limits applied to scans). A lightweight 30 req/min per-IP throttle is enforced in-function.
+6. CORS-safe, `verify_jwt = false` (analysis is read-only/public, matching `fetch-stock-chart`).
 
-Anywhere a ticker symbol is rendered as text today, it becomes a link. Hover state: subtle underline + sage accent — no layout change.
+## Click-through
 
-## Out of scope (this pass)
+The `View` action and "Open full page" button both route to existing `/stock/:ticker`, so all the universal ticker-link plumbing already in place keeps working.
 
-- Intraday websocket streaming (Yahoo 5m polling on 1D is enough).
-- Options chain, insider trades, earnings calendar.
-- Comparison/overlay charts.
-- Adding the detail page to the sitemap dynamically (current `sitemap.xml` is static).
+## Files
 
-## Files touched
+**New**
+- `src/components/dashboard/TickerSearchBar.tsx`
+- `src/components/dashboard/AnalysisResultCard.tsx`
+- `supabase/functions/analyze-ticker/index.ts`
 
-**New:**
-- `supabase/functions/fetch-stock-chart/index.ts`
-- `src/pages/StockDetail.tsx`
-- `src/components/StockChart.tsx`
-- `src/components/TickerLink.tsx`
+**Edited**
+- `src/pages/Dashboard.tsx` — mount `TickerSearchBar` above the tabs.
+- `src/pages/StockDetail.tsx` — add "Run analysis" button + render `AnalysisResultCard` inline.
 
-**Edited:**
-- `src/App.tsx` (route)
-- ~7 components/pages listed above to wrap tickers in `TickerLink`
+## Out of scope
 
-No DB migrations. No new secrets.
+- No new tables / migrations.
+- No changes to the background scanner, autotrader, or scoring math.
+- No fundamentals-only research view (chart/news/stats already exist on `/stock/:ticker`).
+- No saved analysis history (results are ephemeral; user can re-run anytime).
