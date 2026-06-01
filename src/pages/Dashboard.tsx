@@ -670,6 +670,7 @@ const Dashboard = () => {
 
             {/* ── Right Panel ── */}
             <motion.div initial={{ opacity: 0, x: 16 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.2 }} className="lg:col-span-8 xl:col-span-9">
+              <TickerSearchBar />
               <Tabs defaultValue="trading" className="w-full">
                 <TabsList className="bg-secondary/30 mb-6">
                   <TabsTrigger value="trading" className="text-xs sm:text-sm gap-1.5"><Zap className="w-3.5 h-3.5" />Trading</TabsTrigger>
