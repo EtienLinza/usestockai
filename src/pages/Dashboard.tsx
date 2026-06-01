@@ -24,6 +24,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import { MarketTab } from "@/components/dashboard/MarketTab";
 import { TradingTab } from "@/components/dashboard/TradingTab";
+import { TickerSearchBar } from "@/components/dashboard/TickerSearchBar";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
