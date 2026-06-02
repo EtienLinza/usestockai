@@ -11,6 +11,29 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
+export interface AnalysisStats {
+  changePct?: number | null;
+  rsi?: number | null;
+  macdHist?: number | null;
+  macdLine?: number | null;
+  macdSignal?: number | null;
+  sma20?: number | null;
+  sma50?: number | null;
+  sma200?: number | null;
+  adx?: number | null;
+  atr?: number | null;
+  atrPctDaily?: number | null;
+  annualizedVolPct?: number | null;
+  high52w?: number | null;
+  low52w?: number | null;
+  rangePosition?: number | null;
+  volume?: number | null;
+  avgVolume20?: number | null;
+  volRatio?: number | null;
+  trend?: string | null;
+  bars?: number | null;
+}
+
 export interface AnalysisResult {
   ticker: string;
   decision: "BUY" | "SELL" | "HOLD";
@@ -28,6 +51,7 @@ export interface AnalysisResult {
   kellyFraction?: number | null;
   reasoning?: string | null;
   insufficientData?: boolean;
+  stats?: AnalysisStats | null;
 }
 
 interface Props {
