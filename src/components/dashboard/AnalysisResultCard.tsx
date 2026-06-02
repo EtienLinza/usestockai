@@ -157,7 +157,42 @@ export const AnalysisResultCard = ({ result, loading, onSetAlert }: Props) => {
               {result.weeklyBias && (
                 <Badge variant="outline" className="capitalize">Weekly: {result.weeklyBias}</Badge>
               )}
+              {result.stats?.trend && (
+                <Badge variant="outline" className="capitalize">{result.stats.trend}</Badge>
+              )}
             </div>
+
+            {/* Technical indicators grid */}
+            {result.stats && (
+              <div className="pt-3 border-t border-border/40">
+                <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-2">Technicals</div>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  <Stat label="Day change" icon={TrendingUp}
+                    value={fmtPct(result.stats.changePct)}
+                    color={(result.stats.changePct ?? 0) >= 0 ? "text-success" : "text-destructive"} />
+                  <Stat label="RSI(14)" icon={Brain}
+                    value={fmtNum(result.stats.rsi, 1)}
+                    color={rsiColor(result.stats.rsi)} />
+                  <Stat label="MACD hist" icon={TrendingUp}
+                    value={fmtNum(result.stats.macdHist, 3, "")}
+                    color={(result.stats.macdHist ?? 0) >= 0 ? "text-success" : "text-destructive"} />
+                  <Stat label="ADX(14)" icon={TrendingUp}
+                    value={fmtNum(result.stats.adx, 1)}
+                    color={(result.stats.adx ?? 0) >= 25 ? "text-success" : "text-muted-foreground"} />
+                  <Stat label="SMA 20" icon={DollarSign} value={fmt(result.stats.sma20)} />
+                  <Stat label="SMA 50" icon={DollarSign} value={fmt(result.stats.sma50)} />
+                  <Stat label="SMA 200" icon={DollarSign} value={fmt(result.stats.sma200)} />
+                  <Stat label="ATR %" icon={Shield} value={fmtPct(result.stats.atrPctDaily)} />
+                  <Stat label="52w high" icon={Target} value={fmt(result.stats.high52w)} color="text-success/80" />
+                  <Stat label="52w low" icon={Shield} value={fmt(result.stats.low52w)} color="text-destructive/80" />
+                  <Stat label="52w range" icon={Target}
+                    value={result.stats.rangePosition != null ? `${result.stats.rangePosition.toFixed(0)}%` : "—"} />
+                  <Stat label="Vol vs 20d" icon={TrendingUp}
+                    value={result.stats.volRatio != null ? `${result.stats.volRatio.toFixed(2)}×` : "—"}
+                    color={(result.stats.volRatio ?? 0) >= 1.5 ? "text-success" : "text-muted-foreground"} />
+                </div>
+              </div>
+            )}
 
             {/* Reasoning */}
             {result.reasoning && (
@@ -170,6 +205,17 @@ export const AnalysisResultCard = ({ result, loading, onSetAlert }: Props) => {
       </Card>
     </motion.div>
   );
+};
+
+const fmtNum = (n: number | null | undefined, digits = 2, suffix = "") =>
+  n == null || !isFinite(n) ? "—" : `${n.toFixed(digits)}${suffix}`;
+const fmtPct = (n: number | null | undefined) =>
+  n == null || !isFinite(n) ? "—" : `${n >= 0 ? "+" : ""}${n.toFixed(2)}%`;
+const rsiColor = (rsi: number | null | undefined) => {
+  if (rsi == null) return "text-muted-foreground";
+  if (rsi >= 70) return "text-destructive";
+  if (rsi <= 30) return "text-success";
+  return "text-foreground";
 };
 
 const Stat = ({
