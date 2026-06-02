@@ -10,6 +10,7 @@ import {
   Brain, ExternalLink, AlertCircle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { RegisterBuyDialog } from "./RegisterBuyDialog";
 
 export interface AnalysisStats {
   changePct?: number | null;
