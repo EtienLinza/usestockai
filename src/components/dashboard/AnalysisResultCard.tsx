@@ -108,8 +108,32 @@ export const AnalysisResultCard = ({ result, loading, onSetAlert }: Props) => {
                 </div>
               )}
             </div>
+            {!result.insufficientData && (
+              <div className="ml-2 pl-3 border-l border-border/50">
+                <div className="text-[9px] uppercase tracking-wide text-muted-foreground">Confidence</div>
+                <div className={cn(
+                  "font-mono text-2xl font-semibold leading-tight",
+                  result.confidence >= 70 ? "text-success"
+                    : result.confidence >= 50 ? "text-foreground"
+                    : "text-muted-foreground"
+                )}>
+                  {Math.round(result.confidence)}<span className="text-sm text-muted-foreground">%</span>
+                </div>
+              </div>
+            )}
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            {!result.insufficientData && (
+              <RegisterBuyDialog
+                ticker={result.ticker}
+                decision={result.decision}
+                confidence={result.confidence}
+                currentPrice={result.currentPrice ?? null}
+                suggestedStop={result.suggestedStop ?? null}
+                suggestedTarget={result.suggestedTarget ?? null}
+                atr={result.stats?.atr ?? null}
+              />
+            )}
             <AddToWatchlistButton ticker={result.ticker} size="sm" className="border border-border/50" />
             {onSetAlert && (
               <Button variant="outline" size="sm" onClick={onSetAlert}>
