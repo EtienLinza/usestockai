@@ -14,7 +14,7 @@ import { Input } from "@/components/ui/input";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { Shield, Loader2, Info, Bot, Sparkles, Clock, Activity, TrendingUp, TrendingDown, Minus, Wallet, AlertTriangle, ChevronDown, Settings as SettingsIcon, Heart, User as UserIcon } from "lucide-react";
+import { Shield, Loader2, Info, Bot, Sparkles, Clock, Activity, TrendingUp, TrendingDown, Minus, Wallet, AlertTriangle, ChevronDown, Settings as SettingsIcon, Heart, User as UserIcon, CreditCard, Compass, SlidersHorizontal, Skull, Gauge } from "lucide-react";
 import { AccountSection } from "@/components/AccountSection";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
