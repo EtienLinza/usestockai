@@ -143,18 +143,43 @@ serve(async (req) => {
     const decision = sig.decision === "SHORT" ? "SELL" : sig.decision;
     const dir = decision === "BUY" ? 1 : decision === "SELL" ? -1 : 0;
 
-    // Always provide suggested levels — for HOLD use the bias direction so
-    // users still see meaningful entry/stop/target numbers.
     const biasDir = sig.weeklyBias.bias === "long" ? 1 : sig.weeklyBias.bias === "short" ? -1 : 0;
     const useDir = dir !== 0 ? dir : biasDir;
     const atrForStop = sig.atr > 0 ? sig.atr : atrLast;
     const stop = useDir !== 0 && atrForStop > 0 ? last - useDir * atrMult * atrForStop : null;
     const target = useDir !== 0 ? last * (1 + useDir * (tpPct / 100)) : null;
 
+    // Derived technical confidence — used when the engine gates conviction to
+    // 0 (HOLD due to bias mismatch / weak weekly / sub-threshold). Gives the
+    // UI a meaningful 0–100 read of how strong the technicals look right now.
+    const techConfidence = (() => {
+      const parts: number[] = [];
+      if (sma50 && sma200) {
+        const aligned = (last > sma50 && sma50 > sma200) || (last < sma50 && sma50 < sma200);
+        parts.push(aligned ? 1 : 0.4);
+      }
+      if (adxLast != null) parts.push(Math.min(1, adxLast / 40));
+      if (rsi != null) parts.push(Math.min(1, Math.abs(rsi - 50) / 25));
+      if (macdHist != null && last > 0) {
+        parts.push(Math.min(1, Math.abs(macdHist) / (last * 0.005)));
+      }
+      if (rangePos != null) parts.push(Math.min(1, Math.abs(rangePos - 50) / 40));
+      const wkAlloc = Math.abs(sig.weeklyBias?.targetAllocation ?? 0);
+      parts.push(Math.min(1, wkAlloc));
+      if (!parts.length) return 0;
+      const avg = parts.reduce((a, b) => a + b, 0) / parts.length;
+      // Map to 30..90 so HOLDs read as moderate, not zero.
+      return Math.round(30 + avg * 60);
+    })();
+
+    const finalConfidence = sig.conviction > 0 ? sig.conviction : techConfidence;
+
     return new Response(JSON.stringify({
       ticker,
       decision,
-      confidence: sig.conviction,
+      confidence: finalConfidence,
+      engineConviction: sig.conviction,
+      derivedConfidence: sig.conviction > 0 ? null : techConfidence,
       currentPrice: last,
       suggestedEntry: last,
       suggestedStop: stop,
