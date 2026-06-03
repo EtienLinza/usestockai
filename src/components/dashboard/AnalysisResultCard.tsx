@@ -39,6 +39,8 @@ export interface AnalysisResult {
   ticker: string;
   decision: "BUY" | "SELL" | "HOLD";
   confidence: number;
+  engineConviction?: number | null;
+  derivedConfidence?: number | null;
   currentPrice?: number | null;
   suggestedEntry?: number | null;
   suggestedStop?: number | null;
@@ -110,7 +112,9 @@ export const AnalysisResultCard = ({ result, loading, onSetAlert }: Props) => {
             </div>
             {!result.insufficientData && (
               <div className="ml-2 pl-3 border-l border-border/50">
-                <div className="text-[9px] uppercase tracking-wide text-muted-foreground">Confidence</div>
+                <div className="text-[9px] uppercase tracking-wide text-muted-foreground">
+                  {result.derivedConfidence != null ? "Tech score" : "Confidence"}
+                </div>
                 <div className={cn(
                   "font-mono text-2xl font-semibold leading-tight",
                   result.confidence >= 70 ? "text-success"
