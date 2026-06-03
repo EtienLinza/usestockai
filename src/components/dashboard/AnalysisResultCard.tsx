@@ -39,6 +39,8 @@ export interface AnalysisResult {
   ticker: string;
   decision: "BUY" | "SELL" | "HOLD";
   confidence: number;
+  engineConviction?: number | null;
+  derivedConfidence?: number | null;
   currentPrice?: number | null;
   suggestedEntry?: number | null;
   suggestedStop?: number | null;
