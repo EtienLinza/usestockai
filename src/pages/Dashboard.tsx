@@ -557,7 +557,7 @@ const Dashboard = () => {
 
             {/* ── Left Panel: Scanner + Portfolio Summary ── */}
             <motion.div initial={{ opacity: 0, x: -16 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.1 }} className="order-2 lg:order-1 lg:col-span-4 xl:col-span-3">
-              <div className="sticky top-20 space-y-4">
+              <div className="lg:sticky lg:top-20 space-y-4">
 
                 {/* Scanner Control */}
                 <Card className="glass-card p-5 space-y-5">

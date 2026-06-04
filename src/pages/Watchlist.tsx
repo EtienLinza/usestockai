@@ -318,19 +318,19 @@ const Watchlist = () => {
             </div>
 
             {/* Add Ticker Form */}
-            <Card className="glass-card p-4">
-              <form onSubmit={addToWatchlist} className="flex gap-3">
+            <Card className="glass-card p-3 sm:p-4">
+              <form onSubmit={addToWatchlist} className="flex flex-col sm:flex-row gap-2 sm:gap-3">
                 <div className="relative flex-1">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                   <Input
                     value={newTicker}
                     onChange={(e) => setNewTicker(e.target.value.toUpperCase())}
                     placeholder="Enter ticker (e.g., AAPL or BTC-USD)"
-                    className="pl-10 font-mono"
+                    className="pl-10 font-mono h-11"
                     maxLength={10}
                   />
                 </div>
-                <Button type="submit" disabled={isAdding || !newTicker.trim()}>
+                <Button type="submit" disabled={isAdding || !newTicker.trim()} className="h-11 sm:h-10">
                   {isAdding ? (
                     <Loader2 className="w-4 h-4 animate-spin" />
                   ) : (

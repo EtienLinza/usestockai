@@ -304,7 +304,7 @@ const Backtest = () => {
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-8">
             {/* Config Panel */}
             <motion.div initial={{ opacity: 0, x: -16 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.1 }} className="lg:col-span-4 xl:col-span-3">
-              <div className="sticky top-20 space-y-4">
+              <div className="lg:sticky lg:top-20 space-y-4">
                 <Card className="glass-card p-5 space-y-5">
                   <div className="flex items-center gap-2 text-sm font-medium">
                     <Brain className="w-4 h-4 text-primary" />

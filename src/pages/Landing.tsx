@@ -102,7 +102,7 @@ const Landing = () => {
       
       <main>
       {/* Hero Section */}
-      <section className="relative min-h-screen flex items-center justify-center overflow-hidden">
+      <section className="relative min-h-[85vh] sm:min-h-screen flex items-center justify-center overflow-hidden pt-16 sm:pt-0">
         <div className="absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-primary/3 rounded-full blur-[120px]" />
         
         <div className="container mx-auto px-4 sm:px-6 relative z-10">
@@ -116,7 +116,7 @@ const Landing = () => {
               initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               transition={{ delay: 0.1 }}
-              className="flex justify-center mb-10"
+              className="flex justify-center mb-6 sm:mb-10"
             >
               <Logo size="lg" />
             </motion.div>
