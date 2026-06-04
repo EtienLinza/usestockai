@@ -255,7 +255,7 @@ const Settings = () => {
         noindex
       />
       <Navbar />
-      <main className="container mx-auto px-6 pt-20 md:pt-24 pb-24 md:pb-12 max-w-6xl">
+      <main className="container mx-auto px-4 sm:px-6 pt-20 md:pt-24 pb-24 md:pb-12 max-w-6xl">
         <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
           {/* Page header */}
           <div className="space-y-1">
@@ -284,14 +284,14 @@ const Settings = () => {
             />
           )}
 
-          {/* Sticky save bar */}
+          {/* Sticky save bar — clear bottom nav on mobile */}
           {!loading && (
-            <div className="sticky bottom-4 z-10 flex justify-end pt-2">
+            <div className="sticky bottom-20 md:bottom-4 z-10 flex justify-end pt-2">
               <Button
                 onClick={save}
                 disabled={saving}
                 variant="success"
-                className="shadow-lg shadow-primary/20"
+                className="shadow-lg shadow-primary/20 w-full sm:w-auto"
               >
                 {saving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
                 Save Settings
