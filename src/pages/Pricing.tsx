@@ -86,7 +86,7 @@ export default function Pricing() {
       />
       <Navbar />
 
-      <main className="flex-1 pt-24 pb-16">
+      <main className="flex-1 pt-20 md:pt-24 pb-24 md:pb-16">
         <div className="container mx-auto px-6 max-w-6xl">
           {/* Hero */}
           <motion.div

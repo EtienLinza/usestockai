@@ -255,7 +255,7 @@ const Settings = () => {
         noindex
       />
       <Navbar />
-      <main className="container mx-auto px-6 pt-24 pb-12 max-w-6xl">
+      <main className="container mx-auto px-6 pt-20 md:pt-24 pb-24 md:pb-12 max-w-6xl">
         <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
           {/* Page header */}
           <div className="space-y-1">

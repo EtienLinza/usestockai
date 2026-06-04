@@ -288,7 +288,7 @@ const Backtest = () => {
         <div className="absolute top-1/4 left-1/2 -translate-x-1/2 w-[800px] h-[800px] bg-primary/2 rounded-full blur-[150px]" />
       </div>
 
-      <main className="pt-20 pb-12 px-4 sm:px-6 relative z-10">
+      <main className="pt-20 pb-24 md:pb-12 px-4 sm:px-6 relative z-10">
         <div className="container mx-auto max-w-7xl">
           <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} className="mb-6">
             <h1 className="text-xl sm:text-2xl font-medium mb-1 flex items-center gap-2">

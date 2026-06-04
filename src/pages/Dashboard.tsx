@@ -463,7 +463,7 @@ const Dashboard = () => {
         <div className="absolute top-1/4 left-1/2 -translate-x-1/2 w-[800px] h-[800px] bg-primary/2 rounded-full blur-[150px]" />
       </div>
 
-      <main className="pt-20 pb-12 px-4 sm:px-6 relative z-10">
+      <main className="pt-20 pb-24 md:pb-12 px-4 sm:px-6 relative z-10">
         <div className="container mx-auto max-w-7xl">
 
           {/* Per-user emergency stop banner */}
