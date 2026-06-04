@@ -463,7 +463,7 @@ const Dashboard = () => {
         <div className="absolute top-1/4 left-1/2 -translate-x-1/2 w-[800px] h-[800px] bg-primary/2 rounded-full blur-[150px]" />
       </div>
 
-      <main className="pt-20 pb-24 md:pb-12 px-4 sm:px-6 relative z-10">
+      <main className="pt-20 pb-24 md:pb-12 px-3 sm:px-6 relative z-10">
         <div className="container mx-auto max-w-7xl">
 
           {/* Per-user emergency stop banner */}
@@ -556,7 +556,7 @@ const Dashboard = () => {
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-8">
 
             {/* ── Left Panel: Scanner + Portfolio Summary ── */}
-            <motion.div initial={{ opacity: 0, x: -16 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.1 }} className="lg:col-span-4 xl:col-span-3">
+            <motion.div initial={{ opacity: 0, x: -16 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.1 }} className="order-2 lg:order-1 lg:col-span-4 xl:col-span-3">
               <div className="sticky top-20 space-y-4">
 
                 {/* Scanner Control */}
@@ -670,7 +670,7 @@ const Dashboard = () => {
             </motion.div>
 
             {/* ── Right Panel ── */}
-            <motion.div initial={{ opacity: 0, x: 16 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.2 }} className="lg:col-span-8 xl:col-span-9">
+            <motion.div initial={{ opacity: 0, x: 16 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.2 }} className="order-1 lg:order-2 lg:col-span-8 xl:col-span-9">
               <TickerSearchBar />
               <Tabs defaultValue="trading" className="w-full">
                 <TabsList className="bg-secondary/30 mb-6">

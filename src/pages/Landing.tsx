@@ -136,23 +136,23 @@ const Landing = () => {
               </motion.div>
             )}
             
-            <h1 className="text-4xl md:text-5xl lg:text-6xl font-medium mb-6 leading-tight tracking-tight">
+            <h1 className="text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-medium mb-5 sm:mb-6 leading-tight tracking-tight">
               AI Stock Predictions
               <br />
               <span className="text-gradient">& Live Trading Signals</span>
             </h1>
             
-            <p className="text-lg text-muted-foreground mb-12 max-w-xl mx-auto leading-relaxed">
+            <p className="text-base sm:text-lg text-muted-foreground mb-8 sm:mb-12 max-w-xl mx-auto leading-relaxed px-2">
               StockAI scans 6,000+ tickers in real time, generates high-conviction AI stock signals
               with calibrated confidence, and lets you backtest every strategy. Research only — no noise.
             </p>
             
-            <div className="flex flex-col sm:flex-row gap-4 justify-center">
+            <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 justify-center px-4 sm:px-0">
               <Button
                 variant="glow"
                 size="xl"
                 onClick={() => navigate("/dashboard")}
-                className="group"
+                className="group w-full sm:w-auto"
               >
                 <TrendingUp className="w-5 h-5" />
                 Open Dashboard
