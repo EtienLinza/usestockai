@@ -102,10 +102,10 @@ const Landing = () => {
       
       <main>
       {/* Hero Section */}
-      <section className="relative min-h-screen flex items-center justify-center overflow-hidden">
+      <section className="relative min-h-[85vh] sm:min-h-screen flex items-center justify-center overflow-hidden pt-16 sm:pt-0">
         <div className="absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-primary/3 rounded-full blur-[120px]" />
         
-        <div className="container mx-auto px-6 relative z-10">
+        <div className="container mx-auto px-4 sm:px-6 relative z-10">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -116,7 +116,7 @@ const Landing = () => {
               initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               transition={{ delay: 0.1 }}
-              className="flex justify-center mb-10"
+              className="flex justify-center mb-6 sm:mb-10"
             >
               <Logo size="lg" />
             </motion.div>
@@ -136,23 +136,23 @@ const Landing = () => {
               </motion.div>
             )}
             
-            <h1 className="text-4xl md:text-5xl lg:text-6xl font-medium mb-6 leading-tight tracking-tight">
+            <h1 className="text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-medium mb-5 sm:mb-6 leading-tight tracking-tight">
               AI Stock Predictions
               <br />
               <span className="text-gradient">& Live Trading Signals</span>
             </h1>
             
-            <p className="text-lg text-muted-foreground mb-12 max-w-xl mx-auto leading-relaxed">
+            <p className="text-base sm:text-lg text-muted-foreground mb-8 sm:mb-12 max-w-xl mx-auto leading-relaxed px-2">
               StockAI scans 6,000+ tickers in real time, generates high-conviction AI stock signals
               with calibrated confidence, and lets you backtest every strategy. Research only — no noise.
             </p>
             
-            <div className="flex flex-col sm:flex-row gap-4 justify-center">
+            <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 justify-center px-4 sm:px-0">
               <Button
                 variant="glow"
                 size="xl"
                 onClick={() => navigate("/dashboard")}
-                className="group"
+                className="group w-full sm:w-auto"
               >
                 <TrendingUp className="w-5 h-5" />
                 Open Dashboard
@@ -185,9 +185,9 @@ const Landing = () => {
       </section>
 
       {/* Features Section */}
-      <section className="py-24 relative">
+      <section className="py-16 sm:py-24 relative">
         <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-border to-transparent" />
-        <div className="container mx-auto px-6">
+        <div className="container mx-auto px-4 sm:px-6">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             whileInView={{ opacity: 1, y: 0 }}
@@ -221,8 +221,8 @@ const Landing = () => {
       </section>
 
       {/* How It Works */}
-      <section className="py-24 bg-secondary/20">
-        <div className="container mx-auto px-6">
+      <section className="py-16 sm:py-24 bg-secondary/20">
+        <div className="container mx-auto px-4 sm:px-6">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             whileInView={{ opacity: 1, y: 0 }}
@@ -258,8 +258,8 @@ const Landing = () => {
       </section>
 
       {/* Pricing snippet */}
-      <section className="py-24">
-        <div className="container mx-auto px-6 max-w-5xl">
+      <section className="py-16 sm:py-24">
+        <div className="container mx-auto px-4 sm:px-6 max-w-5xl">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             whileInView={{ opacity: 1, y: 0 }}
@@ -295,8 +295,8 @@ const Landing = () => {
       </section>
 
       {/* FAQ */}
-      <section className="py-24 bg-secondary/20">
-        <div className="container mx-auto px-6 max-w-3xl">
+      <section className="py-16 sm:py-24 bg-secondary/20">
+        <div className="container mx-auto px-4 sm:px-6 max-w-3xl">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             whileInView={{ opacity: 1, y: 0 }}
@@ -325,8 +325,8 @@ const Landing = () => {
       </section>
 
       {/* CTA */}
-      <section className="py-24">
-        <div className="container mx-auto px-6 text-center">
+      <section className="py-16 sm:py-24">
+        <div className="container mx-auto px-4 sm:px-6 text-center">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             whileInView={{ opacity: 1, y: 0 }}

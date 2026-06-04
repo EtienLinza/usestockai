@@ -23,6 +23,7 @@ import CheckoutReturn from "./pages/CheckoutReturn";
 import NotFound from "./pages/NotFound";
 import { RequireOnboarding } from "./components/RequireOnboarding";
 import { PaymentTestModeBanner } from "./components/PaymentTestModeBanner";
+import { MobileBottomNav } from "./components/MobileBottomNav";
 
 const queryClient = new QueryClient();
 
@@ -53,6 +54,7 @@ const App = () => (
                 <Route path="/disclosure" element={<Disclosure />} />
                 <Route path="*" element={<NotFound />} />
               </Routes>
+              <MobileBottomNav />
             </RequireOnboarding>
           </BrowserRouter>
         </TooltipProvider>

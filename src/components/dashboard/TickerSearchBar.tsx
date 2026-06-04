@@ -63,13 +63,13 @@ export const TickerSearchBar = () => {
   return (
     <div className="space-y-4 mb-6">
       <Card className="glass-card p-4">
-        <div className="flex items-center gap-2 mb-3">
-          <Search className="w-4 h-4 text-primary" />
+        <div className="flex items-center gap-2 mb-1">
+          <Search className="w-4 h-4 text-primary shrink-0" />
           <span className="text-sm font-medium">Look up any ticker</span>
-          <span className="text-[10px] text-muted-foreground ml-1">
-            Run a fresh BUY / SELL / HOLD analysis or open the full stock page
-          </span>
         </div>
+        <p className="text-[11px] text-muted-foreground mb-3 leading-snug">
+          Run a fresh BUY / SELL / HOLD analysis or open the full stock page.
+        </p>
         <div className="flex flex-col sm:flex-row gap-2">
           <Input
             value={value}
