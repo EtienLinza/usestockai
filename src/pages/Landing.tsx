@@ -105,7 +105,7 @@ const Landing = () => {
       <section className="relative min-h-screen flex items-center justify-center overflow-hidden">
         <div className="absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-primary/3 rounded-full blur-[120px]" />
         
-        <div className="container mx-auto px-6 relative z-10">
+        <div className="container mx-auto px-4 sm:px-6 relative z-10">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -185,9 +185,9 @@ const Landing = () => {
       </section>
 
       {/* Features Section */}
-      <section className="py-24 relative">
+      <section className="py-16 sm:py-24 relative">
         <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-border to-transparent" />
-        <div className="container mx-auto px-6">
+        <div className="container mx-auto px-4 sm:px-6">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             whileInView={{ opacity: 1, y: 0 }}
@@ -221,8 +221,8 @@ const Landing = () => {
       </section>
 
       {/* How It Works */}
-      <section className="py-24 bg-secondary/20">
-        <div className="container mx-auto px-6">
+      <section className="py-16 sm:py-24 bg-secondary/20">
+        <div className="container mx-auto px-4 sm:px-6">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             whileInView={{ opacity: 1, y: 0 }}
@@ -258,8 +258,8 @@ const Landing = () => {
       </section>
 
       {/* Pricing snippet */}
-      <section className="py-24">
-        <div className="container mx-auto px-6 max-w-5xl">
+      <section className="py-16 sm:py-24">
+        <div className="container mx-auto px-4 sm:px-6 max-w-5xl">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             whileInView={{ opacity: 1, y: 0 }}
@@ -295,8 +295,8 @@ const Landing = () => {
       </section>
 
       {/* FAQ */}
-      <section className="py-24 bg-secondary/20">
-        <div className="container mx-auto px-6 max-w-3xl">
+      <section className="py-16 sm:py-24 bg-secondary/20">
+        <div className="container mx-auto px-4 sm:px-6 max-w-3xl">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             whileInView={{ opacity: 1, y: 0 }}
@@ -325,8 +325,8 @@ const Landing = () => {
       </section>
 
       {/* CTA */}
-      <section className="py-24">
-        <div className="container mx-auto px-6 text-center">
+      <section className="py-16 sm:py-24">
+        <div className="container mx-auto px-4 sm:px-6 text-center">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             whileInView={{ opacity: 1, y: 0 }}
