@@ -44,7 +44,7 @@ export const Navbar = () => {
     { href: "/autotrader-log", label: "AutoTrader Log", icon: Bot },
   ];
 
-  const allLinks = [...navLinks, ...secondaryLinks];
+  
 
   const handleSignOut = async () => {
     await signOut();
