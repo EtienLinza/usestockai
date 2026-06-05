@@ -3,8 +3,8 @@ import { AlertTriangle } from "lucide-react";
 
 export const Footer = () => {
   return (
-    <footer className="border-t border-border/40 bg-background mt-auto">
-      <div className="container mx-auto px-6 py-8 max-w-7xl">
+    <footer className="border-t border-border/40 bg-background mt-auto pb-20 md:pb-0">
+      <div className="container mx-auto px-4 sm:px-6 py-8 max-w-7xl">
         {/* Disclaimer banner */}
         <div className="flex items-start gap-3 p-4 rounded-lg bg-muted/30 border border-border/40 mb-6">
           <AlertTriangle className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
