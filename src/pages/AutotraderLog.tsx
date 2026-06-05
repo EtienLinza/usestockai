@@ -100,7 +100,7 @@ const AutotraderLog = () => {
         noindex
       />
       <Navbar />
-      <main className="container mx-auto px-6 pt-20 md:pt-24 pb-24 md:pb-12 max-w-5xl">
+      <main className="container mx-auto px-4 sm:px-6 pt-20 md:pt-24 pb-24 md:pb-12 max-w-5xl">
         <LockedFeature requiredTier="elite" feature="AutoTrader">
         <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-5">
           <div className="flex items-center gap-2 mb-1">
