@@ -120,7 +120,9 @@ export const Navbar = () => {
                   </SheetTitle>
                 </SheetHeader>
                 <nav className="flex flex-col gap-2 mt-6">
-                  {allLinks.map((link) => {
+                  {/* Mobile bottom nav already covers Dashboard/Watchlist/Backtest/Settings.
+                      Only surface what isn't reachable from there. */}
+                  {[...secondaryLinks, { href: "/pricing", label: "Pricing", icon: Sparkles }].map((link) => {
                     const isActive = location.pathname === link.href;
                     const Icon = link.icon;
                     return (
@@ -135,8 +137,9 @@ export const Navbar = () => {
                       </Button>
                     );
                   })}
-                  
+
                   <div className="border-t border-border/30 my-4" />
+                  
                   
                   {user ? (
                     <>
