@@ -8,7 +8,7 @@ const cardVariants = cva(
   {
     variants: {
       variant: {
-        default: "bg-card border-border shadow-sm",
+        default: "bg-card border-border shadow-sm hover:shadow-md hover:border-border/80",
         glass: "bg-card/50 backdrop-blur-sm border-border/50 shadow-lg",
         glow: "bg-card border-primary/20 shadow-lg shadow-primary/10 hover:shadow-xl hover:shadow-primary/15",
         stat: "bg-gradient-to-br from-card to-background border-border/50 shadow-lg hover:-translate-y-1 hover:shadow-xl hover:border-primary/30",

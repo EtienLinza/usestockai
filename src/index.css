@@ -148,6 +148,7 @@
   html {
     scroll-behavior: smooth;
     overflow-x: hidden;
+    -webkit-tap-highlight-color: transparent;
   }
 
   body {
@@ -156,6 +157,9 @@
     letter-spacing: 0.01em;
     overflow-x: hidden;
     min-width: 0;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
   }
 
   /* Prevent any element from busting the viewport */
@@ -163,16 +167,34 @@
 
   code, pre, .font-mono {
     font-family: 'JetBrains Mono', monospace;
+    font-variant-numeric: tabular-nums;
   }
+
+  .tabular-nums { font-variant-numeric: tabular-nums; }
+
+  ::selection {
+    background: hsl(var(--primary) / 0.25);
+    color: hsl(var(--foreground));
+  }
+
+  /* Smoother heading rhythm */
+  h1, h2, h3, h4 { letter-spacing: -0.01em; }
+  h1 { letter-spacing: -0.02em; }
 }
 
 @layer components {
   /* Glassmorphism card - refined */
   .glass-card {
-    @apply relative overflow-hidden rounded-lg border;
+    @apply relative overflow-hidden rounded-lg border transition-all duration-300;
     background: hsl(var(--card));
     border-color: hsl(var(--border));
     backdrop-filter: blur(12px);
+    box-shadow: 0 1px 0 hsl(var(--foreground) / 0.02), 0 8px 24px -12px hsl(0 0% 0% / 0.25);
+  }
+
+  .glass-card:hover {
+    border-color: hsl(var(--primary) / 0.25);
+    box-shadow: 0 1px 0 hsl(var(--foreground) / 0.03), 0 12px 32px -12px hsl(var(--primary) / 0.18);
   }
 
   .dark .glass-card::before {
