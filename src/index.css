@@ -148,6 +148,7 @@
   html {
     scroll-behavior: smooth;
     overflow-x: hidden;
+    -webkit-tap-highlight-color: transparent;
   }
 
   body {
@@ -156,6 +157,9 @@
     letter-spacing: 0.01em;
     overflow-x: hidden;
     min-width: 0;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
   }
 
   /* Prevent any element from busting the viewport */
@@ -163,7 +167,19 @@
 
   code, pre, .font-mono {
     font-family: 'JetBrains Mono', monospace;
+    font-variant-numeric: tabular-nums;
   }
+
+  .tabular-nums { font-variant-numeric: tabular-nums; }
+
+  ::selection {
+    background: hsl(var(--primary) / 0.25);
+    color: hsl(var(--foreground));
+  }
+
+  /* Smoother heading rhythm */
+  h1, h2, h3, h4 { letter-spacing: -0.01em; }
+  h1 { letter-spacing: -0.02em; }
 }
 
 @layer components {
