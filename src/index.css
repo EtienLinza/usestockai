@@ -188,10 +188,6 @@
     button, a, [role="button"], input, select, textarea {
       -webkit-touch-callout: none;
     }
-    /* Ensure interactive controls clear 44px on mobile */
-    button:not([data-size-keep]), a[role="button"]:not([data-size-keep]) {
-      min-height: 40px;
-    }
     /* Momentum scrolling for any scroll containers */
     .scrollbar-thin, [data-scroll], main {
       -webkit-overflow-scrolling: touch;
