@@ -50,14 +50,17 @@ export const MobileBottomNav = () => {
               <Link
                 to={item.href}
                 className={cn(
-                  "flex flex-col items-center justify-center gap-0.5 py-2.5 min-h-[56px] text-[10px] font-medium transition-colors",
+                  "relative flex flex-col items-center justify-center gap-0.5 py-2.5 min-h-[56px] text-[10px] font-medium transition-colors",
                   isActive
                     ? "text-primary"
                     : "text-muted-foreground hover:text-foreground active:text-foreground",
                 )}
                 aria-current={isActive ? "page" : undefined}
               >
-                <Icon className={cn("w-5 h-5", isActive && "text-primary")} />
+                {isActive && (
+                  <span className="absolute top-0 left-1/2 -translate-x-1/2 h-0.5 w-8 rounded-full bg-primary" />
+                )}
+                <Icon className={cn("w-5 h-5 transition-transform", isActive && "text-primary scale-110")} />
                 <span className="tracking-tight">{item.label}</span>
               </Link>
             </li>
