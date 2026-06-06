@@ -166,7 +166,7 @@ const Landing = () => {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.3, duration: 0.6 }}
-            className="flex flex-wrap justify-center gap-6 sm:gap-10 mt-16"
+            className="grid grid-cols-2 sm:flex sm:flex-wrap justify-center gap-4 sm:gap-10 mt-12 sm:mt-16 max-w-md sm:max-w-none mx-auto"
           >
             {stats.map((stat, i) => (
               <motion.div
@@ -174,10 +174,10 @@ const Landing = () => {
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.35 + i * 0.05 }}
-                className="text-center"
+                className="text-center rounded-lg border border-border/30 sm:border-0 py-3 sm:py-0 bg-card/30 sm:bg-transparent"
               >
-                <div className="text-lg sm:text-xl font-bold font-mono text-primary">{stat.value}</div>
-                <div className="text-[10px] sm:text-xs text-muted-foreground uppercase tracking-wider">{stat.label}</div>
+                <div className="text-lg sm:text-xl font-bold font-mono tabular-nums text-primary">{stat.value}</div>
+                <div className="text-[10px] sm:text-xs text-muted-foreground uppercase tracking-wider mt-0.5">{stat.label}</div>
               </motion.div>
             ))}
           </motion.div>

@@ -182,6 +182,26 @@
   h1 { letter-spacing: -0.02em; }
 }
 
+@layer base {
+  /* Mobile polish: larger tap targets, smoother momentum scroll, no callout */
+  @media (max-width: 767px) {
+    button, a, [role="button"], input, select, textarea {
+      -webkit-touch-callout: none;
+    }
+    /* Momentum scrolling for any scroll containers */
+    .scrollbar-thin, [data-scroll], main {
+      -webkit-overflow-scrolling: touch;
+    }
+    /* Slightly tighter headings on small screens */
+    h1 { line-height: 1.1; }
+    h2 { line-height: 1.15; }
+    /* Subtle press feedback on cards */
+    .glass-card:active {
+      transform: scale(0.997);
+    }
+  }
+}
+
 @layer components {
   /* Glassmorphism card - refined */
   .glass-card {
