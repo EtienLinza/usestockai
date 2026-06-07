@@ -1588,7 +1588,21 @@ async function runExitOnlyPass(
       ? { ...baseProfile, trailingStopATRMult: baseProfile.trailingStopATRMult * trailAdj }
       : baseProfile;
 
-    const lossAct = runLossExit(pos, data, currentPrice, profile, liveDecision, liveConviction, liveBias, liveRsi);
+    // Earnings blackout for OPEN positions (audit gap G-3): close before the
+    // gap rather than blocking new entries only. Always takes priority.
+    let earningsAct: ExitAction | null = null;
+    try {
+      const eDays = await getEarningsBlackoutDays(pos.ticker.toUpperCase());
+      if (eDays !== null && eDays <= 2) {
+        earningsAct = {
+          kind: "FULL_EXIT",
+          reason: `Earnings blackout: report in ~${eDays} trading day${eDays === 1 ? "" : "s"} — closing to avoid gap risk`,
+          price: currentPrice,
+        };
+      }
+    } catch (_e) { /* non-fatal */ }
+
+    const lossAct = earningsAct ?? runLossExit(pos, data, currentPrice, profile, liveDecision, liveConviction, liveBias, liveRsi);
     const action: ExitAction = lossAct ?? runWinExit(pos, data, currentPrice, profile, liveWeeklyAlloc);
     const innerSummary = { exits: 0, partials: 0, holds: 0 };
     await executeExit(supabase, pos, action, profile, innerSummary);
@@ -1738,8 +1752,23 @@ async function processUser(
       ? { ...baseProfile, trailingStopATRMult: baseProfile.trailingStopATRMult * trailAdj }
       : baseProfile;
 
-    // Run loss + win in priority order (loss wins ties)
-    const lossAct = runLossExit(pos, data, currentPrice, profile, liveDecision, liveConviction, liveBias, liveRsi);
+    // Earnings blackout for OPEN positions (audit gap G-3): close 2 trading
+    // days before earnings to avoid gap-through-stop risk. Takes priority
+    // over both win-exit and loss-exit logic.
+    let earningsAct: ExitAction | null = null;
+    try {
+      const eDays = await getEarningsBlackoutDays(pos.ticker.toUpperCase());
+      if (eDays !== null && eDays <= 2) {
+        earningsAct = {
+          kind: "FULL_EXIT",
+          reason: `Earnings blackout: report in ~${eDays} trading day${eDays === 1 ? "" : "s"} — closing to avoid gap risk`,
+          price: currentPrice,
+        };
+      }
+    } catch (_e) { /* non-fatal */ }
+
+    // Run loss + win in priority order (earnings → loss → win)
+    const lossAct = earningsAct ?? runLossExit(pos, data, currentPrice, profile, liveDecision, liveConviction, liveBias, liveRsi);
     const action: ExitAction = lossAct ?? runWinExit(pos, data, currentPrice, profile, liveWeeklyAlloc);
 
     const beforeExits = summary.exits, beforePartials = summary.partials, beforeHolds = summary.holds;
@@ -1749,31 +1778,13 @@ async function processUser(
     userSummary.holds += summary.holds - beforeHolds;
   }
 
-  // ── ENTRIES ─────────────────────────────────────────────────────────────
-  // Only users with autotrader enabled get new entries. Users with disabled
-  // autotrader still benefit from the exit pass above (manual buys auto-close).
-  if (!settings.enabled) {
-    await supabase.from("virtual_portfolio_log").upsert(
-      {
-        user_id: userId, date: today,
-        total_value: settings.starting_nav + unrealizedToday,
-        cash: settings.starting_nav - totalNavExposureDollars,
-        positions_value: totalNavExposureDollars,
-      },
-      { onConflict: "user_id,date" },
-    );
-    return;
-  }
-  // Per-user open count: positions that survived the exit pass above.
-  // (Was previously using global summary.exits which contaminated user B with user A's exits.)
-  const refreshedOpenCount = positions.length - userSummary.exits;
-  const navExposurePct = (totalNavExposureDollars / settings.starting_nav) * 100;
-  const todayPnlPct = ((realizedToday + unrealizedToday) / settings.starting_nav) * 100;
-
-  // C-3 FIX: cumulative realized PnL across the entire history of this
-  // user's closed positions. Combined with today's unrealized this gives
-  // an accurate live NAV for position sizing, replacing the static
-  // starting_nav that over-sized after drawdowns and under-sized after gains.
+  // C-3 / G-2 FIX: cumulative realized PnL across this user's entire closed
+  // history. Combined with today's unrealized this gives an accurate MTM NAV
+  // used both for position sizing AND for the rolling-drawdown circuit breaker.
+  // Computed unconditionally so the disabled-autotrader snapshot below also
+  // reports a true MTM equity curve (closes audit gap G-2: breaker previously
+  // saw only closed PnL via virtual_portfolio_log snapshots that ignored
+  // realized history).
   let cumulativeRealizedPnl = 0;
   try {
     const { data: allClosed } = await supabase
@@ -1792,7 +1803,29 @@ async function processUser(
     settings.starting_nav + cumulativeRealizedPnl + unrealizedToday,
   );
 
+  // ── ENTRIES ─────────────────────────────────────────────────────────────
+  // Only users with autotrader enabled get new entries. Users with disabled
+  // autotrader still benefit from the exit pass above (manual buys auto-close).
+  if (!settings.enabled) {
+    await supabase.from("virtual_portfolio_log").upsert(
+      {
+        user_id: userId, date: today,
+        total_value: currentNav,
+        cash: Math.max(0, currentNav - totalNavExposureDollars),
+        positions_value: totalNavExposureDollars,
+      },
+      { onConflict: "user_id,date" },
+    );
+    return;
+  }
+  // Per-user open count: positions that survived the exit pass above.
+  // (Was previously using global summary.exits which contaminated user B with user A's exits.)
+  const refreshedOpenCount = positions.length - userSummary.exits;
+  const navExposurePct = (totalNavExposureDollars / currentNav) * 100;
+  const todayPnlPct = ((realizedToday + unrealizedToday) / currentNav) * 100;
+
   const heldTickers = new Set(positions.map(p => p.ticker.toUpperCase()));
+
 
   // ── CAPITAL ROTATION GATE ─────────────────────────────────────────────
   // When all slots are full we normally skip the entry scan to conserve API
@@ -2132,12 +2165,13 @@ async function processUser(
     if (p.kind === "hold") { summary.holds++; userSummary.holds++; }
   }
 
-  // Portfolio snapshot
+  // Portfolio snapshot — true MTM equity (closes audit gap G-2 so the rolling
+  // drawdown circuit breaker reacts to UNrealized losses too, not just closed).
   await supabase.from("virtual_portfolio_log").upsert(
     {
       user_id: userId, date: today,
-      total_value: settings.starting_nav - totalNavExposureDollars + totalNavExposureDollars + unrealizedToday,
-      cash: settings.starting_nav - totalNavExposureDollars,
+      total_value: currentNav,
+      cash: Math.max(0, currentNav - totalNavExposureDollars),
       positions_value: totalNavExposureDollars,
     },
     { onConflict: "user_id,date" },
