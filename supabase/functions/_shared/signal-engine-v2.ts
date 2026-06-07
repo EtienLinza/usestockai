@@ -986,7 +986,15 @@ export function computePositionSize(
   const kellyBase = (edge && edge.sampleSize >= 30 && edge.avgWin > 0 && edge.avgLoss > 0)
     ? realKelly(edge)
     : 0.10 + ((conviction - 60) / 40) * 0.15;
-  const volScalar = applyVolScaling ? Math.min(1.5, targetVol / atrPct) : 1;
+  // H-2 fix: clamp atrPct in the volScalar denominator so that sub-$5 names
+  // (where tick discreteness inflates ATR%) and ultra-quiet names don't
+  // collapse or balloon sizing. Floor 0.5% (avoids divide-by-tiny) and
+  // ceiling 6% (≈95% annualized — anything above that is already a circuit
+  // breaker case, not a sizing one). Without the ceiling, a $3 stock with
+  // a $0.30 ATR (atrPct=0.10) would size to ~10% of conviction-Kelly; with
+  // the clamp it sizes to a sane ~17%.
+  const atrPctClamped = Math.min(0.06, Math.max(0.005, atrPct));
+  const volScalar = applyVolScaling ? Math.min(1.5, targetVol / atrPctClamped) : 1;
   const raw = kellyBase * volScalar;
   const capped = Math.min(0.25, Math.max(0, raw));
   return direction === "short" ? -capped : capped;
