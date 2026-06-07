@@ -104,6 +104,9 @@ import {
   hasDailyMeanReversionEntry,
   classifyStock,
   evaluateSignal,
+  primeTrackerCacheFromDB,
+  persistTrackerCacheToDB,
+  clearTrackerCache,
   PROFILE_PARAMS,
   INDEX_TICKERS,
   type DataSet,
@@ -831,6 +834,15 @@ serve(async (req) => {
         tickerList: allTickers, totalTickers: allTickers.length, done: true,
       }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
+
+    // C-2 FIX: hydrate per-ticker cooldown tracker from DB so cooldown
+    // actually carries across scanner invocations.
+    const cooldownSupabase = createClient(
+      Deno.env.get("SUPABASE_URL")!,
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+    );
+    clearTrackerCache();
+    await primeTrackerCacheFromDB(cooldownSupabase, tickersToScan);
 
     console.log(`Scanning batch ${batch}: ${tickersToScan.join(", ")}`);
 
