@@ -39,6 +39,11 @@ function buildFeatures(row: OutcomeRow): MetaFeatures | null {
   const relStrength = Number(cr.rel_strength ?? cr.relStrength ?? 0);
   const sectorMomentum = Number(cr.sector_momentum ?? cr.sectorMomentum ?? 0);
   const eps = Number(cr.eps_revision_score ?? 0);
+  // AUDIT FIX (#2): use macro regime persisted in contributing_rules
+  // (bull_quiet/bull_volatile/bear_quiet/bear_volatile/neutral) rather than
+  // the ticker-level `signal_outcomes.regime` (trending/ranging/breakout).
+  // Inference passes the same macro regime, so this eliminates train/serve skew.
+  const macroRegime = (cr.market_regime as string | null) ?? null;
   const ed = row.entry_date ? new Date(row.entry_date) : new Date();
   return {
     conviction: conv,
@@ -46,7 +51,7 @@ function buildFeatures(row: OutcomeRow): MetaFeatures | null {
     relStrength: Number.isFinite(relStrength) ? relStrength : 0,
     sectorMomentum: Number.isFinite(sectorMomentum) ? sectorMomentum : 0,
     epsRevisionScore: Number.isFinite(eps) ? eps : 0,
-    regime: (row.regime as string | null) ?? null,
+    regime: macroRegime,
     hourOfDay: hourOfDay(ed),
     dayOfWeek: dayOfWeek(ed),
   };

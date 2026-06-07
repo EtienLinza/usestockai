@@ -291,6 +291,7 @@ serve(async (req) => {
           market_regime: sig.marketRegime ?? marketRegime ?? null,
           regime_delta: sig.regimeDelta ?? 0,
           meta_score: metaScore,
+          atr_pct: atrPct,
         });
       } catch (err) {
         console.error(`worker ${ticker}:`, err);
