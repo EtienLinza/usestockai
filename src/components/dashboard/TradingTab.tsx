@@ -498,123 +498,8 @@ export function TradingTab({
             />
           </div>
 
-          {/* Performance Metrics (if closed trades) */}
-          {closedPositions.length > 0 && (
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <MetricCard icon={TrendingUp} label="Avg Win" value={`+$${avgWin.toFixed(2)}`} color="text-success" />
-              <MetricCard icon={TrendingDown} label="Avg Loss" value={`$${avgLoss.toFixed(2)}`} color="text-destructive" />
-              <MetricCard
-                icon={Activity}
-                label="Profit Factor"
-                value={profitFactor === Infinity ? "∞" : profitFactor.toFixed(2)}
-                color={profitFactor >= 1.5 ? "text-success" : profitFactor >= 1 ? "text-primary" : "text-destructive"}
-              />
-              <MetricCard
-                icon={Target}
-                label="Total P&L"
-                value={`${totalRealizedPnL >= 0 ? "+" : ""}$${totalRealizedPnL.toFixed(2)}`}
-                color={totalRealizedPnL >= 0 ? "text-success" : "text-destructive"}
-              />
-            </div>
-          )}
+          {/* Performance details moved below positions for better information hierarchy */}
 
-          {/* Performance Summary Card */}
-          {closedPositions.length >= 3 && (
-            <Card className="glass-card p-4 sm:p-5">
-              <div className="flex items-center gap-2 mb-3">
-                <Trophy className="w-4 h-4 text-primary" />
-                <span className="text-sm font-medium">Performance Summary</span>
-              </div>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs">
-                <div>
-                  <div className="text-muted-foreground mb-1">Best Trade</div>
-                  <div className="font-mono font-bold text-success">
-                    {bestTrade ? `${bestTrade.ticker} +$${Number(bestTrade.pnl).toFixed(2)}` : "—"}
-                  </div>
-                </div>
-                <div>
-                  <div className="text-muted-foreground mb-1">Worst Trade</div>
-                  <div className="font-mono font-bold text-destructive">
-                    {worstTrade ? `${worstTrade.ticker} $${Number(worstTrade.pnl).toFixed(2)}` : "—"}
-                  </div>
-                </div>
-                <div>
-                  <div className="text-muted-foreground mb-1">Avg Hold Time</div>
-                  <div className="font-mono font-medium">
-                    {avgHoldTime !== null ? (avgHoldTime < 1 ? `${(avgHoldTime * 24).toFixed(0)}h` : `${avgHoldTime.toFixed(1)}d`) : "—"}
-                  </div>
-                </div>
-                <div>
-                  <div className="text-muted-foreground mb-1">Total Realized</div>
-                  <div className={cn("font-mono font-bold", totalRealizedPnL >= 0 ? "text-success" : "text-destructive")}>
-                    {totalRealizedPnL >= 0 ? "+" : ""}${totalRealizedPnL.toFixed(2)}
-                  </div>
-                </div>
-              </div>
-            </Card>
-          )}
-
-          {/* Equity Curve */}
-          {portfolioHistory.length > 1 && (
-            <Card className="glass-card p-4 sm:p-6">
-              <div className="flex items-center gap-2 mb-4">
-                <BarChart3 className="w-4 h-4 text-primary" />
-                <span className="text-sm font-medium">Equity Curve</span>
-              </div>
-              <div className="h-36 sm:h-48">
-                <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={portfolioHistory}>
-                    <defs>
-                      <linearGradient id="equityFill" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.3} />
-                        <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0} />
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" className="stroke-border/20" />
-                    <XAxis dataKey="date" tick={{ fontSize: 10 }} className="fill-muted-foreground" />
-                    <YAxis
-                      tick={{ fontSize: 10 }}
-                      className="fill-muted-foreground"
-                      // Auto-scale around the actual series instead of a fixed
-                      // domain so the curve fills the chart at any portfolio size.
-                      domain={[(dataMin: number) => dataMin * 0.95, (dataMax: number) => dataMax * 1.1]}
-                      tickFormatter={(v) => `$${Math.round(v).toLocaleString()}`}
-                    />
-                    <Tooltip
-                      contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: "8px", fontSize: "12px" }}
-                      formatter={(value: number) => [`$${value.toFixed(2)}`, "Portfolio Value"]}
-                    />
-                    <Area type="monotone" dataKey="total_value" stroke="hsl(var(--primary))" strokeWidth={2} fill="url(#equityFill)" />
-                  </AreaChart>
-                </ResponsiveContainer>
-              </div>
-
-              {drawdownData.length > 0 && (
-                <div className="h-24 mt-4">
-                  <div className="text-[10px] text-muted-foreground uppercase tracking-wide mb-1">Drawdown</div>
-                  <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={drawdownData}>
-                      <defs>
-                        <linearGradient id="ddFill" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="hsl(var(--destructive))" stopOpacity={0.3} />
-                          <stop offset="95%" stopColor="hsl(var(--destructive))" stopOpacity={0} />
-                        </linearGradient>
-                      </defs>
-                      <CartesianGrid strokeDasharray="3 3" className="stroke-border/10" />
-                      <XAxis dataKey="date" tick={false} />
-                      <YAxis tick={{ fontSize: 9 }} className="fill-muted-foreground" tickFormatter={(v) => `${v.toFixed(0)}%`} />
-                      <Tooltip
-                        contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: "8px", fontSize: "11px" }}
-                        formatter={(value: number) => [`${value.toFixed(2)}%`, "Drawdown"]}
-                      />
-                      <ReferenceLine y={0} className="stroke-border" />
-                      <Area type="monotone" dataKey="drawdown" stroke="hsl(var(--destructive))" strokeWidth={1.5} fill="url(#ddFill)" />
-                    </AreaChart>
-                  </ResponsiveContainer>
-                </div>
-              )}
-            </Card>
-          )}
 
           {/* Active Signals */}
           <Card className="glass-card">
@@ -866,7 +751,127 @@ export function TradingTab({
             </Card>
           )}
 
+
+          {/* === Performance details (moved below the actionable sections) === */}
+
+          {/* Performance Metrics (if closed trades) */}
+          {closedPositions.length > 0 && (
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <MetricCard icon={TrendingUp} label="Avg Win" value={`+$${avgWin.toFixed(2)}`} color="text-success" />
+              <MetricCard icon={TrendingDown} label="Avg Loss" value={`$${avgLoss.toFixed(2)}`} color="text-destructive" />
+              <MetricCard
+                icon={Activity}
+                label="Profit Factor"
+                value={profitFactor === Infinity ? "∞" : profitFactor.toFixed(2)}
+                color={profitFactor >= 1.5 ? "text-success" : profitFactor >= 1 ? "text-primary" : "text-destructive"}
+              />
+              <MetricCard
+                icon={Target}
+                label="Total P&L"
+                value={`${totalRealizedPnL >= 0 ? "+" : ""}$${totalRealizedPnL.toFixed(2)}`}
+                color={totalRealizedPnL >= 0 ? "text-success" : "text-destructive"}
+              />
+            </div>
+          )}
+
+          {/* Performance Summary Card */}
+          {closedPositions.length >= 3 && (
+            <Card className="glass-card p-4 sm:p-5">
+              <div className="flex items-center gap-2 mb-3">
+                <Trophy className="w-4 h-4 text-primary" />
+                <span className="text-sm font-medium">Performance Summary</span>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs">
+                <div>
+                  <div className="text-muted-foreground mb-1">Best Trade</div>
+                  <div className="font-mono font-bold text-success">
+                    {bestTrade ? `${bestTrade.ticker} +$${Number(bestTrade.pnl).toFixed(2)}` : "—"}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-muted-foreground mb-1">Worst Trade</div>
+                  <div className="font-mono font-bold text-destructive">
+                    {worstTrade ? `${worstTrade.ticker} $${Number(worstTrade.pnl).toFixed(2)}` : "—"}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-muted-foreground mb-1">Avg Hold Time</div>
+                  <div className="font-mono font-medium">
+                    {avgHoldTime !== null ? (avgHoldTime < 1 ? `${(avgHoldTime * 24).toFixed(0)}h` : `${avgHoldTime.toFixed(1)}d`) : "—"}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-muted-foreground mb-1">Total Realized</div>
+                  <div className={cn("font-mono font-bold", totalRealizedPnL >= 0 ? "text-success" : "text-destructive")}>
+                    {totalRealizedPnL >= 0 ? "+" : ""}${totalRealizedPnL.toFixed(2)}
+                  </div>
+                </div>
+              </div>
+            </Card>
+          )}
+
+          {/* Equity Curve */}
+          {portfolioHistory.length > 1 && (
+            <Card className="glass-card p-4 sm:p-6">
+              <div className="flex items-center gap-2 mb-4">
+                <BarChart3 className="w-4 h-4 text-primary" />
+                <span className="text-sm font-medium">Equity Curve</span>
+              </div>
+              <div className="h-36 sm:h-48">
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={portfolioHistory}>
+                    <defs>
+                      <linearGradient id="equityFill" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.3} />
+                        <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" className="stroke-border/20" />
+                    <XAxis dataKey="date" tick={{ fontSize: 10 }} className="fill-muted-foreground" />
+                    <YAxis
+                      tick={{ fontSize: 10 }}
+                      className="fill-muted-foreground"
+                      domain={[(dataMin: number) => dataMin * 0.95, (dataMax: number) => dataMax * 1.1]}
+                      tickFormatter={(v) => `$${Math.round(v).toLocaleString()}`}
+                    />
+                    <Tooltip
+                      contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: "8px", fontSize: "12px" }}
+                      formatter={(value: number) => [`$${value.toFixed(2)}`, "Portfolio Value"]}
+                    />
+                    <Area type="monotone" dataKey="total_value" stroke="hsl(var(--primary))" strokeWidth={2} fill="url(#equityFill)" />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+
+              {drawdownData.length > 0 && (
+                <div className="h-24 mt-4">
+                  <div className="text-[10px] text-muted-foreground uppercase tracking-wide mb-1">Drawdown</div>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={drawdownData}>
+                      <defs>
+                        <linearGradient id="ddFill" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="hsl(var(--destructive))" stopOpacity={0.3} />
+                          <stop offset="95%" stopColor="hsl(var(--destructive))" stopOpacity={0} />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" className="stroke-border/10" />
+                      <XAxis dataKey="date" tick={false} />
+                      <YAxis tick={{ fontSize: 9 }} className="fill-muted-foreground" tickFormatter={(v) => `${v.toFixed(0)}%`} />
+                      <Tooltip
+                        contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: "8px", fontSize: "11px" }}
+                        formatter={(value: number) => [`${value.toFixed(2)}%`, "Drawdown"]}
+                      />
+                      <ReferenceLine y={0} className="stroke-border" />
+                      <Area type="monotone" dataKey="drawdown" stroke="hsl(var(--destructive))" strokeWidth={1.5} fill="url(#ddFill)" />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+            </Card>
+          )}
+
           {/* Empty state */}
+
           {openPositions.length === 0 && closedPositions.length === 0 && signals.length === 0 && (
             <Card className="glass-card p-8 text-center">
               <BarChart3 className="w-12 h-12 text-muted-foreground/30 mx-auto mb-4" />
