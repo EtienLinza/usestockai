@@ -1012,6 +1012,9 @@ async function runEntryDecision(
    *  which is static — after a 20% drawdown the engine sized 25% TOO
    *  LARGE relative to actual equity. */
   currentNav?: number,
+  marketRegime?: string | null,
+  metaModel?: MetaLabelModel | null,
+  strategyEdges?: Record<string, { winRate: number; avgWin: number; avgLoss: number; sampleSize: number }>,
 ): Promise<EntryAction> {
   // Daily loss limit — block all new entries
   if (todayPnlPct <= -settings.daily_loss_limit_pct) {
