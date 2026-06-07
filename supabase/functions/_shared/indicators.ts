@@ -100,25 +100,38 @@ export function calculateMACD(prices: number[]): { macd: number[]; signal: numbe
   return { macd, signal: paddedSignal, histogram };
 }
 
+// O(N) rolling Bollinger via running sum + running sum-of-squares.
+// Variance is population (÷period) — matches the original implementation
+// exactly. Numerically safe: variance is clamped at 0 to absorb floating
+// drift on flat windows.
 export function calculateBollingerBands(
   prices: number[],
   period: number = 20,
   stdDev: number = 2,
 ): { upper: number[]; middle: number[]; lower: number[]; bandwidth: number[] } {
+  const n = prices.length;
   const sma = calculateSMA(prices, period);
-  const upper: number[] = [];
-  const lower: number[] = [];
-  const bandwidth: number[] = [];
-
-  for (let i = 0; i < prices.length; i++) {
+  const upper: number[] = new Array(n);
+  const lower: number[] = new Array(n);
+  const bandwidth: number[] = new Array(n);
+  let sum = 0;
+  let sumSq = 0;
+  for (let i = 0; i < n; i++) {
+    const v = prices[i];
+    sum += v;
+    sumSq += v * v;
+    if (i >= period) {
+      const old = prices[i - period];
+      sum -= old;
+      sumSq -= old * old;
+    }
     if (i < period - 1) {
       upper[i] = NaN;
       lower[i] = NaN;
       bandwidth[i] = NaN;
     } else {
-      const slice = prices.slice(i - period + 1, i + 1);
-      const mean = sma[i];
-      const variance = slice.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / period;
+      const mean = sum / period;
+      const variance = Math.max(0, sumSq / period - mean * mean);
       const std = Math.sqrt(variance) * stdDev;
       upper[i] = mean + std;
       lower[i] = mean - std;
