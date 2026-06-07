@@ -1332,7 +1332,23 @@ export function evaluateSignal(
     }
   }
 
-
+  // Market-regime overlay — strategy-conditional conviction multiplier, capped
+  // ±15%. SOFT tilt: never blocks, just biases conviction. Applied AFTER eps
+  // revision so the calibration loop can attribute each layer separately.
+  let regimeDelta = 0;
+  const appliedRegime = (typeof marketRegime === "string" && marketRegime.length > 0) ? marketRegime : null;
+  if (sig.confidence > 0 && appliedRegime) {
+    const mult = regimeMultiplier(sig.strategy, appliedRegime);
+    if (mult !== 1) {
+      const before = sig.confidence;
+      const after = Math.max(0, Math.min(100, Math.round(before * mult)));
+      regimeDelta = after - before;
+      sig.confidence = after;
+      if (before > 0 && sig.consensusScore !== 0) {
+        sig.consensusScore = Math.sign(sig.consensusScore) * sig.confidence;
+      }
+    }
+  }
 
 
   // Re-validate against the active profile's threshold after the volume
