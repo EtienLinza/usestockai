@@ -40,6 +40,8 @@ import { recordHeartbeat } from "../_shared/heartbeat.ts";
 import { applyIsotonicCalibration, type IsotonicAnchor } from "../_shared/calibration.ts";
 import { loadDanelfinScores } from "../_shared/danelfin.ts";
 import { loadEpsRevisions } from "../_shared/eps-revisions.ts";
+import { loadLatestRegime } from "../_shared/regime-detector.ts";
+import { loadLatestMetaModel, scoreMetaLabel, metaLabelDecision, type MetaLabelModel } from "../_shared/meta-labeler.ts";
 
 /** Thrown by the circuit breaker to abort the entire scan immediately. */
 class CircuitBreakerTrippedError extends Error {
