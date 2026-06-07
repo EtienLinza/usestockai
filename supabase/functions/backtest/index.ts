@@ -34,9 +34,11 @@ async function requireAuth(req: Request): Promise<Response | { userId: string }>
 
 type Tier = "free" | "pro" | "elite";
 const TIER_LIMITS: Record<Tier, { backtests: number; maxTickers: number; maxYears: number; allowMonteCarlo: boolean; allowWalkForward: boolean; allowRobustness: boolean }> = {
+  // maxYears tuned to the edge-function CPU budget — larger windows reliably exceed
+  // CPU time and crash with no response. Keep these conservative.
   free: { backtests: 3, maxTickers: 1, maxYears: 1, allowMonteCarlo: false, allowWalkForward: false, allowRobustness: false },
-  pro: { backtests: 20, maxTickers: 3, maxYears: 10, allowMonteCarlo: true, allowWalkForward: true, allowRobustness: false },
-  elite: { backtests: Number.POSITIVE_INFINITY, maxTickers: 10, maxYears: 25, allowMonteCarlo: true, allowWalkForward: true, allowRobustness: true },
+  pro: { backtests: 20, maxTickers: 3, maxYears: 7, allowMonteCarlo: true, allowWalkForward: true, allowRobustness: false },
+  elite: { backtests: Number.POSITIVE_INFINITY, maxTickers: 10, maxYears: 15, allowMonteCarlo: true, allowWalkForward: true, allowRobustness: true },
 };
 
 async function getUserTier(adminClient: ReturnType<typeof createClient>, userId: string): Promise<Tier> {
@@ -1855,12 +1857,15 @@ serve(async (req) => {
       }), { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
     if ((endYear - startYear) > tierLimits.maxYears) {
+      const atMax = tier === "elite";
       return new Response(JSON.stringify({
-        error: "tier_required",
+        error: atMax ? "window_too_large" : "tier_required",
         required: tier === "free" ? "pro" : "elite",
         feature: "Extended backtest window",
-        message: `Your ${tier} plan supports up to ${tierLimits.maxYears}-year windows.`,
-      }), { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        message: atMax
+          ? `Backtests are capped at ${tierLimits.maxYears}-year windows so the engine can finish within compute limits. Please shorten the date range.`
+          : `Your ${tier} plan supports up to ${tierLimits.maxYears}-year windows.`,
+      }), { status: atMax ? 400 : 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
     if (includeMonteCarlo && !tierLimits.allowMonteCarlo) {
       return new Response(JSON.stringify({

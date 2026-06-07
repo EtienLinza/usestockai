@@ -245,6 +245,16 @@ const Backtest = () => {
             }
           } catch {}
         }
+        if (resp.status === 400) {
+          try {
+            const errData = await resp.clone().json();
+            if (errData?.message) {
+              toast.error(errData.message);
+              setIsLoading(false);
+              return;
+            }
+          } catch {}
+        }
         await handleResponseError(resp, navigate);
       }
 
