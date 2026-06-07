@@ -385,6 +385,9 @@ export function TradingTab({
       ) : (
         <motion.div key="content" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-6">
 
+          {/* Market regime badge */}
+          <MarketRegimeBadge />
+
           {/* Primary Metrics Row */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <MetricCard icon={Zap} label="Buy Signals" value={buySignals.length} color="text-success" />
