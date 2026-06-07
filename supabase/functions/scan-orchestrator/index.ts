@@ -208,12 +208,19 @@ serve(async (req) => {
     for (const [t, s] of danelfinMap.entries()) danelfinObj[t] = s;
     console.log(`Danelfin coverage: ${danelfinMap.size}/${survivors.length}`);
 
+    // Pre-load EPS revision scores once (supporting fundamental factor).
+    const epsRevisionMap = await loadEpsRevisions(survivors);
+    const epsRevisionObj: Record<string, number> = {};
+    for (const [t, s] of epsRevisionMap.entries()) epsRevisionObj[t] = s;
+    console.log(`EPS revision coverage: ${epsRevisionMap.size}/${survivors.length}`);
+
     const workerPayloadBase = {
       spyContext: { spyBearish, spyClose: macro.spyClose.slice(-30) },
       macro,
       sectorMomentum,
       weights,
       danelfinScores: danelfinObj,
+      epsRevisionScores: epsRevisionObj,
       mode,
     };
 
