@@ -1126,14 +1126,18 @@ serve(async (req) => {
             status: "open",
           }));
 
-        if (outcomeRows.length > 0) {
+        // P-2 FIX: rows whose signal_id resolved to null can't dedupe on the
+        // unique partial index — every retry would create a duplicate "open"
+        // outcome and corrupt calibration win-rate. Drop them.
+        const outcomeRowsClean = outcomeRows.filter(r => r.signal_id != null);
+        if (outcomeRowsClean.length > 0) {
           // Upsert on the unique partial index (signal_id WHERE status='open')
           // so retries don't create duplicate open outcomes for the same signal.
           const { error: outErr } = await supabase
             .from("signal_outcomes")
-            .upsert(outcomeRows, { onConflict: "signal_id", ignoreDuplicates: true });
+            .upsert(outcomeRowsClean, { onConflict: "signal_id", ignoreDuplicates: true });
           if (outErr) console.error("Failed to log signal outcomes:", outErr);
-          else console.log(`Logged ${outcomeRows.length} new outcome rows`);
+          else console.log(`Logged ${outcomeRowsClean.length} new outcome rows`);
         }
       } catch (e) {
         console.error("Outcome logging error (non-fatal):", e);
