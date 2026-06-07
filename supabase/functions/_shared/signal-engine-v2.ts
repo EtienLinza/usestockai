@@ -1412,10 +1412,14 @@ export function evaluateSignal(
         : !dailyEntry
         ? "Daily entry timing not confirmed"
         : "Conviction below threshold",
+      regimeDelta,
+      marketRegime: appliedRegime,
     };
   }
 
-  const kellyFraction = computePositionSize(sig.confidence, atrPctNow, targetDir);
+  const kellyFraction = computePositionSize(
+    sig.confidence, atrPctNow, targetDir, 0.01, true, realizedEdge ?? null,
+  );
 
   return {
     decision: sigDir,
@@ -1428,11 +1432,31 @@ export function evaluateSignal(
     kellyFraction,
     atr: sig.atr,
     atrPct: atrPctNow,
-    reasoning: `${sig.strategy.replace("_", " ")} ${sigDir.toLowerCase()} | ${cls.classification} profile | ${sig.regime} regime | conviction ${sig.confidence} | kelly ${(kellyFraction * 100).toFixed(1)}%${danelfinDelta !== 0 ? ` | danelfinΔ=${danelfinDelta > 0 ? "+" : ""}${danelfinDelta}` : ""}${epsRevisionDelta !== 0 ? ` | epsΔ=${epsRevisionDelta > 0 ? "+" : ""}${epsRevisionDelta}` : ""}`,
+    reasoning: `${sig.strategy.replace("_", " ")} ${sigDir.toLowerCase()} | ${cls.classification} profile | ${sig.regime} regime | conviction ${sig.confidence} | kelly ${(kellyFraction * 100).toFixed(1)}%${danelfinDelta !== 0 ? ` | danelfinΔ=${danelfinDelta > 0 ? "+" : ""}${danelfinDelta}` : ""}${epsRevisionDelta !== 0 ? ` | epsΔ=${epsRevisionDelta > 0 ? "+" : ""}${epsRevisionDelta}` : ""}${regimeDelta !== 0 ? ` | regimeΔ=${regimeDelta > 0 ? "+" : ""}${regimeDelta} (${appliedRegime})` : ""}${realizedEdge && realizedEdge.sampleSize >= 30 ? ` | realKelly(n=${realizedEdge.sampleSize})` : ""}`,
     danelfinDelta,
     danelfinScore: (danelfinScore !== undefined && danelfinScore !== null && Number.isFinite(danelfinScore)) ? danelfinScore : undefined,
     epsRevisionDelta,
     epsRevisionScore: (epsRevisionScore !== undefined && epsRevisionScore !== null && Number.isFinite(epsRevisionScore)) ? epsRevisionScore : undefined,
+    regimeDelta,
+    marketRegime: appliedRegime,
   };
 }
+
+// ============================================================================
+// REGIME TILT — strategy-conditional conviction multiplier (capped ±15%).
+// Soft layer: never blocks, only biases. Mirrored in `_shared/regime-detector`
+// for callers that need the multiplier without importing the whole engine.
+// ============================================================================
+function regimeMultiplier(strategy: string, regime: string): number {
+  const M: Record<string, Record<string, number>> = {
+    trend: { bull_quiet: 1.10, bull_volatile: 1.00, bear_quiet: 0.92, bear_volatile: 0.85, neutral: 1.00 },
+    mean_reversion: { bull_quiet: 0.92, bull_volatile: 1.12, bear_quiet: 1.00, bear_volatile: 0.90, neutral: 1.00 },
+    breakout: { bull_quiet: 1.10, bull_volatile: 1.00, bear_quiet: 0.88, bear_volatile: 0.85, neutral: 1.00 },
+  };
+  const row = M[strategy];
+  if (!row) return 1;
+  const m = row[regime] ?? 1;
+  return Math.max(0.85, Math.min(1.15, m));
+}
+
 
