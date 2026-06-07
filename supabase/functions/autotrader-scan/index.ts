@@ -2495,7 +2495,17 @@ async function executeEntry(
     trailing_stop_price: hardStop,
     peak_price: fillPrice,
   }).select("id").single();
-  if (insErr) { console.error("entry insert failed", insErr); return; }
+  if (insErr) {
+    // P-4: the partial unique index `uniq_open_position_per_user_ticker` rejects
+    // a second open position for the same (user, ticker). A 23505 here means a
+    // sibling scan already opened this position — that's the correct outcome,
+    // log + bail instead of erroring loudly.
+    if ((insErr as { code?: string }).code === "23505") {
+      console.log(`[entry] duplicate open suppressed for ${ticker} — sibling scan already opened`);
+      return;
+    }
+    console.error("entry insert failed", insErr); return;
+  }
   if (openedByRotation) {
     // Increment per-day counter atomically-enough (single-writer scan loop).
     const today = new Date().toISOString().split("T")[0];
