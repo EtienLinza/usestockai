@@ -72,6 +72,41 @@ function bucketKey(c: number): string {
   return "90-100";
 }
 
+// Inline meta-label scorer so the worker doesn't need a DB round-trip per
+// ticker. Coefficients come from the orchestrator's pre-loaded model.
+function sigmoidLocal(z: number): number {
+  if (z >= 0) { const e = Math.exp(-z); return 1 / (1 + e); }
+  const e = Math.exp(z); return e / (1 + e);
+}
+
+type MetaModelLite = {
+  intercept: number; weights: number[]; means: number[]; stds: number[];
+  feature_names: string[];
+} | null | undefined;
+
+function scoreMetaInline(model: MetaModelLite, f: {
+  conviction: number; atrPct: number; relStrength: number; sectorMomentum: number;
+  epsRevisionScore: number; regime: string | null; hourOfDay: number; dayOfWeek: number;
+}): number | null {
+  if (!model || !Array.isArray(model.weights) || model.weights.length === 0) return null;
+  const r = f.regime ?? "neutral";
+  const x = [
+    f.conviction, f.atrPct, f.relStrength, f.sectorMomentum, f.epsRevisionScore,
+    r === "bull_quiet" ? 1 : 0, r === "bull_volatile" ? 1 : 0,
+    r === "bear_quiet" ? 1 : 0, r === "bear_volatile" ? 1 : 0,
+    f.hourOfDay, f.dayOfWeek,
+  ];
+  if (x.length !== model.weights.length || model.means.length !== x.length || model.stds.length !== x.length) {
+    return null;
+  }
+  let z = model.intercept;
+  for (let i = 0; i < x.length; i++) {
+    const s = model.stds[i] > 1e-9 ? model.stds[i] : 1;
+    z += model.weights[i] * ((x[i] - model.means[i]) / s);
+  }
+  return sigmoidLocal(z);
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
   const denied = await requireCronOrUser(req);
