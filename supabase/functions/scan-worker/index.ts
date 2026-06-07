@@ -169,6 +169,7 @@ serve(async (req) => {
           undefined, undefined,
           danelfin,
           epsRev,
+          marketRegime,
         );
         if (!sig || sig.decision === "HOLD") continue;
         const { regime, strategy, weeklyBias, profile, atrPct } = sig;
