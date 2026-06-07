@@ -523,6 +523,38 @@ function computePeakSignals(
   };
 }
 
+// ----------------------------------------------------------------------------
+// H-7: Legacy-position fallbacks — synthesize hard stop / initial risk when
+// `hard_stop_price` is missing (positions opened before R-ladder shipped, or
+// rows where the column was nulled by a migration). Uses entry_atr with a
+// strategy-aware multiplier; falls back to 5% notional risk as last resort.
+// Keeps R-ladder, R-progress time-stop, and synthesized T1 stop live for
+// every open position instead of silently disabling them.
+// ----------------------------------------------------------------------------
+function inferInitRiskPerShare(pos: Position): number {
+  const entry = Number(pos.entry_price);
+  if (pos.hard_stop_price != null) {
+    const r = Math.abs(entry - Number(pos.hard_stop_price));
+    if (isFinite(r) && r > 0) return r;
+  }
+  const atr = Number(pos.entry_atr ?? 0);
+  if (isFinite(atr) && atr > 0) {
+    const k = pos.entry_strategy === "mean_reversion" ? 1.5
+            : pos.entry_strategy === "breakout" ? 1.75
+            : 2.0;
+    return atr * k;
+  }
+  return entry > 0 ? entry * 0.05 : 0;
+}
+
+function inferHardStopPrice(pos: Position): number | null {
+  if (pos.hard_stop_price != null) return Number(pos.hard_stop_price);
+  const entry = Number(pos.entry_price);
+  const risk = inferInitRiskPerShare(pos);
+  if (!isFinite(risk) || risk <= 0 || !isFinite(entry) || entry <= 0) return null;
+  return pos.position_type === "long" ? entry - risk : entry + risk;
+}
+
 // ============================================================================
 // WIN EXIT — peak detection (5 signals, 3-of-5 fires FULL_EXIT)
 // Improvements over the basic ATR-trail:
