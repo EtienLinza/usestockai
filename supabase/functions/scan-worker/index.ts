@@ -67,6 +67,7 @@ serve(async (req) => {
     const body = await req.json() as Body;
     const { tickers, spyContext, macro, sectorMomentum, weights } = body;
     const danelfinScores = body.danelfinScores ?? {};
+    const epsRevisionScores = body.epsRevisionScores ?? {};
     const mode: "premarket" | "live" = body.mode === "premarket" ? "premarket" : "live";
     if (!Array.isArray(tickers) || tickers.length === 0) {
       return new Response(JSON.stringify({ signals: [] }), {
