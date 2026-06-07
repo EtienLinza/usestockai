@@ -580,11 +580,10 @@ const Backtest = () => {
                       <MetricCard label="Sharpe Ratio" value={report.sharpeRatio} icon={Gauge}
                         color={report.sharpeRatio > 1 ? "text-success" : report.sharpeRatio > 0 ? "text-warning" : "text-destructive"} />
                       <MetricCard
-                        label="Deflated Sharpe"
+                        label={`Deflated Sharpe (u=${((report.avgSampleUniqueness ?? 1) * 100).toFixed(0)}%)`}
                         value={report.deflatedSharpe ?? report.sharpeRatio}
                         icon={Gauge}
                         color={(report.deflatedSharpe ?? 0) > 1 ? "text-success" : (report.deflatedSharpe ?? 0) > 0 ? "text-warning" : "text-destructive"}
-                        tooltip={`Uniqueness-adjusted Sharpe (López de Prado §4.5). Avg sample uniqueness ${((report.avgSampleUniqueness ?? 1) * 100).toFixed(0)}% — lower means more overlapping holding periods inflating raw Sharpe.`}
                       />
                       <MetricCard label="Sortino Ratio" value={report.sortinoRatio} icon={Shield}
                         color={report.sortinoRatio > 1 ? "text-success" : "text-warning"} />
