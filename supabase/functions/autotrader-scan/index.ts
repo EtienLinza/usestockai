@@ -41,7 +41,11 @@ import { applyIsotonicCalibration, type IsotonicAnchor } from "../_shared/calibr
 import { loadDanelfinScores } from "../_shared/danelfin.ts";
 import { loadEpsRevisions } from "../_shared/eps-revisions.ts";
 import { loadLatestRegime } from "../_shared/regime-detector.ts";
-import { loadLatestMetaModel, scoreMetaLabel, metaLabelDecision, type MetaLabelModel } from "../_shared/meta-labeler.ts";
+import { loadLatestMetaModel, scoreMetaLabel, type MetaLabelModel } from "../_shared/meta-labeler.ts";
+import { loadShortInterestMap, shortInterestConvictionDelta, type ShortInterestRow } from "../_shared/short-interest.ts";
+import { slippageShrinkFactor } from "../_shared/slippage-model.ts";
+import { computePortfolioCvar, closeToReturns, DEFAULT_CVAR_CAP_PCT, type CvarPosition } from "../_shared/portfolio-cvar.ts";
+import { detectAdwinDrift, adwinGateAdjust } from "../_shared/adwin.ts";
 
 /** Thrown by the circuit breaker to abort the entire scan immediately. */
 class CircuitBreakerTrippedError extends Error {
@@ -500,7 +504,9 @@ type EntryAction =
   | { kind: "ENTER"; conviction: number; kellyFraction: number; price: number;
       strategy: string; profile: StockProfile; atr: number; hardStop: number;
       weeklyAlloc: number; reasoning: string;
-      decision: "BUY" | "SHORT" }
+      decision: "BUY" | "SHORT";
+      siVelocity?: number | null; siDelta?: number;
+      slippageBpsEst?: number | null }
   | { kind: "HOLD" | "BLOCKED"; reason: string };
 
 // ============================================================================
@@ -1015,6 +1021,8 @@ async function runEntryDecision(
   marketRegime?: string | null,
   metaModel?: MetaLabelModel | null,
   strategyEdges?: Record<string, { winRate: number; avgWin: number; avgLoss: number; sampleSize: number }>,
+  shortInterestMap?: Map<string, ShortInterestRow>,
+  metaGate?: { pass: number; skip: number },
 ): Promise<EntryAction> {
   // Daily loss limit — block all new entries
   if (todayPnlPct <= -settings.daily_loss_limit_pct) {
@@ -1082,9 +1090,24 @@ async function runEntryDecision(
   if (!sig) return { kind: "HOLD", reason: "Insufficient data" };
   if (sig.decision === "HOLD") return { kind: "HOLD", reason: sig.reasoning };
 
-  // ── Meta-label gate (cold-start safe — null model passes through) ──────
-  // PASS: continue. DEMOTE: log + reject (consensus-only, no autotrade).
-  // SKIP: reject hard.
+  // ── Short-interest velocity overlay (supporting factor, NEVER a gate) ──
+  // Applied AFTER the engine returns so the backtest stays deterministic.
+  // Persisted via si_velocity column for closed-loop calibration.
+  let siDelta = 0;
+  let siVelocity: number | null = null;
+  const siRow = shortInterestMap?.get(ticker.toUpperCase()) ?? null;
+  if (siRow) {
+    const side: "long" | "short" = sig.decision === "BUY" ? "long" : "short";
+    siDelta = shortInterestConvictionDelta(siRow, side, sig.strategy);
+    siVelocity = siRow.velocity30d;
+    if (siDelta !== 0) {
+      sig.conviction = Math.max(0, Math.min(100, sig.conviction + siDelta));
+    }
+  }
+
+  // ── Meta-label gate (cold-start safe — null model passes through).
+  //   Thresholds tighten under detected drift (see ADWIN pre-scan pass).
+  const gate = metaGate ?? { pass: 0.45, skip: 0.30 };
   const metaScore = scoreMetaLabel(metaModel ?? null, {
     conviction: sig.conviction,
     atrPct: sig.atrPct,
@@ -1095,13 +1118,16 @@ async function runEntryDecision(
     hourOfDay: (new Date().getUTCHours() + 19) % 24,
     dayOfWeek: new Date().getUTCDay(),
   });
-  const metaDecision = metaLabelDecision(metaScore, sig.conviction);
-  if (metaDecision === "SKIP") {
-    return { kind: "HOLD", reason: `Meta-label skip: score=${metaScore?.toFixed(3)} < 0.30` };
+  if (metaScore !== null && Number.isFinite(metaScore)) {
+    if (metaScore < gate.skip) {
+      return { kind: "HOLD", reason: `Meta-label skip: score=${metaScore.toFixed(3)} < ${gate.skip.toFixed(2)}` };
+    }
+    if (metaScore < gate.pass && sig.conviction < 80) {
+      return { kind: "HOLD", reason: `Meta-label demote: score=${metaScore.toFixed(3)} < ${gate.pass.toFixed(2)} (conv ${sig.conviction} < 80) — consensus-only` };
+    }
   }
-  if (metaDecision === "DEMOTE") {
-    return { kind: "HOLD", reason: `Meta-label demote: score=${metaScore?.toFixed(3)} < 0.45 (conv ${sig.conviction} < 80) — consensus-only` };
-  }
+
+
 
 
   // ── Honest conviction calibration (Phase 1 #5) ──────────────────────────
@@ -1132,18 +1158,40 @@ async function runEntryDecision(
   // ceilings while sizing breathes with realized SPY vol.
   const headroom = (settings.max_nav_exposure_pct - totalNavExposurePct) / 100;
   const baseFrac = sig.kellyFraction * volScalar;
-  const cappedFrac = Math.min(baseFrac, settings.max_single_name_pct / 100, headroom);
+  let cappedFrac = Math.min(baseFrac, settings.max_single_name_pct / 100, headroom);
   const currentPrice = data.close[data.close.length - 1];
   // C-3 FIX: size off dynamic NAV when caller provides it; fall back to
   // starting_nav only for legacy paths that haven't been updated yet.
   const navForSizing = Number.isFinite(currentNav) && (currentNav as number) > 0
     ? (currentNav as number)
     : settings.starting_nav;
-  const targetDollars = navForSizing * cappedFrac;
+  let targetDollars = navForSizing * cappedFrac;
+
+  // ── Almgren–Chriss slippage shrink ─────────────────────────────────────
+  // Estimate ADV from last 20 bars (close × volume), compute expected impact,
+  // shrink the order if impact would consume > 30% of expected edge.
+  let slippageBpsEst: number | null = null;
+  if (data.volume && data.volume.length >= 20 && targetDollars > 0) {
+    const n = data.close.length;
+    let advDollars = 0;
+    for (let i = n - 20; i < n; i++) {
+      advDollars += data.close[i] * data.volume[i];
+    }
+    advDollars /= 20;
+    if (Number.isFinite(advDollars) && advDollars > 0) {
+      const shrink = slippageShrinkFactor(targetDollars, advDollars, sig.atrPct, 2, 0.30);
+      slippageBpsEst = shrink.bps;
+      if (shrink.factor < 1) {
+        cappedFrac = cappedFrac * shrink.factor;
+        targetDollars = navForSizing * cappedFrac;
+      }
+    }
+  }
 
   if (targetDollars < currentPrice) {
     return { kind: "HOLD", reason: "Position too small after caps" };
   }
+
 
   // Hard stop at entry — STRUCTURAL (Phase 2 #10)
   // Pure-ATR stops fire on noise. We anchor the stop to actual market
@@ -1179,6 +1227,13 @@ async function runEntryDecision(
   }
   const hardStop = isLong ? currentPrice - stopDist : currentPrice + stopDist;
 
+  const reasoningExtra: string[] = [];
+  if (siDelta !== 0) reasoningExtra.push(`siΔ=${siDelta > 0 ? "+" : ""}${siDelta}`);
+  if (slippageBpsEst !== null && slippageBpsEst > 0) reasoningExtra.push(`slip=${slippageBpsEst.toFixed(1)}bps`);
+  const reasoning = reasoningExtra.length > 0
+    ? `${sig.reasoning} | ${reasoningExtra.join(" | ")}`
+    : sig.reasoning;
+
   return {
     kind: "ENTER",
     conviction: effectiveConviction,
@@ -1190,7 +1245,10 @@ async function runEntryDecision(
     hardStop,
     weeklyAlloc: sig.weeklyBias.targetAllocation,
     decision: sig.decision === "SHORT" ? "SHORT" : "BUY",
-    reasoning: sig.reasoning,
+    reasoning,
+    siVelocity,
+    siDelta,
+    slippageBpsEst,
   };
 }
 
@@ -2044,6 +2102,11 @@ async function processUser(
     console.log(`autotrader-scan: EPS revision coverage ${epsRevisionMap.size}/${watchlist.length}`);
   }
 
+  // Pre-load short-interest velocity map — supporting factor (never blocks).
+  const shortInterestMap = await loadShortInterestMap(watchlist);
+  if (shortInterestMap.size > 0) {
+    console.log(`autotrader-scan: short-interest coverage ${shortInterestMap.size}/${watchlist.length}`);
+  }
 
   // Pre-load current market regime (cached daily) + meta-label model (latest).
   // Both are null-safe → engine treats missing as no-op.
@@ -2051,6 +2114,40 @@ async function processUser(
   const metaModel = await loadLatestMetaModel();
   if (marketRegime) console.log(`autotrader-scan: regime=${marketRegime}`);
   if (metaModel) console.log(`autotrader-scan: meta-model n=${metaModel.sample_size} AUC=${metaModel.auc ?? "n/a"}`);
+
+  // ── ADWIN drift detection (run once at scan start) ─────────────────────
+  // Pulls last ~200 closed outcomes (binary hit = realized_pnl_pct > 0) and
+  // checks for concept drift. On drift, tighten meta-label thresholds and
+  // INSERT a row into drift_events so the UI + nightly trainer can react.
+  let metaGate: { pass: number; skip: number } = { pass: 0.45, skip: 0.30 };
+  try {
+    const { data: recent } = await supabase
+      .from("signal_outcomes")
+      .select("realized_pnl_pct, entry_date")
+      .in("status", ["closed", "stopped_out", "took_profit"])
+      .order("entry_date", { ascending: false })
+      .limit(200);
+    const series: number[] = [];
+    for (const o of (recent ?? []) as Array<{ realized_pnl_pct: number | null }>) {
+      const p = Number(o.realized_pnl_pct);
+      if (Number.isFinite(p)) series.push(p > 0 ? 1 : 0);
+    }
+    // Reverse so the most-recent obs ends up at the right side of the window.
+    series.reverse();
+    const drift = detectAdwinDrift(series);
+    if (drift.drift) {
+      metaGate = adwinGateAdjust(drift.severity);
+      console.log(`autotrader-scan: ADWIN drift ${drift.severity} | pre=${drift.preMean} post=${drift.postMean} | gate pass=${metaGate.pass} skip=${metaGate.skip}`);
+      await supabase.from("drift_events").insert({
+        window_size: drift.windowSize,
+        pre_mean: drift.preMean,
+        post_mean: drift.postMean,
+        severity: drift.severity,
+      });
+    }
+  } catch (e) { console.warn("ADWIN drift check failed", e); }
+
+
 
   // Pre-load realized edges per strategy from signal_outcomes (last 180d, closed).
   // Used to wire realKelly sizing — H-6 audit closure. Empty → cold-start ramp.
@@ -2119,6 +2216,8 @@ async function processUser(
       marketRegime,
       metaModel,
       strategyEdges,
+      shortInterestMap,
+      metaGate,
     );
 
 
@@ -2369,6 +2468,46 @@ async function processUser(
         continue;
       }
     }
+
+    // ── Portfolio CVaR gate (95% Expected Shortfall over 5-day horizon) ──
+    // Caps EXPECTED tail loss on the LIVE book at 2% NAV. Hard block: cannot
+    // be disabled via enforcement_mode='warn'. Skipped silently when any
+    // open position has <20 return obs (cold-start safe).
+    if (livePositions.length > 0) {
+      try {
+        const cvarPositions: CvarPosition[] = [];
+        for (const pos of livePositions) {
+          const d = priceCache.get(pos.ticker.toUpperCase());
+          if (!d) continue;
+          const px = d.close[d.close.length - 1];
+          const dirSign = pos.position_type === "long" ? 1 : -1;
+          const rets = closeToReturns(d.close.slice(-61));
+          cvarPositions.push({ ticker: pos.ticker, dollars: dirSign * px * Number(pos.shares), returns: rets });
+        }
+        const candD = priceCache.get(p.ticker.toUpperCase());
+        if (candD) {
+          const candSign = p.decision.decision === "BUY" ? 1 : -1;
+          cvarPositions.push({
+            ticker: p.ticker,
+            dollars: candSign * candidateDollars,
+            returns: closeToReturns(candD.close.slice(-61)),
+          });
+        }
+        const cvar = computePortfolioCvar(cvarPositions, settings.starting_nav);
+        if (cvar && cvar.cvarPct > DEFAULT_CVAR_CAP_PCT) {
+          summary.blocked++; userSummary.blocked++;
+          await supabase.from("autotrade_log").insert({
+            user_id: userId, ticker: p.ticker, action: "BLOCKED",
+            reason: `Portfolio CVaR: 95% ES would reach ${cvar.cvarPct.toFixed(2)}% NAV (cap ${DEFAULT_CVAR_CAP_PCT}%, worst=${cvar.worstPathPct.toFixed(1)}%)`,
+            conviction: p.decision.conviction, strategy: p.decision.strategy, profile: p.decision.profile,
+            cvar_block_count: 1,
+          });
+          continue;
+        }
+      } catch (e) { console.warn("cvar gate failed", e); }
+    }
+
+
 
     const beforeEntries = summary.entries;
     await executeEntry(supabase, settings, p.ticker, p.decision, summary, rotationActive);

@@ -104,13 +104,15 @@ function standardize(X: number[][]): { Xz: number[][]; means: number[]; stds: nu
 function fitLogistic(
   X: number[][],
   y: number[],
-  opts: { lr?: number; l2?: number; iters?: number } = {},
+  opts: { lr?: number; l2?: number; iters?: number; weights?: number[] } = {},
 ): { intercept: number; weights: number[] } {
   const lr = opts.lr ?? 0.1;
   const l2 = opts.l2 ?? 1e-3;
   const iters = opts.iters ?? 400;
   const n = X.length;
   const p = X[0].length;
+  const sw = opts.weights && opts.weights.length === n ? opts.weights : null;
+  const wSum = sw ? sw.reduce((a, b) => a + b, 0) : n;
   let b = 0;
   const w = new Array(p).fill(0);
   for (let t = 0; t < iters; t++) {
@@ -120,17 +122,18 @@ function fitLogistic(
       let z = b;
       for (let j = 0; j < p; j++) z += w[j] * X[i][j];
       const ph = sigmoid(z);
-      const err = ph - y[i];
+      const err = (ph - y[i]) * (sw ? sw[i] : 1);
       gb += err;
       for (let j = 0; j < p; j++) gw[j] += err * X[i][j];
     }
-    b -= lr * (gb / n);
+    b -= lr * (gb / wSum);
     for (let j = 0; j < p; j++) {
-      w[j] -= lr * (gw[j] / n + l2 * w[j]);
+      w[j] -= lr * (gw[j] / wSum + l2 * w[j]);
     }
   }
   return { intercept: b, weights: w };
 }
+
 
 function computeAUC(scores: number[], labels: number[]): number {
   // Mann-Whitney U statistic AUC. O(n log n).
@@ -175,15 +178,18 @@ Deno.serve(async (req) => {
 
     const X: number[][] = [];
     const y: number[] = [];
+    const entryAges: number[] = []; // days since trade
+    const now = Date.now();
     for (const r of rows) {
       const pnl = Number(r.realized_pnl_pct);
       if (!Number.isFinite(pnl)) continue;
       const f = buildFeatures(r);
       if (!f) continue;
       X.push(vectorize(f));
-      // Label = 1 if profitable, else 0. Take-profit hits or any positive PnL = win.
       const win = r.exit_reason === "take_profit" || pnl > 0 ? 1 : 0;
       y.push(win);
+      const ed = r.entry_date ? new Date(r.entry_date).getTime() : now;
+      entryAges.push(Math.max(0, (now - ed) / 86400000));
     }
 
     if (X.length < 40) {
@@ -193,7 +199,6 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Class-balance check: need both classes present.
     const posCount = y.reduce((a, b) => a + b, 0);
     if (posCount < 5 || posCount > y.length - 5) {
       console.log(`[train-meta] degenerate labels (pos=${posCount}/${y.length}) — skipping fit`);
@@ -202,8 +207,23 @@ Deno.serve(async (req) => {
       });
     }
 
+    // ── Drift-aware sample weighting ─────────────────────────────────────
+    // Check for recent ADWIN drift events. If any fired in the last 30 days,
+    // weight the most-recent 30 days × 3 instead of the default × 2.
+    const { data: drift } = await supabase
+      .from("drift_events")
+      .select("detected_at, severity")
+      .gte("detected_at", new Date(now - 30 * 86400000).toISOString())
+      .limit(5);
+    const recentDriftHard = (drift ?? []).some((d: any) => d.severity === "hard");
+    const recentDriftSoft = (drift ?? []).some((d: any) => d.severity === "soft");
+    const recentMult = recentDriftHard ? 3.0 : recentDriftSoft ? 2.5 : 2.0;
+    const sampleWeights = entryAges.map(a => a <= 30 ? recentMult : a <= 60 ? 1.5 : 1.0);
+    console.log(`[train-meta] drift=${recentDriftHard ? "hard" : recentDriftSoft ? "soft" : "none"} → recent-window weight ×${recentMult}`);
+
     const { Xz, means, stds } = standardize(X);
-    const { intercept, weights } = fitLogistic(Xz, y, { lr: 0.1, l2: 1e-3, iters: 400 });
+    const { intercept, weights } = fitLogistic(Xz, y, { lr: 0.1, l2: 1e-3, iters: 400, weights: sampleWeights });
+
 
     // Compute in-sample AUC for monitoring.
     const scores: number[] = [];
