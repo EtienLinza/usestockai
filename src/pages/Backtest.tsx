@@ -36,6 +36,8 @@ interface BacktestReport {
   totalReturn: number;
   maxDrawdown: number;
   sharpeRatio: number;
+  deflatedSharpe?: number;
+  avgSampleUniqueness?: number;
   sortinoRatio: number;
   calmarRatio: number;
   profitFactor: number;
