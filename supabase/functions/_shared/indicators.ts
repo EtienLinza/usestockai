@@ -159,12 +159,6 @@ function wildersSmooth(values: number[], period: number): number[] {
   return out;
 }
 
-export function calculateVolatility(prices: number[], period: number = 20): number[] {
-  const returns: number[] = [];
-  for (let i = 1; i < prices.length; i++) {
-    if (prices[i - 1] !== 0) returns.push((prices[i] - prices[i - 1]) / prices[i - 1]);
-    else returns.push(0);
-  }
 // O(N) rolling Bessel-corrected stdev on simple returns. Window of size
 // `period` over returns[i-period..i-1] — same indexing as the legacy form.
 export function calculateVolatility(prices: number[], period: number = 20): number[] {
