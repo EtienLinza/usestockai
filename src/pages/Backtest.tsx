@@ -36,6 +36,8 @@ interface BacktestReport {
   totalReturn: number;
   maxDrawdown: number;
   sharpeRatio: number;
+  deflatedSharpe?: number;
+  avgSampleUniqueness?: number;
   sortinoRatio: number;
   calmarRatio: number;
   profitFactor: number;
@@ -577,10 +579,19 @@ const Backtest = () => {
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                       <MetricCard label="Sharpe Ratio" value={report.sharpeRatio} icon={Gauge}
                         color={report.sharpeRatio > 1 ? "text-success" : report.sharpeRatio > 0 ? "text-warning" : "text-destructive"} />
+                      <MetricCard
+                        label={`Deflated Sharpe (u=${((report.avgSampleUniqueness ?? 1) * 100).toFixed(0)}%)`}
+                        value={report.deflatedSharpe ?? report.sharpeRatio}
+                        icon={Gauge}
+                        color={(report.deflatedSharpe ?? 0) > 1 ? "text-success" : (report.deflatedSharpe ?? 0) > 0 ? "text-warning" : "text-destructive"}
+                      />
                       <MetricCard label="Sortino Ratio" value={report.sortinoRatio} icon={Shield}
                         color={report.sortinoRatio > 1 ? "text-success" : "text-warning"} />
                       <MetricCard label="Profit Factor" value={report.profitFactor} icon={DollarSign}
                         color={report.profitFactor > 1 ? "text-success" : "text-destructive"} />
+                    </div>
+
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                       <MetricCard label="Calmar Ratio" value={report.calmarRatio} icon={Percent}
                         color={report.calmarRatio > 0.5 ? "text-success" : "text-warning"} />
                     </div>

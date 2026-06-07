@@ -252,6 +252,10 @@ interface BacktestReport {
   totalReturn: number;
   maxDrawdown: number;
   sharpeRatio: number;
+  /** Sample-uniqueness-deflated Sharpe (López de Prado §4.5). raw × √(avg uniqueness). */
+  deflatedSharpe: number;
+  /** Mean per-trade uniqueness (1 = no overlap; 0.5 = half the bars overlap). */
+  avgSampleUniqueness: number;
   sortinoRatio: number;
   calmarRatio: number;
   profitFactor: number;
@@ -911,6 +915,7 @@ function computeMetrics(
     return {
       totalTrades: 0, winRate: 0, avgReturn: 0, totalReturn: 0, maxDrawdown: 0,
       sharpeRatio: 0, sortinoRatio: 0, calmarRatio: 0, profitFactor: 0,
+      deflatedSharpe: 0, avgSampleUniqueness: 1,
       directionalAccuracy: 0, convictionBuckets: [],
       avgWin: 0, avgLoss: 0, winLossRatio: 0,
       avgTradeDuration: 0, medianTradeDuration: 0, maxTradeDuration: 0,
@@ -1040,6 +1045,45 @@ function computeMetrics(
       ? Math.sqrt(eqDownside.reduce((a, b) => a + (b - rfPerPeriod) ** 2, 0) / eqDownside.length)
       : 0;
     sortinoRatio = downsideStd > 0 ? ((eqMean - rfPerPeriod) / downsideStd) * annFactor : 0;
+  }
+
+  // ── Sample-uniqueness-deflated Sharpe (López de Prado AFML §4.5, idea #2) ──
+  // Overlapping holding periods produce dependent observations, which inflates
+  // Sharpe. Compute concurrency[t] = # of open trades on bar t, then per-trade
+  // uniqueness = mean(1/concurrency[t]) over the trade's holding bars. The
+  // deflated Sharpe = raw × √(avg_uniqueness). avg_uniqueness ∈ (0,1]; 1 means
+  // perfectly non-overlapping trades, 0.5 means on average half the bars are
+  // shared with a sibling trade and the effective sample is halved.
+  let avgSampleUniqueness = 1;
+  let deflatedSharpe = sharpeRatio;
+  if (trades.length >= 2 && sortedEqCurve.length > 1) {
+    const dateIdx = new Map<string, number>();
+    sortedEqCurve.forEach((p, i) => dateIdx.set(p.date, i));
+    const N = sortedEqCurve.length;
+    const concurrency = new Array<number>(N).fill(0);
+    const tradeRanges: [number, number][] = [];
+    for (const t of trades) {
+      const a = dateIdx.get(t.date);
+      const b = dateIdx.get(t.exitDate);
+      if (a === undefined || b === undefined) { tradeRanges.push([-1, -1]); continue; }
+      const lo = Math.min(a, b), hi = Math.max(a, b);
+      tradeRanges.push([lo, hi]);
+      for (let i = lo; i <= hi; i++) concurrency[i]++;
+    }
+    let uSum = 0, uN = 0;
+    for (const [lo, hi] of tradeRanges) {
+      if (lo < 0 || hi < lo) continue;
+      let acc = 0, n = 0;
+      for (let i = lo; i <= hi; i++) {
+        const c = concurrency[i];
+        if (c > 0) { acc += 1 / c; n++; }
+      }
+      if (n > 0) { uSum += acc / n; uN++; }
+    }
+    if (uN > 0) {
+      avgSampleUniqueness = Math.max(0.05, Math.min(1, uSum / uN));
+      deflatedSharpe = sharpeRatio * Math.sqrt(avgSampleUniqueness);
+    }
   }
 
   // Calmar Ratio
@@ -1333,6 +1377,7 @@ function computeMetrics(
     totalTrades: trades.length,
     winRate: p(winRate), avgReturn: p(avgReturn), totalReturn: p(totalReturn),
     maxDrawdown: p(maxDrawdown), sharpeRatio: p(sharpeRatio), sortinoRatio: p(sortinoRatio),
+    deflatedSharpe: p(deflatedSharpe), avgSampleUniqueness: p(avgSampleUniqueness),
     calmarRatio: p(calmarRatio), profitFactor: p(profitFactor),
     directionalAccuracy: p(directionalAccuracy), convictionBuckets,
     avgWin: p(avgWin), avgLoss: p(avgLoss), winLossRatio: p(winLossRatio),
