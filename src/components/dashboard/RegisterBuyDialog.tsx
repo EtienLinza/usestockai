@@ -80,7 +80,13 @@ export const RegisterBuyDialog = ({
           : null,
       });
 
-      if (error) throw error;
+      if (error) {
+        // P-4: friendlier message when the partial unique index blocks a duplicate open.
+        if ((error as { code?: string }).code === "23505") {
+          throw new Error(`You already have an open position in ${ticker}. Close it first to re-enter.`);
+        }
+        throw error;
+      }
 
       toast.success(`Bought ${shares} ${ticker} @ $${currentPrice.toFixed(2)}`, {
         description: `Position registered in your virtual portfolio.`,
