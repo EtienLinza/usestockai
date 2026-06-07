@@ -128,11 +128,23 @@ export async function computeMacroRegime(): Promise<MacroRegime> {
 
   let credit = 50;
   if (hyg && lqd && hyg.close.length >= 61 && lqd.close.length >= 61) {
+    // M-9: align HYG and LQD by timestamp before computing the ratio. Direct
+    // index-pairing breaks whenever one ETF has a missing/extra bar (early
+    // history, intraday outage), silently pairing different dates and
+    // distorting the 60d credit-spread slope.
+    const lqdIx = new Map<string, number>();
+    for (let i = 0; i < lqd.timestamps.length; i++) lqdIx.set(lqd.timestamps[i], i);
     const ratio: number[] = [];
-    const minLen = Math.min(hyg.close.length, lqd.close.length);
-    for (let i = 0; i < minLen; i++) if (lqd.close[i] > 0) ratio.push(hyg.close[i] / lqd.close[i]);
-    const r = pctChange(ratio, 60);
-    if (r !== null) credit = clamp(50 + r * 25);
+    for (let i = 0; i < hyg.timestamps.length; i++) {
+      const j = lqdIx.get(hyg.timestamps[i]);
+      if (j === undefined) continue;
+      const lp = lqd.close[j], hp = hyg.close[i];
+      if (lp > 0 && isFinite(hp)) ratio.push(hp / lp);
+    }
+    if (ratio.length >= 61) {
+      const r = pctChange(ratio, 60);
+      if (r !== null) credit = clamp(50 + r * 25);
+    }
   }
 
   const score = Math.round((trend + vol + breadth + credit) / 4);

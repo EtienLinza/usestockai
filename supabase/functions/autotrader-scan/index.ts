@@ -523,6 +523,38 @@ function computePeakSignals(
   };
 }
 
+// ----------------------------------------------------------------------------
+// H-7: Legacy-position fallbacks — synthesize hard stop / initial risk when
+// `hard_stop_price` is missing (positions opened before R-ladder shipped, or
+// rows where the column was nulled by a migration). Uses entry_atr with a
+// strategy-aware multiplier; falls back to 5% notional risk as last resort.
+// Keeps R-ladder, R-progress time-stop, and synthesized T1 stop live for
+// every open position instead of silently disabling them.
+// ----------------------------------------------------------------------------
+function inferInitRiskPerShare(pos: Position): number {
+  const entry = Number(pos.entry_price);
+  if (pos.hard_stop_price != null) {
+    const r = Math.abs(entry - Number(pos.hard_stop_price));
+    if (isFinite(r) && r > 0) return r;
+  }
+  const atr = Number(pos.entry_atr ?? 0);
+  if (isFinite(atr) && atr > 0) {
+    const k = pos.entry_strategy === "mean_reversion" ? 1.5
+            : pos.entry_strategy === "breakout" ? 1.75
+            : 2.0;
+    return atr * k;
+  }
+  return entry > 0 ? entry * 0.05 : 0;
+}
+
+function inferHardStopPrice(pos: Position): number | null {
+  if (pos.hard_stop_price != null) return Number(pos.hard_stop_price);
+  const entry = Number(pos.entry_price);
+  const risk = inferInitRiskPerShare(pos);
+  if (!isFinite(risk) || risk <= 0 || !isFinite(entry) || entry <= 0) return null;
+  return pos.position_type === "long" ? entry - risk : entry + risk;
+}
+
 // ============================================================================
 // WIN EXIT — peak detection (5 signals, 3-of-5 fires FULL_EXIT)
 // Improvements over the basic ATR-trail:
@@ -566,10 +598,11 @@ function runWinExit(
   // ── R-multiple partial-exit ladder (Phase 2 #7) ────────────────────────
   // Scale out 1/3 at +1R, another 1/3 at +2R, let runner/peak handle the rest.
   // Tightens trailing to breakeven after rung 1 fires (free trade).
-  // Initial risk per share = |entry − hard_stop_price|. Skipped if no hard stop.
-  if (pos.hard_stop_price != null && entry > 0) {
-    const initRisk = Math.abs(entry - Number(pos.hard_stop_price));
-    if (initRisk > 0) {
+  // Initial risk per share = |entry − hard_stop_price|; falls back to ATR-derived
+  // or 5% notional when hard_stop_price is missing (H-7).
+  {
+    const initRisk = inferInitRiskPerShare(pos);
+    if (entry > 0 && initRisk > 0) {
       const rMult = (isLong ? currentPrice - entry : entry - currentPrice) / initRisk;
       const rung = pos.partial_exits_taken ?? 0;
       if (rung === 0 && rMult >= 1.0) {
@@ -792,11 +825,17 @@ function runLossExit(
   const entry = Number(pos.entry_price);
   const pnlPct = isLong ? (currentPrice - entry) / entry : (entry - currentPrice) / entry;
 
-  // T1: Hard stop — non-negotiable
-  if (pos.hard_stop_price != null) {
-    const hit = isLong ? currentPrice <= pos.hard_stop_price : currentPrice >= pos.hard_stop_price;
-    if (hit) {
-      return { kind: "FULL_EXIT", reason: `Hard stop hit (${(pnlPct * 100).toFixed(1)}%)`, price: currentPrice };
+  // T1: Hard stop — non-negotiable. For legacy positions without an explicit
+  // hard_stop_price, synthesize one from entry_atr (H-7) so the safety net
+  // still fires.
+  {
+    const stopPx = inferHardStopPrice(pos);
+    if (stopPx != null) {
+      const hit = isLong ? currentPrice <= stopPx : currentPrice >= stopPx;
+      if (hit) {
+        const synth = pos.hard_stop_price == null ? " [synthesized]" : "";
+        return { kind: "FULL_EXIT", reason: `Hard stop hit${synth} (${(pnlPct * 100).toFixed(1)}%)`, price: currentPrice };
+      }
     }
   }
 
@@ -846,8 +885,13 @@ function runLossExit(
     ? profile.maxHoldBreakout
     : profile.maxHoldTrend;
   const barsHeld = businessDaysSince(pos.created_at);
-  if (pos.hard_stop_price != null && entry > 0 && barsHeld >= Math.max(3, Math.floor(maxHold / 2))) {
-    const initRiskPerShare = Math.abs(entry - Number(pos.hard_stop_price));
+  // T2.5: R-progress time stop (Phase 2 #8)
+  // If half the strategy's max-hold has elapsed and the trade hasn't shown
+  // ≥ 0.5R of unrealized progress, the thesis is stalling — cut early to
+  // free capital for fresher setups. Uses initial risk derived from
+  // hard_stop_price, ATR fallback, or 5% notional (H-7).
+  if (entry > 0 && barsHeld >= Math.max(3, Math.floor(maxHold / 2))) {
+    const initRiskPerShare = inferInitRiskPerShare(pos);
     if (initRiskPerShare > 0) {
       const progressR = (isLong ? currentPrice - entry : entry - currentPrice) / initRiskPerShare;
       if (progressR < 0.5) {
