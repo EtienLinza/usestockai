@@ -1157,11 +1157,15 @@ serve(async (req) => {
         breadth: macro.breadth, credit: macro.credit,
         vixLevel: macro.vixLevel, notes: macro.notes,
       } : null,
-      // Pass cached context to next batch (truncate spyClose to keep payload small)
+      // Pass cached context to next batch. C-5 FIX: previously spyClose was
+      // truncated to the last 30 bars, but macroPermitsEntry() needs ≥200
+      // bars and defaults to "permit" with fewer — silently disabling the
+      // macro regime filter for every batch after batch 0. The full series
+      // is ~252 floats (<3 KB), negligible payload-wise.
       spyContext: spyContext ? {
         spyBearish: spyContext.spyBearish,
-        spyClose: spyContext.spyClose.slice(-30),
-        macro: spyContext.macro ? { ...spyContext.macro, spyClose: spyContext.macro.spyClose.slice(-30) } : undefined,
+        spyClose: spyContext.spyClose,
+        macro: spyContext.macro ? { ...spyContext.macro, spyClose: spyContext.macro.spyClose } : undefined,
       } : null,
       sectorMomentum,
     }), {
