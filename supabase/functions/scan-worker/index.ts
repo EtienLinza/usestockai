@@ -146,12 +146,14 @@ serve(async (req) => {
       if (blackoutSet.has(ticker)) continue;
       try {
         const danelfin = danelfinScores[ticker.toUpperCase()] ?? null;
+        const epsRev = epsRevisionScores[ticker.toUpperCase()] ?? null;
         const sig = evaluateSignal(
           data, ticker,
           { spyBearish: spyContext.spyBearish },
           (macro as MacroContext | null) ?? null,
           undefined, undefined,
           danelfin,
+          epsRev,
         );
         if (!sig || sig.decision === "HOLD") continue;
         const { regime, strategy, weeklyBias, profile, atrPct } = sig;
