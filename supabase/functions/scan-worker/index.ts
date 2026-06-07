@@ -225,6 +225,18 @@ serve(async (req) => {
 
         const qualityScore = annualizedVol > 0 ? conviction / annualizedVol : conviction;
 
+        // Meta-label score (cold-start safe — null when model absent).
+        const metaScore = scoreMetaInline(metaModel, {
+          conviction,
+          atrPct,
+          relStrength: 0,
+          sectorMomentum: sectorMod.bonus,
+          epsRevisionScore: sig.epsRevisionScore ?? 0,
+          regime: marketRegime ?? sig.marketRegime ?? null,
+          hourOfDay: (new Date().getUTCHours() + 19) % 24,
+          dayOfWeek: new Date().getUTCDay(),
+        });
+
         signals.push({
           ticker,
           signal_type: sig.decision === "BUY" ? "BUY" : "SELL",
@@ -241,6 +253,9 @@ serve(async (req) => {
           danelfin_delta: sig.danelfinDelta ?? 0,
           eps_revision_score: sig.epsRevisionScore ?? null,
           eps_revision_delta: sig.epsRevisionDelta ?? 0,
+          market_regime: sig.marketRegime ?? marketRegime ?? null,
+          regime_delta: sig.regimeDelta ?? 0,
+          meta_score: metaScore,
         });
       } catch (err) {
         console.error(`worker ${ticker}:`, err);
