@@ -405,7 +405,10 @@ function dailyReturns(close: number[], lookback: number): number[] {
 
 function pearson(a: number[], b: number[]): number | null {
   const n = Math.min(a.length, b.length);
-  if (n < 30) return null;
+  // H-8 FIX: require ≥60 overlapping bars before applying the 0.75 correlation
+  // threshold (which was calibrated on a full 60-bar window). Short-history
+  // tickers used to be compared at 30 bars and tripped the gate noisily.
+  if (n < 60) return null;
   let sa = 0, sb = 0;
   for (let i = 0; i < n; i++) { sa += a[i]; sb += b[i]; }
   const ma = sa / n, mb = sb / n;
