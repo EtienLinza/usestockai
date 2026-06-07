@@ -369,10 +369,15 @@ function computeEffectiveSettings(
   };
 }
 
-// Autopilot scan cadence — tighter on volatile/open, looser on calm afternoons
+// Autopilot scan cadence — tighter on volatile/open, looser on calm afternoons.
+// P-8 FIX: use Intl to derive the actual NY hour so the cadence aligns with
+// the cash session in both EDT (UTC−4) and EST (UTC−5). The old code hardcoded
+// UTC−4, which was off by an hour for ~5 months/year (Nov→Mar).
 function algoScanIntervalMinutes(macro: MacroContext | null, vixRegime: string): number {
-  const utcHour = new Date().getUTCHours();
-  const nyHour = (utcHour - 4 + 24) % 24;
+  const nyHourStr = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York", hour: "2-digit", hour12: false,
+  }).format(new Date());
+  const nyHour = Number(nyHourStr) % 24;
   if (nyHour === 9 || nyHour === 10) return 5;
   if (vixRegime === "elevated" || vixRegime === "crisis") return 5;
   if (isBearishMacro(macro)) return 5;

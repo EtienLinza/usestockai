@@ -158,7 +158,11 @@ export function calculateVolatility(prices: number[], period: number = 20): numb
     } else {
       const slice = returns.slice(i - period, i);
       const mean = slice.reduce((a, b) => a + b, 0) / period;
-      const variance = slice.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / period;
+      // M-2 FIX: Bessel-corrected sample variance (n-1) instead of population
+      // variance (n). Previous formula underestimated vol by ~2.5% on a 20-bar
+      // window, which systematically over-sized positions via the vol scalar.
+      const denom = Math.max(1, period - 1);
+      const variance = slice.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / denom;
       volatility[i] = Math.sqrt(variance);
     }
   }
