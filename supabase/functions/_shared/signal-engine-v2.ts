@@ -1173,6 +1173,10 @@ export function evaluateSignal(
    *  conviction factor — long: +(score-5)*1.5, short: -(score-5)*1.5.
    *  Missing/undefined → 0 (neutral, never blocks). */
   danelfinScore?: number | null,
+  /** Optional EPS revision score (-10..+10). Used as a SUPPORTING conviction
+   *  factor — long: +round(score*0.8), short: -round(score*0.8).
+   *  Missing/undefined → 0 (neutral, never blocks). */
+  epsRevisionScore?: number | null,
 ): EvaluateSignalResult | null {
   if (data.close.length < 200) return null;
 
