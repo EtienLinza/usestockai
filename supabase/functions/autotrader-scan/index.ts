@@ -504,7 +504,9 @@ type EntryAction =
   | { kind: "ENTER"; conviction: number; kellyFraction: number; price: number;
       strategy: string; profile: StockProfile; atr: number; hardStop: number;
       weeklyAlloc: number; reasoning: string;
-      decision: "BUY" | "SHORT" }
+      decision: "BUY" | "SHORT";
+      siVelocity?: number | null; siDelta?: number;
+      slippageBpsEst?: number | null }
   | { kind: "HOLD" | "BLOCKED"; reason: string };
 
 // ============================================================================
