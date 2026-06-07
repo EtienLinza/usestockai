@@ -1039,6 +1039,11 @@ export interface EvaluateSignalResult {
   epsRevisionDelta?: number;
   /** Raw EPS revision score (-10..+10), or undefined when missing. */
   epsRevisionScore?: number;
+  /** Conviction delta from the regime-tilt overlay (capped ±15%, rounded). 0
+   *  when no regime supplied. */
+  regimeDelta?: number;
+  /** The market regime that was applied (`bull_quiet` etc.) or null. */
+  marketRegime?: string | null;
 }
 
 // ----------------------------------------------------------------------------
