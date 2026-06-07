@@ -1640,6 +1640,13 @@ async function processUser(
   ]));
   if (allTickers.length === 0) return;
 
+  // C-2 FIX: hydrate the per-ticker signal cooldown tracker from DB so that
+  // cooldownBarsRemaining actually carries between cron invocations
+  // (edge-function cold starts otherwise reset the in-memory cache and the
+  // documented cooldown never fires). Persisted at end of processUser below.
+  clearTrackerCache();
+  await primeTrackerCacheFromDB(supabase, allTickers);
+
   await batchFetch(allTickers);
 
   // ── CIRCUIT BREAKER — evaluate batch fetch health before any decisions ──
@@ -2135,6 +2142,9 @@ async function processUser(
     },
     { onConflict: "user_id,date" },
   );
+
+  // C-2 FIX: flush updated cooldown state back to DB for next invocation.
+  await persistTrackerCacheToDB(supabase);
 }
 
 // ── Execute helpers ───────────────────────────────────────────────────────
