@@ -1235,9 +1235,10 @@ serve(async (req) => {
       : null;
     const vixRegime = vixRegimeOf(vixValue);
     const spyTrend = spyTrendOf(macro);
-    const { scalar: volScalar, spyVol } = volTargetScalar(macro);
+    const { scalar: volScalar, spyVol, spyVolFast } = volTargetScalar(macro);
     if (spyVol != null) {
-      console.log(`[autotrader-scan] vol-target: SPY ${VOL_LOOKBACK}d realized vol=${(spyVol*100).toFixed(1)}% → sizing scalar ${volScalar.toFixed(2)}`);
+      const fastStr = spyVolFast != null ? ` (20d=${(spyVolFast*100).toFixed(1)}%)` : "";
+      console.log(`[autotrader-scan] vol-target: SPY ${VOL_LOOKBACK}d realized vol=${(spyVol*100).toFixed(1)}%${fastStr} → sizing scalar ${volScalar.toFixed(2)}`);
     }
     const regimeFloors = (weightsRes.data?.regime_floors as Record<string, number> | null) ?? null;
     const exitCalibration = (weightsRes.data?.exit_calibration as Record<string, { trailMultAdjust: number }> | null) ?? null;
