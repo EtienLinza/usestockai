@@ -2227,7 +2227,10 @@ async function processUser(
 
     const candidateDollars = p.decision.kellyFraction * settings.starting_nav;
 
-    // ── Sector cap gate ──
+    // ── Sector cap gate (G-5 hard block) ──
+    // Sector concentration is a non-negotiable rail when ≥cap, matching the
+    // portfolio-heat-cap precedent. Always blocks regardless of
+    // enforcement_mode — the warn-mode toggle only applies to portfolio_beta.
     let candidateSector: string | null = null;
     if (sectorCapsActive) {
       try { candidateSector = await getSector(p.ticker); } catch { candidateSector = null; }
@@ -2235,21 +2238,13 @@ async function processUser(
         const projected = (sectorDollars.get(candidateSector) ?? 0) + candidateDollars;
         const projectedPct = (projected / settings.starting_nav) * 100;
         if (projectedPct > capPct) {
-          if (blockMode) {
-            summary.blocked++; userSummary.blocked++;
-            await supabase.from("autotrade_log").insert({
-              user_id: userId, ticker: p.ticker, action: "BLOCKED",
-              reason: `Sector cap: ${candidateSector} would reach ${projectedPct.toFixed(0)}% NAV (cap ${capPct}%)`,
-              conviction: p.decision.conviction, strategy: p.decision.strategy, profile: p.decision.profile,
-            });
-            continue;
-          } else {
-            await supabase.from("autotrade_log").insert({
-              user_id: userId, ticker: p.ticker, action: "WARN",
-              reason: `Sector exposure warning: ${candidateSector} → ${projectedPct.toFixed(0)}% NAV (cap ${capPct}%, mode=warn)`,
-              conviction: p.decision.conviction, strategy: p.decision.strategy, profile: p.decision.profile,
-            });
-          }
+          summary.blocked++; userSummary.blocked++;
+          await supabase.from("autotrade_log").insert({
+            user_id: userId, ticker: p.ticker, action: "BLOCKED",
+            reason: `Sector cap: ${candidateSector} would reach ${projectedPct.toFixed(0)}% NAV (cap ${capPct}%)`,
+            conviction: p.decision.conviction, strategy: p.decision.strategy, profile: p.decision.profile,
+          });
+          continue;
         }
       }
     }
