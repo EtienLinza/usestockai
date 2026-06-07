@@ -216,6 +216,41 @@ serve(async (req) => {
     for (const [t, s] of epsRevisionMap.entries()) epsRevisionObj[t] = s;
     console.log(`EPS revision coverage: ${epsRevisionMap.size}/${survivors.length}`);
 
+    // Classify current market regime from SPY bars (already in macro).
+    // Persist once per scan; cheap if duplicate (upsert on date).
+    let currentRegime: string | null = null;
+    try {
+      const spyData = await (async () => {
+        const { fetchDailyHistory } = await import("../_shared/yahoo-history.ts");
+        return fetchDailyHistory("SPY", "1y");
+      })();
+      if (spyData && spyData.close.length >= 210) {
+        const snap = classifyRegime(spyData.close, spyData.high, spyData.low);
+        if (snap) {
+          currentRegime = snap.regime;
+          upsertRegimeSnapshot(snap).catch(() => {});
+          console.log(`Regime: ${snap.regime} (atrPct=${snap.atrPct}, smaRatio=${snap.smaRatio})`);
+        }
+      }
+    } catch (e) { console.warn("regime classify failed", e); }
+
+    // Pre-load latest meta-label model (null when undertrained → no-op).
+    const metaModelRow = await loadLatestMetaModel();
+    const metaModelForWorker = metaModelRow
+      ? {
+          intercept: metaModelRow.intercept,
+          weights: metaModelRow.coefficients,
+          means: metaModelRow.means,
+          stds: metaModelRow.stds,
+          feature_names: metaModelRow.feature_names,
+        }
+      : null;
+    if (metaModelRow) {
+      console.log(`Meta-model: n=${metaModelRow.sample_size} AUC=${metaModelRow.auc ?? "n/a"} trained=${metaModelRow.trained_at}`);
+    } else {
+      console.log("Meta-model: not yet trained (cold start)");
+    }
+
     const workerPayloadBase = {
       spyContext: { spyBearish, spyClose: macro.spyClose.slice(-30) },
       macro,
@@ -223,6 +258,8 @@ serve(async (req) => {
       weights,
       danelfinScores: danelfinObj,
       epsRevisionScores: epsRevisionObj,
+      marketRegime: currentRegime,
+      metaModel: metaModelForWorker,
       mode,
     };
 
