@@ -44,7 +44,15 @@ import { loadLatestRegime } from "../_shared/regime-detector.ts";
 import { loadLatestMetaModel, scoreMetaLabel, type MetaLabelModel } from "../_shared/meta-labeler.ts";
 import { loadShortInterestMap, shortInterestConvictionDelta, type ShortInterestRow } from "../_shared/short-interest.ts";
 import { slippageShrinkFactor } from "../_shared/slippage-model.ts";
-import { computePortfolioCvar, closeToReturns, DEFAULT_CVAR_CAP_PCT, type CvarPosition } from "../_shared/portfolio-cvar.ts";
+import {
+  computePortfolioCvar,
+  computePortfolioCvarBase,
+  computePortfolioCvarMarginal,
+  closeToReturns,
+  DEFAULT_CVAR_CAP_PCT,
+  type CvarBase,
+  type CvarPosition,
+} from "../_shared/portfolio-cvar.ts";
 import { detectAdwinDrift, adwinGateAdjust } from "../_shared/adwin.ts";
 
 /** Thrown by the circuit breaker to abort the entire scan immediately. */
