@@ -1011,6 +1011,15 @@ async function runEntryDecision(
       reason: `Rolling drawdown circuit breaker: 30d NAV dd ${settings.current_drawdown_pct.toFixed(1)}% ≥ ${ROLLING_DD_HARD_BLOCK_PCT}% — entries paused`,
     };
   }
+  // CDaR_0.95 circuit breaker (idea #13) — also runs in non-adaptive mode.
+  // Catches sustained slow bleeds where the peak-to-current snapshot is mild
+  // but the *average* worst-tail drawdown across the window is severe.
+  if (settings.current_cdar_pct >= CDAR_HARD_BLOCK_PCT) {
+    return {
+      kind: "BLOCKED",
+      reason: `CDaR circuit breaker: 30d CDaR_0.95 ${settings.current_cdar_pct.toFixed(1)}% ≥ ${CDAR_HARD_BLOCK_PCT}% — entries paused`,
+    };
+  }
   if (openCount >= settings.max_positions) {
     return { kind: "BLOCKED", reason: `Max positions reached (${openCount}/${settings.max_positions})` };
   }
