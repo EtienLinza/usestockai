@@ -192,6 +192,11 @@ const Backtest = () => {
       toast.error("End year must be after start year");
       return;
     }
+    if (endYear - startYear > 15) {
+      toast.error("Backtest window is capped at 15 years — please shorten the date range");
+      return;
+    }
+
 
     setIsLoading(true);
     setReport(null);
