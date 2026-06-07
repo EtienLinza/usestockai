@@ -639,6 +639,7 @@ export type Database = {
       }
       scan_universe_log: {
         Row: {
+          all_tickers: Json | null
           created_at: string
           fallback_used: boolean
           id: string
@@ -650,6 +651,7 @@ export type Database = {
           total_tickers: number
         }
         Insert: {
+          all_tickers?: Json | null
           created_at?: string
           fallback_used?: boolean
           id?: string
@@ -661,6 +663,7 @@ export type Database = {
           total_tickers?: number
         }
         Update: {
+          all_tickers?: Json | null
           created_at?: string
           fallback_used?: boolean
           id?: string
@@ -713,6 +716,30 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      signal_cooldown: {
+        Row: {
+          cooldown_bars_remaining: number
+          last_decision: string | null
+          last_strategy: string | null
+          ticker: string
+          updated_at: string
+        }
+        Insert: {
+          cooldown_bars_remaining?: number
+          last_decision?: string | null
+          last_strategy?: string | null
+          ticker: string
+          updated_at?: string
+        }
+        Update: {
+          cooldown_bars_remaining?: number
+          last_decision?: string | null
+          last_strategy?: string | null
+          ticker?: string
+          updated_at?: string
+        }
+        Relationships: []
       }
       signal_outcomes: {
         Row: {
