@@ -281,6 +281,8 @@ serve(async (req) => {
             reasoning: s.reasoning,
             danelfin: s.danelfin_delta ?? 0,
             danelfin_score: s.danelfin_score ?? null,
+            eps_revision: s.eps_revision_delta ?? 0,
+            eps_revision_score: s.eps_revision_score ?? null,
           },
           entry_price: s.entry_price,
           spy_at_entry: macro.spyClose[macro.spyClose.length - 1] ?? null,
