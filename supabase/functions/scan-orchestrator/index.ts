@@ -298,6 +298,7 @@ serve(async (req) => {
         expires_at: expiresAt,
         source: mode === "premarket" ? "premarket" : "live",
         explanation: s.explanation ?? null,
+        meta_score: s.meta_score ?? null,
       }));
       const { data: upserted, error } = await supabase
         .from("live_signals").upsert(rows, { onConflict: "ticker" }).select("id, ticker");
