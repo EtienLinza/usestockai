@@ -22,6 +22,9 @@ import {
 } from "../_shared/indicators.ts";
 import {
   evaluateSignal,
+  primeTrackerCacheFromDB,
+  persistTrackerCacheToDB,
+  clearTrackerCache,
   classifyStock,
   PROFILE_PARAMS,
   type DataSet,
