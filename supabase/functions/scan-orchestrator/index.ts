@@ -327,6 +327,7 @@ serve(async (req) => {
             market_regime: s.market_regime ?? null,
             regime_delta: s.regime_delta ?? 0,
             meta_score: s.meta_score ?? null,
+            atr_pct: s.atr_pct ?? null,
           },
           entry_price: s.entry_price,
           spy_at_entry: macro.spyClose[macro.spyClose.length - 1] ?? null,
