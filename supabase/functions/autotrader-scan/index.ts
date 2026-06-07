@@ -2340,7 +2340,7 @@ async function processUser(
     if (rotationActive) {
       if (rotationsDoneThisScan >= rotationBudget) {
         summary.blocked++; userSummary.blocked++;
-        await supabase.from("autotrade_log").insert({
+        queueLog({
           user_id: userId, ticker: p.ticker, action: "BLOCKED",
           reason: `Rotation cap reached for today (${rotationCountToday + rotationsDoneThisScan}/${settings.rotation_max_per_day})`,
           conviction: p.decision.conviction, strategy: p.decision.strategy, profile: p.decision.profile,
@@ -2349,7 +2349,7 @@ async function processUser(
       }
       if (p.decision.conviction < HIGH_CONVICTION_ROTATION_FLOOR) {
         summary.holds++; userSummary.holds++;
-        await supabase.from("autotrade_log").insert({
+        queueLog({
           user_id: userId, ticker: p.ticker, action: "HOLD",
           reason: `Rotation skipped — conviction ${p.decision.conviction} < floor ${HIGH_CONVICTION_ROTATION_FLOOR}`,
           conviction: p.decision.conviction, strategy: p.decision.strategy, profile: p.decision.profile,
@@ -2377,7 +2377,7 @@ async function processUser(
       const worst = ranked[0];
       if (!worst) {
         summary.blocked++; userSummary.blocked++;
-        await supabase.from("autotrade_log").insert({
+        queueLog({
           user_id: userId, ticker: p.ticker, action: "BLOCKED",
           reason: `Rotation skipped — no eligible GREEN position to displace (never rotate on a loss)`,
           conviction: p.decision.conviction, strategy: p.decision.strategy, profile: p.decision.profile,
@@ -2388,7 +2388,7 @@ async function processUser(
       const delta = p.decision.conviction - incumbentConv;
       if (delta < settings.rotation_min_delta_conviction) {
         summary.holds++; userSummary.holds++;
-        await supabase.from("autotrade_log").insert({
+        queueLog({
           user_id: userId, ticker: p.ticker, action: "HOLD",
           reason: `Rotation skipped — Δconv ${delta} < min ${settings.rotation_min_delta_conviction} (incumbent ${worst.pos.ticker} @ conv ${incumbentConv}, P&L ${worst.pnlPct.toFixed(1)}%)`,
           conviction: p.decision.conviction, strategy: p.decision.strategy, profile: p.decision.profile,
@@ -2432,7 +2432,7 @@ async function processUser(
       const corr = maxCorrelationToBook(p.ticker, liveBook);
       if (corr && corr.maxAbs >= CORR_THRESHOLD) {
         summary.blocked++; userSummary.blocked++;
-        await supabase.from("autotrade_log").insert({
+        queueLog({
           user_id: userId, ticker: p.ticker, action: "BLOCKED",
           reason: `Correlation gate (intra-scan): |ρ|=${corr.maxAbs.toFixed(2)} vs ${corr.against} ≥ ${CORR_THRESHOLD}`,
           conviction: p.decision.conviction, strategy: p.decision.strategy, profile: p.decision.profile,
@@ -2455,7 +2455,7 @@ async function processUser(
         const projectedPct = (projected / settings.starting_nav) * 100;
         if (projectedPct > capPct) {
           summary.blocked++; userSummary.blocked++;
-          await supabase.from("autotrade_log").insert({
+          queueLog({
             user_id: userId, ticker: p.ticker, action: "BLOCKED",
             reason: `Sector cap: ${candidateSector} would reach ${projectedPct.toFixed(0)}% NAV (cap ${capPct}%)`,
             conviction: p.decision.conviction, strategy: p.decision.strategy, profile: p.decision.profile,
@@ -2477,14 +2477,14 @@ async function processUser(
       if (projectedPortBeta > betaCap) {
         if (blockMode) {
           summary.blocked++; userSummary.blocked++;
-          await supabase.from("autotrade_log").insert({
+          queueLog({
             user_id: userId, ticker: p.ticker, action: "BLOCKED",
             reason: `Beta cap: portfolio β would reach ${projectedPortBeta.toFixed(2)} (cap ${betaCap}, ${p.ticker} β=${useBeta.toFixed(2)})`,
             conviction: p.decision.conviction, strategy: p.decision.strategy, profile: p.decision.profile,
           });
           continue;
         } else {
-          await supabase.from("autotrade_log").insert({
+          queueLog({
             user_id: userId, ticker: p.ticker, action: "WARN",
             reason: `Beta warning: portfolio β → ${projectedPortBeta.toFixed(2)} (cap ${betaCap}, mode=warn)`,
             conviction: p.decision.conviction, strategy: p.decision.strategy, profile: p.decision.profile,
@@ -2503,7 +2503,7 @@ async function processUser(
         // Heat is a hard safety rail — block even when caps disabled or in warn mode,
         // because the user explicitly disabling caps doesn't justify a margin call.
         summary.blocked++; userSummary.blocked++;
-        await supabase.from("autotrade_log").insert({
+        queueLog({
           user_id: userId, ticker: p.ticker, action: "BLOCKED",
           reason: `Portfolio heat: open R-risk would reach ${projectedHeatPct.toFixed(1)}% NAV (cap ${PORTFOLIO_HEAT_CAP_PCT}%)`,
           conviction: p.decision.conviction, strategy: p.decision.strategy, profile: p.decision.profile,
