@@ -324,12 +324,16 @@ serve(async (req) => {
             danelfin_score: s.danelfin_score ?? null,
             eps_revision: s.eps_revision_delta ?? 0,
             eps_revision_score: s.eps_revision_score ?? null,
+            market_regime: s.market_regime ?? null,
+            regime_delta: s.regime_delta ?? 0,
+            meta_score: s.meta_score ?? null,
           },
           entry_price: s.entry_price,
           spy_at_entry: macro.spyClose[macro.spyClose.length - 1] ?? null,
           macro_score: macro.score, macro_label: macro.label,
           weights_id: weights.activeWeightsId, status: "open",
           explanation: s.explanation ?? null,
+          meta_score: s.meta_score ?? null,
         }));
         // P-2 FIX: rows whose signal_id resolved to null can't dedupe on the
         // unique partial index — every retry would create a brand-new "open"
