@@ -598,9 +598,11 @@ function runWinExit(
   // ── R-multiple partial-exit ladder (Phase 2 #7) ────────────────────────
   // Scale out 1/3 at +1R, another 1/3 at +2R, let runner/peak handle the rest.
   // Tightens trailing to breakeven after rung 1 fires (free trade).
-  // Initial risk per share = |entry − hard_stop_price|. Skipped if no hard stop.
-  if (pos.hard_stop_price != null && entry > 0) {
-    const initRisk = Math.abs(entry - Number(pos.hard_stop_price));
+  // Initial risk per share = |entry − hard_stop_price|; falls back to ATR-derived
+  // or 5% notional when hard_stop_price is missing (H-7).
+  {
+    const initRisk = inferInitRiskPerShare(pos);
+    if (entry > 0 && initRisk > 0) {
     if (initRisk > 0) {
       const rMult = (isLong ? currentPrice - entry : entry - currentPrice) / initRisk;
       const rung = pos.partial_exits_taken ?? 0;
