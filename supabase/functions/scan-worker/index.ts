@@ -48,6 +48,19 @@ interface Body {
   /** Pre-loaded EPS revision scores keyed by uppercase ticker — supporting
    *  fundamental factor. Missing → neutral. */
   epsRevisionScores?: Record<string, number>;
+  /** Current market regime (`bull_quiet` | `bull_volatile` | `bear_quiet` |
+   *  `bear_volatile` | `neutral`). Orchestrator classifies once per scan and
+   *  forwards. Missing → no regime tilt applied. */
+  marketRegime?: string | null;
+  /** Pre-loaded meta-label model coefficients (logistic). Pass-through when
+   *  absent or under-trained. */
+  metaModel?: {
+    intercept: number;
+    weights: number[];
+    means: number[];
+    stds: number[];
+    feature_names: string[];
+  } | null;
   mode?: "premarket" | "live";
 }
 
