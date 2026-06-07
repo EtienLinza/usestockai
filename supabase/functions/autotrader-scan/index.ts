@@ -2518,34 +2518,32 @@ async function processUser(
     // open position has <20 return obs (cold-start safe).
     if (livePositions.length > 0) {
       try {
-        const cvarPositions: CvarPosition[] = [];
-        for (const pos of livePositions) {
-          const d = priceCache.get(pos.ticker.toUpperCase());
-          if (!d) continue;
-          const px = d.close[d.close.length - 1];
-          const dirSign = pos.position_type === "long" ? 1 : -1;
-          const rets = closeToReturns(d.close.slice(-61));
-          cvarPositions.push({ ticker: pos.ticker, dollars: dirSign * px * Number(pos.shares), returns: rets });
+        if (cvarBaseDirty) {
+          cvarBase = buildCvarBase();
+          cvarBaseDirty = false;
         }
         const candD = priceCache.get(p.ticker.toUpperCase());
-        if (candD) {
+        if (cvarBase && candD) {
           const candSign = p.decision.decision === "BUY" ? 1 : -1;
-          cvarPositions.push({
-            ticker: p.ticker,
-            dollars: candSign * candidateDollars,
-            returns: closeToReturns(candD.close.slice(-61)),
-          });
-        }
-        const cvar = computePortfolioCvar(cvarPositions, currentNav);
-        if (cvar && cvar.cvarPct > DEFAULT_CVAR_CAP_PCT) {
-          summary.blocked++; userSummary.blocked++;
-          await supabase.from("autotrade_log").insert({
-            user_id: userId, ticker: p.ticker, action: "BLOCKED",
-            reason: `Portfolio CVaR: 95% ES would reach ${cvar.cvarPct.toFixed(2)}% NAV (cap ${DEFAULT_CVAR_CAP_PCT}%, worst=${cvar.worstPathPct.toFixed(1)}%)`,
-            conviction: p.decision.conviction, strategy: p.decision.strategy, profile: p.decision.profile,
-            cvar_block_count: 1,
-          });
-          continue;
+          const cvar = computePortfolioCvarMarginal(
+            cvarBase,
+            {
+              ticker: p.ticker,
+              dollars: candSign * candidateDollars,
+              returns: closeToReturns(candD.close.slice(-61)),
+            },
+            currentNav,
+          );
+          if (cvar && cvar.cvarPct > DEFAULT_CVAR_CAP_PCT) {
+            summary.blocked++; userSummary.blocked++;
+            queueLog({
+              user_id: userId, ticker: p.ticker, action: "BLOCKED",
+              reason: `Portfolio CVaR: 95% ES would reach ${cvar.cvarPct.toFixed(2)}% NAV (cap ${DEFAULT_CVAR_CAP_PCT}%, worst=${cvar.worstPathPct.toFixed(1)}%)`,
+              conviction: p.decision.conviction, strategy: p.decision.strategy, profile: p.decision.profile,
+              cvar_block_count: 1,
+            });
+            continue;
+          }
         }
       } catch (e) { console.warn("cvar gate failed", e); }
     }
@@ -2565,6 +2563,8 @@ async function processUser(
       if (betaCapsActive) {
         bookBetaDollars += candidateDollars * (candidateBeta ?? 1);
       }
+      // Invalidate CVaR base — the open book just gained a position.
+      cvarBaseDirty = true;
     }
   }
 
