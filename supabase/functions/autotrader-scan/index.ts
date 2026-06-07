@@ -2422,6 +2422,8 @@ async function processUser(
         bookBetaDollars = Math.max(0, bookBetaDollars - worstDollars * (b ?? 1));
       }
       rotationsDoneThisScan++;
+      cvarBaseDirty = true; // book just lost a position
+
     }
 
     // Re-check correlation against the live book — including any positions
