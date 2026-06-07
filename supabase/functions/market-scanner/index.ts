@@ -1120,6 +1120,7 @@ serve(async (req) => {
         reasoning: s.reasoning,
         strategy: s.strategy,
         expires_at: expiresAt,
+        explanation: (s as any).explanation ?? null,
       }));
 
       const { data: upserted, error } = await supabase
