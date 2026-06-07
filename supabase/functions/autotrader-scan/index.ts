@@ -2570,6 +2570,15 @@ async function processUser(
     }
   }
 
+  // Drain any queued log inserts from the gate loop. Use allSettled so a
+  // single failed write never aborts the scan.
+  if (logInserts.length > 0) {
+    await Promise.allSettled(logInserts);
+    logInserts.length = 0;
+  }
+
+
+
   for (const p of deferred) {
     summary.holds++;
     userSummary.holds++;
