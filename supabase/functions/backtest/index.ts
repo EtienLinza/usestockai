@@ -1376,6 +1376,7 @@ function computeMetrics(
     totalTrades: trades.length,
     winRate: p(winRate), avgReturn: p(avgReturn), totalReturn: p(totalReturn),
     maxDrawdown: p(maxDrawdown), sharpeRatio: p(sharpeRatio), sortinoRatio: p(sortinoRatio),
+    deflatedSharpe: p(deflatedSharpe), avgSampleUniqueness: p(avgSampleUniqueness),
     calmarRatio: p(calmarRatio), profitFactor: p(profitFactor),
     directionalAccuracy: p(directionalAccuracy), convictionBuckets,
     avgWin: p(avgWin), avgLoss: p(avgLoss), winLossRatio: p(winLossRatio),
