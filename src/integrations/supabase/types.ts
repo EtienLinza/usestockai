@@ -370,6 +370,7 @@ export type Database = {
           expires_at: string | null
           explanation: string | null
           id: string
+          meta_score: number | null
           reasoning: string | null
           regime: string | null
           signal_type: string
@@ -387,6 +388,7 @@ export type Database = {
           expires_at?: string | null
           explanation?: string | null
           id?: string
+          meta_score?: number | null
           reasoning?: string | null
           regime?: string | null
           signal_type: string
@@ -404,6 +406,7 @@ export type Database = {
           expires_at?: string | null
           explanation?: string | null
           id?: string
+          meta_score?: number | null
           reasoning?: string | null
           regime?: string | null
           signal_type?: string
@@ -413,6 +416,63 @@ export type Database = {
           target_allocation?: number | null
           ticker?: string
           weekly_bias?: string | null
+        }
+        Relationships: []
+      }
+      market_regime: {
+        Row: {
+          atr_pct: number | null
+          created_at: string
+          date: string
+          regime: string
+          sma_ratio: number | null
+          spy_close: number | null
+        }
+        Insert: {
+          atr_pct?: number | null
+          created_at?: string
+          date: string
+          regime: string
+          sma_ratio?: number | null
+          spy_close?: number | null
+        }
+        Update: {
+          atr_pct?: number | null
+          created_at?: string
+          date?: string
+          regime?: string
+          sma_ratio?: number | null
+          spy_close?: number | null
+        }
+        Relationships: []
+      }
+      meta_label_model: {
+        Row: {
+          auc: number | null
+          coefficients: Json
+          feature_names: Json
+          id: string
+          intercept: number
+          sample_size: number
+          trained_at: string
+        }
+        Insert: {
+          auc?: number | null
+          coefficients: Json
+          feature_names: Json
+          id?: string
+          intercept?: number
+          sample_size?: number
+          trained_at?: string
+        }
+        Update: {
+          auc?: number | null
+          coefficients?: Json
+          feature_names?: Json
+          id?: string
+          intercept?: number
+          sample_size?: number
+          trained_at?: string
         }
         Relationships: []
       }
@@ -792,6 +852,7 @@ export type Database = {
           macro_score: number | null
           max_adverse_excursion_pct: number | null
           max_favorable_excursion_pct: number | null
+          meta_score: number | null
           realized_pnl_pct: number | null
           regime: string | null
           signal_id: string | null
@@ -823,6 +884,7 @@ export type Database = {
           macro_score?: number | null
           max_adverse_excursion_pct?: number | null
           max_favorable_excursion_pct?: number | null
+          meta_score?: number | null
           realized_pnl_pct?: number | null
           regime?: string | null
           signal_id?: string | null
@@ -854,6 +916,7 @@ export type Database = {
           macro_score?: number | null
           max_adverse_excursion_pct?: number | null
           max_favorable_excursion_pct?: number | null
+          meta_score?: number | null
           realized_pnl_pct?: number | null
           regime?: string | null
           signal_id?: string | null

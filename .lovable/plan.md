@@ -1,111 +1,88 @@
-# High-Impact Clean Wins — Implementation Plan
+# Medium-Effort / Strong-Value Batch
 
-Three orthogonal upgrades from the remaining roadmap, all rated **S** difficulty, each closing a distinct gap (risk, alpha, UX).
-
----
-
-## 1. #6 — Hard Sector Exposure Cap (closes G-5)
-
-**Gap:** `portfolio_caps` already has `sector_max_pct` (default 35%) and `portfolio-gate` enforces it on the **client buy path**. The **autotrader** path bypasses this — it has its own correlation gate but no sector ceiling, so NVDA+AMD+AVGO can all open as a 3× XLK cluster.
-
-**Change:**
-- In `autotrader-scan/index.ts`, mirror the heat-cap pre-pass: compute current sector exposure $ from `open virtual_positions` using the existing `TICKER_TO_SECTOR_ETF` map in `_shared/scan-pipeline.ts`.
-- Per candidate: `(sectorDollars[sector] + candidateDollars) / currentNAV > sector_max_pct` → **block** (regardless of `enforcement_mode`, same precedent as portfolio heat cap — sector concentration is a non-negotiable rail when ≥35%).
-- Update `sectorDollars` after each successful entry within the scan.
-- Log block reason to `autotrade_log.reason`.
-
-**File:** `supabase/functions/autotrader-scan/index.ts` only.
-**Memory:** `mem://architecture/prediction-engine/sector-exposure-cap.md`.
+Picking the three roadmap items with the best value-to-effort ratio. Skipping pure tech-debt (H-4, P-3) and data-plumbing (G-8 corp actions) — those are low-value relative to alpha lifts. Skipping #20 factor neutralization (needs full factor model, high effort).
 
 ---
 
-## 2. #11 — EPS-Revision Factor (orthogonal fundamental tilt)
+## 1. #7 Regime Detection Gate
 
-**Gap:** Engine is 100% technical. EPS-estimate-revision momentum is the best-documented orthogonal factor and the cheapest to add (Finnhub already in stack — `FINNHUB_API_KEY` configured).
+**Why:** Single biggest unrealized edge. Engine currently treats all market states identically; mean-reversion signals fire in trending tapes and momentum signals fire in chop. A regime classifier lets us tilt strategy weights per regime instead of forcing one config.
 
-**Data source:** Finnhub `/stock/recommendation` + `/stock/earnings` gives quarter-over-quarter EPS estimate trend. Free tier covers it.
+**Approach — keep it simple, classical HMM-style states from SPY:**
+- New `_shared/regime-detector.ts`: classify market into 4 states using SPY daily bars (already cached):
+  - `bull_quiet` — 50d > 200d SMA, ATR% < 1.2
+  - `bull_volatile` — 50d > 200d SMA, ATR% ≥ 1.2
+  - `bear_quiet` — 50d < 200d SMA, ATR% < 1.5
+  - `bear_volatile` — 50d < 200d SMA, ATR% ≥ 1.5 (VIX proxy ≥ 25)
+- Persist to new `market_regime` table (one row per day, populated by `market-scanner` once per scan).
+- `signal-engine-v2.ts` reads current regime, applies strategy-tilt multipliers:
+  - momentum strategies → `bull_quiet` ×1.15, `bear_volatile` ×0.70
+  - mean-reversion → `bull_volatile` ×1.20, `bull_quiet` ×0.90
+  - breakout → `bull_quiet` ×1.10, `bear_quiet` ×0.85
+- Tilts cap at ±20% delta on conviction so they bias, never gate.
+- Surface `regime` field in `live_signals` for UI (small badge in TradingTab).
 
-**Schema:**
-```sql
-CREATE TABLE public.eps_revisions (
-  ticker text NOT NULL,
-  as_of date NOT NULL,
-  current_estimate numeric,
-  estimate_30d_ago numeric,
-  estimate_90d_ago numeric,
-  revision_score numeric,  -- -10..+10
-  PRIMARY KEY (ticker, as_of)
-);
--- Public read, server-only write (mirrors danelfin_scores pattern)
-```
+## 2. #8 Meta-Labeling Filter
 
-**Refresh:** New `refresh-eps-revisions` edge fn + nightly cron at 02:45 UTC (after Danelfin). Throttled ~1 req/sec, capped at 300 tickers, same universe selection as Danelfin (`scan_universe_log.sample_tickers` ∪ watchlist ∪ open positions).
+**Why:** Lopez de Prado's secondary classifier — given the primary signal already fired, predict whether *this specific instance* is likely to be profitable. Historically lifts precision 15-25% with minor recall loss. Fits naturally on top of existing signal pipeline.
 
-**Factor formula** (in `_shared/signal-engine-v2.ts`, parallel to existing Danelfin overlay):
-- `revisionScore = clamp(((current - est_90d_ago) / |est_90d_ago|) * 50, -10, +10)`
-- Long:  `delta = round(revisionScore * 0.8)` → range −8…+8
-- Short: `delta = -round(revisionScore * 0.8)`
-- Missing/null/crypto → 0 (never blocks)
-- Applied **after** Danelfin delta, clamped 0..100, mirrored into `consensusScore`
+**Approach — logistic on persisted features, retrained nightly:**
+- New `meta_label_model` table: stores serialized logistic regression coefficients (~20 floats) + timestamp.
+- New nightly cron edge function `train-meta-labeler`:
+  - Pulls last 180d of `signal_outcomes` with realized PnL
+  - Features: conviction, atrPct, relStrength, sectorMomentum, regime (one-hot), epsRevisionScore, hour-of-day, day-of-week
+  - Label: 1 if trade hit TP before SL, else 0
+  - Fit logistic via plain JS (no deps — ~80 lines of gradient descent)
+  - Store coefficients
+- `signal-engine-v2.ts` loads latest coefficients, computes `metaScore ∈ [0,1]` per candidate.
+- Filter: if `metaScore < 0.45` and conviction < 80, **demote** to consensus-only (no autotrade). Hard skip below 0.30.
+- Persist `metaScore` to `signal_outcomes.contributing_rules.meta_score` for closed-loop tracking.
 
-**Wiring:**
-- `scan-orchestrator` pre-loads `epsRevisions` map once per run, forwards to workers under `body.epsRevisions` (mirrors `danelfinScores` flow).
-- `autotrader-scan` pre-loads once per scan, passes to `runEntryDecision` → `evaluateSignal`.
-- `evaluateSignal` returns `epsRevisionDelta` and `epsRevisionScore`; persisted to `signal_outcomes.contributing_rules.eps_revision*` so `calibrate-weights` can measure incremental edge.
-- Reasoning string appends ` | epsΔ=±N` when non-zero.
+## 3. H-6 realKelly Wiring
 
-**Memory:** `mem://architecture/prediction-engine/eps-revision-overlay.md` (hard rule: supporting factor only, never a gate — same pattern as Danelfin overlay).
+**Why:** We have a full realKelly implementation that's never used because `autotrader-scan` runs stateless per-candidate. Switching to a stateful sizing pass closes the audit gap and improves capital efficiency on multi-candidate batches.
 
----
-
-## 3. #15 — Natural-Language Signal Explanations (UX moat)
-
-**Gap:** Signals show factor weights as opaque numbers. Composer/TrendSpider's biggest UX advantage is plain-English "why."
-
-**Approach:** Cheap LLM overlay using **Lovable AI Gateway** (`google/gemini-2.5-flash-lite` — fastest/cheapest tier, perfect for short structured summaries; no user API key required).
-
-**Where rendered:** `signal_outcomes` already stores `contributing_rules` (regime, strategy_tilt, danelfinΔ, ticker_calibration, etc.). On signal write, generate a 2-3 sentence explanation and persist alongside.
-
-**Schema:**
-```sql
-ALTER TABLE public.live_signals ADD COLUMN explanation text;
-ALTER TABLE public.signal_outcomes ADD COLUMN explanation text;
-```
-
-**Flow:**
-- New shared helper `_shared/signal-explainer.ts` exports `explainSignal(sig, factors): Promise<string>`.
-- Called from `scan-worker` and `market-scanner` after `evaluateSignal`, **non-blocking** (Promise.all with timeout). On error/timeout → empty string, never blocks signal write.
-- Prompt: structured JSON of top 5 contributing factors + side + regime → return 2-3 sentence retail-friendly explanation.
-- Rate limit awareness: skip generation if scan batch >50 signals, generate top-20 by conviction only.
-
-**UI:** `TradingTab` signal cards already have a `HoverCard` for the Danelfin badge. Add a `?` icon next to conviction → popover showing `explanation`. Hidden when empty.
-
-**Memory:** `mem://features/trading-hub/signal-explanations.md`.
+**Approach:**
+- In `autotrader-scan/index.ts`, after candidate scoring but before entry loop:
+  - Collect all approved candidates into array with `{ticker, conviction, atrPct, expectedEdge}`.
+  - Pull open positions from `virtual_positions` for correlation context.
+  - Call existing `realKelly()` solver with the candidate set + current portfolio → returns per-ticker fraction.
+  - Replace per-candidate `kellyFraction` with solver output.
+- Falls back to half-Kelly per-ticker if solver fails or batch size = 1.
+- Keep existing vol-target scalar and portfolio-heat-cap on top (multiplicative).
 
 ---
 
-## Execution Order (single sprint)
+## Technical Details
 
-```text
-Step 1: Migration — eps_revisions table + GRANTs/RLS + live_signals.explanation + signal_outcomes.explanation
-Step 2: Sector cap in autotrader-scan (no schema)
-Step 3: refresh-eps-revisions edge fn + cron + config.toml (verify_jwt=false)
-Step 4: _shared/eps-revisions.ts loader + signal-engine-v2 factor wiring
-Step 5: scan-orchestrator + scan-worker + market-scanner + autotrader-scan pass-through
-Step 6: _shared/signal-explainer.ts + non-blocking call sites
-Step 7: TradingTab UI popover for explanation
-Step 8: Three memory files
-Step 9: Deploy all touched edge fns
-```
+**New files:**
+- `supabase/functions/_shared/regime-detector.ts`
+- `supabase/functions/_shared/meta-labeler.ts` (load + score)
+- `supabase/functions/train-meta-labeler/index.ts` (nightly)
+- 3 memory files under `.lovable/memory/architecture/prediction-engine/`
 
-## Files Touched
-- **New:** `supabase/functions/refresh-eps-revisions/index.ts`, `supabase/functions/_shared/eps-revisions.ts`, `supabase/functions/_shared/signal-explainer.ts`, 3 memory files
-- **Edited:** `supabase/functions/autotrader-scan/index.ts`, `supabase/functions/_shared/signal-engine-v2.ts`, `supabase/functions/scan-orchestrator/index.ts`, `supabase/functions/scan-worker/index.ts`, `supabase/functions/market-scanner/index.ts`, `supabase/config.toml`, `src/components/dashboard/TradingTab.tsx`
-- **Migration:** eps_revisions + 2 ALTER TABLEs + cron job
+**Edited files:**
+- `_shared/signal-engine-v2.ts` — regime tilts + meta-label filter
+- `autotrader-scan/index.ts` — stateful realKelly pass
+- `market-scanner/index.ts` + `scan-orchestrator/index.ts` — persist regime
+- `scan-worker/index.ts` — persist metaScore
+- `src/components/dashboard/TradingTab.tsx` — regime badge
+- `supabase/config.toml` — schedule `train-meta-labeler` nightly 02:30 UTC
 
-## Out of Scope (explicit)
-- Backtest doesn't get EPS data (no history on free tier) — engine no-ops with delta=0, identical to Danelfin's backtest behavior.
-- No new gate, no minimum EPS score, no veto — supporting factor only.
-- Sector cap uses existing `TICKER_TO_SECTOR_ETF`; no GICS upgrade.
+**Migration:**
+- `market_regime` table (date PK, regime text, atr_pct, sma_ratio)
+- `meta_label_model` table (id, coefficients jsonb, trained_at, sample_size, auc)
+- `live_signals.regime text`, `live_signals.meta_score numeric`
+- `signal_outcomes.meta_score numeric`
+- GRANTs + RLS (public read on regime, service-role-only on model)
 
-Reply **"go"** to ship, or tell me which of the three to drop / reorder.
+**Out of scope (intentionally):**
+- No GICS sector upgrade
+- No corporate action handling
+- No factor-model neutralization
+- No XGBoost / neural meta-labeler — logistic only for explainability + zero deps
+- Meta-labeler defaults to pass-through when `meta_label_model` is empty (cold start safe)
+
+---
+
+Reply **"go"** to ship all three, or tell me which to drop/reorder.
