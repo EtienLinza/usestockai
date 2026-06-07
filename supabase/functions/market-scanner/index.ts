@@ -1163,6 +1163,8 @@ serve(async (req) => {
               reasoning: s.reasoning,
               danelfin: s.danelfin_delta ?? 0,
               danelfin_score: s.danelfin_score ?? null,
+              eps_revision: s.eps_revision_delta ?? 0,
+              eps_revision_score: s.eps_revision_score ?? null,
             },
             entry_price: s.entry_price,
             spy_at_entry: spyContext?.spyClose?.[spyContext.spyClose.length - 1] ?? null,
@@ -1170,6 +1172,7 @@ serve(async (req) => {
             macro_label: macro?.label ?? spyContext?.macro?.label ?? null,
             weights_id: activeWeightsId,
             status: "open",
+            explanation: (s as any).explanation ?? null,
           }));
 
         // P-2 FIX: rows whose signal_id resolved to null can't dedupe on the
