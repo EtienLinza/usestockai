@@ -894,6 +894,11 @@ async function runEntryDecision(
   strategyTilts: Record<string, { multiplier: number }>,
   tickerCalibration: Record<string, { adjust: number }>,
   danelfinMap?: Map<string, number>,
+  /** C-3 FIX: dynamic NAV (starting_nav + cumulative realized PnL +
+   *  unrealized today). Previously we sized off `settings.starting_nav`
+   *  which is static — after a 20% drawdown the engine sized 25% TOO
+   *  LARGE relative to actual equity. */
+  currentNav?: number,
 ): Promise<EntryAction> {
   // Daily loss limit — block all new entries
   if (todayPnlPct <= -settings.daily_loss_limit_pct) {
@@ -978,7 +983,12 @@ async function runEntryDecision(
   const baseFrac = sig.kellyFraction * volScalar;
   const cappedFrac = Math.min(baseFrac, settings.max_single_name_pct / 100, headroom);
   const currentPrice = data.close[data.close.length - 1];
-  const targetDollars = settings.starting_nav * cappedFrac;
+  // C-3 FIX: size off dynamic NAV when caller provides it; fall back to
+  // starting_nav only for legacy paths that haven't been updated yet.
+  const navForSizing = Number.isFinite(currentNav) && (currentNav as number) > 0
+    ? (currentNav as number)
+    : settings.starting_nav;
+  const targetDollars = navForSizing * cappedFrac;
 
   if (targetDollars < currentPrice) {
     return { kind: "HOLD", reason: "Position too small after caps" };
