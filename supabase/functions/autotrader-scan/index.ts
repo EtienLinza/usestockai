@@ -2297,6 +2297,42 @@ async function processUser(
   const HIGH_CONVICTION_ROTATION_FLOOR = 85;
   const MIN_POSITION_AGE_MS = 30 * 60_000; // don't rotate fresh entries
 
+  // ── Engine-speed: fire-and-forget log inserts ────────────────────────────
+  // Each candidate may emit a BLOCKED/HOLD/WARN row to autotrade_log; awaiting
+  // each round-trip serialises the loop on network latency. Queue them and
+  // settle once after the loop instead.
+  const logInserts: Promise<unknown>[] = [];
+  const queueLog = (row: Record<string, unknown>) => {
+    logInserts.push(
+      supabase.from("autotrade_log").insert(row).then(() => {}, (e: unknown) => {
+        console.warn("autotrade_log insert failed", e);
+      }),
+    );
+  };
+
+  // ── Engine-speed: CVaR base/marginal caching ─────────────────────────────
+  // Build the base sim (open book only) once per scan, reuse across all
+  // candidates. Invalidate on rotation close or successful entry so the next
+  // gate evaluation re-seeds from the updated book.
+  let cvarBase: CvarBase | null = null;
+  let cvarBaseDirty = true;
+  const buildCvarBase = (): CvarBase | null => {
+    const basePositions: CvarPosition[] = [];
+    for (const pos of livePositions) {
+      const d = priceCache.get(pos.ticker.toUpperCase());
+      if (!d) continue;
+      const px = d.close[d.close.length - 1];
+      const dirSign = pos.position_type === "long" ? 1 : -1;
+      const rets = closeToReturns(d.close.slice(-61));
+      basePositions.push({
+        ticker: pos.ticker,
+        dollars: dirSign * px * Number(pos.shares),
+        returns: rets,
+      });
+    }
+    return computePortfolioCvarBase(basePositions);
+  };
+
   for (const p of toExecute) {
     // ── ROTATION GATE: if slots are full and rotation enabled, evaluate
     // whether this candidate is strong enough to displace the weakest open
