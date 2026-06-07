@@ -826,11 +826,17 @@ function runLossExit(
   const entry = Number(pos.entry_price);
   const pnlPct = isLong ? (currentPrice - entry) / entry : (entry - currentPrice) / entry;
 
-  // T1: Hard stop — non-negotiable
-  if (pos.hard_stop_price != null) {
-    const hit = isLong ? currentPrice <= pos.hard_stop_price : currentPrice >= pos.hard_stop_price;
-    if (hit) {
-      return { kind: "FULL_EXIT", reason: `Hard stop hit (${(pnlPct * 100).toFixed(1)}%)`, price: currentPrice };
+  // T1: Hard stop — non-negotiable. For legacy positions without an explicit
+  // hard_stop_price, synthesize one from entry_atr (H-7) so the safety net
+  // still fires.
+  {
+    const stopPx = inferHardStopPrice(pos);
+    if (stopPx != null) {
+      const hit = isLong ? currentPrice <= stopPx : currentPrice >= stopPx;
+      if (hit) {
+        const synth = pos.hard_stop_price == null ? " [synthesized]" : "";
+        return { kind: "FULL_EXIT", reason: `Hard stop hit${synth} (${(pnlPct * 100).toFixed(1)}%)`, price: currentPrice };
+      }
     }
   }
 
