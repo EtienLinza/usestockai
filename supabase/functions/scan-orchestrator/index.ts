@@ -18,6 +18,8 @@ import {
 import { loadCachedBars } from "../_shared/bars-cache.ts";
 import { loadDanelfinScores } from "../_shared/danelfin.ts";
 import { loadEpsRevisions } from "../_shared/eps-revisions.ts";
+import { classifyRegime, upsertRegimeSnapshot } from "../_shared/regime-detector.ts";
+import { loadLatestMetaModel } from "../_shared/meta-labeler.ts";
 import { requireCronOrUser, cronSecretHeader } from "../_shared/cron-auth.ts";
 import { isMarketHoliday, etMinuteOfDay, etDayOfWeek } from "../_shared/market-calendar.ts";
 
