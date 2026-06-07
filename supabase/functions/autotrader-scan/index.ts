@@ -1156,18 +1156,40 @@ async function runEntryDecision(
   // ceilings while sizing breathes with realized SPY vol.
   const headroom = (settings.max_nav_exposure_pct - totalNavExposurePct) / 100;
   const baseFrac = sig.kellyFraction * volScalar;
-  const cappedFrac = Math.min(baseFrac, settings.max_single_name_pct / 100, headroom);
+  let cappedFrac = Math.min(baseFrac, settings.max_single_name_pct / 100, headroom);
   const currentPrice = data.close[data.close.length - 1];
   // C-3 FIX: size off dynamic NAV when caller provides it; fall back to
   // starting_nav only for legacy paths that haven't been updated yet.
   const navForSizing = Number.isFinite(currentNav) && (currentNav as number) > 0
     ? (currentNav as number)
     : settings.starting_nav;
-  const targetDollars = navForSizing * cappedFrac;
+  let targetDollars = navForSizing * cappedFrac;
+
+  // ── Almgren–Chriss slippage shrink ─────────────────────────────────────
+  // Estimate ADV from last 20 bars (close × volume), compute expected impact,
+  // shrink the order if impact would consume > 30% of expected edge.
+  let slippageBpsEst: number | null = null;
+  if (data.volume && data.volume.length >= 20 && targetDollars > 0) {
+    const n = data.close.length;
+    let advDollars = 0;
+    for (let i = n - 20; i < n; i++) {
+      advDollars += data.close[i] * data.volume[i];
+    }
+    advDollars /= 20;
+    if (Number.isFinite(advDollars) && advDollars > 0) {
+      const shrink = slippageShrinkFactor(targetDollars, advDollars, sig.atrPct, 2, 0.30);
+      slippageBpsEst = shrink.bps;
+      if (shrink.factor < 1) {
+        cappedFrac = cappedFrac * shrink.factor;
+        targetDollars = navForSizing * cappedFrac;
+      }
+    }
+  }
 
   if (targetDollars < currentPrice) {
     return { kind: "HOLD", reason: "Position too small after caps" };
   }
+
 
   // Hard stop at entry — STRUCTURAL (Phase 2 #10)
   // Pure-ATR stops fire on noise. We anchor the stop to actual market
