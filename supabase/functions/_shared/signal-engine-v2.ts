@@ -343,8 +343,18 @@ export function macroPermitsEntry(
   const sma200 = calculateSMA(spy, 200);
   const n = spy.length - 1;
   const spyPrice = spy[n];
-  const s50 = safeGet(sma50, spyPrice);
-  const s200 = safeGet(sma200, spyPrice);
+  // C-4 FIX: previously `safeGet(sma50, spyPrice)` defaulted to `spyPrice`
+  // when the SMA was NaN, which silently makes `spyPrice < s50` evaluate
+  // false and effectively bypasses the macro filter on degraded data.
+  // Now we treat missing SMAs as "insufficient data → no block, no claim".
+  const s50raw = sma50[n];
+  const s200raw = sma200[n];
+  if (!Number.isFinite(s50raw) || !Number.isFinite(s200raw) || !Number.isFinite(spyPrice)) {
+    console.warn("[macroPermitsEntry] insufficient SMA data — macro filter bypassed");
+    return true;
+  }
+  const s50 = s50raw;
+  const s200 = s200raw;
   const spyMomentum = n >= 5 ? (spy[n] - spy[n - 5]) / spy[n - 5] : 0;
 
   const bearRegime = spyPrice < s50 && spyPrice < s200 && spyMomentum < -0.02;
@@ -1038,6 +1048,98 @@ export function getOrCreateTracker(ticker: string): SignalState {
 
 export function clearTrackerCache() {
   signalTrackerCache.clear();
+}
+
+// ─── C-2 FIX: persist tracker state across cold starts ─────────────────────
+// Edge functions don't reliably warm-instance between cron invocations, so
+// the in-memory `signalTrackerCache` resets on every run and cooldownBars
+// never carries forward — effectively disabling the documented cooldown.
+// These helpers let any caller hydrate the cache from `public.signal_cooldown`
+// before its scan loop and flush it back afterwards.
+//
+// The supabase client is duck-typed so this module stays free of
+// `@supabase/supabase-js` imports (preserving its use as a pure logic module).
+
+type SupaLike = {
+  from: (table: string) => any;
+};
+
+export async function primeTrackerCacheFromDB(
+  supabase: SupaLike,
+  tickers: string[],
+): Promise<void> {
+  if (!supabase || !Array.isArray(tickers) || tickers.length === 0) return;
+  try {
+    const upper = Array.from(new Set(tickers.map((t) => t.toUpperCase())));
+    // Postgrest .in() caps at a few thousand; chunk to be safe.
+    const chunkSize = 500;
+    for (let i = 0; i < upper.length; i += chunkSize) {
+      const chunk = upper.slice(i, i + chunkSize);
+      const { data, error } = await supabase
+        .from("signal_cooldown")
+        .select("ticker, cooldown_bars_remaining, last_decision")
+        .in("ticker", chunk);
+      if (error) {
+        console.warn("[primeTrackerCache] select error", error);
+        continue;
+      }
+      for (const row of (data ?? []) as Array<{
+        ticker: string;
+        cooldown_bars_remaining: number;
+        last_decision: string | null;
+      }>) {
+        const key = row.ticker.toUpperCase();
+        const lastDir: SignalState["lastDirection"] =
+          row.last_decision === "BUY" || row.last_decision === "SHORT"
+            ? row.last_decision
+            : "HOLD";
+        signalTrackerCache.set(key, {
+          lastDirection: lastDir,
+          consecutiveCount: 0,
+          cooldownBarsRemaining: Math.max(0, Number(row.cooldown_bars_remaining ?? 0)),
+        });
+      }
+    }
+  } catch (e) {
+    console.warn("[primeTrackerCache] failed", e);
+  }
+}
+
+export async function persistTrackerCacheToDB(
+  supabase: SupaLike,
+): Promise<void> {
+  if (!supabase || signalTrackerCache.size === 0) return;
+  try {
+    const rows: Array<{
+      ticker: string;
+      cooldown_bars_remaining: number;
+      last_decision: string;
+      updated_at: string;
+    }> = [];
+    const now = new Date().toISOString();
+    for (const [ticker, state] of signalTrackerCache.entries()) {
+      // Only persist rows that carry meaningful state — skip pristine
+      // BUY/SHORT/HOLD=HOLD with no cooldown.
+      if (state.cooldownBarsRemaining <= 0 && state.lastDirection === "HOLD") continue;
+      rows.push({
+        ticker,
+        cooldown_bars_remaining: Math.max(0, Math.round(state.cooldownBarsRemaining)),
+        last_decision: state.lastDirection,
+        updated_at: now,
+      });
+    }
+    if (rows.length === 0) return;
+    const chunkSize = 500;
+    for (let i = 0; i < rows.length; i += chunkSize) {
+      const chunk = rows.slice(i, i + chunkSize);
+      const { error } = await supabase
+        .from("signal_cooldown")
+        .upsert(chunk, { onConflict: "ticker" });
+      if (error) console.warn("[persistTrackerCache] upsert error", error);
+    }
+  } catch (e) {
+    console.warn("[persistTrackerCache] failed", e);
+  }
 }
 
 export function evaluateSignal(

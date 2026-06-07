@@ -22,6 +22,9 @@ import {
 } from "../_shared/indicators.ts";
 import {
   evaluateSignal,
+  primeTrackerCacheFromDB,
+  persistTrackerCacheToDB,
+  clearTrackerCache,
   classifyStock,
   PROFILE_PARAMS,
   type DataSet,
@@ -894,6 +897,11 @@ async function runEntryDecision(
   strategyTilts: Record<string, { multiplier: number }>,
   tickerCalibration: Record<string, { adjust: number }>,
   danelfinMap?: Map<string, number>,
+  /** C-3 FIX: dynamic NAV (starting_nav + cumulative realized PnL +
+   *  unrealized today). Previously we sized off `settings.starting_nav`
+   *  which is static — after a 20% drawdown the engine sized 25% TOO
+   *  LARGE relative to actual equity. */
+  currentNav?: number,
 ): Promise<EntryAction> {
   // Daily loss limit — block all new entries
   if (todayPnlPct <= -settings.daily_loss_limit_pct) {
@@ -978,7 +986,12 @@ async function runEntryDecision(
   const baseFrac = sig.kellyFraction * volScalar;
   const cappedFrac = Math.min(baseFrac, settings.max_single_name_pct / 100, headroom);
   const currentPrice = data.close[data.close.length - 1];
-  const targetDollars = settings.starting_nav * cappedFrac;
+  // C-3 FIX: size off dynamic NAV when caller provides it; fall back to
+  // starting_nav only for legacy paths that haven't been updated yet.
+  const navForSizing = Number.isFinite(currentNav) && (currentNav as number) > 0
+    ? (currentNav as number)
+    : settings.starting_nav;
+  const targetDollars = navForSizing * cappedFrac;
 
   if (targetDollars < currentPrice) {
     return { kind: "HOLD", reason: "Position too small after caps" };
@@ -1627,6 +1640,13 @@ async function processUser(
   ]));
   if (allTickers.length === 0) return;
 
+  // C-2 FIX: hydrate the per-ticker signal cooldown tracker from DB so that
+  // cooldownBarsRemaining actually carries between cron invocations
+  // (edge-function cold starts otherwise reset the in-memory cache and the
+  // documented cooldown never fires). Persisted at end of processUser below.
+  clearTrackerCache();
+  await primeTrackerCacheFromDB(supabase, allTickers);
+
   await batchFetch(allTickers);
 
   // ── CIRCUIT BREAKER — evaluate batch fetch health before any decisions ──
@@ -1750,6 +1770,28 @@ async function processUser(
   const navExposurePct = (totalNavExposureDollars / settings.starting_nav) * 100;
   const todayPnlPct = ((realizedToday + unrealizedToday) / settings.starting_nav) * 100;
 
+  // C-3 FIX: cumulative realized PnL across the entire history of this
+  // user's closed positions. Combined with today's unrealized this gives
+  // an accurate live NAV for position sizing, replacing the static
+  // starting_nav that over-sized after drawdowns and under-sized after gains.
+  let cumulativeRealizedPnl = 0;
+  try {
+    const { data: allClosed } = await supabase
+      .from("virtual_positions")
+      .select("pnl")
+      .eq("user_id", userId)
+      .eq("status", "closed");
+    cumulativeRealizedPnl = (allClosed ?? []).reduce(
+      (s: number, p: any) => s + Number(p.pnl ?? 0), 0,
+    );
+  } catch (e) {
+    console.warn("cumulative pnl query failed", e);
+  }
+  const currentNav = Math.max(
+    settings.starting_nav * 0.1, // sanity floor: never let NAV fall below 10% of start
+    settings.starting_nav + cumulativeRealizedPnl + unrealizedToday,
+  );
+
   const heldTickers = new Set(positions.map(p => p.ticker.toUpperCase()));
 
   // ── CAPITAL ROTATION GATE ─────────────────────────────────────────────
@@ -1827,6 +1869,7 @@ async function processUser(
       volScalar,
       calibrationCurve, strategyTilts, tickerCalibration,
       danelfinMap,
+      currentNav, // C-3 FIX: dynamic NAV for sizing
     );
 
     if (decision.kind === "ENTER") pending.push({ kind: "enter", ticker, decision });
@@ -2099,6 +2142,9 @@ async function processUser(
     },
     { onConflict: "user_id,date" },
   );
+
+  // C-2 FIX: flush updated cooldown state back to DB for next invocation.
+  await persistTrackerCacheToDB(supabase);
 }
 
 // ── Execute helpers ───────────────────────────────────────────────────────

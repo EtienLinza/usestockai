@@ -5,7 +5,15 @@
 // orchestrator merges and persists.
 // ============================================================================
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { evaluateSignal, type DataSet, type MacroContext } from "../_shared/signal-engine-v2.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+import {
+  evaluateSignal,
+  primeTrackerCacheFromDB,
+  persistTrackerCacheToDB,
+  clearTrackerCache,
+  type DataSet,
+  type MacroContext,
+} from "../_shared/signal-engine-v2.ts";
 import { fetchDailyHistory, fetchPremarketQuote } from "../_shared/yahoo-history.ts";
 import { loadCachedBars, upsertBars } from "../_shared/bars-cache.ts";
 import { getSectorConvictionModifier, macroFloorAdjust, preScreen, type SectorMomentum, type MacroRegime } from "../_shared/scan-pipeline.ts";
@@ -61,6 +69,15 @@ serve(async (req) => {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
+
+    // C-2 FIX: hydrate cooldown tracker from DB so cooldownBarsRemaining
+    // persists across worker invocations (each cold start otherwise resets it).
+    const supabase = createClient(
+      Deno.env.get("SUPABASE_URL")!,
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+    );
+    clearTrackerCache();
+    await primeTrackerCacheFromDB(supabase, tickers);
 
     // Load cached bars; fetch misses with bounded parallelism, pre-screen, and warm cache.
     const cache = await loadCachedBars(tickers);
@@ -204,6 +221,9 @@ serve(async (req) => {
         console.error(`worker ${ticker}:`, err);
       }
     }
+
+    // C-2 FIX: persist updated cooldown state before responding.
+    await persistTrackerCacheToDB(supabase);
 
     return new Response(JSON.stringify({ signals }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },

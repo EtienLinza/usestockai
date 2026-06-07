@@ -82,8 +82,13 @@ serve(async (req) => {
     }
 
     // ─── 1. Discovery (reuse most-recent scan_universe_log if fresh) ──────
+    // C-1 FIX: previously the TTL check existed but the cached branch was
+    // empty, so every scan re-fetched GitHub + 12 Yahoo screener endpoints
+    // (2-4s of avoidable latency, silent empty scans on transient outages).
+    // Now we persist `all_tickers` and reuse it when within TTL.
     let allTickers: string[] = [];
     let discoveryBreakdown: any = null;
+    let usedCache = false;
     if (!refresh) {
       const { data: lastUni } = await supabase
         .from("scan_universe_log")
@@ -91,29 +96,47 @@ serve(async (req) => {
         .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle();
-      if (lastUni && Date.now() - new Date((lastUni as any).created_at).getTime() < DISCOVERY_TTL_MS) {
-        // We need the tickers themselves — discovery log only stores counts/samples.
-        // So re-run discovery only if we don't have a cached ticker list (keep simple: always rediscover but it's <2s).
+      if (lastUni
+          && Date.now() - new Date((lastUni as any).created_at).getTime() < DISCOVERY_TTL_MS
+          && Array.isArray((lastUni as any).all_tickers)
+          && (lastUni as any).all_tickers.length > 50) {
+        allTickers = (lastUni as any).all_tickers as string[];
+        discoveryBreakdown = {
+          indexCount: (lastUni as any).index_count,
+          screenerCount: (lastUni as any).screener_count,
+          overlapCount: (lastUni as any).overlap_count,
+          fallbackUsed: (lastUni as any).fallback_used,
+          perScreener: (lastUni as any).source_breakdown,
+          sampleTickers: (lastUni as any).sample_tickers,
+        };
+        usedCache = true;
+        console.log(`[scan-orchestrator] reusing cached universe (${allTickers.length} tickers, age=${Math.round((Date.now() - new Date((lastUni as any).created_at).getTime()) / 1000)}s)`);
       }
     }
-    const disco = await discoverTickers();
-    allTickers = disco.tickers;
-    discoveryBreakdown = disco.breakdown;
+    if (!usedCache) {
+      const disco = await discoverTickers();
+      allTickers = disco.tickers;
+      discoveryBreakdown = disco.breakdown;
+    }
 
     await setProgress({ universe_size: allTickers.length, total: allTickers.length, phase: "context" });
 
-    // Log universe attribution (fire-and-forget)
-    try {
-      await supabase.from("scan_universe_log").insert({
-        total_tickers: allTickers.length,
-        index_count: discoveryBreakdown.indexCount,
-        screener_count: discoveryBreakdown.screenerCount,
-        overlap_count: discoveryBreakdown.overlapCount,
-        fallback_used: discoveryBreakdown.fallbackUsed,
-        source_breakdown: discoveryBreakdown.perScreener,
-        sample_tickers: discoveryBreakdown.sampleTickers,
-      });
-    } catch (e) { console.warn("scan_universe_log insert", e); }
+    // Log universe attribution (fire-and-forget). Only insert a new row when
+    // we did a fresh discovery — reusing the cache shouldn't bloat the log.
+    if (!usedCache) {
+      try {
+        await supabase.from("scan_universe_log").insert({
+          total_tickers: allTickers.length,
+          index_count: discoveryBreakdown.indexCount,
+          screener_count: discoveryBreakdown.screenerCount,
+          overlap_count: discoveryBreakdown.overlapCount,
+          fallback_used: discoveryBreakdown.fallbackUsed,
+          source_breakdown: discoveryBreakdown.perScreener,
+          sample_tickers: discoveryBreakdown.sampleTickers,
+          all_tickers: allTickers,
+        });
+      } catch (e) { console.warn("scan_universe_log insert", e); }
+    }
 
     // ─── 2. Context: macro + sector + weights in parallel ─────────────────
     const [macro, sectorMomentum, weightsRow] = await Promise.all([
