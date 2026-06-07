@@ -1752,8 +1752,23 @@ async function processUser(
       ? { ...baseProfile, trailingStopATRMult: baseProfile.trailingStopATRMult * trailAdj }
       : baseProfile;
 
-    // Run loss + win in priority order (loss wins ties)
-    const lossAct = runLossExit(pos, data, currentPrice, profile, liveDecision, liveConviction, liveBias, liveRsi);
+    // Earnings blackout for OPEN positions (audit gap G-3): close 2 trading
+    // days before earnings to avoid gap-through-stop risk. Takes priority
+    // over both win-exit and loss-exit logic.
+    let earningsAct: ExitAction | null = null;
+    try {
+      const eDays = await getEarningsBlackoutDays(pos.ticker.toUpperCase());
+      if (eDays !== null && eDays <= 2) {
+        earningsAct = {
+          kind: "FULL_EXIT",
+          reason: `Earnings blackout: report in ~${eDays} trading day${eDays === 1 ? "" : "s"} — closing to avoid gap risk`,
+          price: currentPrice,
+        };
+      }
+    } catch (_e) { /* non-fatal */ }
+
+    // Run loss + win in priority order (earnings → loss → win)
+    const lossAct = earningsAct ?? runLossExit(pos, data, currentPrice, profile, liveDecision, liveConviction, liveBias, liveRsi);
     const action: ExitAction = lossAct ?? runWinExit(pos, data, currentPrice, profile, liveWeeklyAlloc);
 
     const beforeExits = summary.exits, beforePartials = summary.partials, beforeHolds = summary.holds;
