@@ -1227,6 +1227,13 @@ async function runEntryDecision(
   }
   const hardStop = isLong ? currentPrice - stopDist : currentPrice + stopDist;
 
+  const reasoningExtra: string[] = [];
+  if (siDelta !== 0) reasoningExtra.push(`siΔ=${siDelta > 0 ? "+" : ""}${siDelta}`);
+  if (slippageBpsEst !== null && slippageBpsEst > 0) reasoningExtra.push(`slip=${slippageBpsEst.toFixed(1)}bps`);
+  const reasoning = reasoningExtra.length > 0
+    ? `${sig.reasoning} | ${reasoningExtra.join(" | ")}`
+    : sig.reasoning;
+
   return {
     kind: "ENTER",
     conviction: effectiveConviction,
@@ -1238,7 +1245,10 @@ async function runEntryDecision(
     hardStop,
     weeklyAlloc: sig.weeklyBias.targetAllocation,
     decision: sig.decision === "SHORT" ? "SHORT" : "BUY",
-    reasoning: sig.reasoning,
+    reasoning,
+    siVelocity,
+    siDelta,
+    slippageBpsEst,
   };
 }
 
