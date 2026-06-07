@@ -137,6 +137,8 @@ interface Settings {
   auto_watchlist_stale_days: number;
   /** Computed at runtime — 30-day rolling NAV drawdown % (positive = decline). */
   current_drawdown_pct: number;
+  /** Computed at runtime — 30-day CDaR_0.95 (mean of worst 5% daily drawdowns). */
+  current_cdar_pct: number;
 }
 
 interface AdaptiveContext {
@@ -147,6 +149,8 @@ interface AdaptiveContext {
   windowDays: number;
   /** 30-day rolling NAV drawdown % from peak (positive number). */
   rollingDrawdownPct: number;
+  /** 30-day CDaR at α=0.95 — mean of worst 5% of daily peak-to-current drawdowns. */
+  rollingCdarPct: number;
   adjustments: string[];       // human-readable reasons applied
 }
 
@@ -155,6 +159,16 @@ interface AdaptiveContext {
 // threshold. Independent of daily_loss_limit (intraday) and recentPnlPct
 // (7-day realized) — catches slow bleeds the other two miss.
 const ROLLING_DD_HARD_BLOCK_PCT = 10;
+
+// ── CDaR (Conditional Drawdown-at-Risk) circuit breaker — idea #13 ────────
+// CDaR_α is the mean of drawdown observations in the worst (1−α) tail.
+// More robust than a single peak-to-current snapshot because it captures
+// the *severity* of the recent loss path, not just one moment. Tuned to
+// fire before the peak-to-current breaker on persistent slow bleeds.
+const CDAR_ALPHA = 0.95;
+const CDAR_HARD_BLOCK_PCT = 12; // hard-block entries
+const CDAR_HALF_EXPOSURE_PCT = 8; // halve max NAV exposure
+const CDAR_TIGHTEN_PCT = 5; // mild tightening
 
 // (Sentiment / AI layer removed: signals are now 100% deterministic.
 //  Trading-loop AI was a regulatory + reproducibility risk — keep this surface
@@ -339,6 +353,19 @@ function computeEffectiveSettings(
       adjustments.push(`30d drawdown ${dd.toFixed(1)}%: +3 conv, NAV×0.8`);
     }
 
+    // ── Layer 3c: CDaR_0.95 (idea #13) — severity-aware breaker ──
+    // Looks at the mean depth of the worst 5% of the last 30 daily drawdowns.
+    // Catches "many shallow red days in a row" that the single-point peak
+    // breaker would only catch on the final close.
+    const cdar = ctx.rollingCdarPct;
+    if (cdar >= CDAR_HALF_EXPOSURE_PCT) {
+      minConv += 5; maxNav = Math.min(maxNav, maxNav * 0.5);
+      adjustments.push(`CDaR ${cdar.toFixed(1)}%: +5 conv, NAV×0.5`);
+    } else if (cdar >= CDAR_TIGHTEN_PCT) {
+      minConv += 2; maxNav = Math.min(maxNav, maxNav * 0.85);
+      adjustments.push(`CDaR ${cdar.toFixed(1)}%: +2 conv, NAV×0.85`);
+    }
+
     // ── Layer 4: Calibration floor (from nightly strategy_weights.regime_floors) ──
     if (regimeFloors) {
       const regimeKey = ctx.spyTrend === "down" ? "bear" : ctx.vixRegime === "calm" ? "bull" : "neutral";
@@ -366,6 +393,7 @@ function computeEffectiveSettings(
     max_single_name_pct: maxSingle,
     daily_loss_limit_pct: s.daily_loss_limit_pct, // always user-controlled / 3% default
     current_drawdown_pct: ctx.rollingDrawdownPct,
+    current_cdar_pct: ctx.rollingCdarPct,
   };
 }
 
@@ -983,6 +1011,15 @@ async function runEntryDecision(
       reason: `Rolling drawdown circuit breaker: 30d NAV dd ${settings.current_drawdown_pct.toFixed(1)}% ≥ ${ROLLING_DD_HARD_BLOCK_PCT}% — entries paused`,
     };
   }
+  // CDaR_0.95 circuit breaker (idea #13) — also runs in non-adaptive mode.
+  // Catches sustained slow bleeds where the peak-to-current snapshot is mild
+  // but the *average* worst-tail drawdown across the window is severe.
+  if (settings.current_cdar_pct >= CDAR_HARD_BLOCK_PCT) {
+    return {
+      kind: "BLOCKED",
+      reason: `CDaR circuit breaker: 30d CDaR_0.95 ${settings.current_cdar_pct.toFixed(1)}% ≥ ${CDAR_HARD_BLOCK_PCT}% — entries paused`,
+    };
+  }
   if (openCount >= settings.max_positions) {
     return { kind: "BLOCKED", reason: `Max positions reached (${openCount}/${settings.max_positions})` };
   }
@@ -1288,8 +1325,10 @@ serve(async (req) => {
       const recentPnlPct = (recentPnlDollars / Number(rawSettings.starting_nav || 100000)) * 100;
 
       // 30-day rolling NAV drawdown — peak-to-current from virtual_portfolio_log.
-      // Stale-data safe: if we can't compute it, treat as 0 so we never falsely block.
+      // Also compute CDaR_0.95 (mean of worst 5% daily drawdowns over the window).
+      // Stale-data safe: if we can't compute, treat as 0 so we never falsely block.
       let rollingDrawdownPct = 0;
+      let rollingCdarPct = 0;
       try {
         const thirtyDaysAgo = new Date(Date.now() - 30 * 86400000).toISOString();
         const { data: navHistory } = await supabase
@@ -1307,9 +1346,23 @@ serve(async (req) => {
           if (peak > 0 && current < peak) {
             rollingDrawdownPct = ((peak - current) / peak) * 100;
           }
+          // CDaR_α: build per-day drawdown series (running peak − value)/peak,
+          // sort descending, take the worst (1−α) tail and average it.
+          let runPeak = values[0];
+          const ddSeries: number[] = [];
+          for (const v of values) {
+            if (v > runPeak) runPeak = v;
+            ddSeries.push(runPeak > 0 ? ((runPeak - v) / runPeak) * 100 : 0);
+          }
+          if (ddSeries.length >= 5) {
+            const sorted = [...ddSeries].sort((a, b) => b - a);
+            const tailN = Math.max(1, Math.ceil(sorted.length * (1 - CDAR_ALPHA)));
+            const tail = sorted.slice(0, tailN);
+            rollingCdarPct = tail.reduce((s, v) => s + v, 0) / tail.length;
+          }
         }
       } catch (e) {
-        console.warn("[rolling-dd] compute failed", e);
+        console.warn("[rolling-dd/cdar] compute failed", e);
       }
 
       const adaptiveCtx: AdaptiveContext = {
@@ -1319,6 +1372,7 @@ serve(async (req) => {
         recentPnlPct,
         windowDays: 7,
         rollingDrawdownPct,
+        rollingCdarPct,
         adjustments: [],
       };
 
