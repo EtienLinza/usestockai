@@ -1316,8 +1316,10 @@ serve(async (req) => {
       const recentPnlPct = (recentPnlDollars / Number(rawSettings.starting_nav || 100000)) * 100;
 
       // 30-day rolling NAV drawdown — peak-to-current from virtual_portfolio_log.
-      // Stale-data safe: if we can't compute it, treat as 0 so we never falsely block.
+      // Also compute CDaR_0.95 (mean of worst 5% daily drawdowns over the window).
+      // Stale-data safe: if we can't compute, treat as 0 so we never falsely block.
       let rollingDrawdownPct = 0;
+      let rollingCdarPct = 0;
       try {
         const thirtyDaysAgo = new Date(Date.now() - 30 * 86400000).toISOString();
         const { data: navHistory } = await supabase
@@ -1335,9 +1337,23 @@ serve(async (req) => {
           if (peak > 0 && current < peak) {
             rollingDrawdownPct = ((peak - current) / peak) * 100;
           }
+          // CDaR_α: build per-day drawdown series (running peak − value)/peak,
+          // sort descending, take the worst (1−α) tail and average it.
+          let runPeak = values[0];
+          const ddSeries: number[] = [];
+          for (const v of values) {
+            if (v > runPeak) runPeak = v;
+            ddSeries.push(runPeak > 0 ? ((runPeak - v) / runPeak) * 100 : 0);
+          }
+          if (ddSeries.length >= 5) {
+            const sorted = [...ddSeries].sort((a, b) => b - a);
+            const tailN = Math.max(1, Math.ceil(sorted.length * (1 - CDAR_ALPHA)));
+            const tail = sorted.slice(0, tailN);
+            rollingCdarPct = tail.reduce((s, v) => s + v, 0) / tail.length;
+          }
         }
       } catch (e) {
-        console.warn("[rolling-dd] compute failed", e);
+        console.warn("[rolling-dd/cdar] compute failed", e);
       }
 
       const adaptiveCtx: AdaptiveContext = {
@@ -1347,6 +1363,7 @@ serve(async (req) => {
         recentPnlPct,
         windowDays: 7,
         rollingDrawdownPct,
+        rollingCdarPct,
         adjustments: [],
       };
 
