@@ -1042,6 +1042,45 @@ function computeMetrics(
     sortinoRatio = downsideStd > 0 ? ((eqMean - rfPerPeriod) / downsideStd) * annFactor : 0;
   }
 
+  // ── Sample-uniqueness-deflated Sharpe (López de Prado AFML §4.5, idea #2) ──
+  // Overlapping holding periods produce dependent observations, which inflates
+  // Sharpe. Compute concurrency[t] = # of open trades on bar t, then per-trade
+  // uniqueness = mean(1/concurrency[t]) over the trade's holding bars. The
+  // deflated Sharpe = raw × √(avg_uniqueness). avg_uniqueness ∈ (0,1]; 1 means
+  // perfectly non-overlapping trades, 0.5 means on average half the bars are
+  // shared with a sibling trade and the effective sample is halved.
+  let avgSampleUniqueness = 1;
+  let deflatedSharpe = sharpeRatio;
+  if (trades.length >= 2 && sortedEqCurve.length > 1) {
+    const dateIdx = new Map<string, number>();
+    sortedEqCurve.forEach((p, i) => dateIdx.set(p.date, i));
+    const N = sortedEqCurve.length;
+    const concurrency = new Array<number>(N).fill(0);
+    const tradeRanges: [number, number][] = [];
+    for (const t of trades) {
+      const a = dateIdx.get(t.date);
+      const b = dateIdx.get(t.exitDate);
+      if (a === undefined || b === undefined) { tradeRanges.push([-1, -1]); continue; }
+      const lo = Math.min(a, b), hi = Math.max(a, b);
+      tradeRanges.push([lo, hi]);
+      for (let i = lo; i <= hi; i++) concurrency[i]++;
+    }
+    let uSum = 0, uN = 0;
+    for (const [lo, hi] of tradeRanges) {
+      if (lo < 0 || hi < lo) continue;
+      let acc = 0, n = 0;
+      for (let i = lo; i <= hi; i++) {
+        const c = concurrency[i];
+        if (c > 0) { acc += 1 / c; n++; }
+      }
+      if (n > 0) { uSum += acc / n; uN++; }
+    }
+    if (uN > 0) {
+      avgSampleUniqueness = Math.max(0.05, Math.min(1, uSum / uN));
+      deflatedSharpe = sharpeRatio * Math.sqrt(avgSampleUniqueness);
+    }
+  }
+
   // Calmar Ratio
   const calmarRatio = maxDrawdown > 0 ? annualizedReturn / maxDrawdown : 0;
 
