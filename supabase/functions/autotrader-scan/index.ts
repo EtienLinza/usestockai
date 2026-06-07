@@ -1088,9 +1088,24 @@ async function runEntryDecision(
   if (!sig) return { kind: "HOLD", reason: "Insufficient data" };
   if (sig.decision === "HOLD") return { kind: "HOLD", reason: sig.reasoning };
 
-  // ── Meta-label gate (cold-start safe — null model passes through) ──────
-  // PASS: continue. DEMOTE: log + reject (consensus-only, no autotrade).
-  // SKIP: reject hard.
+  // ── Short-interest velocity overlay (supporting factor, NEVER a gate) ──
+  // Applied AFTER the engine returns so the backtest stays deterministic.
+  // Persisted via si_velocity column for closed-loop calibration.
+  let siDelta = 0;
+  let siVelocity: number | null = null;
+  const siRow = shortInterestMap?.get(ticker.toUpperCase()) ?? null;
+  if (siRow) {
+    const side: "long" | "short" = sig.decision === "BUY" ? "long" : "short";
+    siDelta = shortInterestConvictionDelta(siRow, side, sig.strategy);
+    siVelocity = siRow.velocity30d;
+    if (siDelta !== 0) {
+      sig.conviction = Math.max(0, Math.min(100, sig.conviction + siDelta));
+    }
+  }
+
+  // ── Meta-label gate (cold-start safe — null model passes through).
+  //   Thresholds tighten under detected drift (see ADWIN pre-scan pass).
+  const gate = metaGate ?? { pass: 0.45, skip: 0.30 };
   const metaScore = scoreMetaLabel(metaModel ?? null, {
     conviction: sig.conviction,
     atrPct: sig.atrPct,
@@ -1101,13 +1116,16 @@ async function runEntryDecision(
     hourOfDay: (new Date().getUTCHours() + 19) % 24,
     dayOfWeek: new Date().getUTCDay(),
   });
-  const metaDecision = metaLabelDecision(metaScore, sig.conviction);
-  if (metaDecision === "SKIP") {
-    return { kind: "HOLD", reason: `Meta-label skip: score=${metaScore?.toFixed(3)} < 0.30` };
+  if (metaScore !== null && Number.isFinite(metaScore)) {
+    if (metaScore < gate.skip) {
+      return { kind: "HOLD", reason: `Meta-label skip: score=${metaScore.toFixed(3)} < ${gate.skip.toFixed(2)}` };
+    }
+    if (metaScore < gate.pass && sig.conviction < 80) {
+      return { kind: "HOLD", reason: `Meta-label demote: score=${metaScore.toFixed(3)} < ${gate.pass.toFixed(2)} (conv ${sig.conviction} < 80) — consensus-only` };
+    }
   }
-  if (metaDecision === "DEMOTE") {
-    return { kind: "HOLD", reason: `Meta-label demote: score=${metaScore?.toFixed(3)} < 0.45 (conv ${sig.conviction} < 80) — consensus-only` };
-  }
+
+
 
 
   // ── Honest conviction calibration (Phase 1 #5) ──────────────────────────
