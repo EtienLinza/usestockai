@@ -2216,6 +2216,8 @@ async function processUser(
       marketRegime,
       metaModel,
       strategyEdges,
+      shortInterestMap,
+      metaGate,
     );
 
 
