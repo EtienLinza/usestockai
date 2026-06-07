@@ -1154,6 +1154,9 @@ serve(async (req) => {
       );
     }
 
+    // C-2 FIX: flush updated cooldown state back to DB before responding.
+    await persistTrackerCacheToDB(cooldownSupabase);
+
     return new Response(JSON.stringify({
       signals,
       batch,
