@@ -279,12 +279,16 @@ serve(async (req) => {
           macro_score: macro.score, macro_label: macro.label,
           weights_id: weights.activeWeightsId, status: "open",
         }));
-        if (outcomeRows.length > 0) {
+        // P-2 FIX: rows whose signal_id resolved to null can't dedupe on the
+        // unique partial index — every retry would create a brand-new "open"
+        // outcome and corrupt the calibration win-rate. Drop them.
+        const outcomeRowsClean = outcomeRows.filter(r => r.signal_id != null);
+        if (outcomeRowsClean.length > 0) {
           // Upsert on the unique partial index (signal_id WHERE status='open')
           // so retries after partial writes don't create duplicates.
           const { error: oe } = await supabase
             .from("signal_outcomes")
-            .upsert(outcomeRows, { onConflict: "signal_id", ignoreDuplicates: true });
+            .upsert(outcomeRowsClean, { onConflict: "signal_id", ignoreDuplicates: true });
           if (oe) console.error("signal_outcomes upsert err:", oe);
         }
       } catch (e) { console.error("outcome logging:", e); }
