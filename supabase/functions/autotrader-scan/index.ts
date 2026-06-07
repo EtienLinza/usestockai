@@ -204,8 +204,15 @@ function isBearishMacro(macro: MacroContext | null): boolean {
 // risk-parity anchor. When SPY realized vol > target, scale sizes down;
 // when < target, scale up modestly. Continuous (not regime-bucketed) so
 // sizing reacts smoothly as conditions evolve.
+//
+// M-6 FIX: lookback is 63 bars (≈ one quarter, institutional standard) instead
+// of 20. The 20-bar window was too noisy — transient VIX spikes halved sizing
+// for an entire month after the spike rolled off. 63 bars is the same window
+// banks/risk-parity desks use for the same reason. We also keep a 20-bar
+// "fast" measurement and surface it in logs for transparency.
 const VOL_TARGET_ANNUAL = 0.16;
-const VOL_LOOKBACK = 20;
+const VOL_LOOKBACK = 63;
+const VOL_LOOKBACK_FAST = 20;
 const VOL_SCALAR_MIN = 0.5;
 const VOL_SCALAR_MAX = 1.25;
 
@@ -225,13 +232,16 @@ function realizedVolAnnualized(close: number[], lookback: number): number | null
   return Math.sqrt(v) * Math.sqrt(252);
 }
 
-function volTargetScalar(macro: MacroContext | null): { scalar: number; spyVol: number | null } {
-  if (!macro) return { scalar: 1, spyVol: null };
-  const spyVol = realizedVolAnnualized(macro.spyClose, VOL_LOOKBACK);
-  if (spyVol == null || spyVol <= 0) return { scalar: 1, spyVol: null };
+function volTargetScalar(macro: MacroContext | null): { scalar: number; spyVol: number | null; spyVolFast: number | null } {
+  if (!macro) return { scalar: 1, spyVol: null, spyVolFast: null };
+  let spyVol = realizedVolAnnualized(macro.spyClose, VOL_LOOKBACK);
+  const spyVolFast = realizedVolAnnualized(macro.spyClose, VOL_LOOKBACK_FAST);
+  // Fallback: not enough bars for 63 (e.g. fresh ticker) — fall back to fast window.
+  if (spyVol == null || spyVol <= 0) spyVol = spyVolFast;
+  if (spyVol == null || spyVol <= 0) return { scalar: 1, spyVol: null, spyVolFast };
   const raw = VOL_TARGET_ANNUAL / spyVol;
   const scalar = Math.max(VOL_SCALAR_MIN, Math.min(VOL_SCALAR_MAX, raw));
-  return { scalar, spyVol };
+  return { scalar, spyVol, spyVolFast };
 }
 
 // VIX regime classifier
