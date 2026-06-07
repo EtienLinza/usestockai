@@ -20,6 +20,7 @@ import { getSectorConvictionModifier, macroFloorAdjust, preScreen, type SectorMo
 import { getEarningsBlackoutDays } from "../_shared/finnhub.ts";
 import { applyIsotonicCalibration, type IsotonicAnchor } from "../_shared/calibration.ts";
 import { requireCronOrUser } from "../_shared/cron-auth.ts";
+import { explainSignal } from "../_shared/signal-explainer.ts";
 
 
 const corsHeaders = {
