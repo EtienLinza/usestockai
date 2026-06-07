@@ -1301,6 +1301,26 @@ export function evaluateSignal(
     }
   }
 
+  // EPS revision overlay — supporting conviction factor (NEVER a gate).
+  // Long: +round(score * 0.8)  → -8 … +8
+  // Short: -round(score * 0.8)
+  // Applied after Danelfin so calibration can distinguish their contributions.
+  let epsRevisionDelta = 0;
+  if (sig.confidence > 0 && epsRevisionScore !== undefined && epsRevisionScore !== null && Number.isFinite(epsRevisionScore)) {
+    const side: "long" | "short" = sig.consensusScore >= 0 ? "long" : "short";
+    const raw = Math.round(epsRevisionScore * 0.8);
+    epsRevisionDelta = side === "long" ? raw : -raw;
+    if (epsRevisionDelta !== 0) {
+      const before = sig.confidence;
+      sig.confidence = Math.max(0, Math.min(100, sig.confidence + epsRevisionDelta));
+      if (before > 0 && sig.consensusScore !== 0) {
+        sig.consensusScore = Math.sign(sig.consensusScore) * sig.confidence;
+      }
+    }
+  }
+
+
+
 
   // Re-validate against the active profile's threshold after the volume
   // adjustment. Previously a 66-confidence signal could fall to 61, below the
