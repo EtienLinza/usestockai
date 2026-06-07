@@ -2102,6 +2102,11 @@ async function processUser(
     console.log(`autotrader-scan: EPS revision coverage ${epsRevisionMap.size}/${watchlist.length}`);
   }
 
+  // Pre-load short-interest velocity map — supporting factor (never blocks).
+  const shortInterestMap = await loadShortInterestMap(watchlist);
+  if (shortInterestMap.size > 0) {
+    console.log(`autotrader-scan: short-interest coverage ${shortInterestMap.size}/${watchlist.length}`);
+  }
 
   // Pre-load current market regime (cached daily) + meta-label model (latest).
   // Both are null-safe → engine treats missing as no-op.
@@ -2109,6 +2114,40 @@ async function processUser(
   const metaModel = await loadLatestMetaModel();
   if (marketRegime) console.log(`autotrader-scan: regime=${marketRegime}`);
   if (metaModel) console.log(`autotrader-scan: meta-model n=${metaModel.sample_size} AUC=${metaModel.auc ?? "n/a"}`);
+
+  // ── ADWIN drift detection (run once at scan start) ─────────────────────
+  // Pulls last ~200 closed outcomes (binary hit = realized_pnl_pct > 0) and
+  // checks for concept drift. On drift, tighten meta-label thresholds and
+  // INSERT a row into drift_events so the UI + nightly trainer can react.
+  let metaGate: { pass: number; skip: number } = { pass: 0.45, skip: 0.30 };
+  try {
+    const { data: recent } = await supabase
+      .from("signal_outcomes")
+      .select("realized_pnl_pct, entry_date")
+      .in("status", ["closed", "stopped_out", "took_profit"])
+      .order("entry_date", { ascending: false })
+      .limit(200);
+    const series: number[] = [];
+    for (const o of (recent ?? []) as Array<{ realized_pnl_pct: number | null }>) {
+      const p = Number(o.realized_pnl_pct);
+      if (Number.isFinite(p)) series.push(p > 0 ? 1 : 0);
+    }
+    // Reverse so the most-recent obs ends up at the right side of the window.
+    series.reverse();
+    const drift = detectAdwinDrift(series);
+    if (drift.drift) {
+      metaGate = adwinGateAdjust(drift.severity);
+      console.log(`autotrader-scan: ADWIN drift ${drift.severity} | pre=${drift.preMean} post=${drift.postMean} | gate pass=${metaGate.pass} skip=${metaGate.skip}`);
+      await supabase.from("drift_events").insert({
+        window_size: drift.windowSize,
+        pre_mean: drift.preMean,
+        post_mean: drift.postMean,
+        severity: drift.severity,
+      });
+    }
+  } catch (e) { console.warn("ADWIN drift check failed", e); }
+
+
 
   // Pre-load realized edges per strategy from signal_outcomes (last 180d, closed).
   // Used to wire realKelly sizing — H-6 audit closure. Empty → cold-start ramp.
