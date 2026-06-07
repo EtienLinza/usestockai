@@ -252,6 +252,10 @@ interface BacktestReport {
   totalReturn: number;
   maxDrawdown: number;
   sharpeRatio: number;
+  /** Sample-uniqueness-deflated Sharpe (López de Prado §4.5). raw × √(avg uniqueness). */
+  deflatedSharpe: number;
+  /** Mean per-trade uniqueness (1 = no overlap; 0.5 = half the bars overlap). */
+  avgSampleUniqueness: number;
   sortinoRatio: number;
   calmarRatio: number;
   profitFactor: number;
