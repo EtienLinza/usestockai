@@ -1019,6 +1019,8 @@ async function runEntryDecision(
   marketRegime?: string | null,
   metaModel?: MetaLabelModel | null,
   strategyEdges?: Record<string, { winRate: number; avgWin: number; avgLoss: number; sampleSize: number }>,
+  shortInterestMap?: Map<string, ShortInterestRow>,
+  metaGate?: { pass: number; skip: number },
 ): Promise<EntryAction> {
   // Daily loss limit — block all new entries
   if (todayPnlPct <= -settings.daily_loss_limit_pct) {
