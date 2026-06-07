@@ -2345,10 +2345,18 @@ async function executeExit(
       : (entry - action.price) * Number(pos.shares);
 
     // Cooldown: 5–15 trading days based on profile
-    const cdDays = pos.entry_profile === "value" ? 21
+    const baseCdDays = pos.entry_profile === "value" ? 21
       : pos.entry_profile === "volatile" ? 11
       : pos.entry_profile === "index" ? 7
       : 14;
+    // L-3 fix: extend cooldown on losing exits (revenge-entry guard). Stops
+    // hit because the thesis broke — re-entering the same name 14d later
+    // ignores that, especially in volatile regimes. 1.5x for losses, 2.0x
+    // for hard-stop exits (T1 hard_stop / regime breaker).
+    const isLossExit = pnl < 0;
+    const isHardStop = /hard[_ ]?stop|stop[_ ]?loss|regime[_ ]?breaker|cdar/i.test(action.reason ?? "");
+    const cdMult = isHardStop ? 2.0 : isLossExit ? 1.5 : 1.0;
+    const cdDays = Math.round(baseCdDays * cdMult);
     const cooldownUntil = new Date(Date.now() + cdDays * 86400000).toISOString();
 
     await supabase.from("virtual_positions").update({
