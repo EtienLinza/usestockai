@@ -1182,6 +1182,14 @@ export function evaluateSignal(
    *  factor — long: +round(score*0.8), short: -round(score*0.8).
    *  Missing/undefined → 0 (neutral, never blocks). */
   epsRevisionScore?: number | null,
+  /** Optional market regime ("bull_quiet" | "bull_volatile" | "bear_quiet" |
+   *  "bear_volatile" | "neutral"). Applies a strategy-conditional conviction
+   *  multiplier capped ±15%. Missing → no tilt (multiplier 1.0). */
+  marketRegime?: string | null,
+  /** Optional realized-edge calibration for Kelly sizing. When `sampleSize ≥
+   *  30`, computePositionSize uses true fractional Kelly instead of the
+   *  conviction ramp. Missing → cold-start conviction ramp. */
+  realizedEdge?: RealizedEdge | null,
 ): EvaluateSignalResult | null {
   if (data.close.length < 200) return null;
 
