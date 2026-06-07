@@ -1105,31 +1105,6 @@ async function runEntryDecision(
     }
   }
 
-  // ── Meta-label gate (cold-start safe — null model passes through).
-  //   Thresholds tighten under detected drift (see ADWIN pre-scan pass).
-  const gate = metaGate ?? { pass: 0.45, skip: 0.30 };
-  const metaScore = scoreMetaLabel(metaModel ?? null, {
-    conviction: sig.conviction,
-    atrPct: sig.atrPct,
-    relStrength: 0,
-    sectorMomentum: 0,
-    epsRevisionScore: sig.epsRevisionScore ?? 0,
-    regime: sig.marketRegime ?? marketRegime ?? null,
-    hourOfDay: (new Date().getUTCHours() + 19) % 24,
-    dayOfWeek: new Date().getUTCDay(),
-  });
-  if (metaScore !== null && Number.isFinite(metaScore)) {
-    if (metaScore < gate.skip) {
-      return { kind: "HOLD", reason: `Meta-label skip: score=${metaScore.toFixed(3)} < ${gate.skip.toFixed(2)}` };
-    }
-    if (metaScore < gate.pass && sig.conviction < 80) {
-      return { kind: "HOLD", reason: `Meta-label demote: score=${metaScore.toFixed(3)} < ${gate.pass.toFixed(2)} (conv ${sig.conviction} < 80) — consensus-only` };
-    }
-  }
-
-
-
-
   // ── Honest conviction calibration (Phase 1 #5) ──────────────────────────
   // Apply the same nightly-learned adjustments the scanner uses so the
   // autotrader's min_conviction gate compares apples-to-apples. Order:
@@ -1149,6 +1124,30 @@ async function runEntryDecision(
 
   if (conviction < settings.min_conviction) {
     return { kind: "HOLD", reason: `Calibrated conviction ${conviction} (raw ${sig.conviction}) < min ${settings.min_conviction}` };
+  }
+
+  // ── Meta-label gate (cold-start safe — null model passes through).
+  // Audit fix: runs AFTER calibration so the conviction feature matches the
+  // value the trainer sees in `signal_outcomes.conviction` (also calibrated).
+  // Thresholds tighten under detected drift (see ADWIN pre-scan pass).
+  const gate = metaGate ?? { pass: 0.45, skip: 0.30 };
+  const metaScore = scoreMetaLabel(metaModel ?? null, {
+    conviction,
+    atrPct: sig.atrPct,
+    relStrength: 0,
+    sectorMomentum: 0,
+    epsRevisionScore: sig.epsRevisionScore ?? 0,
+    regime: sig.marketRegime ?? marketRegime ?? null,
+    hourOfDay: (new Date().getUTCHours() + 19) % 24,
+    dayOfWeek: new Date().getUTCDay(),
+  });
+  if (metaScore !== null && Number.isFinite(metaScore)) {
+    if (metaScore < gate.skip) {
+      return { kind: "HOLD", reason: `Meta-label skip: score=${metaScore.toFixed(3)} < ${gate.skip.toFixed(2)}` };
+    }
+    if (metaScore < gate.pass && conviction < 80) {
+      return { kind: "HOLD", reason: `Meta-label demote: score=${metaScore.toFixed(3)} < ${gate.pass.toFixed(2)} (conv ${conviction} < 80) — consensus-only` };
+    }
   }
 
   const effectiveConviction = conviction;
