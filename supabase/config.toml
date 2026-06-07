@@ -51,6 +51,11 @@ verify_jwt = false
 [functions.refresh-eps-revisions]
 verify_jwt = false
 
+[functions.train-meta-labeler]
+verify_jwt = false
+
+
+
 
 [functions.create-checkout]
 verify_jwt = false
