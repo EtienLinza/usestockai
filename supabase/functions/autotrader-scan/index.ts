@@ -886,8 +886,13 @@ function runLossExit(
     ? profile.maxHoldBreakout
     : profile.maxHoldTrend;
   const barsHeld = businessDaysSince(pos.created_at);
-  if (pos.hard_stop_price != null && entry > 0 && barsHeld >= Math.max(3, Math.floor(maxHold / 2))) {
-    const initRiskPerShare = Math.abs(entry - Number(pos.hard_stop_price));
+  // T2.5: R-progress time stop (Phase 2 #8)
+  // If half the strategy's max-hold has elapsed and the trade hasn't shown
+  // ≥ 0.5R of unrealized progress, the thesis is stalling — cut early to
+  // free capital for fresher setups. Uses initial risk derived from
+  // hard_stop_price, ATR fallback, or 5% notional (H-7).
+  if (entry > 0 && barsHeld >= Math.max(3, Math.floor(maxHold / 2))) {
+    const initRiskPerShare = inferInitRiskPerShare(pos);
     if (initRiskPerShare > 0) {
       const progressR = (isLong ? currentPrice - entry : entry - currentPrice) / initRiskPerShare;
       if (progressR < 0.5) {
