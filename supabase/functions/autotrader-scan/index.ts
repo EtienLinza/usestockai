@@ -2492,7 +2492,7 @@ async function processUser(
             returns: closeToReturns(candD.close.slice(-61)),
           });
         }
-        const cvar = computePortfolioCvar(cvarPositions, settings.starting_nav);
+        const cvar = computePortfolioCvar(cvarPositions, currentNav);
         if (cvar && cvar.cvarPct > DEFAULT_CVAR_CAP_PCT) {
           summary.blocked++; userSummary.blocked++;
           await supabase.from("autotrade_log").insert({
