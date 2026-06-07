@@ -39,6 +39,7 @@ import { getQuoteWithFallback, getEarningsBlackoutDays, getSector, getBeta } fro
 import { recordHeartbeat } from "../_shared/heartbeat.ts";
 import { applyIsotonicCalibration, type IsotonicAnchor } from "../_shared/calibration.ts";
 import { loadDanelfinScores } from "../_shared/danelfin.ts";
+import { loadEpsRevisions } from "../_shared/eps-revisions.ts";
 
 /** Thrown by the circuit breaker to abort the entire scan immediately. */
 class CircuitBreakerTrippedError extends Error {
