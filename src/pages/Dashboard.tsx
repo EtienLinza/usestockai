@@ -388,7 +388,14 @@ const Dashboard = () => {
       target_profit_pct: profitTarget,
     } as any);
 
-    if (error) { toast.error("Failed to register position"); }
+    if (error) {
+      // P-4: unique-violation on (user, ticker) WHERE status='open' — friendlier message.
+      if ((error as { code?: string }).code === "23505") {
+        toast.error(`You already have an open position in ${selectedSignal.ticker}. Close it first to re-enter.`);
+      } else {
+        toast.error("Failed to register position");
+      }
+    }
     else {
       toast.success(`Registered ${shares} shares of ${selectedSignal.ticker} at $${Number(selectedSignal.entry_price).toFixed(2)}`);
       setBuyDialogOpen(false);
