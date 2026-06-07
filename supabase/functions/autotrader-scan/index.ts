@@ -353,6 +353,19 @@ function computeEffectiveSettings(
       adjustments.push(`30d drawdown ${dd.toFixed(1)}%: +3 conv, NAV×0.8`);
     }
 
+    // ── Layer 3c: CDaR_0.95 (idea #13) — severity-aware breaker ──
+    // Looks at the mean depth of the worst 5% of the last 30 daily drawdowns.
+    // Catches "many shallow red days in a row" that the single-point peak
+    // breaker would only catch on the final close.
+    const cdar = ctx.rollingCdarPct;
+    if (cdar >= CDAR_HALF_EXPOSURE_PCT) {
+      minConv += 5; maxNav = Math.min(maxNav, maxNav * 0.5);
+      adjustments.push(`CDaR ${cdar.toFixed(1)}%: +5 conv, NAV×0.5`);
+    } else if (cdar >= CDAR_TIGHTEN_PCT) {
+      minConv += 2; maxNav = Math.min(maxNav, maxNav * 0.85);
+      adjustments.push(`CDaR ${cdar.toFixed(1)}%: +2 conv, NAV×0.85`);
+    }
+
     // ── Layer 4: Calibration floor (from nightly strategy_weights.regime_floors) ──
     if (regimeFloors) {
       const regimeKey = ctx.spyTrend === "down" ? "bear" : ctx.vixRegime === "calm" ? "bull" : "neutral";
@@ -380,6 +393,7 @@ function computeEffectiveSettings(
     max_single_name_pct: maxSingle,
     daily_loss_limit_pct: s.daily_loss_limit_pct, // always user-controlled / 3% default
     current_drawdown_pct: ctx.rollingDrawdownPct,
+    current_cdar_pct: ctx.rollingCdarPct,
   };
 }
 
