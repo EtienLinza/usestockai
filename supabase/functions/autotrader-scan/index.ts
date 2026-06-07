@@ -2008,6 +2008,12 @@ async function processUser(
     console.log(`autotrader-scan: Danelfin coverage ${danelfinMap.size}/${watchlist.length}`);
   }
 
+  // Pre-load EPS revision scores — supporting fundamental factor (never blocks).
+  const epsRevisionMap = await loadEpsRevisions(watchlist);
+  if (epsRevisionMap.size > 0) {
+    console.log(`autotrader-scan: EPS revision coverage ${epsRevisionMap.size}/${watchlist.length}`);
+  }
+
 
   for (const ticker of watchlist) {
     if (heldTickers.has(ticker)) continue;
@@ -2038,6 +2044,7 @@ async function processUser(
       volScalar,
       calibrationCurve, strategyTilts, tickerCalibration,
       danelfinMap,
+      epsRevisionMap,
       currentNav, // C-3 FIX: dynamic NAV for sizing
     );
 
