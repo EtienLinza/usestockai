@@ -2165,12 +2165,13 @@ async function processUser(
     if (p.kind === "hold") { summary.holds++; userSummary.holds++; }
   }
 
-  // Portfolio snapshot
+  // Portfolio snapshot — true MTM equity (closes audit gap G-2 so the rolling
+  // drawdown circuit breaker reacts to UNrealized losses too, not just closed).
   await supabase.from("virtual_portfolio_log").upsert(
     {
       user_id: userId, date: today,
-      total_value: settings.starting_nav - totalNavExposureDollars + totalNavExposureDollars + unrealizedToday,
-      cash: settings.starting_nav - totalNavExposureDollars,
+      total_value: currentNav,
+      cash: Math.max(0, currentNav - totalNavExposureDollars),
       positions_value: totalNavExposureDollars,
     },
     { onConflict: "user_id,date" },
