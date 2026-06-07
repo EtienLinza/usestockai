@@ -104,13 +104,15 @@ function standardize(X: number[][]): { Xz: number[][]; means: number[]; stds: nu
 function fitLogistic(
   X: number[][],
   y: number[],
-  opts: { lr?: number; l2?: number; iters?: number } = {},
+  opts: { lr?: number; l2?: number; iters?: number; weights?: number[] } = {},
 ): { intercept: number; weights: number[] } {
   const lr = opts.lr ?? 0.1;
   const l2 = opts.l2 ?? 1e-3;
   const iters = opts.iters ?? 400;
   const n = X.length;
   const p = X[0].length;
+  const sw = opts.weights && opts.weights.length === n ? opts.weights : null;
+  const wSum = sw ? sw.reduce((a, b) => a + b, 0) : n;
   let b = 0;
   const w = new Array(p).fill(0);
   for (let t = 0; t < iters; t++) {
@@ -120,17 +122,18 @@ function fitLogistic(
       let z = b;
       for (let j = 0; j < p; j++) z += w[j] * X[i][j];
       const ph = sigmoid(z);
-      const err = ph - y[i];
+      const err = (ph - y[i]) * (sw ? sw[i] : 1);
       gb += err;
       for (let j = 0; j < p; j++) gw[j] += err * X[i][j];
     }
-    b -= lr * (gb / n);
+    b -= lr * (gb / wSum);
     for (let j = 0; j < p; j++) {
-      w[j] -= lr * (gw[j] / n + l2 * w[j]);
+      w[j] -= lr * (gw[j] / wSum + l2 * w[j]);
     }
   }
   return { intercept: b, weights: w };
 }
+
 
 function computeAUC(scores: number[], labels: number[]): number {
   // Mann-Whitney U statistic AUC. O(n log n).
