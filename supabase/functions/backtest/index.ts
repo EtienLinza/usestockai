@@ -34,9 +34,11 @@ async function requireAuth(req: Request): Promise<Response | { userId: string }>
 
 type Tier = "free" | "pro" | "elite";
 const TIER_LIMITS: Record<Tier, { backtests: number; maxTickers: number; maxYears: number; allowMonteCarlo: boolean; allowWalkForward: boolean; allowRobustness: boolean }> = {
+  // maxYears tuned to the edge-function CPU budget — larger windows reliably exceed
+  // CPU time and crash with no response. Keep these conservative.
   free: { backtests: 3, maxTickers: 1, maxYears: 1, allowMonteCarlo: false, allowWalkForward: false, allowRobustness: false },
-  pro: { backtests: 20, maxTickers: 3, maxYears: 10, allowMonteCarlo: true, allowWalkForward: true, allowRobustness: false },
-  elite: { backtests: Number.POSITIVE_INFINITY, maxTickers: 10, maxYears: 25, allowMonteCarlo: true, allowWalkForward: true, allowRobustness: true },
+  pro: { backtests: 20, maxTickers: 3, maxYears: 7, allowMonteCarlo: true, allowWalkForward: true, allowRobustness: false },
+  elite: { backtests: Number.POSITIVE_INFINITY, maxTickers: 10, maxYears: 15, allowMonteCarlo: true, allowWalkForward: true, allowRobustness: true },
 };
 
 async function getUserTier(adminClient: ReturnType<typeof createClient>, userId: string): Promise<Tier> {
