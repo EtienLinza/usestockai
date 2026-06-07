@@ -117,6 +117,8 @@ import {
 import { getEarningsBlackoutDays } from "../_shared/finnhub.ts";
 import { applyIsotonicCalibration, type IsotonicAnchor } from "../_shared/calibration.ts";
 import { loadDanelfinScores } from "../_shared/danelfin.ts";
+import { loadEpsRevisions } from "../_shared/eps-revisions.ts";
+import { explainSignal } from "../_shared/signal-explainer.ts";
 
 
 
