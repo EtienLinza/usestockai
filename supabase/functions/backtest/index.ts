@@ -1857,12 +1857,15 @@ serve(async (req) => {
       }), { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
     if ((endYear - startYear) > tierLimits.maxYears) {
+      const atMax = tier === "elite";
       return new Response(JSON.stringify({
-        error: "tier_required",
+        error: atMax ? "window_too_large" : "tier_required",
         required: tier === "free" ? "pro" : "elite",
         feature: "Extended backtest window",
-        message: `Your ${tier} plan supports up to ${tierLimits.maxYears}-year windows.`,
-      }), { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        message: atMax
+          ? `Backtests are capped at ${tierLimits.maxYears}-year windows so the engine can finish within compute limits. Please shorten the date range.`
+          : `Your ${tier} plan supports up to ${tierLimits.maxYears}-year windows.`,
+      }), { status: atMax ? 400 : 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
     if (includeMonteCarlo && !tierLimits.allowMonteCarlo) {
       return new Response(JSON.stringify({
