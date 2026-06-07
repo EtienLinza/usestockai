@@ -45,6 +45,9 @@ interface Body {
   /** Pre-loaded Danelfin AI Scores keyed by uppercase ticker — supporting
    *  conviction factor passed through to evaluateSignal. Missing → neutral. */
   danelfinScores?: Record<string, number>;
+  /** Pre-loaded EPS revision scores keyed by uppercase ticker — supporting
+   *  fundamental factor. Missing → neutral. */
+  epsRevisionScores?: Record<string, number>;
   mode?: "premarket" | "live";
 }
 
