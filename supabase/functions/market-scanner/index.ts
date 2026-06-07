@@ -290,18 +290,28 @@ async function computeMacroRegime(): Promise<MacroRegime> {
   }
 
   // ── 4. Credit (HYG/LQD ratio 60d slope) ─────────────────────────────────
+  // M-9: align HYG/LQD by timestamp before computing the ratio (missing or
+  // extra bars in either ETF would otherwise pair different dates).
   let credit = 50;
   if (hyg && lqd && hyg.close.length >= 61 && lqd.close.length >= 61) {
+    const lqdIx = new Map<string, number>();
+    for (let i = 0; i < lqd.timestamps.length; i++) lqdIx.set(lqd.timestamps[i], i);
     const ratio: number[] = [];
-    const minLen = Math.min(hyg.close.length, lqd.close.length);
-    for (let i = 0; i < minLen; i++) {
-      if (lqd.close[i] > 0) ratio.push(hyg.close[i] / lqd.close[i]);
+    for (let i = 0; i < hyg.timestamps.length; i++) {
+      const j = lqdIx.get(hyg.timestamps[i]);
+      if (j === undefined) continue;
+      const lp = lqd.close[j], hp = hyg.close[i];
+      if (lp > 0 && isFinite(hp)) ratio.push(hp / lp);
     }
-    const ratioRet = pctChange(ratio, 60);
-    if (ratioRet !== null) {
-      // ±2% credit ratio change -> ±50 from neutral
-      credit = clamp(50 + ratioRet * 25);
-      notes.push(`credit hyg/lqd=${ratioRet.toFixed(2)}%`);
+    if (ratio.length >= 61) {
+      const ratioRet = pctChange(ratio, 60);
+      if (ratioRet !== null) {
+        // ±2% credit ratio change -> ±50 from neutral
+        credit = clamp(50 + ratioRet * 25);
+        notes.push(`credit hyg/lqd=${ratioRet.toFixed(2)}%`);
+      }
+    } else {
+      notes.push("credit insufficient aligned bars");
     }
   } else {
     notes.push("credit insufficient data");
