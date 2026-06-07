@@ -265,6 +265,53 @@ function MarketRegimeBadge() {
   );
 }
 
+// Surfaces the most recent ADWIN drift event within the last 48h. Hidden
+// when no drift has fired (the default healthy state).
+function DriftBadge() {
+  const [data, setData] = useState<{ severity: string; pre_mean: number; post_mean: number; detected_at: string } | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const cutoff = new Date(Date.now() - 48 * 3600_000).toISOString();
+      const { data: row } = await supabase
+        .from("drift_events")
+        .select("severity, pre_mean, post_mean, detected_at")
+        .gte("detected_at", cutoff)
+        .order("detected_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (!cancelled && row) setData(row as any);
+    })();
+    return () => { cancelled = true; };
+  }, []);
+  if (!data) return null;
+  const tone = data.severity === "hard"
+    ? "bg-destructive/10 text-destructive border-destructive/30"
+    : "bg-warning/10 text-warning border-warning/30";
+  const delta = ((data.post_mean - data.pre_mean) * 100).toFixed(1);
+  return (
+    <HoverCard>
+      <HoverCardTrigger asChild>
+        <div className="inline-flex items-center gap-2 cursor-help">
+          <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Drift</span>
+          <Badge variant="outline" className={cn("text-[11px] capitalize", tone)}>{data.severity}</Badge>
+        </div>
+      </HoverCardTrigger>
+      <HoverCardContent className="w-72 text-xs space-y-1">
+        <div className="font-semibold text-sm">Concept drift detected</div>
+        <div className="text-muted-foreground">
+          Live hit-rate has shifted relative to the recent baseline. Meta-label gate has been tightened automatically.
+        </div>
+        <div>Pre-mean: <span className="font-mono">{(data.pre_mean * 100).toFixed(1)}%</span></div>
+        <div>Post-mean: <span className="font-mono">{(data.post_mean * 100).toFixed(1)}%</span></div>
+        <div>Δ: <span className="font-mono">{delta}pp</span></div>
+      </HoverCardContent>
+    </HoverCard>
+  );
+}
+
+
+
 
 const TRADING_STYLES = [
   { value: "all", label: "All Signals" },
