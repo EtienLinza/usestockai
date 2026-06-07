@@ -915,6 +915,7 @@ function computeMetrics(
     return {
       totalTrades: 0, winRate: 0, avgReturn: 0, totalReturn: 0, maxDrawdown: 0,
       sharpeRatio: 0, sortinoRatio: 0, calmarRatio: 0, profitFactor: 0,
+      deflatedSharpe: 0, avgSampleUniqueness: 1,
       directionalAccuracy: 0, convictionBuckets: [],
       avgWin: 0, avgLoss: 0, winLossRatio: 0,
       avgTradeDuration: 0, medianTradeDuration: 0, maxTradeDuration: 0,
