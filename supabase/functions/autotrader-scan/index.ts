@@ -2272,11 +2272,31 @@ async function processUser(
       }
     }
 
+    // ── Portfolio heat gate ──
+    // Candidate $ at risk = |price − hardStop| × shares, shares = $/price
+    const candidateRisk = Math.abs(p.decision.price - p.decision.hardStop)
+                        * (candidateDollars / p.decision.price);
+    const projectedHeatPct = ((openRiskDollars + candidateRisk) / settings.starting_nav) * 100;
+    if (projectedHeatPct > PORTFOLIO_HEAT_CAP_PCT) {
+      if (blockMode || !caps?.enabled) {
+        // Heat is a hard safety rail — block even when caps disabled or in warn mode,
+        // because the user explicitly disabling caps doesn't justify a margin call.
+        summary.blocked++; userSummary.blocked++;
+        await supabase.from("autotrade_log").insert({
+          user_id: userId, ticker: p.ticker, action: "BLOCKED",
+          reason: `Portfolio heat: open R-risk would reach ${projectedHeatPct.toFixed(1)}% NAV (cap ${PORTFOLIO_HEAT_CAP_PCT}%)`,
+          conviction: p.decision.conviction, strategy: p.decision.strategy, profile: p.decision.profile,
+        });
+        continue;
+      }
+    }
+
     const beforeEntries = summary.entries;
     await executeEntry(supabase, settings, p.ticker, p.decision, summary, rotationActive);
     userSummary.entries += summary.entries - beforeEntries;
     if (summary.entries > beforeEntries) {
       totalNavExposureDollars += candidateDollars;
+      openRiskDollars += candidateRisk;
       heldTickers.add(p.ticker);
       if (sectorCapsActive && candidateSector) {
         sectorDollars.set(candidateSector, (sectorDollars.get(candidateSector) ?? 0) + candidateDollars);
