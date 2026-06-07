@@ -973,6 +973,11 @@ serve(async (req) => {
     if (danelfinMap.size > 0) {
       console.log(`market-scanner: Danelfin coverage ${danelfinMap.size}/${tickersToScan.length}`);
     }
+    // Pre-load EPS revision scores (supporting fundamental factor).
+    const epsRevisionMap = await loadEpsRevisions(tickersToScan);
+    if (epsRevisionMap.size > 0) {
+      console.log(`market-scanner: EPS revision coverage ${epsRevisionMap.size}/${tickersToScan.length}`);
+    }
 
     for (let ti = 0; ti < tickersToScan.length; ti++) {
       const ticker = tickersToScan[ti];
@@ -986,6 +991,7 @@ serve(async (req) => {
         // uses for entries and the backtester validates against. Eliminates
         // scanner/autotrader divergence.
         const danelfin = danelfinMap.get(ticker.toUpperCase()) ?? null;
+        const epsRev = epsRevisionMap.get(ticker.toUpperCase()) ?? null;
         const sig = evaluateSignal(
           data,
           ticker,
@@ -993,6 +999,7 @@ serve(async (req) => {
           (macro as MacroContext | null) ?? null,
           undefined, undefined,
           danelfin,
+          epsRev,
         );
         if (!sig || sig.decision === "HOLD") continue;
 
