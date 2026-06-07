@@ -45,7 +45,6 @@ import { loadLatestMetaModel, scoreMetaLabel, type MetaLabelModel } from "../_sh
 import { loadShortInterestMap, shortInterestConvictionDelta, type ShortInterestRow } from "../_shared/short-interest.ts";
 import { slippageShrinkFactor } from "../_shared/slippage-model.ts";
 import {
-  computePortfolioCvar,
   computePortfolioCvarBase,
   computePortfolioCvarMarginal,
   closeToReturns,
