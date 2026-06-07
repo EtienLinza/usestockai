@@ -2064,6 +2064,20 @@ async function processUser(
   const blockMode = (caps?.enforcement_mode ?? "warn") === "block";
 
   let bookBetaDollars = 0; // Σ (positionDollars × beta)
+
+  // ── Portfolio heat (total open R-risk) — Phase 4 ────────────────────────
+  // Sum of |entry − hard_stop_price| × shares across open positions = the
+  // worst-case $ lost if every stop hits today. Capped at 6% of starting_nav
+  // (institutional standard: never have >6% of book at risk simultaneously).
+  // Falls back to inferHardStopPrice() for legacy positions without stops.
+  const PORTFOLIO_HEAT_CAP_PCT = 6;
+  let openRiskDollars = 0;
+  for (const pos of positions) {
+    const entry = Number(pos.entry_price);
+    const stop = inferHardStopPrice(pos);
+    if (!Number.isFinite(entry) || !Number.isFinite(stop)) continue;
+    openRiskDollars += Math.abs(entry - stop) * Number(pos.shares);
+  }
   if (capsActive) {
     for (const pos of positions) {
       const t = pos.ticker.toUpperCase();
@@ -2258,11 +2272,31 @@ async function processUser(
       }
     }
 
+    // ── Portfolio heat gate ──
+    // Candidate $ at risk = |price − hardStop| × shares, shares = $/price
+    const candidateRisk = Math.abs(p.decision.price - p.decision.hardStop)
+                        * (candidateDollars / p.decision.price);
+    const projectedHeatPct = ((openRiskDollars + candidateRisk) / settings.starting_nav) * 100;
+    if (projectedHeatPct > PORTFOLIO_HEAT_CAP_PCT) {
+      if (blockMode || !caps?.enabled) {
+        // Heat is a hard safety rail — block even when caps disabled or in warn mode,
+        // because the user explicitly disabling caps doesn't justify a margin call.
+        summary.blocked++; userSummary.blocked++;
+        await supabase.from("autotrade_log").insert({
+          user_id: userId, ticker: p.ticker, action: "BLOCKED",
+          reason: `Portfolio heat: open R-risk would reach ${projectedHeatPct.toFixed(1)}% NAV (cap ${PORTFOLIO_HEAT_CAP_PCT}%)`,
+          conviction: p.decision.conviction, strategy: p.decision.strategy, profile: p.decision.profile,
+        });
+        continue;
+      }
+    }
+
     const beforeEntries = summary.entries;
     await executeEntry(supabase, settings, p.ticker, p.decision, summary, rotationActive);
     userSummary.entries += summary.entries - beforeEntries;
     if (summary.entries > beforeEntries) {
       totalNavExposureDollars += candidateDollars;
+      openRiskDollars += candidateRisk;
       heldTickers.add(p.ticker);
       if (sectorCapsActive && candidateSector) {
         sectorDollars.set(candidateSector, (sectorDollars.get(candidateSector) ?? 0) + candidateDollars);
