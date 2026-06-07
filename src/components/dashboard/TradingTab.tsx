@@ -220,6 +220,52 @@ const getRegimeBadge = (regime: string) => {
   return colors[regime] || colors.neutral;
 };
 
+// ── Market Regime Badge ────────────────────────────────────────────────────
+// Reads the most recent row from `market_regime` and renders a small chip.
+// Hidden when no data exists (cold start, never trained).
+function MarketRegimeBadge() {
+  const [data, setData] = useState<{ regime: string; atr_pct: number | null; sma_ratio: number | null } | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const { data: row } = await supabase
+        .from("market_regime")
+        .select("regime, atr_pct, sma_ratio")
+        .order("date", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (!cancelled && row) setData(row as any);
+    })();
+    return () => { cancelled = true; };
+  }, []);
+  if (!data) return null;
+  const label = data.regime.replace("_", " ");
+  const tone = data.regime.startsWith("bull")
+    ? "bg-success/10 text-success border-success/30"
+    : data.regime.startsWith("bear")
+    ? "bg-destructive/10 text-destructive border-destructive/30"
+    : "bg-muted text-muted-foreground border-border";
+  return (
+    <HoverCard>
+      <HoverCardTrigger asChild>
+        <div className="inline-flex items-center gap-2 cursor-help">
+          <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Market regime</span>
+          <Badge variant="outline" className={cn("text-[11px] capitalize", tone)}>{label}</Badge>
+        </div>
+      </HoverCardTrigger>
+      <HoverCardContent className="w-72 text-xs space-y-1">
+        <div className="font-semibold text-sm capitalize">{label}</div>
+        <div className="text-muted-foreground">
+          Daily SPY-derived market state used to softly tilt strategy weights (±15%).
+        </div>
+        {data.atr_pct !== null && <div>SPY ATR%: <span className="font-mono">{Number(data.atr_pct).toFixed(2)}%</span></div>}
+        {data.sma_ratio !== null && <div>50d / 200d: <span className="font-mono">{Number(data.sma_ratio).toFixed(4)}</span></div>}
+      </HoverCardContent>
+    </HoverCard>
+  );
+}
+
+
 const TRADING_STYLES = [
   { value: "all", label: "All Signals" },
   { value: "scalping", label: "Scalping" },
@@ -384,6 +430,9 @@ export function TradingTab({
         </motion.div>
       ) : (
         <motion.div key="content" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-6">
+
+          {/* Market regime badge */}
+          <MarketRegimeBadge />
 
           {/* Primary Metrics Row */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">

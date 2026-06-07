@@ -18,6 +18,8 @@ import {
 import { loadCachedBars } from "../_shared/bars-cache.ts";
 import { loadDanelfinScores } from "../_shared/danelfin.ts";
 import { loadEpsRevisions } from "../_shared/eps-revisions.ts";
+import { classifyRegime, upsertRegimeSnapshot } from "../_shared/regime-detector.ts";
+import { loadLatestMetaModel } from "../_shared/meta-labeler.ts";
 import { requireCronOrUser, cronSecretHeader } from "../_shared/cron-auth.ts";
 import { isMarketHoliday, etMinuteOfDay, etDayOfWeek } from "../_shared/market-calendar.ts";
 
@@ -214,6 +216,41 @@ serve(async (req) => {
     for (const [t, s] of epsRevisionMap.entries()) epsRevisionObj[t] = s;
     console.log(`EPS revision coverage: ${epsRevisionMap.size}/${survivors.length}`);
 
+    // Classify current market regime from SPY bars (already in macro).
+    // Persist once per scan; cheap if duplicate (upsert on date).
+    let currentRegime: string | null = null;
+    try {
+      const spyData = await (async () => {
+        const { fetchDailyHistory } = await import("../_shared/yahoo-history.ts");
+        return fetchDailyHistory("SPY", "1y");
+      })();
+      if (spyData && spyData.close.length >= 210) {
+        const snap = classifyRegime(spyData.close, spyData.high, spyData.low);
+        if (snap) {
+          currentRegime = snap.regime;
+          upsertRegimeSnapshot(snap).catch(() => {});
+          console.log(`Regime: ${snap.regime} (atrPct=${snap.atrPct}, smaRatio=${snap.smaRatio})`);
+        }
+      }
+    } catch (e) { console.warn("regime classify failed", e); }
+
+    // Pre-load latest meta-label model (null when undertrained → no-op).
+    const metaModelRow = await loadLatestMetaModel();
+    const metaModelForWorker = metaModelRow
+      ? {
+          intercept: metaModelRow.intercept,
+          weights: metaModelRow.coefficients,
+          means: metaModelRow.means,
+          stds: metaModelRow.stds,
+          feature_names: metaModelRow.feature_names,
+        }
+      : null;
+    if (metaModelRow) {
+      console.log(`Meta-model: n=${metaModelRow.sample_size} AUC=${metaModelRow.auc ?? "n/a"} trained=${metaModelRow.trained_at}`);
+    } else {
+      console.log("Meta-model: not yet trained (cold start)");
+    }
+
     const workerPayloadBase = {
       spyContext: { spyBearish, spyClose: macro.spyClose.slice(-30) },
       macro,
@@ -221,6 +258,8 @@ serve(async (req) => {
       weights,
       danelfinScores: danelfinObj,
       epsRevisionScores: epsRevisionObj,
+      marketRegime: currentRegime,
+      metaModel: metaModelForWorker,
       mode,
     };
 
@@ -259,6 +298,7 @@ serve(async (req) => {
         expires_at: expiresAt,
         source: mode === "premarket" ? "premarket" : "live",
         explanation: s.explanation ?? null,
+        meta_score: s.meta_score ?? null,
       }));
       const { data: upserted, error } = await supabase
         .from("live_signals").upsert(rows, { onConflict: "ticker" }).select("id, ticker");
@@ -284,12 +324,16 @@ serve(async (req) => {
             danelfin_score: s.danelfin_score ?? null,
             eps_revision: s.eps_revision_delta ?? 0,
             eps_revision_score: s.eps_revision_score ?? null,
+            market_regime: s.market_regime ?? null,
+            regime_delta: s.regime_delta ?? 0,
+            meta_score: s.meta_score ?? null,
           },
           entry_price: s.entry_price,
           spy_at_entry: macro.spyClose[macro.spyClose.length - 1] ?? null,
           macro_score: macro.score, macro_label: macro.label,
           weights_id: weights.activeWeightsId, status: "open",
           explanation: s.explanation ?? null,
+          meta_score: s.meta_score ?? null,
         }));
         // P-2 FIX: rows whose signal_id resolved to null can't dedupe on the
         // unique partial index — every retry would create a brand-new "open"

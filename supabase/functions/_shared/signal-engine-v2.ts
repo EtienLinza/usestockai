@@ -1039,6 +1039,11 @@ export interface EvaluateSignalResult {
   epsRevisionDelta?: number;
   /** Raw EPS revision score (-10..+10), or undefined when missing. */
   epsRevisionScore?: number;
+  /** Conviction delta from the regime-tilt overlay (capped ±15%, rounded). 0
+   *  when no regime supplied. */
+  regimeDelta?: number;
+  /** The market regime that was applied (`bull_quiet` etc.) or null. */
+  marketRegime?: string | null;
 }
 
 // ----------------------------------------------------------------------------
@@ -1177,6 +1182,14 @@ export function evaluateSignal(
    *  factor — long: +round(score*0.8), short: -round(score*0.8).
    *  Missing/undefined → 0 (neutral, never blocks). */
   epsRevisionScore?: number | null,
+  /** Optional market regime ("bull_quiet" | "bull_volatile" | "bear_quiet" |
+   *  "bear_volatile" | "neutral"). Applies a strategy-conditional conviction
+   *  multiplier capped ±15%. Missing → no tilt (multiplier 1.0). */
+  marketRegime?: string | null,
+  /** Optional realized-edge calibration for Kelly sizing. When `sampleSize ≥
+   *  30`, computePositionSize uses true fractional Kelly instead of the
+   *  conviction ramp. Missing → cold-start conviction ramp. */
+  realizedEdge?: RealizedEdge | null,
 ): EvaluateSignalResult | null {
   if (data.close.length < 200) return null;
 
@@ -1319,7 +1332,23 @@ export function evaluateSignal(
     }
   }
 
-
+  // Market-regime overlay — strategy-conditional conviction multiplier, capped
+  // ±15%. SOFT tilt: never blocks, just biases conviction. Applied AFTER eps
+  // revision so the calibration loop can attribute each layer separately.
+  let regimeDelta = 0;
+  const appliedRegime = (typeof marketRegime === "string" && marketRegime.length > 0) ? marketRegime : null;
+  if (sig.confidence > 0 && appliedRegime) {
+    const mult = regimeMultiplier(sig.strategy, appliedRegime);
+    if (mult !== 1) {
+      const before = sig.confidence;
+      const after = Math.max(0, Math.min(100, Math.round(before * mult)));
+      regimeDelta = after - before;
+      sig.confidence = after;
+      if (before > 0 && sig.consensusScore !== 0) {
+        sig.consensusScore = Math.sign(sig.consensusScore) * sig.confidence;
+      }
+    }
+  }
 
 
   // Re-validate against the active profile's threshold after the volume
@@ -1383,10 +1412,14 @@ export function evaluateSignal(
         : !dailyEntry
         ? "Daily entry timing not confirmed"
         : "Conviction below threshold",
+      regimeDelta,
+      marketRegime: appliedRegime,
     };
   }
 
-  const kellyFraction = computePositionSize(sig.confidence, atrPctNow, targetDir);
+  const kellyFraction = computePositionSize(
+    sig.confidence, atrPctNow, targetDir, 0.01, true, realizedEdge ?? null,
+  );
 
   return {
     decision: sigDir,
@@ -1399,11 +1432,31 @@ export function evaluateSignal(
     kellyFraction,
     atr: sig.atr,
     atrPct: atrPctNow,
-    reasoning: `${sig.strategy.replace("_", " ")} ${sigDir.toLowerCase()} | ${cls.classification} profile | ${sig.regime} regime | conviction ${sig.confidence} | kelly ${(kellyFraction * 100).toFixed(1)}%${danelfinDelta !== 0 ? ` | danelfinΔ=${danelfinDelta > 0 ? "+" : ""}${danelfinDelta}` : ""}${epsRevisionDelta !== 0 ? ` | epsΔ=${epsRevisionDelta > 0 ? "+" : ""}${epsRevisionDelta}` : ""}`,
+    reasoning: `${sig.strategy.replace("_", " ")} ${sigDir.toLowerCase()} | ${cls.classification} profile | ${sig.regime} regime | conviction ${sig.confidence} | kelly ${(kellyFraction * 100).toFixed(1)}%${danelfinDelta !== 0 ? ` | danelfinΔ=${danelfinDelta > 0 ? "+" : ""}${danelfinDelta}` : ""}${epsRevisionDelta !== 0 ? ` | epsΔ=${epsRevisionDelta > 0 ? "+" : ""}${epsRevisionDelta}` : ""}${regimeDelta !== 0 ? ` | regimeΔ=${regimeDelta > 0 ? "+" : ""}${regimeDelta} (${appliedRegime})` : ""}${realizedEdge && realizedEdge.sampleSize >= 30 ? ` | realKelly(n=${realizedEdge.sampleSize})` : ""}`,
     danelfinDelta,
     danelfinScore: (danelfinScore !== undefined && danelfinScore !== null && Number.isFinite(danelfinScore)) ? danelfinScore : undefined,
     epsRevisionDelta,
     epsRevisionScore: (epsRevisionScore !== undefined && epsRevisionScore !== null && Number.isFinite(epsRevisionScore)) ? epsRevisionScore : undefined,
+    regimeDelta,
+    marketRegime: appliedRegime,
   };
 }
+
+// ============================================================================
+// REGIME TILT — strategy-conditional conviction multiplier (capped ±15%).
+// Soft layer: never blocks, only biases. Mirrored in `_shared/regime-detector`
+// for callers that need the multiplier without importing the whole engine.
+// ============================================================================
+function regimeMultiplier(strategy: string, regime: string): number {
+  const M: Record<string, Record<string, number>> = {
+    trend: { bull_quiet: 1.10, bull_volatile: 1.00, bear_quiet: 0.92, bear_volatile: 0.85, neutral: 1.00 },
+    mean_reversion: { bull_quiet: 0.92, bull_volatile: 1.12, bear_quiet: 1.00, bear_volatile: 0.90, neutral: 1.00 },
+    breakout: { bull_quiet: 1.10, bull_volatile: 1.00, bear_quiet: 0.88, bear_volatile: 0.85, neutral: 1.00 },
+  };
+  const row = M[strategy];
+  if (!row) return 1;
+  const m = row[regime] ?? 1;
+  return Math.max(0.85, Math.min(1.15, m));
+}
+
 

@@ -48,6 +48,19 @@ interface Body {
   /** Pre-loaded EPS revision scores keyed by uppercase ticker — supporting
    *  fundamental factor. Missing → neutral. */
   epsRevisionScores?: Record<string, number>;
+  /** Current market regime (`bull_quiet` | `bull_volatile` | `bear_quiet` |
+   *  `bear_volatile` | `neutral`). Orchestrator classifies once per scan and
+   *  forwards. Missing → no regime tilt applied. */
+  marketRegime?: string | null;
+  /** Pre-loaded meta-label model coefficients (logistic). Pass-through when
+   *  absent or under-trained. */
+  metaModel?: {
+    intercept: number;
+    weights: number[];
+    means: number[];
+    stds: number[];
+    feature_names: string[];
+  } | null;
   mode?: "premarket" | "live";
 }
 
@@ -59,6 +72,41 @@ function bucketKey(c: number): string {
   return "90-100";
 }
 
+// Inline meta-label scorer so the worker doesn't need a DB round-trip per
+// ticker. Coefficients come from the orchestrator's pre-loaded model.
+function sigmoidLocal(z: number): number {
+  if (z >= 0) { const e = Math.exp(-z); return 1 / (1 + e); }
+  const e = Math.exp(z); return e / (1 + e);
+}
+
+type MetaModelLite = {
+  intercept: number; weights: number[]; means: number[]; stds: number[];
+  feature_names: string[];
+} | null | undefined;
+
+function scoreMetaInline(model: MetaModelLite, f: {
+  conviction: number; atrPct: number; relStrength: number; sectorMomentum: number;
+  epsRevisionScore: number; regime: string | null; hourOfDay: number; dayOfWeek: number;
+}): number | null {
+  if (!model || !Array.isArray(model.weights) || model.weights.length === 0) return null;
+  const r = f.regime ?? "neutral";
+  const x = [
+    f.conviction, f.atrPct, f.relStrength, f.sectorMomentum, f.epsRevisionScore,
+    r === "bull_quiet" ? 1 : 0, r === "bull_volatile" ? 1 : 0,
+    r === "bear_quiet" ? 1 : 0, r === "bear_volatile" ? 1 : 0,
+    f.hourOfDay, f.dayOfWeek,
+  ];
+  if (x.length !== model.weights.length || model.means.length !== x.length || model.stds.length !== x.length) {
+    return null;
+  }
+  let z = model.intercept;
+  for (let i = 0; i < x.length; i++) {
+    const s = model.stds[i] > 1e-9 ? model.stds[i] : 1;
+    z += model.weights[i] * ((x[i] - model.means[i]) / s);
+  }
+  return sigmoidLocal(z);
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
   const denied = await requireCronOrUser(req);
@@ -68,6 +116,8 @@ serve(async (req) => {
     const { tickers, spyContext, macro, sectorMomentum, weights } = body;
     const danelfinScores = body.danelfinScores ?? {};
     const epsRevisionScores = body.epsRevisionScores ?? {};
+    const marketRegime = body.marketRegime ?? null;
+    const metaModel = body.metaModel ?? null;
     const mode: "premarket" | "live" = body.mode === "premarket" ? "premarket" : "live";
     if (!Array.isArray(tickers) || tickers.length === 0) {
       return new Response(JSON.stringify({ signals: [] }), {
@@ -154,6 +204,7 @@ serve(async (req) => {
           undefined, undefined,
           danelfin,
           epsRev,
+          marketRegime,
         );
         if (!sig || sig.decision === "HOLD") continue;
         const { regime, strategy, weeklyBias, profile, atrPct } = sig;
@@ -209,6 +260,18 @@ serve(async (req) => {
 
         const qualityScore = annualizedVol > 0 ? conviction / annualizedVol : conviction;
 
+        // Meta-label score (cold-start safe — null when model absent).
+        const metaScore = scoreMetaInline(metaModel, {
+          conviction,
+          atrPct,
+          relStrength: 0,
+          sectorMomentum: sectorMod.bonus,
+          epsRevisionScore: sig.epsRevisionScore ?? 0,
+          regime: marketRegime ?? sig.marketRegime ?? null,
+          hourOfDay: (new Date().getUTCHours() + 19) % 24,
+          dayOfWeek: new Date().getUTCDay(),
+        });
+
         signals.push({
           ticker,
           signal_type: sig.decision === "BUY" ? "BUY" : "SELL",
@@ -225,6 +288,9 @@ serve(async (req) => {
           danelfin_delta: sig.danelfinDelta ?? 0,
           eps_revision_score: sig.epsRevisionScore ?? null,
           eps_revision_delta: sig.epsRevisionDelta ?? 0,
+          market_regime: sig.marketRegime ?? marketRegime ?? null,
+          regime_delta: sig.regimeDelta ?? 0,
+          meta_score: metaScore,
         });
       } catch (err) {
         console.error(`worker ${ticker}:`, err);

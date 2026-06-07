@@ -40,6 +40,8 @@ import { recordHeartbeat } from "../_shared/heartbeat.ts";
 import { applyIsotonicCalibration, type IsotonicAnchor } from "../_shared/calibration.ts";
 import { loadDanelfinScores } from "../_shared/danelfin.ts";
 import { loadEpsRevisions } from "../_shared/eps-revisions.ts";
+import { loadLatestRegime } from "../_shared/regime-detector.ts";
+import { loadLatestMetaModel, scoreMetaLabel, metaLabelDecision, type MetaLabelModel } from "../_shared/meta-labeler.ts";
 
 /** Thrown by the circuit breaker to abort the entire scan immediately. */
 class CircuitBreakerTrippedError extends Error {
@@ -1010,6 +1012,9 @@ async function runEntryDecision(
    *  which is static — after a 20% drawdown the engine sized 25% TOO
    *  LARGE relative to actual equity. */
   currentNav?: number,
+  marketRegime?: string | null,
+  metaModel?: MetaLabelModel | null,
+  strategyEdges?: Record<string, { winRate: number; avgWin: number; avgLoss: number; sampleSize: number }>,
 ): Promise<EntryAction> {
   // Daily loss limit — block all new entries
   if (todayPnlPct <= -settings.daily_loss_limit_pct) {
@@ -1070,9 +1075,34 @@ async function runEntryDecision(
 
   const danelfin = danelfinMap?.get(ticker.toUpperCase()) ?? null;
   const epsRev = epsRevisionMap?.get(ticker.toUpperCase()) ?? null;
-  const sig = evaluateSignal(data, ticker, undefined, macro, undefined, undefined, danelfin, epsRev);
+  // Pre-evaluate without realized edge so we can fetch the right strategy bucket.
+  const peek = evaluateSignal(data, ticker, undefined, macro, undefined, undefined, danelfin, epsRev, marketRegime);
+  const edge = peek?.strategy ? strategyEdges?.[peek.strategy] : undefined;
+  const sig = evaluateSignal(data, ticker, undefined, macro, undefined, undefined, danelfin, epsRev, marketRegime, edge ?? null);
   if (!sig) return { kind: "HOLD", reason: "Insufficient data" };
   if (sig.decision === "HOLD") return { kind: "HOLD", reason: sig.reasoning };
+
+  // ── Meta-label gate (cold-start safe — null model passes through) ──────
+  // PASS: continue. DEMOTE: log + reject (consensus-only, no autotrade).
+  // SKIP: reject hard.
+  const metaScore = scoreMetaLabel(metaModel ?? null, {
+    conviction: sig.conviction,
+    atrPct: sig.atrPct,
+    relStrength: 0,
+    sectorMomentum: 0,
+    epsRevisionScore: sig.epsRevisionScore ?? 0,
+    regime: sig.marketRegime ?? marketRegime ?? null,
+    hourOfDay: (new Date().getUTCHours() + 19) % 24,
+    dayOfWeek: new Date().getUTCDay(),
+  });
+  const metaDecision = metaLabelDecision(metaScore, sig.conviction);
+  if (metaDecision === "SKIP") {
+    return { kind: "HOLD", reason: `Meta-label skip: score=${metaScore?.toFixed(3)} < 0.30` };
+  }
+  if (metaDecision === "DEMOTE") {
+    return { kind: "HOLD", reason: `Meta-label demote: score=${metaScore?.toFixed(3)} < 0.45 (conv ${sig.conviction} < 80) — consensus-only` };
+  }
+
 
   // ── Honest conviction calibration (Phase 1 #5) ──────────────────────────
   // Apply the same nightly-learned adjustments the scanner uses so the
@@ -2015,6 +2045,46 @@ async function processUser(
   }
 
 
+  // Pre-load current market regime (cached daily) + meta-label model (latest).
+  // Both are null-safe → engine treats missing as no-op.
+  const marketRegime = await loadLatestRegime();
+  const metaModel = await loadLatestMetaModel();
+  if (marketRegime) console.log(`autotrader-scan: regime=${marketRegime}`);
+  if (metaModel) console.log(`autotrader-scan: meta-model n=${metaModel.sample_size} AUC=${metaModel.auc ?? "n/a"}`);
+
+  // Pre-load realized edges per strategy from signal_outcomes (last 180d, closed).
+  // Used to wire realKelly sizing — H-6 audit closure. Empty → cold-start ramp.
+  const strategyEdges: Record<string, { winRate: number; avgWin: number; avgLoss: number; sampleSize: number }> = {};
+  try {
+    const cutoff = new Date(Date.now() - 180 * 86400000).toISOString();
+    const { data: outcomes } = await supabase
+      .from("signal_outcomes")
+      .select("strategy, realized_pnl_pct, exit_reason")
+      .gte("entry_date", cutoff)
+      .in("status", ["closed", "stopped_out", "took_profit"])
+      .limit(5000);
+    const buckets: Record<string, { wins: number[]; losses: number[] }> = {};
+    for (const o of (outcomes ?? []) as Array<{ strategy: string | null; realized_pnl_pct: number | null; exit_reason: string | null }>) {
+      const s = o.strategy ?? "none";
+      const p = Number(o.realized_pnl_pct);
+      if (!Number.isFinite(p)) continue;
+      if (!buckets[s]) buckets[s] = { wins: [], losses: [] };
+      if (p > 0) buckets[s].wins.push(p);
+      else buckets[s].losses.push(Math.abs(p));
+    }
+    for (const [s, b] of Object.entries(buckets)) {
+      const n = b.wins.length + b.losses.length;
+      if (n < 10) continue;
+      const winRate = (b.wins.length / n) * 100;
+      const avgWin = b.wins.length ? b.wins.reduce((a, c) => a + c, 0) / b.wins.length : 0;
+      const avgLoss = b.losses.length ? b.losses.reduce((a, c) => a + c, 0) / b.losses.length : 0;
+      strategyEdges[s] = { winRate, avgWin, avgLoss, sampleSize: n };
+    }
+    if (Object.keys(strategyEdges).length > 0) {
+      console.log(`autotrader-scan: realKelly edges`, strategyEdges);
+    }
+  } catch (e) { console.warn("strategyEdges load failed", e); }
+
   for (const ticker of watchlist) {
     if (heldTickers.has(ticker)) continue;
 
@@ -2046,7 +2116,11 @@ async function processUser(
       danelfinMap,
       epsRevisionMap,
       currentNav, // C-3 FIX: dynamic NAV for sizing
+      marketRegime,
+      metaModel,
+      strategyEdges,
     );
+
 
     if (decision.kind === "ENTER") pending.push({ kind: "enter", ticker, decision });
     else if (decision.kind === "BLOCKED") pending.push({ kind: "blocked", ticker, decision });
