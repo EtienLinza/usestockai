@@ -19,6 +19,7 @@ export type Database = {
           action: string
           conviction: number | null
           created_at: string
+          cvar_block_count: number | null
           id: string
           pnl_pct: number | null
           position_id: string | null
@@ -37,6 +38,7 @@ export type Database = {
           action: string
           conviction?: number | null
           created_at?: string
+          cvar_block_count?: number | null
           id?: string
           pnl_pct?: number | null
           position_id?: string | null
@@ -55,6 +57,7 @@ export type Database = {
           action?: string
           conviction?: number | null
           created_at?: string
+          cvar_block_count?: number | null
           id?: string
           pnl_pct?: number | null
           position_id?: string | null
@@ -275,6 +278,33 @@ export type Database = {
         }
         Relationships: []
       }
+      drift_events: {
+        Row: {
+          detected_at: string
+          id: string
+          post_mean: number
+          pre_mean: number
+          severity: string
+          window_size: number
+        }
+        Insert: {
+          detected_at?: string
+          id?: string
+          post_mean: number
+          pre_mean: number
+          severity?: string
+          window_size: number
+        }
+        Update: {
+          detected_at?: string
+          id?: string
+          post_mean?: number
+          pre_mean?: number
+          severity?: string
+          window_size?: number
+        }
+        Relationships: []
+      }
       eps_revisions: {
         Row: {
           as_of: string
@@ -373,7 +403,9 @@ export type Database = {
           meta_score: number | null
           reasoning: string | null
           regime: string | null
+          si_velocity: number | null
           signal_type: string
+          slippage_bps_est: number | null
           source: string
           stock_profile: string | null
           strategy: string | null
@@ -391,7 +423,9 @@ export type Database = {
           meta_score?: number | null
           reasoning?: string | null
           regime?: string | null
+          si_velocity?: number | null
           signal_type: string
+          slippage_bps_est?: number | null
           source?: string
           stock_profile?: string | null
           strategy?: string | null
@@ -409,7 +443,9 @@ export type Database = {
           meta_score?: number | null
           reasoning?: string | null
           regime?: string | null
+          si_velocity?: number | null
           signal_type?: string
+          slippage_bps_est?: number | null
           source?: string
           stock_profile?: string | null
           strategy?: string | null
@@ -535,6 +571,33 @@ export type Database = {
           portfolio_beta_max?: number
           sector_max_pct?: number
           updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      portfolio_cvar_snapshots: {
+        Row: {
+          cvar_pct: number
+          id: string
+          n_positions: number
+          nav: number | null
+          taken_at: string
+          user_id: string
+        }
+        Insert: {
+          cvar_pct: number
+          id?: string
+          n_positions?: number
+          nav?: number | null
+          taken_at?: string
+          user_id: string
+        }
+        Update: {
+          cvar_pct?: number
+          id?: string
+          n_positions?: number
+          nav?: number | null
+          taken_at?: string
           user_id?: string
         }
         Relationships: []
@@ -810,6 +873,33 @@ export type Database = {
           },
         ]
       }
+      short_interest_history: {
+        Row: {
+          created_at: string
+          days_to_cover: number | null
+          report_date: string
+          si_pct_float: number | null
+          ticker: string
+          velocity_30d: number | null
+        }
+        Insert: {
+          created_at?: string
+          days_to_cover?: number | null
+          report_date: string
+          si_pct_float?: number | null
+          ticker: string
+          velocity_30d?: number | null
+        }
+        Update: {
+          created_at?: string
+          days_to_cover?: number | null
+          report_date?: string
+          si_pct_float?: number | null
+          ticker?: string
+          velocity_30d?: number | null
+        }
+        Relationships: []
+      }
       signal_cooldown: {
         Row: {
           cooldown_bars_remaining: number
@@ -855,8 +945,10 @@ export type Database = {
           meta_score: number | null
           realized_pnl_pct: number | null
           regime: string | null
+          si_velocity: number | null
           signal_id: string | null
           signal_type: string
+          slippage_bps_est: number | null
           spy_at_entry: number | null
           status: string
           stock_profile: string | null
@@ -887,8 +979,10 @@ export type Database = {
           meta_score?: number | null
           realized_pnl_pct?: number | null
           regime?: string | null
+          si_velocity?: number | null
           signal_id?: string | null
           signal_type: string
+          slippage_bps_est?: number | null
           spy_at_entry?: number | null
           status?: string
           stock_profile?: string | null
@@ -919,8 +1013,10 @@ export type Database = {
           meta_score?: number | null
           realized_pnl_pct?: number | null
           regime?: string | null
+          si_velocity?: number | null
           signal_id?: string | null
           signal_type?: string
+          slippage_bps_est?: number | null
           spy_at_entry?: number | null
           status?: string
           stock_profile?: string | null
