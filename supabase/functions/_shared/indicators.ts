@@ -165,18 +165,47 @@ export function calculateVolatility(prices: number[], period: number = 20): numb
     if (prices[i - 1] !== 0) returns.push((prices[i] - prices[i - 1]) / prices[i - 1]);
     else returns.push(0);
   }
-  const volatility: number[] = [NaN];
-  for (let i = 1; i < prices.length; i++) {
-    if (i < period) {
+// O(N) rolling Bessel-corrected stdev on simple returns. Window of size
+// `period` over returns[i-period..i-1] — same indexing as the legacy form.
+export function calculateVolatility(prices: number[], period: number = 20): number[] {
+  const n = prices.length;
+  if (n < 2) {
+    const out: number[] = new Array(n);
+    for (let i = 0; i < n; i++) out[i] = NaN;
+    return out;
+  }
+  const returns: number[] = new Array(n - 1);
+  for (let k = 0; k < n - 1; k++) {
+    const p0 = prices[k];
+    returns[k] = p0 !== 0 ? (prices[k + 1] - p0) / p0 : 0;
+  }
+  const denom = Math.max(1, period - 1);
+  const volatility: number[] = new Array(n);
+  volatility[0] = NaN;
+  let sum = 0;
+  let sumSq = 0;
+  // Seed first window: returns[0..period-1] → volatility[period].
+  for (let i = 1; i < n; i++) {
+    if (i <= period) {
       volatility[i] = NaN;
+      if (i >= 1 && i <= period) {
+        const r = returns[i - 1];
+        sum += r;
+        sumSq += r * r;
+      }
+      if (i === period) {
+        const mean = sum / period;
+        const variance = Math.max(0, (sumSq - mean * mean * period)) / denom;
+        volatility[i] = Math.sqrt(variance);
+      }
     } else {
-      const slice = returns.slice(i - period, i);
-      const mean = slice.reduce((a, b) => a + b, 0) / period;
-      // M-2 FIX: Bessel-corrected sample variance (n-1) instead of population
-      // variance (n). Previous formula underestimated vol by ~2.5% on a 20-bar
-      // window, which systematically over-sized positions via the vol scalar.
-      const denom = Math.max(1, period - 1);
-      const variance = slice.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / denom;
+      // Slide: drop returns[i-period-1], add returns[i-1].
+      const dropped = returns[i - period - 1];
+      const added = returns[i - 1];
+      sum += added - dropped;
+      sumSq += added * added - dropped * dropped;
+      const mean = sum / period;
+      const variance = Math.max(0, (sumSq - mean * mean * period)) / denom;
       volatility[i] = Math.sqrt(variance);
     }
   }
