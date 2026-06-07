@@ -1075,9 +1075,34 @@ async function runEntryDecision(
 
   const danelfin = danelfinMap?.get(ticker.toUpperCase()) ?? null;
   const epsRev = epsRevisionMap?.get(ticker.toUpperCase()) ?? null;
-  const sig = evaluateSignal(data, ticker, undefined, macro, undefined, undefined, danelfin, epsRev);
+  // Pre-evaluate without realized edge so we can fetch the right strategy bucket.
+  const peek = evaluateSignal(data, ticker, undefined, macro, undefined, undefined, danelfin, epsRev, marketRegime);
+  const edge = peek?.strategy ? strategyEdges?.[peek.strategy] : undefined;
+  const sig = evaluateSignal(data, ticker, undefined, macro, undefined, undefined, danelfin, epsRev, marketRegime, edge ?? null);
   if (!sig) return { kind: "HOLD", reason: "Insufficient data" };
   if (sig.decision === "HOLD") return { kind: "HOLD", reason: sig.reasoning };
+
+  // ── Meta-label gate (cold-start safe — null model passes through) ──────
+  // PASS: continue. DEMOTE: log + reject (consensus-only, no autotrade).
+  // SKIP: reject hard.
+  const metaScore = scoreMetaLabel(metaModel ?? null, {
+    conviction: sig.conviction,
+    atrPct: sig.atrPct,
+    relStrength: 0,
+    sectorMomentum: 0,
+    epsRevisionScore: sig.epsRevisionScore ?? 0,
+    regime: sig.marketRegime ?? marketRegime ?? null,
+    hourOfDay: (new Date().getUTCHours() + 19) % 24,
+    dayOfWeek: new Date().getUTCDay(),
+  });
+  const metaDecision = metaLabelDecision(metaScore, sig.conviction);
+  if (metaDecision === "SKIP") {
+    return { kind: "HOLD", reason: `Meta-label skip: score=${metaScore?.toFixed(3)} < 0.30` };
+  }
+  if (metaDecision === "DEMOTE") {
+    return { kind: "HOLD", reason: `Meta-label demote: score=${metaScore?.toFixed(3)} < 0.45 (conv ${sig.conviction} < 80) — consensus-only` };
+  }
+
 
   // ── Honest conviction calibration (Phase 1 #5) ──────────────────────────
   // Apply the same nightly-learned adjustments the scanner uses so the
