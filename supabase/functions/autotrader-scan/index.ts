@@ -603,7 +603,6 @@ function runWinExit(
   {
     const initRisk = inferInitRiskPerShare(pos);
     if (entry > 0 && initRisk > 0) {
-    {
       const rMult = (isLong ? currentPrice - entry : entry - currentPrice) / initRisk;
       const rung = pos.partial_exits_taken ?? 0;
       if (rung === 0 && rMult >= 1.0) {
