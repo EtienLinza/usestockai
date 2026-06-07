@@ -2064,6 +2064,20 @@ async function processUser(
   const blockMode = (caps?.enforcement_mode ?? "warn") === "block";
 
   let bookBetaDollars = 0; // Σ (positionDollars × beta)
+
+  // ── Portfolio heat (total open R-risk) — Phase 4 ────────────────────────
+  // Sum of |entry − hard_stop_price| × shares across open positions = the
+  // worst-case $ lost if every stop hits today. Capped at 6% of starting_nav
+  // (institutional standard: never have >6% of book at risk simultaneously).
+  // Falls back to inferHardStopPrice() for legacy positions without stops.
+  const PORTFOLIO_HEAT_CAP_PCT = 6;
+  let openRiskDollars = 0;
+  for (const pos of positions) {
+    const entry = Number(pos.entry_price);
+    const stop = inferHardStopPrice(pos);
+    if (!Number.isFinite(entry) || !Number.isFinite(stop)) continue;
+    openRiskDollars += Math.abs(entry - stop) * Number(pos.shares);
+  }
   if (capsActive) {
     for (const pos of positions) {
       const t = pos.ticker.toUpperCase();
