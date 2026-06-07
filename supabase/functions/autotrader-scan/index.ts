@@ -44,7 +44,14 @@ import { loadLatestRegime } from "../_shared/regime-detector.ts";
 import { loadLatestMetaModel, scoreMetaLabel, type MetaLabelModel } from "../_shared/meta-labeler.ts";
 import { loadShortInterestMap, shortInterestConvictionDelta, type ShortInterestRow } from "../_shared/short-interest.ts";
 import { slippageShrinkFactor } from "../_shared/slippage-model.ts";
-import { computePortfolioCvar, closeToReturns, DEFAULT_CVAR_CAP_PCT, type CvarPosition } from "../_shared/portfolio-cvar.ts";
+import {
+  computePortfolioCvarBase,
+  computePortfolioCvarMarginal,
+  closeToReturns,
+  DEFAULT_CVAR_CAP_PCT,
+  type CvarBase,
+  type CvarPosition,
+} from "../_shared/portfolio-cvar.ts";
 import { detectAdwinDrift, adwinGateAdjust } from "../_shared/adwin.ts";
 
 /** Thrown by the circuit breaker to abort the entire scan immediately. */
@@ -2289,6 +2296,42 @@ async function processUser(
   const HIGH_CONVICTION_ROTATION_FLOOR = 85;
   const MIN_POSITION_AGE_MS = 30 * 60_000; // don't rotate fresh entries
 
+  // ── Engine-speed: fire-and-forget log inserts ────────────────────────────
+  // Each candidate may emit a BLOCKED/HOLD/WARN row to autotrade_log; awaiting
+  // each round-trip serialises the loop on network latency. Queue them and
+  // settle once after the loop instead.
+  const logInserts: Promise<unknown>[] = [];
+  const queueLog = (row: Record<string, unknown>) => {
+    logInserts.push(
+      supabase.from("autotrade_log").insert(row).then(() => {}, (e: unknown) => {
+        console.warn("autotrade_log insert failed", e);
+      }),
+    );
+  };
+
+  // ── Engine-speed: CVaR base/marginal caching ─────────────────────────────
+  // Build the base sim (open book only) once per scan, reuse across all
+  // candidates. Invalidate on rotation close or successful entry so the next
+  // gate evaluation re-seeds from the updated book.
+  let cvarBase: CvarBase | null = null;
+  let cvarBaseDirty = true;
+  const buildCvarBase = (): CvarBase | null => {
+    const basePositions: CvarPosition[] = [];
+    for (const pos of livePositions) {
+      const d = priceCache.get(pos.ticker.toUpperCase());
+      if (!d) continue;
+      const px = d.close[d.close.length - 1];
+      const dirSign = pos.position_type === "long" ? 1 : -1;
+      const rets = closeToReturns(d.close.slice(-61));
+      basePositions.push({
+        ticker: pos.ticker,
+        dollars: dirSign * px * Number(pos.shares),
+        returns: rets,
+      });
+    }
+    return computePortfolioCvarBase(basePositions);
+  };
+
   for (const p of toExecute) {
     // ── ROTATION GATE: if slots are full and rotation enabled, evaluate
     // whether this candidate is strong enough to displace the weakest open
@@ -2296,7 +2339,7 @@ async function processUser(
     if (rotationActive) {
       if (rotationsDoneThisScan >= rotationBudget) {
         summary.blocked++; userSummary.blocked++;
-        await supabase.from("autotrade_log").insert({
+        queueLog({
           user_id: userId, ticker: p.ticker, action: "BLOCKED",
           reason: `Rotation cap reached for today (${rotationCountToday + rotationsDoneThisScan}/${settings.rotation_max_per_day})`,
           conviction: p.decision.conviction, strategy: p.decision.strategy, profile: p.decision.profile,
@@ -2305,7 +2348,7 @@ async function processUser(
       }
       if (p.decision.conviction < HIGH_CONVICTION_ROTATION_FLOOR) {
         summary.holds++; userSummary.holds++;
-        await supabase.from("autotrade_log").insert({
+        queueLog({
           user_id: userId, ticker: p.ticker, action: "HOLD",
           reason: `Rotation skipped — conviction ${p.decision.conviction} < floor ${HIGH_CONVICTION_ROTATION_FLOOR}`,
           conviction: p.decision.conviction, strategy: p.decision.strategy, profile: p.decision.profile,
@@ -2333,7 +2376,7 @@ async function processUser(
       const worst = ranked[0];
       if (!worst) {
         summary.blocked++; userSummary.blocked++;
-        await supabase.from("autotrade_log").insert({
+        queueLog({
           user_id: userId, ticker: p.ticker, action: "BLOCKED",
           reason: `Rotation skipped — no eligible GREEN position to displace (never rotate on a loss)`,
           conviction: p.decision.conviction, strategy: p.decision.strategy, profile: p.decision.profile,
@@ -2344,7 +2387,7 @@ async function processUser(
       const delta = p.decision.conviction - incumbentConv;
       if (delta < settings.rotation_min_delta_conviction) {
         summary.holds++; userSummary.holds++;
-        await supabase.from("autotrade_log").insert({
+        queueLog({
           user_id: userId, ticker: p.ticker, action: "HOLD",
           reason: `Rotation skipped — Δconv ${delta} < min ${settings.rotation_min_delta_conviction} (incumbent ${worst.pos.ticker} @ conv ${incumbentConv}, P&L ${worst.pnlPct.toFixed(1)}%)`,
           conviction: p.decision.conviction, strategy: p.decision.strategy, profile: p.decision.profile,
@@ -2378,6 +2421,8 @@ async function processUser(
         bookBetaDollars = Math.max(0, bookBetaDollars - worstDollars * (b ?? 1));
       }
       rotationsDoneThisScan++;
+      cvarBaseDirty = true; // book just lost a position
+
     }
 
     // Re-check correlation against the live book — including any positions
@@ -2388,7 +2433,7 @@ async function processUser(
       const corr = maxCorrelationToBook(p.ticker, liveBook);
       if (corr && corr.maxAbs >= CORR_THRESHOLD) {
         summary.blocked++; userSummary.blocked++;
-        await supabase.from("autotrade_log").insert({
+        queueLog({
           user_id: userId, ticker: p.ticker, action: "BLOCKED",
           reason: `Correlation gate (intra-scan): |ρ|=${corr.maxAbs.toFixed(2)} vs ${corr.against} ≥ ${CORR_THRESHOLD}`,
           conviction: p.decision.conviction, strategy: p.decision.strategy, profile: p.decision.profile,
@@ -2411,7 +2456,7 @@ async function processUser(
         const projectedPct = (projected / settings.starting_nav) * 100;
         if (projectedPct > capPct) {
           summary.blocked++; userSummary.blocked++;
-          await supabase.from("autotrade_log").insert({
+          queueLog({
             user_id: userId, ticker: p.ticker, action: "BLOCKED",
             reason: `Sector cap: ${candidateSector} would reach ${projectedPct.toFixed(0)}% NAV (cap ${capPct}%)`,
             conviction: p.decision.conviction, strategy: p.decision.strategy, profile: p.decision.profile,
@@ -2433,14 +2478,14 @@ async function processUser(
       if (projectedPortBeta > betaCap) {
         if (blockMode) {
           summary.blocked++; userSummary.blocked++;
-          await supabase.from("autotrade_log").insert({
+          queueLog({
             user_id: userId, ticker: p.ticker, action: "BLOCKED",
             reason: `Beta cap: portfolio β would reach ${projectedPortBeta.toFixed(2)} (cap ${betaCap}, ${p.ticker} β=${useBeta.toFixed(2)})`,
             conviction: p.decision.conviction, strategy: p.decision.strategy, profile: p.decision.profile,
           });
           continue;
         } else {
-          await supabase.from("autotrade_log").insert({
+          queueLog({
             user_id: userId, ticker: p.ticker, action: "WARN",
             reason: `Beta warning: portfolio β → ${projectedPortBeta.toFixed(2)} (cap ${betaCap}, mode=warn)`,
             conviction: p.decision.conviction, strategy: p.decision.strategy, profile: p.decision.profile,
@@ -2459,7 +2504,7 @@ async function processUser(
         // Heat is a hard safety rail — block even when caps disabled or in warn mode,
         // because the user explicitly disabling caps doesn't justify a margin call.
         summary.blocked++; userSummary.blocked++;
-        await supabase.from("autotrade_log").insert({
+        queueLog({
           user_id: userId, ticker: p.ticker, action: "BLOCKED",
           reason: `Portfolio heat: open R-risk would reach ${projectedHeatPct.toFixed(1)}% NAV (cap ${PORTFOLIO_HEAT_CAP_PCT}%)`,
           conviction: p.decision.conviction, strategy: p.decision.strategy, profile: p.decision.profile,
@@ -2474,34 +2519,32 @@ async function processUser(
     // open position has <20 return obs (cold-start safe).
     if (livePositions.length > 0) {
       try {
-        const cvarPositions: CvarPosition[] = [];
-        for (const pos of livePositions) {
-          const d = priceCache.get(pos.ticker.toUpperCase());
-          if (!d) continue;
-          const px = d.close[d.close.length - 1];
-          const dirSign = pos.position_type === "long" ? 1 : -1;
-          const rets = closeToReturns(d.close.slice(-61));
-          cvarPositions.push({ ticker: pos.ticker, dollars: dirSign * px * Number(pos.shares), returns: rets });
+        if (cvarBaseDirty) {
+          cvarBase = buildCvarBase();
+          cvarBaseDirty = false;
         }
         const candD = priceCache.get(p.ticker.toUpperCase());
-        if (candD) {
+        if (cvarBase && candD) {
           const candSign = p.decision.decision === "BUY" ? 1 : -1;
-          cvarPositions.push({
-            ticker: p.ticker,
-            dollars: candSign * candidateDollars,
-            returns: closeToReturns(candD.close.slice(-61)),
-          });
-        }
-        const cvar = computePortfolioCvar(cvarPositions, currentNav);
-        if (cvar && cvar.cvarPct > DEFAULT_CVAR_CAP_PCT) {
-          summary.blocked++; userSummary.blocked++;
-          await supabase.from("autotrade_log").insert({
-            user_id: userId, ticker: p.ticker, action: "BLOCKED",
-            reason: `Portfolio CVaR: 95% ES would reach ${cvar.cvarPct.toFixed(2)}% NAV (cap ${DEFAULT_CVAR_CAP_PCT}%, worst=${cvar.worstPathPct.toFixed(1)}%)`,
-            conviction: p.decision.conviction, strategy: p.decision.strategy, profile: p.decision.profile,
-            cvar_block_count: 1,
-          });
-          continue;
+          const cvar = computePortfolioCvarMarginal(
+            cvarBase,
+            {
+              ticker: p.ticker,
+              dollars: candSign * candidateDollars,
+              returns: closeToReturns(candD.close.slice(-61)),
+            },
+            currentNav,
+          );
+          if (cvar && cvar.cvarPct > DEFAULT_CVAR_CAP_PCT) {
+            summary.blocked++; userSummary.blocked++;
+            queueLog({
+              user_id: userId, ticker: p.ticker, action: "BLOCKED",
+              reason: `Portfolio CVaR: 95% ES would reach ${cvar.cvarPct.toFixed(2)}% NAV (cap ${DEFAULT_CVAR_CAP_PCT}%, worst=${cvar.worstPathPct.toFixed(1)}%)`,
+              conviction: p.decision.conviction, strategy: p.decision.strategy, profile: p.decision.profile,
+              cvar_block_count: 1,
+            });
+            continue;
+          }
         }
       } catch (e) { console.warn("cvar gate failed", e); }
     }
@@ -2521,8 +2564,19 @@ async function processUser(
       if (betaCapsActive) {
         bookBetaDollars += candidateDollars * (candidateBeta ?? 1);
       }
+      // Invalidate CVaR base — the open book just gained a position.
+      cvarBaseDirty = true;
     }
   }
+
+  // Drain any queued log inserts from the gate loop. Use allSettled so a
+  // single failed write never aborts the scan.
+  if (logInserts.length > 0) {
+    await Promise.allSettled(logInserts);
+    logInserts.length = 0;
+  }
+
+
 
   for (const p of deferred) {
     summary.holds++;

@@ -24,15 +24,16 @@ export function calculateEMA(prices: number[], period: number): number[] {
   return ema;
 }
 
+// O(N) rolling SMA — incremental sum, identical math to the slice/reduce form.
 export function calculateSMA(prices: number[], period: number): number[] {
-  const sma: number[] = [];
-  for (let i = 0; i < prices.length; i++) {
-    if (i < period - 1) {
-      sma[i] = NaN;
-    } else {
-      const sum = prices.slice(i - period + 1, i + 1).reduce((a, b) => a + b, 0);
-      sma[i] = sum / period;
-    }
+  const n = prices.length;
+  const sma: number[] = new Array(n);
+  if (period <= 0 || n === 0) return sma;
+  let sum = 0;
+  for (let i = 0; i < n; i++) {
+    sum += prices[i];
+    if (i >= period) sum -= prices[i - period];
+    sma[i] = i < period - 1 ? NaN : sum / period;
   }
   return sma;
 }
@@ -99,25 +100,38 @@ export function calculateMACD(prices: number[]): { macd: number[]; signal: numbe
   return { macd, signal: paddedSignal, histogram };
 }
 
+// O(N) rolling Bollinger via running sum + running sum-of-squares.
+// Variance is population (÷period) — matches the original implementation
+// exactly. Numerically safe: variance is clamped at 0 to absorb floating
+// drift on flat windows.
 export function calculateBollingerBands(
   prices: number[],
   period: number = 20,
   stdDev: number = 2,
 ): { upper: number[]; middle: number[]; lower: number[]; bandwidth: number[] } {
+  const n = prices.length;
   const sma = calculateSMA(prices, period);
-  const upper: number[] = [];
-  const lower: number[] = [];
-  const bandwidth: number[] = [];
-
-  for (let i = 0; i < prices.length; i++) {
+  const upper: number[] = new Array(n);
+  const lower: number[] = new Array(n);
+  const bandwidth: number[] = new Array(n);
+  let sum = 0;
+  let sumSq = 0;
+  for (let i = 0; i < n; i++) {
+    const v = prices[i];
+    sum += v;
+    sumSq += v * v;
+    if (i >= period) {
+      const old = prices[i - period];
+      sum -= old;
+      sumSq -= old * old;
+    }
     if (i < period - 1) {
       upper[i] = NaN;
       lower[i] = NaN;
       bandwidth[i] = NaN;
     } else {
-      const slice = prices.slice(i - period + 1, i + 1);
-      const mean = sma[i];
-      const variance = slice.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / period;
+      const mean = sum / period;
+      const variance = Math.max(0, sumSq / period - mean * mean);
       const std = Math.sqrt(variance) * stdDev;
       upper[i] = mean + std;
       lower[i] = mean - std;
@@ -145,24 +159,47 @@ function wildersSmooth(values: number[], period: number): number[] {
   return out;
 }
 
+// O(N) rolling Bessel-corrected stdev on simple returns. Window of size
+// `period` over returns[i-period..i-1] — same indexing as the legacy form.
 export function calculateVolatility(prices: number[], period: number = 20): number[] {
-  const returns: number[] = [];
-  for (let i = 1; i < prices.length; i++) {
-    if (prices[i - 1] !== 0) returns.push((prices[i] - prices[i - 1]) / prices[i - 1]);
-    else returns.push(0);
+  const n = prices.length;
+  if (n < 2) {
+    const out: number[] = new Array(n);
+    for (let i = 0; i < n; i++) out[i] = NaN;
+    return out;
   }
-  const volatility: number[] = [NaN];
-  for (let i = 1; i < prices.length; i++) {
-    if (i < period) {
+  const returns: number[] = new Array(n - 1);
+  for (let k = 0; k < n - 1; k++) {
+    const p0 = prices[k];
+    returns[k] = p0 !== 0 ? (prices[k + 1] - p0) / p0 : 0;
+  }
+  const denom = Math.max(1, period - 1);
+  const volatility: number[] = new Array(n);
+  volatility[0] = NaN;
+  let sum = 0;
+  let sumSq = 0;
+  // Seed first window: returns[0..period-1] → volatility[period].
+  for (let i = 1; i < n; i++) {
+    if (i <= period) {
       volatility[i] = NaN;
+      if (i >= 1 && i <= period) {
+        const r = returns[i - 1];
+        sum += r;
+        sumSq += r * r;
+      }
+      if (i === period) {
+        const mean = sum / period;
+        const variance = Math.max(0, (sumSq - mean * mean * period)) / denom;
+        volatility[i] = Math.sqrt(variance);
+      }
     } else {
-      const slice = returns.slice(i - period, i);
-      const mean = slice.reduce((a, b) => a + b, 0) / period;
-      // M-2 FIX: Bessel-corrected sample variance (n-1) instead of population
-      // variance (n). Previous formula underestimated vol by ~2.5% on a 20-bar
-      // window, which systematically over-sized positions via the vol scalar.
-      const denom = Math.max(1, period - 1);
-      const variance = slice.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / denom;
+      // Slide: drop returns[i-period-1], add returns[i-1].
+      const dropped = returns[i - period - 1];
+      const added = returns[i - 1];
+      sum += added - dropped;
+      sumSq += added * added - dropped * dropped;
+      const mean = sum / period;
+      const variance = Math.max(0, (sumSq - mean * mean * period)) / denom;
       volatility[i] = Math.sqrt(variance);
     }
   }
