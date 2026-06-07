@@ -275,6 +275,36 @@ export type Database = {
         }
         Relationships: []
       }
+      eps_revisions: {
+        Row: {
+          as_of: string
+          created_at: string
+          current_estimate: number | null
+          estimate_30d_ago: number | null
+          estimate_90d_ago: number | null
+          revision_score: number | null
+          ticker: string
+        }
+        Insert: {
+          as_of: string
+          created_at?: string
+          current_estimate?: number | null
+          estimate_30d_ago?: number | null
+          estimate_90d_ago?: number | null
+          revision_score?: number | null
+          ticker: string
+        }
+        Update: {
+          as_of?: string
+          created_at?: string
+          current_estimate?: number | null
+          estimate_30d_ago?: number | null
+          estimate_90d_ago?: number | null
+          revision_score?: number | null
+          ticker?: string
+        }
+        Relationships: []
+      }
       finnhub_cache: {
         Row: {
           cache_key: string
@@ -338,6 +368,7 @@ export type Database = {
           created_at: string
           entry_price: number
           expires_at: string | null
+          explanation: string | null
           id: string
           reasoning: string | null
           regime: string | null
@@ -354,6 +385,7 @@ export type Database = {
           created_at?: string
           entry_price: number
           expires_at?: string | null
+          explanation?: string | null
           id?: string
           reasoning?: string | null
           regime?: string | null
@@ -370,6 +402,7 @@ export type Database = {
           created_at?: string
           entry_price?: number
           expires_at?: string | null
+          explanation?: string | null
           id?: string
           reasoning?: string | null
           regime?: string | null
@@ -753,6 +786,7 @@ export type Database = {
           exit_date: string | null
           exit_price: number | null
           exit_reason: string | null
+          explanation: string | null
           id: string
           macro_label: string | null
           macro_score: number | null
@@ -783,6 +817,7 @@ export type Database = {
           exit_date?: string | null
           exit_price?: number | null
           exit_reason?: string | null
+          explanation?: string | null
           id?: string
           macro_label?: string | null
           macro_score?: number | null
@@ -813,6 +848,7 @@ export type Database = {
           exit_date?: string | null
           exit_price?: number | null
           exit_reason?: string | null
+          explanation?: string | null
           id?: string
           macro_label?: string | null
           macro_score?: number | null

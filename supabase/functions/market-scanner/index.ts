@@ -117,6 +117,8 @@ import {
 import { getEarningsBlackoutDays } from "../_shared/finnhub.ts";
 import { applyIsotonicCalibration, type IsotonicAnchor } from "../_shared/calibration.ts";
 import { loadDanelfinScores } from "../_shared/danelfin.ts";
+import { loadEpsRevisions } from "../_shared/eps-revisions.ts";
+import { explainSignal } from "../_shared/signal-explainer.ts";
 
 
 
@@ -971,6 +973,11 @@ serve(async (req) => {
     if (danelfinMap.size > 0) {
       console.log(`market-scanner: Danelfin coverage ${danelfinMap.size}/${tickersToScan.length}`);
     }
+    // Pre-load EPS revision scores (supporting fundamental factor).
+    const epsRevisionMap = await loadEpsRevisions(tickersToScan);
+    if (epsRevisionMap.size > 0) {
+      console.log(`market-scanner: EPS revision coverage ${epsRevisionMap.size}/${tickersToScan.length}`);
+    }
 
     for (let ti = 0; ti < tickersToScan.length; ti++) {
       const ticker = tickersToScan[ti];
@@ -984,6 +991,7 @@ serve(async (req) => {
         // uses for entries and the backtester validates against. Eliminates
         // scanner/autotrader divergence.
         const danelfin = danelfinMap.get(ticker.toUpperCase()) ?? null;
+        const epsRev = epsRevisionMap.get(ticker.toUpperCase()) ?? null;
         const sig = evaluateSignal(
           data,
           ticker,
@@ -991,6 +999,7 @@ serve(async (req) => {
           (macro as MacroContext | null) ?? null,
           undefined, undefined,
           danelfin,
+          epsRev,
         );
         if (!sig || sig.decision === "HOLD") continue;
 
@@ -1057,11 +1066,37 @@ serve(async (req) => {
           qualityScore,
           danelfin_score: sig.danelfinScore ?? null,
           danelfin_delta: sig.danelfinDelta ?? 0,
+          eps_revision_score: sig.epsRevisionScore ?? null,
+          eps_revision_delta: sig.epsRevisionDelta ?? 0,
         });
       } catch (err) {
         console.error(`Error analyzing ${ticker}:`, err);
       }
     }
+
+    // ── Natural-language explanations (top-N by conviction, non-blocking) ──
+    const TOP_N_EXPLAIN = 20;
+    const ranked = [...signals].sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0));
+    const toExplain = ranked.slice(0, TOP_N_EXPLAIN);
+    const explanations = await Promise.all(toExplain.map(s =>
+      explainSignal({
+        ticker: s.ticker,
+        side: s.signal_type === "BUY" ? "long" : "short",
+        conviction: s.confidence,
+        strategy: s.strategy,
+        profile: s.stock_profile,
+        regime: s.regime,
+        weeklyBias: s.weekly_bias,
+        factors: {
+          danelfin_delta: s.danelfin_delta,
+          danelfin_score: s.danelfin_score,
+          eps_revision_delta: s.eps_revision_delta,
+          eps_revision_score: s.eps_revision_score,
+          target_allocation: s.target_allocation,
+        },
+      }).catch(() => ""),
+    ));
+    toExplain.forEach((s, i) => { (s as any).explanation = explanations[i] || ""; });
 
     // [FIX #7] Sort by risk-adjusted quality score instead of raw conviction
     signals.sort((a, b) => b.qualityScore - a.qualityScore);
@@ -1085,6 +1120,7 @@ serve(async (req) => {
         reasoning: s.reasoning,
         strategy: s.strategy,
         expires_at: expiresAt,
+        explanation: (s as any).explanation ?? null,
       }));
 
       const { data: upserted, error } = await supabase
@@ -1127,6 +1163,8 @@ serve(async (req) => {
               reasoning: s.reasoning,
               danelfin: s.danelfin_delta ?? 0,
               danelfin_score: s.danelfin_score ?? null,
+              eps_revision: s.eps_revision_delta ?? 0,
+              eps_revision_score: s.eps_revision_score ?? null,
             },
             entry_price: s.entry_price,
             spy_at_entry: spyContext?.spyClose?.[spyContext.spyClose.length - 1] ?? null,
@@ -1134,6 +1172,7 @@ serve(async (req) => {
             macro_label: macro?.label ?? spyContext?.macro?.label ?? null,
             weights_id: activeWeightsId,
             status: "open",
+            explanation: (s as any).explanation ?? null,
           }));
 
         // P-2 FIX: rows whose signal_id resolved to null can't dedupe on the

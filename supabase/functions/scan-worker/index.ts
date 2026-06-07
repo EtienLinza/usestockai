@@ -20,6 +20,7 @@ import { getSectorConvictionModifier, macroFloorAdjust, preScreen, type SectorMo
 import { getEarningsBlackoutDays } from "../_shared/finnhub.ts";
 import { applyIsotonicCalibration, type IsotonicAnchor } from "../_shared/calibration.ts";
 import { requireCronOrUser } from "../_shared/cron-auth.ts";
+import { explainSignal } from "../_shared/signal-explainer.ts";
 
 
 const corsHeaders = {
@@ -44,6 +45,9 @@ interface Body {
   /** Pre-loaded Danelfin AI Scores keyed by uppercase ticker — supporting
    *  conviction factor passed through to evaluateSignal. Missing → neutral. */
   danelfinScores?: Record<string, number>;
+  /** Pre-loaded EPS revision scores keyed by uppercase ticker — supporting
+   *  fundamental factor. Missing → neutral. */
+  epsRevisionScores?: Record<string, number>;
   mode?: "premarket" | "live";
 }
 
@@ -63,6 +67,7 @@ serve(async (req) => {
     const body = await req.json() as Body;
     const { tickers, spyContext, macro, sectorMomentum, weights } = body;
     const danelfinScores = body.danelfinScores ?? {};
+    const epsRevisionScores = body.epsRevisionScores ?? {};
     const mode: "premarket" | "live" = body.mode === "premarket" ? "premarket" : "live";
     if (!Array.isArray(tickers) || tickers.length === 0) {
       return new Response(JSON.stringify({ signals: [] }), {
@@ -141,12 +146,14 @@ serve(async (req) => {
       if (blackoutSet.has(ticker)) continue;
       try {
         const danelfin = danelfinScores[ticker.toUpperCase()] ?? null;
+        const epsRev = epsRevisionScores[ticker.toUpperCase()] ?? null;
         const sig = evaluateSignal(
           data, ticker,
           { spyBearish: spyContext.spyBearish },
           (macro as MacroContext | null) ?? null,
           undefined, undefined,
           danelfin,
+          epsRev,
         );
         if (!sig || sig.decision === "HOLD") continue;
         const { regime, strategy, weeklyBias, profile, atrPct } = sig;
@@ -216,11 +223,39 @@ serve(async (req) => {
           qualityScore,
           danelfin_score: sig.danelfinScore ?? null,
           danelfin_delta: sig.danelfinDelta ?? 0,
+          eps_revision_score: sig.epsRevisionScore ?? null,
+          eps_revision_delta: sig.epsRevisionDelta ?? 0,
         });
       } catch (err) {
         console.error(`worker ${ticker}:`, err);
       }
     }
+
+    // Natural-language explanations — top-N by conviction only, non-blocking.
+    // Bounded by Promise.all so we wait at most ~timeout for the slowest call;
+    // failures return "" so signal write never blocks on the LLM.
+    const TOP_N_EXPLAIN = 20;
+    const ranked = [...signals].sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0));
+    const toExplain = ranked.slice(0, TOP_N_EXPLAIN);
+    const explanations = await Promise.all(toExplain.map(s =>
+      explainSignal({
+        ticker: s.ticker,
+        side: s.signal_type === "BUY" ? "long" : "short",
+        conviction: s.confidence,
+        strategy: s.strategy,
+        profile: s.stock_profile,
+        regime: s.regime,
+        weeklyBias: s.weekly_bias,
+        factors: {
+          danelfin_delta: s.danelfin_delta,
+          danelfin_score: s.danelfin_score,
+          eps_revision_delta: s.eps_revision_delta,
+          eps_revision_score: s.eps_revision_score,
+          target_allocation: s.target_allocation,
+        },
+      }).catch(() => ""),
+    ));
+    toExplain.forEach((s, i) => { s.explanation = explanations[i] || ""; });
 
     // C-2 FIX: persist updated cooldown state before responding.
     await persistTrackerCacheToDB(supabase);

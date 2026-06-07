@@ -39,6 +39,7 @@ import { getQuoteWithFallback, getEarningsBlackoutDays, getSector, getBeta } fro
 import { recordHeartbeat } from "../_shared/heartbeat.ts";
 import { applyIsotonicCalibration, type IsotonicAnchor } from "../_shared/calibration.ts";
 import { loadDanelfinScores } from "../_shared/danelfin.ts";
+import { loadEpsRevisions } from "../_shared/eps-revisions.ts";
 
 /** Thrown by the circuit breaker to abort the entire scan immediately. */
 class CircuitBreakerTrippedError extends Error {
@@ -1003,6 +1004,7 @@ async function runEntryDecision(
   strategyTilts: Record<string, { multiplier: number }>,
   tickerCalibration: Record<string, { adjust: number }>,
   danelfinMap?: Map<string, number>,
+  epsRevisionMap?: Map<string, number>,
   /** C-3 FIX: dynamic NAV (starting_nav + cumulative realized PnL +
    *  unrealized today). Previously we sized off `settings.starting_nav`
    *  which is static — after a 20% drawdown the engine sized 25% TOO
@@ -1067,7 +1069,8 @@ async function runEntryDecision(
   } catch (_e) { /* non-fatal — never block scan on earnings API hiccup */ }
 
   const danelfin = danelfinMap?.get(ticker.toUpperCase()) ?? null;
-  const sig = evaluateSignal(data, ticker, undefined, macro, undefined, undefined, danelfin);
+  const epsRev = epsRevisionMap?.get(ticker.toUpperCase()) ?? null;
+  const sig = evaluateSignal(data, ticker, undefined, macro, undefined, undefined, danelfin, epsRev);
   if (!sig) return { kind: "HOLD", reason: "Insufficient data" };
   if (sig.decision === "HOLD") return { kind: "HOLD", reason: sig.reasoning };
 
@@ -2005,6 +2008,12 @@ async function processUser(
     console.log(`autotrader-scan: Danelfin coverage ${danelfinMap.size}/${watchlist.length}`);
   }
 
+  // Pre-load EPS revision scores — supporting fundamental factor (never blocks).
+  const epsRevisionMap = await loadEpsRevisions(watchlist);
+  if (epsRevisionMap.size > 0) {
+    console.log(`autotrader-scan: EPS revision coverage ${epsRevisionMap.size}/${watchlist.length}`);
+  }
+
 
   for (const ticker of watchlist) {
     if (heldTickers.has(ticker)) continue;
@@ -2035,6 +2044,7 @@ async function processUser(
       volScalar,
       calibrationCurve, strategyTilts, tickerCalibration,
       danelfinMap,
+      epsRevisionMap,
       currentNav, // C-3 FIX: dynamic NAV for sizing
     );
 
@@ -2217,7 +2227,10 @@ async function processUser(
 
     const candidateDollars = p.decision.kellyFraction * settings.starting_nav;
 
-    // ── Sector cap gate ──
+    // ── Sector cap gate (G-5 hard block) ──
+    // Sector concentration is a non-negotiable rail when ≥cap, matching the
+    // portfolio-heat-cap precedent. Always blocks regardless of
+    // enforcement_mode — the warn-mode toggle only applies to portfolio_beta.
     let candidateSector: string | null = null;
     if (sectorCapsActive) {
       try { candidateSector = await getSector(p.ticker); } catch { candidateSector = null; }
@@ -2225,21 +2238,13 @@ async function processUser(
         const projected = (sectorDollars.get(candidateSector) ?? 0) + candidateDollars;
         const projectedPct = (projected / settings.starting_nav) * 100;
         if (projectedPct > capPct) {
-          if (blockMode) {
-            summary.blocked++; userSummary.blocked++;
-            await supabase.from("autotrade_log").insert({
-              user_id: userId, ticker: p.ticker, action: "BLOCKED",
-              reason: `Sector cap: ${candidateSector} would reach ${projectedPct.toFixed(0)}% NAV (cap ${capPct}%)`,
-              conviction: p.decision.conviction, strategy: p.decision.strategy, profile: p.decision.profile,
-            });
-            continue;
-          } else {
-            await supabase.from("autotrade_log").insert({
-              user_id: userId, ticker: p.ticker, action: "WARN",
-              reason: `Sector exposure warning: ${candidateSector} → ${projectedPct.toFixed(0)}% NAV (cap ${capPct}%, mode=warn)`,
-              conviction: p.decision.conviction, strategy: p.decision.strategy, profile: p.decision.profile,
-            });
-          }
+          summary.blocked++; userSummary.blocked++;
+          await supabase.from("autotrade_log").insert({
+            user_id: userId, ticker: p.ticker, action: "BLOCKED",
+            reason: `Sector cap: ${candidateSector} would reach ${projectedPct.toFixed(0)}% NAV (cap ${capPct}%)`,
+            conviction: p.decision.conviction, strategy: p.decision.strategy, profile: p.decision.profile,
+          });
+          continue;
         }
       }
     }

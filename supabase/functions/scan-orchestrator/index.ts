@@ -17,6 +17,7 @@ import {
 } from "../_shared/scan-pipeline.ts";
 import { loadCachedBars } from "../_shared/bars-cache.ts";
 import { loadDanelfinScores } from "../_shared/danelfin.ts";
+import { loadEpsRevisions } from "../_shared/eps-revisions.ts";
 import { requireCronOrUser, cronSecretHeader } from "../_shared/cron-auth.ts";
 import { isMarketHoliday, etMinuteOfDay, etDayOfWeek } from "../_shared/market-calendar.ts";
 
@@ -207,12 +208,19 @@ serve(async (req) => {
     for (const [t, s] of danelfinMap.entries()) danelfinObj[t] = s;
     console.log(`Danelfin coverage: ${danelfinMap.size}/${survivors.length}`);
 
+    // Pre-load EPS revision scores once (supporting fundamental factor).
+    const epsRevisionMap = await loadEpsRevisions(survivors);
+    const epsRevisionObj: Record<string, number> = {};
+    for (const [t, s] of epsRevisionMap.entries()) epsRevisionObj[t] = s;
+    console.log(`EPS revision coverage: ${epsRevisionMap.size}/${survivors.length}`);
+
     const workerPayloadBase = {
       spyContext: { spyBearish, spyClose: macro.spyClose.slice(-30) },
       macro,
       sectorMomentum,
       weights,
       danelfinScores: danelfinObj,
+      epsRevisionScores: epsRevisionObj,
       mode,
     };
 
@@ -250,6 +258,7 @@ serve(async (req) => {
         reasoning: s.reasoning, strategy: s.strategy,
         expires_at: expiresAt,
         source: mode === "premarket" ? "premarket" : "live",
+        explanation: s.explanation ?? null,
       }));
       const { data: upserted, error } = await supabase
         .from("live_signals").upsert(rows, { onConflict: "ticker" }).select("id, ticker");
@@ -273,11 +282,14 @@ serve(async (req) => {
             reasoning: s.reasoning,
             danelfin: s.danelfin_delta ?? 0,
             danelfin_score: s.danelfin_score ?? null,
+            eps_revision: s.eps_revision_delta ?? 0,
+            eps_revision_score: s.eps_revision_score ?? null,
           },
           entry_price: s.entry_price,
           spy_at_entry: macro.spyClose[macro.spyClose.length - 1] ?? null,
           macro_score: macro.score, macro_label: macro.label,
           weights_id: weights.activeWeightsId, status: "open",
+          explanation: s.explanation ?? null,
         }));
         // P-2 FIX: rows whose signal_id resolved to null can't dedupe on the
         // unique partial index — every retry would create a brand-new "open"

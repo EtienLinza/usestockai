@@ -1033,6 +1033,12 @@ export interface EvaluateSignalResult {
   danelfinDelta?: number;
   /** Raw Danelfin AI Score 1..10 (or undefined when missing). */
   danelfinScore?: number;
+  /** Conviction delta from the EPS revision overlay (long: +round(s*0.8),
+   *  short: -round(s*0.8)). 0 when no score available. Persisted to
+   *  contributing_rules.eps_revision_delta for calibration. */
+  epsRevisionDelta?: number;
+  /** Raw EPS revision score (-10..+10), or undefined when missing. */
+  epsRevisionScore?: number;
 }
 
 // ----------------------------------------------------------------------------
@@ -1167,6 +1173,10 @@ export function evaluateSignal(
    *  conviction factor — long: +(score-5)*1.5, short: -(score-5)*1.5.
    *  Missing/undefined → 0 (neutral, never blocks). */
   danelfinScore?: number | null,
+  /** Optional EPS revision score (-10..+10). Used as a SUPPORTING conviction
+   *  factor — long: +round(score*0.8), short: -round(score*0.8).
+   *  Missing/undefined → 0 (neutral, never blocks). */
+  epsRevisionScore?: number | null,
 ): EvaluateSignalResult | null {
   if (data.close.length < 200) return null;
 
@@ -1291,6 +1301,26 @@ export function evaluateSignal(
     }
   }
 
+  // EPS revision overlay — supporting conviction factor (NEVER a gate).
+  // Long: +round(score * 0.8)  → -8 … +8
+  // Short: -round(score * 0.8)
+  // Applied after Danelfin so calibration can distinguish their contributions.
+  let epsRevisionDelta = 0;
+  if (sig.confidence > 0 && epsRevisionScore !== undefined && epsRevisionScore !== null && Number.isFinite(epsRevisionScore)) {
+    const side: "long" | "short" = sig.consensusScore >= 0 ? "long" : "short";
+    const raw = Math.round(epsRevisionScore * 0.8);
+    epsRevisionDelta = side === "long" ? raw : -raw;
+    if (epsRevisionDelta !== 0) {
+      const before = sig.confidence;
+      sig.confidence = Math.max(0, Math.min(100, sig.confidence + epsRevisionDelta));
+      if (before > 0 && sig.consensusScore !== 0) {
+        sig.consensusScore = Math.sign(sig.consensusScore) * sig.confidence;
+      }
+    }
+  }
+
+
+
 
   // Re-validate against the active profile's threshold after the volume
   // adjustment. Previously a 66-confidence signal could fall to 61, below the
@@ -1369,9 +1399,11 @@ export function evaluateSignal(
     kellyFraction,
     atr: sig.atr,
     atrPct: atrPctNow,
-    reasoning: `${sig.strategy.replace("_", " ")} ${sigDir.toLowerCase()} | ${cls.classification} profile | ${sig.regime} regime | conviction ${sig.confidence} | kelly ${(kellyFraction * 100).toFixed(1)}%${danelfinDelta !== 0 ? ` | danelfinΔ=${danelfinDelta > 0 ? "+" : ""}${danelfinDelta}` : ""}`,
+    reasoning: `${sig.strategy.replace("_", " ")} ${sigDir.toLowerCase()} | ${cls.classification} profile | ${sig.regime} regime | conviction ${sig.confidence} | kelly ${(kellyFraction * 100).toFixed(1)}%${danelfinDelta !== 0 ? ` | danelfinΔ=${danelfinDelta > 0 ? "+" : ""}${danelfinDelta}` : ""}${epsRevisionDelta !== 0 ? ` | epsΔ=${epsRevisionDelta > 0 ? "+" : ""}${epsRevisionDelta}` : ""}`,
     danelfinDelta,
     danelfinScore: (danelfinScore !== undefined && danelfinScore !== null && Number.isFinite(danelfinScore)) ? danelfinScore : undefined,
+    epsRevisionDelta,
+    epsRevisionScore: (epsRevisionScore !== undefined && epsRevisionScore !== null && Number.isFinite(epsRevisionScore)) ? epsRevisionScore : undefined,
   };
 }
 

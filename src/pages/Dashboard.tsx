@@ -76,7 +76,7 @@ interface Signal {
   created_at: string;
   expires_at: string;
   sector?: string;
-  
+  explanation?: string | null;
 }
 
 interface Position {

@@ -41,6 +41,7 @@ interface Signal {
   created_at: string;
   expires_at: string;
   sector?: string;
+  explanation?: string | null;
 }
 
 interface Position {
@@ -617,6 +618,26 @@ export function TradingTab({
                     {signal.reasoning && (
                       <p className="text-[11px] sm:text-xs text-muted-foreground mt-2 border-t border-border/10 pt-2 ml-6 sm:ml-0 line-clamp-2 sm:line-clamp-none">{signal.reasoning}</p>
                     )}
+
+                    {signal.explanation && (
+                      <HoverCard openDelay={120} closeDelay={80}>
+                        <HoverCardTrigger asChild>
+                          <button
+                            type="button"
+                            className="mt-1.5 ml-6 sm:ml-0 inline-flex items-center gap-1 text-[10px] sm:text-[11px] text-primary/80 hover:text-primary underline-offset-2 hover:underline cursor-help"
+                            aria-label="Why this signal fired"
+                          >
+                            <span className="font-mono">?</span>
+                            <span>Why this signal</span>
+                          </button>
+                        </HoverCardTrigger>
+                        <HoverCardContent className="w-72 p-3 text-xs leading-relaxed" align="start" side="top">
+                          {signal.explanation}
+                        </HoverCardContent>
+                      </HoverCard>
+                    )}
+
+
 
                   </motion.div>
                 ))}

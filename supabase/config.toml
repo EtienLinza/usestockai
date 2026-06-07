@@ -48,6 +48,10 @@ verify_jwt = false
 [functions.refresh-danelfin-scores]
 verify_jwt = false
 
+[functions.refresh-eps-revisions]
+verify_jwt = false
+
+
 [functions.create-checkout]
 verify_jwt = false
 
