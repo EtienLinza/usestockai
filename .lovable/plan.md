@@ -1,95 +1,87 @@
-# Medium-Effort / Strong-Value — Batch 2
+# Engine Speed Bundle — "Hypercar engine" pass
 
-We already shipped **#7 Regime Detection**, **#8 Meta-Labeling**, and **H-6 realKelly Wiring**.
-Remaining medium-effort items from the 20-idea list are: #5, #9, #10, #12, #14, #16, #17, #18, #19, #20.
+Three optimizations. Zero behavior changes. Same signals, same fills, same math — just faster.
 
-Picking 4 with the best value-to-effort ratio that compound with what's already in the engine. Skipping the rest for stated reasons.
-
----
-
-## 1. #5 Portfolio CVaR Budget (≤2% NAV at 95% ES)
-
-**Why:** Pairs with the 6% portfolio heat cap and the CDaR₀.₉₅ breaker — heat cap bounds *worst-case sum of stops*, CDaR bounds *realized drawdown*, but neither bounds *expected tail loss on the live book right now*. CVaR is the missing rail.
-
-**Approach:**
-- New `_shared/portfolio-cvar.ts`: given current open `virtual_positions` + last 60 daily returns per ticker, simulate 1,000 historical-bootstrap P&L paths over a 5-day horizon → compute 95% Expected Shortfall as % of NAV.
-- `autotrader-scan` calls it pre-entry: if adding the candidate pushes book CVaR above **2% NAV**, block the entry (treated like heat-cap — hard block, not warn).
-- New column `autotrader_log.cvar_block_count`; reasoning string appends `cvar=X.XX%`.
-- Persists scan-level snapshot to `portfolio_cvar_snapshots` (date, user_id, cvar_pct, n_positions).
-
-## 2. #9 Almgren–Chriss Slippage / Impact Model
-
-**Why:** Current cost model is a flat bps haircut. Real fills scale with `(orderSize / ADV)^0.5`. Closes the audit gap where backtests overstate edge on small-cap or sized-up entries, and lets autotrader downsize when impact would eat the expected edge.
-
-**Approach:**
-- New `_shared/slippage-model.ts` implementing simplified Almgren–Chriss permanent + temporary impact:
-  - `slippageBps = γ × (Q / ADV) + η × σ × √(Q / ADV)` with γ=10bps, η=12bps, σ=daily vol.
-  - Inputs: orderNotional, ADV (already fetched), atrPct.
-- Wire into `signal-engine-v2.ts`:
-  - `computePositionSize` adds an impact-aware shrink: if expected impact > 30% of `expectedEdgeBps`, shrink position until ratio ≤ 30%.
-  - Persist `slippage_bps_est` to `signal_outcomes.contributing_rules`.
-- Wire into backtester (`backtest/index.ts`): replace flat slippage with the same function so backtest = live.
-
-## 3. #17 Short-Interest Velocity Filter
-
-**Why:** Cheapest orthogonal alpha left — Finnhub already in stack (no new key). Rising SI on a long candidate is a yellow flag; collapsing SI (short squeeze fuel) is a green flag for breakouts. Mirror of the EPS-revision overlay we just shipped, on a different fundamental axis.
-
-**Approach:**
-- New `_shared/short-interest.ts` + nightly cron `refresh-short-interest` (03:00 UTC) that pulls `/stock/insider-transactions` short-interest endpoint for active tickers, persists to `short_interest_history (ticker, report_date, si_pct_float, days_to_cover, velocity_30d)`.
-- `signal-engine-v2.ts`: add supporting conviction delta **±6 pts**:
-  - Long candidate with SI rising > 20% over 30d → −4 to −6
-  - Long breakout with SI falling > 30% AND days-to-cover ≥ 3 → +4 to +6
-  - Short candidate inverts the signs
-- Persist `si_velocity, si_delta` to outcomes for closed-loop calibration.
-
-## 4. #14 ADWIN Drift Detector
-
-**Why:** The meta-labeler retrains nightly on 180d. If the market shifts (regime break, post-event drift), the model is stale **before** retrain. ADWIN (Bies-Castro–Gavaldà adaptive windowing) flags drift in realized hit-rate within hours, not nights.
-
-**Approach:**
-- New `_shared/adwin.ts`: streaming ADWIN over the last N closed `signal_outcomes` (sliding pointer + Hoeffding bound, ~50 LOC).
-- `autotrader-scan` runs ADWIN on hit-rate at scan start. On drift detection:
-  - Soft mode: tighten meta-label gate (PASS threshold lifts from 0.45 → 0.55, SKIP from 0.30 → 0.40).
-  - Snapshot to new `drift_events` table (detected_at, window_size, pre_mean, post_mean).
-  - Surfaced as a chip in `TradingTab` next to the regime badge.
-- Cron job `train-meta-labeler` reads recent drift events and weights the most-recent 30d ×3 instead of the default ×2 when drift was flagged in that window.
+Target: scan latency from ~30-60s → ~5-15s on a 200-candidate run.
 
 ---
 
-## Technical Details
+## 1. Parallelize the autotrader per-candidate gate loop
 
-**New files:**
-- `supabase/functions/_shared/portfolio-cvar.ts`
-- `supabase/functions/_shared/slippage-model.ts`
-- `supabase/functions/_shared/short-interest.ts`
-- `supabase/functions/_shared/adwin.ts`
-- `supabase/functions/refresh-short-interest/index.ts`
-- 4 memory files under `.lovable/memory/architecture/prediction-engine/`
+**File:** `supabase/functions/autotrader-scan/index.ts` (around L2292 / L2478 — the `for (const p of toExecute)` block that runs CVaR + slippage + meta-label + calibration per candidate).
 
-**Edited files:**
-- `_shared/signal-engine-v2.ts` — slippage shrink + SI velocity delta
-- `autotrader-scan/index.ts` — CVaR pre-trade gate + ADWIN drift sensing
-- `scan-orchestrator/index.ts` + `scan-worker/index.ts` + `market-scanner/index.ts` — propagate SI fields
-- `backtest/index.ts` — swap flat slippage for Almgren–Chriss
-- `train-meta-labeler/index.ts` — drift-aware reweighting
-- `src/components/dashboard/TradingTab.tsx` — drift chip
-- `supabase/config.toml` — schedule `refresh-short-interest` 03:00 UTC
+**Today:** serial `await` per candidate. CVaR alone is ~1000 bootstrap paths × N positions × 5 days = ~50-200ms per call. With 50 candidates that's 2.5-10s wall-clock spent waiting on independent computations.
 
-**Migration:**
-- `short_interest_history` table (ticker, report_date PK, si_pct_float, days_to_cover, velocity_30d)
-- `portfolio_cvar_snapshots` (id, user_id, taken_at, cvar_pct, n_positions, nav)
-- `drift_events` (id, detected_at, window_size, pre_mean, post_mean, severity)
-- `live_signals.si_velocity numeric`, `live_signals.slippage_bps_est numeric`
-- `signal_outcomes.si_velocity numeric`, `signal_outcomes.slippage_bps_est numeric`
-- GRANTs + RLS (public read on `short_interest_history` + `drift_events`; user-scoped read on `portfolio_cvar_snapshots`)
+**Change:**
+- Wrap the per-candidate gate work in an `evaluateCandidate(p)` async function returning `{ accept, reason, sizedKelly, … }`.
+- Replace the loop with a bounded-concurrency map (semaphore = **8**, hand-rolled, no deps):
+  ```ts
+  async function mapLimit<T,R>(items: T[], limit: number, fn: (t:T)=>Promise<R>): Promise<R[]>
+  ```
+- Iterate results in original order to preserve heat-cap / sector-cap / single-name accounting (which IS order-dependent). Sequence the *accounting commit* serially after parallel evaluation completes.
 
-**Out of scope (intentionally):**
-- **#10 Conformal prediction intervals** — overlaps too much with the just-shipped meta-labeler; revisit once we have 6 months of meta-score history.
-- **#12 Options flow / #16 Form 4** — both require new paid data feeds; punt until a feed is wired.
-- **#18 Fractional differentiation** — marginal lift on top of existing features; better tackled as part of a meta-labeler v2.
-- **#19 TWAP/VWAP slicing** — only matters once we wire a real broker; virtual positions are atomic fills.
-- **#20 Factor neutralization** — needs a full Fama-French factor model; high effort, separate batch.
+**Ordering invariant:** Parallel = "evaluate the gates"; serial = "apply the running portfolio caps + execute". The two are split cleanly so we keep deterministic outcomes.
 
 ---
 
-Reply **"go"** to ship all four, or tell me which to drop/reorder.
+## 2. Cache the CVaR base-book per scan
+
+**File:** `supabase/functions/_shared/portfolio-cvar.ts` + call site in `autotrader-scan/index.ts:2495`.
+
+**Today:** `computePortfolioCvar(positions, nav)` is called once per candidate. The `positions` list is the same N open positions every time — only the candidate's marginal contribution differs. We're re-running 1000 bootstrap paths over the same N positions for every candidate.
+
+**Change:** Add `computePortfolioCvarBase(positions, opts)` that:
+1. Pre-draws B×H random indices into a `Int32Array` once.
+2. Computes the base `pathPnls[b]` (dollars) over the N open positions once.
+3. Returns `{ pathPnlsBase: Float64Array, indices, B, H }`.
+
+Add `computePortfolioCvarMarginal(base, candidate, nav)` that:
+1. For each of the B paths, **reuses the same H draws** for the candidate's return series — cumulative return per path is O(H) per candidate per path.
+2. Adds `candidate.dollars * cum` to a cloned `pathPnls`.
+3. Sorts, computes ES.
+
+Net: per-candidate cost drops from O(B·N·H) to O(B·H). For N=10 open positions that's a **10× speedup** on the CVaR gate, plus the base sim only runs once per scan.
+
+**Determinism:** same RNG seed across candidates so CVaR comparisons are consistent. The existing single-shot `computePortfolioCvar` stays as-is for callers that don't need the marginal form.
+
+---
+
+## 3. Vectorize the hot indicators in `_shared/indicators.ts`
+
+**File:** `supabase/functions/_shared/indicators.ts` (337 lines, called from `evaluateSignal` for every ticker).
+
+**Today:** SMA/EMA/RSI/ATR/stdev are recomputed via nested loops with allocator pressure (each call returns a fresh `number[]`). For 200 tickers × 250 bars × ~8 indicators that adds up.
+
+**Change (incremental rolling forms, no math change):**
+- **SMA:** maintain a running sum, subtract leaving bar, add entering bar. O(N) total instead of O(N·window).
+- **EMA:** already incremental — verify and switch storage to `Float64Array`.
+- **RSI (Wilder):** rolling avgGain/avgLoss with the standard smoothing recursion. Output identical to the textbook RSI.
+- **ATR (Wilder):** same Wilder smoothing on True Range.
+- **Stdev (rolling window):** Welford's online variance over a sliding window using the West algorithm (numerically stable, single pass).
+- **Storage:** all internal buffers become `Float64Array`. Public return type stays `number[]` (or we expose an optional typed-array path for the hot worker loop and keep `number[]` for callers that JSON-serialize).
+
+**Correctness guarantee:** add a one-time unit test that asserts the new forms match the old loop outputs within 1e-9 across a 1000-bar SPY series before deleting the old paths.
+
+---
+
+## Out of scope this pass
+
+- Meta-label precomputed weights, finnhub earnings cache, fire-and-forget LLM explanations, orchestrator-side bars hydration — saved for the next batch so we can measure the impact of these three cleanly.
+
+---
+
+## Files touched
+
+- `supabase/functions/autotrader-scan/index.ts` — gate loop refactor + `mapLimit` helper.
+- `supabase/functions/_shared/portfolio-cvar.ts` — add `computePortfolioCvarBase` + `…Marginal`.
+- `supabase/functions/_shared/indicators.ts` — vectorize SMA/EMA/RSI/ATR/stdev.
+- New: `supabase/functions/_shared/indicators.test.ts` — parity tests.
+- New memory note: `mem://architecture/prediction-engine/engine-speed-bundle.md`.
+
+## Verification before declaring done
+
+1. Run `_shared/indicators.test.ts` — must match legacy outputs within 1e-9.
+2. Manual scan trigger via `curl_edge_functions` → compare generated `live_signals` row count and conviction distribution to a baseline scan (should be identical).
+3. Check `function_edge_logs` for the scan duration delta.
+
+Reply **"go"** to ship, or tell me which of the three to drop.
