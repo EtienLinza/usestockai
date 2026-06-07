@@ -1588,7 +1588,21 @@ async function runExitOnlyPass(
       ? { ...baseProfile, trailingStopATRMult: baseProfile.trailingStopATRMult * trailAdj }
       : baseProfile;
 
-    const lossAct = runLossExit(pos, data, currentPrice, profile, liveDecision, liveConviction, liveBias, liveRsi);
+    // Earnings blackout for OPEN positions (audit gap G-3): close before the
+    // gap rather than blocking new entries only. Always takes priority.
+    let earningsAct: ExitAction | null = null;
+    try {
+      const eDays = await getEarningsBlackoutDays(pos.ticker.toUpperCase());
+      if (eDays !== null && eDays <= 2) {
+        earningsAct = {
+          kind: "FULL_EXIT",
+          reason: `Earnings blackout: report in ~${eDays} trading day${eDays === 1 ? "" : "s"} — closing to avoid gap risk`,
+          price: currentPrice,
+        };
+      }
+    } catch (_e) { /* non-fatal */ }
+
+    const lossAct = earningsAct ?? runLossExit(pos, data, currentPrice, profile, liveDecision, liveConviction, liveBias, liveRsi);
     const action: ExitAction = lossAct ?? runWinExit(pos, data, currentPrice, profile, liveWeeklyAlloc);
     const innerSummary = { exits: 0, partials: 0, holds: 0 };
     await executeExit(supabase, pos, action, profile, innerSummary);
