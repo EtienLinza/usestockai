@@ -1068,7 +1068,8 @@ async function runEntryDecision(
   } catch (_e) { /* non-fatal — never block scan on earnings API hiccup */ }
 
   const danelfin = danelfinMap?.get(ticker.toUpperCase()) ?? null;
-  const sig = evaluateSignal(data, ticker, undefined, macro, undefined, undefined, danelfin);
+  const epsRev = epsRevisionMap?.get(ticker.toUpperCase()) ?? null;
+  const sig = evaluateSignal(data, ticker, undefined, macro, undefined, undefined, danelfin, epsRev);
   if (!sig) return { kind: "HOLD", reason: "Insufficient data" };
   if (sig.decision === "HOLD") return { kind: "HOLD", reason: sig.reasoning };
 
