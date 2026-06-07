@@ -137,6 +137,8 @@ interface Settings {
   auto_watchlist_stale_days: number;
   /** Computed at runtime — 30-day rolling NAV drawdown % (positive = decline). */
   current_drawdown_pct: number;
+  /** Computed at runtime — 30-day CDaR_0.95 (mean of worst 5% daily drawdowns). */
+  current_cdar_pct: number;
 }
 
 interface AdaptiveContext {
@@ -147,6 +149,8 @@ interface AdaptiveContext {
   windowDays: number;
   /** 30-day rolling NAV drawdown % from peak (positive number). */
   rollingDrawdownPct: number;
+  /** 30-day CDaR at α=0.95 — mean of worst 5% of daily peak-to-current drawdowns. */
+  rollingCdarPct: number;
   adjustments: string[];       // human-readable reasons applied
 }
 
@@ -155,6 +159,16 @@ interface AdaptiveContext {
 // threshold. Independent of daily_loss_limit (intraday) and recentPnlPct
 // (7-day realized) — catches slow bleeds the other two miss.
 const ROLLING_DD_HARD_BLOCK_PCT = 10;
+
+// ── CDaR (Conditional Drawdown-at-Risk) circuit breaker — idea #13 ────────
+// CDaR_α is the mean of drawdown observations in the worst (1−α) tail.
+// More robust than a single peak-to-current snapshot because it captures
+// the *severity* of the recent loss path, not just one moment. Tuned to
+// fire before the peak-to-current breaker on persistent slow bleeds.
+const CDAR_ALPHA = 0.95;
+const CDAR_HARD_BLOCK_PCT = 12; // hard-block entries
+const CDAR_HALF_EXPOSURE_PCT = 8; // halve max NAV exposure
+const CDAR_TIGHTEN_PCT = 5; // mild tightening
 
 // (Sentiment / AI layer removed: signals are now 100% deterministic.
 //  Trading-loop AI was a regulatory + reproducibility risk — keep this surface
