@@ -2045,6 +2045,46 @@ async function processUser(
   }
 
 
+  // Pre-load current market regime (cached daily) + meta-label model (latest).
+  // Both are null-safe → engine treats missing as no-op.
+  const marketRegime = await loadLatestRegime();
+  const metaModel = await loadLatestMetaModel();
+  if (marketRegime) console.log(`autotrader-scan: regime=${marketRegime}`);
+  if (metaModel) console.log(`autotrader-scan: meta-model n=${metaModel.sample_size} AUC=${metaModel.auc ?? "n/a"}`);
+
+  // Pre-load realized edges per strategy from signal_outcomes (last 180d, closed).
+  // Used to wire realKelly sizing — H-6 audit closure. Empty → cold-start ramp.
+  const strategyEdges: Record<string, { winRate: number; avgWin: number; avgLoss: number; sampleSize: number }> = {};
+  try {
+    const cutoff = new Date(Date.now() - 180 * 86400000).toISOString();
+    const { data: outcomes } = await supabase
+      .from("signal_outcomes")
+      .select("strategy, realized_pnl_pct, exit_reason")
+      .gte("entry_date", cutoff)
+      .in("status", ["closed", "stopped_out", "took_profit"])
+      .limit(5000);
+    const buckets: Record<string, { wins: number[]; losses: number[] }> = {};
+    for (const o of (outcomes ?? []) as Array<{ strategy: string | null; realized_pnl_pct: number | null; exit_reason: string | null }>) {
+      const s = o.strategy ?? "none";
+      const p = Number(o.realized_pnl_pct);
+      if (!Number.isFinite(p)) continue;
+      if (!buckets[s]) buckets[s] = { wins: [], losses: [] };
+      if (p > 0) buckets[s].wins.push(p);
+      else buckets[s].losses.push(Math.abs(p));
+    }
+    for (const [s, b] of Object.entries(buckets)) {
+      const n = b.wins.length + b.losses.length;
+      if (n < 10) continue;
+      const winRate = (b.wins.length / n) * 100;
+      const avgWin = b.wins.length ? b.wins.reduce((a, c) => a + c, 0) / b.wins.length : 0;
+      const avgLoss = b.losses.length ? b.losses.reduce((a, c) => a + c, 0) / b.losses.length : 0;
+      strategyEdges[s] = { winRate, avgWin, avgLoss, sampleSize: n };
+    }
+    if (Object.keys(strategyEdges).length > 0) {
+      console.log(`autotrader-scan: realKelly edges`, strategyEdges);
+    }
+  } catch (e) { console.warn("strategyEdges load failed", e); }
+
   for (const ticker of watchlist) {
     if (heldTickers.has(ticker)) continue;
 
@@ -2076,7 +2116,11 @@ async function processUser(
       danelfinMap,
       epsRevisionMap,
       currentNav, // C-3 FIX: dynamic NAV for sizing
+      marketRegime,
+      metaModel,
+      strategyEdges,
     );
+
 
     if (decision.kind === "ENTER") pending.push({ kind: "enter", ticker, decision });
     else if (decision.kind === "BLOCKED") pending.push({ kind: "blocked", ticker, decision });
