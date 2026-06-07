@@ -433,7 +433,7 @@ function maxCorrelationToBook(
   const candData = priceCache.get(candidateTicker);
   if (!candData) return null;
   const candRet = dailyReturns(candData.close, CORR_LOOKBACK_BARS);
-  if (candRet.length < 30) return null;
+  if (candRet.length < 60) return null;
 
   let bestAbs = 0;
   let bestTicker = "";
