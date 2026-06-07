@@ -405,7 +405,10 @@ function dailyReturns(close: number[], lookback: number): number[] {
 
 function pearson(a: number[], b: number[]): number | null {
   const n = Math.min(a.length, b.length);
-  if (n < 30) return null;
+  // H-8 FIX: require ≥60 overlapping bars before applying the 0.75 correlation
+  // threshold (which was calibrated on a full 60-bar window). Short-history
+  // tickers used to be compared at 30 bars and tripped the gate noisily.
+  if (n < 60) return null;
   let sa = 0, sb = 0;
   for (let i = 0; i < n; i++) { sa += a[i]; sb += b[i]; }
   const ma = sa / n, mb = sb / n;
@@ -430,7 +433,7 @@ function maxCorrelationToBook(
   const candData = priceCache.get(candidateTicker);
   if (!candData) return null;
   const candRet = dailyReturns(candData.close, CORR_LOOKBACK_BARS);
-  if (candRet.length < 30) return null;
+  if (candRet.length < 60) return null;
 
   let bestAbs = 0;
   let bestTicker = "";
@@ -867,9 +870,25 @@ function runLossExit(
 }
 
 function businessDaysSince(iso: string): number {
-  const ms = Date.now() - new Date(iso).getTime();
-  const days = ms / 86400000;
-  return Math.max(1, Math.round(days * (5 / 7)));
+  // H-1 FIX: walk day-by-day, skipping weekends AND NYSE holidays.
+  // Previously used calendar-days × 5/7 which ignored holidays entirely,
+  // so R-progress stall and time-stop fired ~1–2 days late around holiday weeks.
+  const start = new Date(iso);
+  if (!Number.isFinite(start.getTime())) return 1;
+  const today = new Date();
+  // Normalize both to UTC midnight to avoid DST drift in the loop.
+  const day = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate()));
+  const end = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
+  let count = 0;
+  // Cap at 1 year of bars in case of bad input — defensive only.
+  for (let i = 0; i < 400 && day < end; i++) {
+    day.setUTCDate(day.getUTCDate() + 1);
+    const wd = day.getUTCDay(); // 0=Sun, 6=Sat
+    if (wd === 0 || wd === 6) continue;
+    if (isMarketHoliday(day)) continue;
+    count++;
+  }
+  return Math.max(1, count);
 }
 
 // ============================================================================
