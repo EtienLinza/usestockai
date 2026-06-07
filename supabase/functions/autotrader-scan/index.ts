@@ -1760,6 +1760,28 @@ async function processUser(
   const navExposurePct = (totalNavExposureDollars / settings.starting_nav) * 100;
   const todayPnlPct = ((realizedToday + unrealizedToday) / settings.starting_nav) * 100;
 
+  // C-3 FIX: cumulative realized PnL across the entire history of this
+  // user's closed positions. Combined with today's unrealized this gives
+  // an accurate live NAV for position sizing, replacing the static
+  // starting_nav that over-sized after drawdowns and under-sized after gains.
+  let cumulativeRealizedPnl = 0;
+  try {
+    const { data: allClosed } = await supabase
+      .from("virtual_positions")
+      .select("pnl")
+      .eq("user_id", userId)
+      .eq("status", "closed");
+    cumulativeRealizedPnl = (allClosed ?? []).reduce(
+      (s: number, p: any) => s + Number(p.pnl ?? 0), 0,
+    );
+  } catch (e) {
+    console.warn("cumulative pnl query failed", e);
+  }
+  const currentNav = Math.max(
+    settings.starting_nav * 0.1, // sanity floor: never let NAV fall below 10% of start
+    settings.starting_nav + cumulativeRealizedPnl + unrealizedToday,
+  );
+
   const heldTickers = new Set(positions.map(p => p.ticker.toUpperCase()));
 
   // ── CAPITAL ROTATION GATE ─────────────────────────────────────────────
@@ -1837,6 +1859,7 @@ async function processUser(
       volScalar,
       calibrationCurve, strategyTilts, tickerCalibration,
       danelfinMap,
+      currentNav, // C-3 FIX: dynamic NAV for sizing
     );
 
     if (decision.kind === "ENTER") pending.push({ kind: "enter", ticker, decision });
