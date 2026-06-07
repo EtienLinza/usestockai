@@ -83,6 +83,15 @@ export default function Pricing() {
       <SEO
         title="Pricing — StockAI"
         description="Simple, transparent pricing for AI-powered stock signals, backtesting, and portfolio analytics. Free forever, Pro $29/mo, Elite $59/mo." path="/pricing"
+        jsonLd={{
+          "@context": "https://schema.org",
+          "@type": "FAQPage",
+          mainEntity: FAQS.map((f) => ({
+            "@type": "Question",
+            name: f.q,
+            acceptedAnswer: { "@type": "Answer", text: f.a },
+          })),
+        }}
       />
       <Navbar />
 
