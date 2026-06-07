@@ -24,15 +24,16 @@ export function calculateEMA(prices: number[], period: number): number[] {
   return ema;
 }
 
+// O(N) rolling SMA — incremental sum, identical math to the slice/reduce form.
 export function calculateSMA(prices: number[], period: number): number[] {
-  const sma: number[] = [];
-  for (let i = 0; i < prices.length; i++) {
-    if (i < period - 1) {
-      sma[i] = NaN;
-    } else {
-      const sum = prices.slice(i - period + 1, i + 1).reduce((a, b) => a + b, 0);
-      sma[i] = sum / period;
-    }
+  const n = prices.length;
+  const sma: number[] = new Array(n);
+  if (period <= 0 || n === 0) return sma;
+  let sum = 0;
+  for (let i = 0; i < n; i++) {
+    sum += prices[i];
+    if (i >= period) sum -= prices[i - period];
+    sma[i] = i < period - 1 ? NaN : sum / period;
   }
   return sma;
 }
