@@ -1033,6 +1033,12 @@ export interface EvaluateSignalResult {
   danelfinDelta?: number;
   /** Raw Danelfin AI Score 1..10 (or undefined when missing). */
   danelfinScore?: number;
+  /** Conviction delta from the EPS revision overlay (long: +round(s*0.8),
+   *  short: -round(s*0.8)). 0 when no score available. Persisted to
+   *  contributing_rules.eps_revision_delta for calibration. */
+  epsRevisionDelta?: number;
+  /** Raw EPS revision score (-10..+10), or undefined when missing. */
+  epsRevisionScore?: number;
 }
 
 // ----------------------------------------------------------------------------
