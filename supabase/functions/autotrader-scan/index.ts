@@ -1003,6 +1003,7 @@ async function runEntryDecision(
   strategyTilts: Record<string, { multiplier: number }>,
   tickerCalibration: Record<string, { adjust: number }>,
   danelfinMap?: Map<string, number>,
+  epsRevisionMap?: Map<string, number>,
   /** C-3 FIX: dynamic NAV (starting_nav + cumulative realized PnL +
    *  unrealized today). Previously we sized off `settings.starting_nav`
    *  which is static — after a 20% drawdown the engine sized 25% TOO
