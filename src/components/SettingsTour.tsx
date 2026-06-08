@@ -12,6 +12,7 @@ export type TourSectionKey =
   | "account" | "billing" | "at-status" | "at-core"
   | "at-discovery" | "at-advanced" | "at-danger" | "risk" | "system";
 
+
 interface Step {
   section: TourSectionKey | null;
   icon: React.ComponentType<{ className?: string }>;
