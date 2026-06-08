@@ -259,14 +259,25 @@ const Settings = () => {
       <main className="container mx-auto px-4 sm:px-6 pt-20 md:pt-24 pb-24 md:pb-12 max-w-6xl">
         <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
           {/* Page header */}
-          <div className="space-y-1">
-            <div className="flex items-center gap-2">
-              <SettingsIcon className="w-5 h-5 text-primary" />
-              <h1 className="text-2xl font-medium tracking-tight">Settings</h1>
+          <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <SettingsIcon className="w-5 h-5 text-primary" />
+                <h1 className="text-2xl font-medium tracking-tight">Settings</h1>
+              </div>
+              <p className="text-sm text-muted-foreground">
+                Configure how the bot trades, what risks you'll accept, and monitor system health.
+              </p>
             </div>
-            <p className="text-sm text-muted-foreground">
-              Configure how the bot trades, what risks you'll accept, and monitor system health.
-            </p>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setTourOpen(true)}
+              className="gap-2 self-start sm:self-auto"
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              Take a tour
+            </Button>
           </div>
 
           {loading ? (
