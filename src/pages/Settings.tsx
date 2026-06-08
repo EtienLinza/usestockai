@@ -303,8 +303,16 @@ const Settings = () => {
               adaptiveState={adaptiveState}
               lastScanAt={lastScanAt}
               nextScanAt={nextScanAt}
+              active={activeSection}
+              setActive={setActiveSection}
             />
           )}
+
+          <SettingsTour
+            open={tourOpen}
+            onClose={() => setTourOpen(false)}
+            setActive={(k) => setActiveSection(k)}
+          />
 
           {/* Sticky save bar — clear bottom nav on mobile */}
           {!loading && (
