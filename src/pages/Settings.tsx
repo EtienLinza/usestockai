@@ -24,6 +24,7 @@ import { toast } from "sonner";
 import { useNavigate } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import { getMarketStatus } from "@/lib/market-hours";
+import { SettingsTour, shouldAutoOpenSettingsTour, type TourSectionKey } from "@/components/SettingsTour";
 
 interface PortfolioCaps {
   sector_max_pct: number;
@@ -121,6 +122,16 @@ const Settings = () => {
   const [adaptiveState, setAdaptiveState] = useState<AutotraderState | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [tourOpen, setTourOpen] = useState(false);
+  const [activeSection, setActiveSection] = useState<TourSectionKey>("account");
+
+  useEffect(() => {
+    if (!authLoading && user && shouldAutoOpenSettingsTour()) {
+      // small delay so the page renders first
+      const t = setTimeout(() => setTourOpen(true), 600);
+      return () => clearTimeout(t);
+    }
+  }, [authLoading, user]);
 
   useEffect(() => {
     if (!authLoading && !user) navigate("/auth");
@@ -258,14 +269,25 @@ const Settings = () => {
       <main className="container mx-auto px-4 sm:px-6 pt-20 md:pt-24 pb-24 md:pb-12 max-w-6xl">
         <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
           {/* Page header */}
-          <div className="space-y-1">
-            <div className="flex items-center gap-2">
-              <SettingsIcon className="w-5 h-5 text-primary" />
-              <h1 className="text-2xl font-medium tracking-tight">Settings</h1>
+          <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <SettingsIcon className="w-5 h-5 text-primary" />
+                <h1 className="text-2xl font-medium tracking-tight">Settings</h1>
+              </div>
+              <p className="text-sm text-muted-foreground">
+                Configure how the bot trades, what risks you'll accept, and monitor system health.
+              </p>
             </div>
-            <p className="text-sm text-muted-foreground">
-              Configure how the bot trades, what risks you'll accept, and monitor system health.
-            </p>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setTourOpen(true)}
+              className="gap-2 self-start sm:self-auto"
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              Take a tour
+            </Button>
           </div>
 
           {loading ? (
@@ -281,8 +303,16 @@ const Settings = () => {
               adaptiveState={adaptiveState}
               lastScanAt={lastScanAt}
               nextScanAt={nextScanAt}
+              active={activeSection}
+              setActive={setActiveSection}
             />
           )}
+
+          <SettingsTour
+            open={tourOpen}
+            onClose={() => setTourOpen(false)}
+            setActive={(k) => setActiveSection(k)}
+          />
 
           {/* Sticky save bar — clear bottom nav on mobile */}
           {!loading && (
@@ -357,10 +387,11 @@ interface SettingsShellProps {
   adaptiveState: AutotraderState | null;
   lastScanAt: string | null;
   nextScanAt: string | null;
+  active: SectionKey;
+  setActive: (k: SectionKey) => void;
 }
 
-function SettingsShell({ caps, setCaps, bot, setBot, adaptiveState, lastScanAt, nextScanAt }: SettingsShellProps) {
-  const [active, setActive] = useState<SectionKey>("account");
+function SettingsShell({ caps, setCaps, bot, setBot, adaptiveState, lastScanAt, nextScanAt, active, setActive }: SettingsShellProps) {
   const activeMeta = NAV.flatMap((g) => g.items).find((i) => i.key === active);
 
   return (
