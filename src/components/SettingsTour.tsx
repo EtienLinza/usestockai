@@ -94,6 +94,8 @@ const STEPS: Step[] = [
   },
 ];
 
+const STORAGE_KEY = "settings-tour-completed-v1";
+
 interface Props {
   setActive: (k: TourSectionKey) => void;
   open: boolean;
@@ -113,7 +115,10 @@ export function SettingsTour({ setActive, open, onClose }: Props) {
     if (open) setStep(0);
   }, [open]);
 
-  const finish = () => onClose();
+  const finish = () => {
+    try { localStorage.setItem(STORAGE_KEY, "1"); } catch { /* ignore */ }
+    onClose();
+  };
 
   if (!open) return null;
   const s = STEPS[step];
@@ -212,5 +217,13 @@ export function SettingsTour({ setActive, open, onClose }: Props) {
       </motion.div>
     </AnimatePresence>
   );
+}
+
+export function shouldAutoOpenSettingsTour(): boolean {
+  try {
+    return localStorage.getItem(STORAGE_KEY) !== "1";
+  } catch {
+    return false;
+  }
 }
 
