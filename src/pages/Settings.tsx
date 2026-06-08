@@ -124,11 +124,9 @@ const Settings = () => {
   const [saving, setSaving] = useState(false);
   const [tourOpen, setTourOpen] = useState(false);
   const [activeSection, setActiveSection] = useState<TourSectionKey>("account");
-  const tourAutoOpened = useRef(false);
 
   useEffect(() => {
-    if (!authLoading && user && !tourAutoOpened.current) {
-      tourAutoOpened.current = true;
+    if (!authLoading && user && shouldAutoOpenSettingsTour()) {
       const t = setTimeout(() => setTourOpen(true), 600);
       return () => clearTimeout(t);
     }
