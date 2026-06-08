@@ -137,7 +137,7 @@ export function SettingsTour({ setActive, open, onClose }: Props) {
           onClick={(e) => e.stopPropagation()}
           className="w-full max-w-md"
         >
-          <Card variant="glow" className="p-5 space-y-4 relative">
+          <Card variant="glow" className="p-4 sm:p-5 space-y-3 sm:space-y-4 relative max-h-[85vh] overflow-y-auto">
             <button
               type="button"
               onClick={finish}
