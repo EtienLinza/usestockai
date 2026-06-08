@@ -115,7 +115,10 @@ export function SettingsTour({ setActive, open, onClose }: Props) {
     if (open) setStep(0);
   }, [open]);
 
-  const finish = () => onClose();
+  const finish = () => {
+    try { localStorage.setItem(STORAGE_KEY, "1"); } catch { /* ignore */ }
+    onClose();
+  };
 
   if (!open) return null;
   const s = STEPS[step];
