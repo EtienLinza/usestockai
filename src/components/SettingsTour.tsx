@@ -94,6 +94,8 @@ const STEPS: Step[] = [
   },
 ];
 
+const STORAGE_KEY = "settings-tour-completed-v1";
+
 interface Props {
   setActive: (k: TourSectionKey) => void;
   open: boolean;
