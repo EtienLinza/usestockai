@@ -214,10 +214,3 @@ export function SettingsTour({ setActive, open, onClose }: Props) {
   );
 }
 
-export function shouldAutoOpenSettingsTour(): boolean {
-  try {
-    return localStorage.getItem(STORAGE_KEY) !== "1";
-  } catch {
-    return false;
-  }
-}
