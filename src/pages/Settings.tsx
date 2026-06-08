@@ -387,10 +387,11 @@ interface SettingsShellProps {
   adaptiveState: AutotraderState | null;
   lastScanAt: string | null;
   nextScanAt: string | null;
+  active: SectionKey;
+  setActive: (k: SectionKey) => void;
 }
 
-function SettingsShell({ caps, setCaps, bot, setBot, adaptiveState, lastScanAt, nextScanAt }: SettingsShellProps) {
-  const [active, setActive] = useState<SectionKey>("account");
+function SettingsShell({ caps, setCaps, bot, setBot, adaptiveState, lastScanAt, nextScanAt, active, setActive }: SettingsShellProps) {
   const activeMeta = NAV.flatMap((g) => g.items).find((i) => i.key === active);
 
   return (
