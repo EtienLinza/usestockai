@@ -122,6 +122,16 @@ const Settings = () => {
   const [adaptiveState, setAdaptiveState] = useState<AutotraderState | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [tourOpen, setTourOpen] = useState(false);
+  const [activeSection, setActiveSection] = useState<TourSectionKey>("account");
+
+  useEffect(() => {
+    if (!authLoading && user && shouldAutoOpenSettingsTour()) {
+      // small delay so the page renders first
+      const t = setTimeout(() => setTourOpen(true), 600);
+      return () => clearTimeout(t);
+    }
+  }, [authLoading, user]);
 
   useEffect(() => {
     if (!authLoading && !user) navigate("/auth");
