@@ -12,6 +12,7 @@ export type TourSectionKey =
   | "account" | "billing" | "at-status" | "at-core"
   | "at-discovery" | "at-advanced" | "at-danger" | "risk" | "system";
 
+
 interface Step {
   section: TourSectionKey | null;
   icon: React.ComponentType<{ className?: string }>;
@@ -93,8 +94,6 @@ const STEPS: Step[] = [
   },
 ];
 
-const STORAGE_KEY = "settings-tour-completed-v1";
-
 interface Props {
   setActive: (k: TourSectionKey) => void;
   open: boolean;
@@ -114,10 +113,7 @@ export function SettingsTour({ setActive, open, onClose }: Props) {
     if (open) setStep(0);
   }, [open]);
 
-  const finish = () => {
-    try { localStorage.setItem(STORAGE_KEY, "1"); } catch { /* ignore */ }
-    onClose();
-  };
+  const finish = () => onClose();
 
   if (!open) return null;
   const s = STEPS[step];
@@ -141,7 +137,7 @@ export function SettingsTour({ setActive, open, onClose }: Props) {
           onClick={(e) => e.stopPropagation()}
           className="w-full max-w-md"
         >
-          <Card variant="glow" className="p-5 space-y-4 relative">
+          <Card variant="glow" className="p-4 sm:p-5 space-y-3 sm:space-y-4 relative max-h-[85vh] overflow-y-auto">
             <button
               type="button"
               onClick={finish}
@@ -218,10 +214,3 @@ export function SettingsTour({ setActive, open, onClose }: Props) {
   );
 }
 
-export function shouldAutoOpenSettingsTour(): boolean {
-  try {
-    return localStorage.getItem(STORAGE_KEY) !== "1";
-  } catch {
-    return false;
-  }
-}

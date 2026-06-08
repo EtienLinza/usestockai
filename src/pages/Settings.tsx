@@ -1,5 +1,5 @@
 import { SEO } from "@/components/SEO";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { Navbar } from "@/components/Navbar";
 import { SystemHealth } from "@/components/SystemHealth";
@@ -24,7 +24,7 @@ import { toast } from "sonner";
 import { useNavigate } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import { getMarketStatus } from "@/lib/market-hours";
-import { SettingsTour, shouldAutoOpenSettingsTour, type TourSectionKey } from "@/components/SettingsTour";
+import { SettingsTour, type TourSectionKey } from "@/components/SettingsTour";
 
 interface PortfolioCaps {
   sector_max_pct: number;
@@ -124,10 +124,11 @@ const Settings = () => {
   const [saving, setSaving] = useState(false);
   const [tourOpen, setTourOpen] = useState(false);
   const [activeSection, setActiveSection] = useState<TourSectionKey>("account");
+  const tourAutoOpened = useRef(false);
 
   useEffect(() => {
-    if (!authLoading && user && shouldAutoOpenSettingsTour()) {
-      // small delay so the page renders first
+    if (!authLoading && user && !tourAutoOpened.current) {
+      tourAutoOpened.current = true;
       const t = setTimeout(() => setTourOpen(true), 600);
       return () => clearTimeout(t);
     }
