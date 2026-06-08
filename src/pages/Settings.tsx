@@ -24,7 +24,7 @@ import { toast } from "sonner";
 import { useNavigate } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import { getMarketStatus } from "@/lib/market-hours";
-import { SettingsTour, type TourSectionKey } from "@/components/SettingsTour";
+import { SettingsTour, shouldAutoOpenSettingsTour, type TourSectionKey } from "@/components/SettingsTour";
 
 interface PortfolioCaps {
   sector_max_pct: number;
