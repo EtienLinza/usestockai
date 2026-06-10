@@ -631,16 +631,17 @@ function runWinExit(
   const oldPeak = pos.peak_price ?? entry;
   const newPeak = isLong ? Math.max(oldPeak, currentPrice) : Math.min(oldPeak, currentPrice);
 
-  // Trailing-stop ratchet (Phase 2 #9 — Chandelier-style anchored to peak,
-  // tightening as the R-ladder advances: looser ATR pre-rung, 3.0×ATR after
-  // rung 1, 2.5×ATR after rung 2. Locks gains earlier on mid-sized winners
-  // that never reach runner mode's 12%+ floor.)
+  // Trailing-stop ratchet (Phase 2 #9 — Chandelier-style anchored to peak).
+  // FAT-TAIL FIX: Because avg loss ($397) > avg win ($248), we MUST let
+  // multi-R winners run further to maintain positive expectancy if win-rate
+  // mean-reverts. Loosen post-rung trails: keep base ATR mult pre-rung,
+  // 3.5×ATR after rung 1 (was 3.0), 3.0×ATR after rung 2 (was 2.5).
   const atr = pos.entry_atr ?? 0;
   let trailing = pos.trailing_stop_price ?? pos.hard_stop_price ?? (isLong ? entry * 0.95 : entry * 1.05);
   if (atr > 0) {
     const rungNow = pos.partial_exits_taken ?? 0;
-    const trailMult = rungNow >= 2 ? 2.5
-                    : rungNow >= 1 ? 3.0
+    const trailMult = rungNow >= 2 ? 3.0
+                    : rungNow >= 1 ? 3.5
                     : profile.trailingStopATRMult;
     const candidate = isLong
       ? newPeak - atr * trailMult
@@ -1204,13 +1205,21 @@ async function runEntryDecision(
   // structure: the more conservative (tighter) of swing-low / EMA20 buffer,
   // then clamp the resulting risk into [0.8·ATR, hardStopATRMult·ATR] so
   // we neither stop on a tick nor blow our risk budget.
+  //
+  // FAT-TAIL GUARD: Cap absolute stop distance at MAX_HARD_STOP_PCT of entry
+  // price. Average win ≈ $248 vs catastrophic losses of $500–$600+ (UAMY
+  // -27.8%, SATS) blow R:R asymmetry. With ≤5% absolute hard stop and 5% NAV
+  // sizing, max intraday loss per position is capped at ~0.25% NAV — gaps
+  // still bypass the stop but the initial-risk envelope is bounded.
+  const MAX_HARD_STOP_PCT = 0.05;
   const profile = PROFILE_PARAMS[sig.profile];
   const params = sig.blendedParams ?? profile;
   const atr = sig.atr;
   const isLong = sig.decision === "BUY";
   const atrStopDist = atr * params.hardStopATRMult;
   const minDist = atr * 0.8;
-  let stopDist = atrStopDist;
+  const absMaxDist = currentPrice * MAX_HARD_STOP_PCT;
+  let stopDist = Math.min(atrStopDist, absMaxDist);
   if (atr > 0 && data.close.length >= 22) {
     const lookback = 10;
     const n = data.close.length;
@@ -1228,9 +1237,11 @@ async function runEntryDecision(
     const structAnchor = isLong ? Math.max(swing, emaAnchor) : Math.min(swing, emaAnchor);
     const structDist = isLong ? currentPrice - structAnchor : structAnchor - currentPrice;
     if (Number.isFinite(structDist) && structDist > 0) {
-      stopDist = Math.min(atrStopDist, Math.max(minDist, structDist));
+      stopDist = Math.min(atrStopDist, absMaxDist, Math.max(minDist, structDist));
     }
   }
+  // Final absolute clamp — even degenerate ATR/structure can't blow the cap.
+  stopDist = Math.min(stopDist, absMaxDist);
   const hardStop = isLong ? currentPrice - stopDist : currentPrice + stopDist;
 
   const reasoningExtra: string[] = [];
