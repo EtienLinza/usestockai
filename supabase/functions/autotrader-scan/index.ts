@@ -1200,26 +1200,20 @@ async function runEntryDecision(
   }
 
 
-  // Hard stop at entry — STRUCTURAL (Phase 2 #10)
+  // Hard stop at entry — STRUCTURAL + ADAPTIVE (Phase 2 #10)
   // Pure-ATR stops fire on noise. We anchor the stop to actual market
   // structure: the more conservative (tighter) of swing-low / EMA20 buffer,
   // then clamp the resulting risk into [0.8·ATR, hardStopATRMult·ATR] so
-  // we neither stop on a tick nor blow our risk budget.
-  //
-  // FAT-TAIL GUARD: Cap absolute stop distance at MAX_HARD_STOP_PCT of entry
-  // price. Average win ≈ $248 vs catastrophic losses of $500–$600+ (UAMY
-  // -27.8%, SATS) blow R:R asymmetry. With ≤5% absolute hard stop and 5% NAV
-  // sizing, max intraday loss per position is capped at ~0.25% NAV — gaps
-  // still bypass the stop but the initial-risk envelope is bounded.
-  const MAX_HARD_STOP_PCT = 0.05;
+  // we neither stop on a tick nor blow our risk budget. Stop distance stays
+  // fully adaptive to volatility — fat-tail control is enforced via
+  // risk-parity sizing below, NOT a constant % cap.
   const profile = PROFILE_PARAMS[sig.profile];
   const params = sig.blendedParams ?? profile;
   const atr = sig.atr;
   const isLong = sig.decision === "BUY";
   const atrStopDist = atr * params.hardStopATRMult;
   const minDist = atr * 0.8;
-  const absMaxDist = currentPrice * MAX_HARD_STOP_PCT;
-  let stopDist = Math.min(atrStopDist, absMaxDist);
+  let stopDist = atrStopDist;
   if (atr > 0 && data.close.length >= 22) {
     const lookback = 10;
     const n = data.close.length;
@@ -1237,12 +1231,38 @@ async function runEntryDecision(
     const structAnchor = isLong ? Math.max(swing, emaAnchor) : Math.min(swing, emaAnchor);
     const structDist = isLong ? currentPrice - structAnchor : structAnchor - currentPrice;
     if (Number.isFinite(structDist) && structDist > 0) {
-      stopDist = Math.min(atrStopDist, absMaxDist, Math.max(minDist, structDist));
+      stopDist = Math.min(atrStopDist, Math.max(minDist, structDist));
     }
   }
-  // Final absolute clamp — even degenerate ATR/structure can't blow the cap.
-  stopDist = Math.min(stopDist, absMaxDist);
   const hardStop = isLong ? currentPrice - stopDist : currentPrice + stopDist;
+
+  // ── FAT-TAIL GUARD: Risk-parity sizing ─────────────────────────────────
+  // Cap dollar risk per trade at MAX_RISK_PCT of NAV. If the adaptive stop
+  // is wide (high-ATR name), shares shrink so $-at-risk stays constant.
+  // If the stop is tight (low-ATR name), shares can grow up to the existing
+  // single-name / headroom caps. This eliminates the UAMY/SATS-style
+  // outliers without sacrificing volatility adaptivity. Conviction scales
+  // the budget linearly between MIN and MAX so higher-quality setups can
+  // risk slightly more.
+  const MIN_RISK_PCT = 0.0030;  // 0.30% NAV at min_conviction
+  const MAX_RISK_PCT = 0.0060;  // 0.60% NAV at conviction=95+
+  const convBlend = Math.max(0, Math.min(1,
+    (effectiveConviction - settings.min_conviction) / Math.max(1, 95 - settings.min_conviction)
+  ));
+  const riskPct = MIN_RISK_PCT + (MAX_RISK_PCT - MIN_RISK_PCT) * convBlend;
+  const riskBudgetDollars = navForSizing * riskPct;
+  if (stopDist > 0) {
+    const maxSharesByRisk = riskBudgetDollars / stopDist;
+    const maxDollarsByRisk = maxSharesByRisk * currentPrice;
+    if (targetDollars > maxDollarsByRisk) {
+      const shrinkFactor = maxDollarsByRisk / targetDollars;
+      cappedFrac = cappedFrac * shrinkFactor;
+      targetDollars = maxDollarsByRisk;
+    }
+  }
+  if (targetDollars < currentPrice) {
+    return { kind: "HOLD", reason: `Stop too wide for risk budget — would size below 1 share at ${(riskPct * 100).toFixed(2)}% NAV cap` };
+  }
 
   const reasoningExtra: string[] = [];
   if (siDelta !== 0) reasoningExtra.push(`siΔ=${siDelta > 0 ? "+" : ""}${siDelta}`);
