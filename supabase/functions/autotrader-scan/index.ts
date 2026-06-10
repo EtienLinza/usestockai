@@ -631,16 +631,17 @@ function runWinExit(
   const oldPeak = pos.peak_price ?? entry;
   const newPeak = isLong ? Math.max(oldPeak, currentPrice) : Math.min(oldPeak, currentPrice);
 
-  // Trailing-stop ratchet (Phase 2 #9 — Chandelier-style anchored to peak,
-  // tightening as the R-ladder advances: looser ATR pre-rung, 3.0×ATR after
-  // rung 1, 2.5×ATR after rung 2. Locks gains earlier on mid-sized winners
-  // that never reach runner mode's 12%+ floor.)
+  // Trailing-stop ratchet (Phase 2 #9 — Chandelier-style anchored to peak).
+  // FAT-TAIL FIX: Because avg loss ($397) > avg win ($248), we MUST let
+  // multi-R winners run further to maintain positive expectancy if win-rate
+  // mean-reverts. Loosen post-rung trails: keep base ATR mult pre-rung,
+  // 3.5×ATR after rung 1 (was 3.0), 3.0×ATR after rung 2 (was 2.5).
   const atr = pos.entry_atr ?? 0;
   let trailing = pos.trailing_stop_price ?? pos.hard_stop_price ?? (isLong ? entry * 0.95 : entry * 1.05);
   if (atr > 0) {
     const rungNow = pos.partial_exits_taken ?? 0;
-    const trailMult = rungNow >= 2 ? 2.5
-                    : rungNow >= 1 ? 3.0
+    const trailMult = rungNow >= 2 ? 3.0
+                    : rungNow >= 1 ? 3.5
                     : profile.trailingStopATRMult;
     const candidate = isLong
       ? newPeak - atr * trailMult
