@@ -1204,13 +1204,21 @@ async function runEntryDecision(
   // structure: the more conservative (tighter) of swing-low / EMA20 buffer,
   // then clamp the resulting risk into [0.8·ATR, hardStopATRMult·ATR] so
   // we neither stop on a tick nor blow our risk budget.
+  //
+  // FAT-TAIL GUARD: Cap absolute stop distance at MAX_HARD_STOP_PCT of entry
+  // price. Average win ≈ $248 vs catastrophic losses of $500–$600+ (UAMY
+  // -27.8%, SATS) blow R:R asymmetry. With ≤5% absolute hard stop and 5% NAV
+  // sizing, max intraday loss per position is capped at ~0.25% NAV — gaps
+  // still bypass the stop but the initial-risk envelope is bounded.
+  const MAX_HARD_STOP_PCT = 0.05;
   const profile = PROFILE_PARAMS[sig.profile];
   const params = sig.blendedParams ?? profile;
   const atr = sig.atr;
   const isLong = sig.decision === "BUY";
   const atrStopDist = atr * params.hardStopATRMult;
   const minDist = atr * 0.8;
-  let stopDist = atrStopDist;
+  const absMaxDist = currentPrice * MAX_HARD_STOP_PCT;
+  let stopDist = Math.min(atrStopDist, absMaxDist);
   if (atr > 0 && data.close.length >= 22) {
     const lookback = 10;
     const n = data.close.length;
@@ -1228,9 +1236,11 @@ async function runEntryDecision(
     const structAnchor = isLong ? Math.max(swing, emaAnchor) : Math.min(swing, emaAnchor);
     const structDist = isLong ? currentPrice - structAnchor : structAnchor - currentPrice;
     if (Number.isFinite(structDist) && structDist > 0) {
-      stopDist = Math.min(atrStopDist, Math.max(minDist, structDist));
+      stopDist = Math.min(atrStopDist, absMaxDist, Math.max(minDist, structDist));
     }
   }
+  // Final absolute clamp — even degenerate ATR/structure can't blow the cap.
+  stopDist = Math.min(stopDist, absMaxDist);
   const hardStop = isLong ? currentPrice - stopDist : currentPrice + stopDist;
 
   const reasoningExtra: string[] = [];
