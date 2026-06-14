@@ -169,6 +169,8 @@ export function blendProfiles(a: ProfileParams, b: ProfileParams, weight: number
     weeklySlowMA: Math.round(lerp(a.weeklySlowMA, b.weeklySlowMA)),
     weeklyRSILong: Math.round(lerp(a.weeklyRSILong, b.weeklyRSILong)),
     hardStopATRMult: lerp(a.hardStopATRMult, b.hardStopATRMult),
+    breakevenRungATR: lerp(a.breakevenRungATR, b.breakevenRungATR),
+    partialScaleOutPct: lerp(a.partialScaleOutPct, b.partialScaleOutPct),
   };
 }
 
