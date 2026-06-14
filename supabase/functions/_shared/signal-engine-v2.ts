@@ -86,6 +86,12 @@ export interface ProfileParams {
   weeklySlowMA: number;
   weeklyRSILong: number;
   hardStopATRMult: number;
+  /** ATR distance gained in favor before stop ratchets to breakeven (entry).
+   *  Fires before the +1R rung — caps Avg Loss by killing round-trips. */
+  breakevenRungATR: number;
+  /** Fraction of original position scaled out at the +1R rung (rung 1).
+   *  Higher = more aggressive locking of partial profits. */
+  partialScaleOutPct: number;
 }
 
 // ============================================================================
