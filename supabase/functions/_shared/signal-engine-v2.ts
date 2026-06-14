@@ -86,6 +86,12 @@ export interface ProfileParams {
   weeklySlowMA: number;
   weeklyRSILong: number;
   hardStopATRMult: number;
+  /** ATR distance gained in favor before stop ratchets to breakeven (entry).
+   *  Fires before the +1R rung — caps Avg Loss by killing round-trips. */
+  breakevenRungATR: number;
+  /** Fraction of original position scaled out at the +1R rung (rung 1).
+   *  Higher = more aggressive locking of partial profits. */
+  partialScaleOutPct: number;
 }
 
 // ============================================================================
@@ -100,6 +106,7 @@ export const PROFILE_PARAMS: Record<StockProfile, ProfileParams> = {
     buyThreshold: 68, shortThreshold: 66,
     trendConvictionBonus: 5, mrConvictionBonus: 0, breakoutConvictionBonus: 0,
     weeklyFastMA: 10, weeklySlowMA: 40, weeklyRSILong: 45, hardStopATRMult: 3.0,
+    breakevenRungATR: 1.5, partialScaleOutPct: 0.50,
   },
   value: {
     adxThreshold: 32, rsiOversold: 22, rsiOverbought: 78,
@@ -108,6 +115,7 @@ export const PROFILE_PARAMS: Record<StockProfile, ProfileParams> = {
     buyThreshold: 68, shortThreshold: 66,
     trendConvictionBonus: 0, mrConvictionBonus: 12, breakoutConvictionBonus: 0,
     weeklyFastMA: 13, weeklySlowMA: 50, weeklyRSILong: 35, hardStopATRMult: 2.5,
+    breakevenRungATR: 1.0, partialScaleOutPct: 0.33,
   },
   index: {
     adxThreshold: 26, rsiOversold: 28, rsiOverbought: 72,
@@ -116,6 +124,7 @@ export const PROFILE_PARAMS: Record<StockProfile, ProfileParams> = {
     buyThreshold: 68, shortThreshold: 66,
     trendConvictionBonus: 5, mrConvictionBonus: 5, breakoutConvictionBonus: 0,
     weeklyFastMA: 10, weeklySlowMA: 40, weeklyRSILong: 40, hardStopATRMult: 2.8,
+    breakevenRungATR: 1.2, partialScaleOutPct: 0.40,
   },
   volatile: {
     adxThreshold: 18, rsiOversold: 22, rsiOverbought: 78,
@@ -124,6 +133,7 @@ export const PROFILE_PARAMS: Record<StockProfile, ProfileParams> = {
     buyThreshold: 68, shortThreshold: 66,
     trendConvictionBonus: 0, mrConvictionBonus: 0, breakoutConvictionBonus: 5,
     weeklyFastMA: 8, weeklySlowMA: 30, weeklyRSILong: 50, hardStopATRMult: 3.5,
+    breakevenRungATR: 1.25, partialScaleOutPct: 0.50,
   },
 };
 
@@ -159,6 +169,8 @@ export function blendProfiles(a: ProfileParams, b: ProfileParams, weight: number
     weeklySlowMA: Math.round(lerp(a.weeklySlowMA, b.weeklySlowMA)),
     weeklyRSILong: Math.round(lerp(a.weeklyRSILong, b.weeklyRSILong)),
     hardStopATRMult: lerp(a.hardStopATRMult, b.hardStopATRMult),
+    breakevenRungATR: lerp(a.breakevenRungATR, b.breakevenRungATR),
+    partialScaleOutPct: lerp(a.partialScaleOutPct, b.partialScaleOutPct),
   };
 }
 
