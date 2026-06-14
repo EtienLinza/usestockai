@@ -106,6 +106,7 @@ export const PROFILE_PARAMS: Record<StockProfile, ProfileParams> = {
     buyThreshold: 68, shortThreshold: 66,
     trendConvictionBonus: 5, mrConvictionBonus: 0, breakoutConvictionBonus: 0,
     weeklyFastMA: 10, weeklySlowMA: 40, weeklyRSILong: 45, hardStopATRMult: 3.0,
+    breakevenRungATR: 1.5, partialScaleOutPct: 0.50,
   },
   value: {
     adxThreshold: 32, rsiOversold: 22, rsiOverbought: 78,
@@ -114,6 +115,7 @@ export const PROFILE_PARAMS: Record<StockProfile, ProfileParams> = {
     buyThreshold: 68, shortThreshold: 66,
     trendConvictionBonus: 0, mrConvictionBonus: 12, breakoutConvictionBonus: 0,
     weeklyFastMA: 13, weeklySlowMA: 50, weeklyRSILong: 35, hardStopATRMult: 2.5,
+    breakevenRungATR: 1.0, partialScaleOutPct: 0.33,
   },
   index: {
     adxThreshold: 26, rsiOversold: 28, rsiOverbought: 72,
@@ -122,6 +124,7 @@ export const PROFILE_PARAMS: Record<StockProfile, ProfileParams> = {
     buyThreshold: 68, shortThreshold: 66,
     trendConvictionBonus: 5, mrConvictionBonus: 5, breakoutConvictionBonus: 0,
     weeklyFastMA: 10, weeklySlowMA: 40, weeklyRSILong: 40, hardStopATRMult: 2.8,
+    breakevenRungATR: 1.2, partialScaleOutPct: 0.40,
   },
   volatile: {
     adxThreshold: 18, rsiOversold: 22, rsiOverbought: 78,
@@ -130,6 +133,7 @@ export const PROFILE_PARAMS: Record<StockProfile, ProfileParams> = {
     buyThreshold: 68, shortThreshold: 66,
     trendConvictionBonus: 0, mrConvictionBonus: 0, breakoutConvictionBonus: 5,
     weeklyFastMA: 8, weeklySlowMA: 30, weeklyRSILong: 50, hardStopATRMult: 3.5,
+    breakevenRungATR: 1.25, partialScaleOutPct: 0.50,
   },
 };
 
