@@ -650,36 +650,55 @@ function runWinExit(
   }
   const trailingHit = isLong ? currentPrice <= trailing : currentPrice >= trailing;
 
+  // ── Pre-rung breakeven trigger ─────────────────────────────────────────
+  // FAT-TAIL FIX: before any partial scales out, once price has moved
+  // `breakevenRungATR × ATR` in our favor, ratchet the trailing stop to entry.
+  // This kills round-trips — a position that goes +1.5 ATR favorable can no
+  // longer come back and hit the full hard stop, capping Avg Loss across the
+  // distribution. Pure stop ratchet, no shares closed.
+  {
+    const rung = pos.partial_exits_taken ?? 0;
+    if (rung === 0 && atr > 0 && profile.breakevenRungATR > 0) {
+      const favorable = isLong ? currentPrice - entry : entry - currentPrice;
+      const beTrigger = atr * profile.breakevenRungATR;
+      if (favorable >= beTrigger) {
+        const newTrail = isLong ? Math.max(trailing, entry) : Math.min(trailing, entry);
+        if (newTrail !== trailing) trailing = newTrail;
+      }
+    }
+  }
+
   // ── R-multiple partial-exit ladder (Phase 2 #7) ────────────────────────
-  // Scale out 1/3 at +1R, another 1/3 at +2R, let runner/peak handle the rest.
-  // Tightens trailing to breakeven after rung 1 fires (free trade).
-  // Initial risk per share = |entry − hard_stop_price|; falls back to ATR-derived
-  // or 5% notional when hard_stop_price is missing (H-7).
+  // Scale out `partialScaleOutPct` at +1R, then half of the remainder at +2R,
+  // let runner/peak handle the rest. Tightens trailing to breakeven after
+  // rung 1 fires (free trade). Initial risk per share = |entry − hard_stop_price|;
+  // falls back to ATR-derived or 5% notional when hard_stop_price is missing (H-7).
   {
     const initRisk = inferInitRiskPerShare(pos);
     if (entry > 0 && initRisk > 0) {
       const rMult = (isLong ? currentPrice - entry : entry - currentPrice) / initRisk;
       const rung = pos.partial_exits_taken ?? 0;
+      const rung1Pct = Math.min(0.75, Math.max(0.10, profile.partialScaleOutPct ?? (1 / 3)));
       if (rung === 0 && rMult >= 1.0) {
-        // Rung 1: take ⅓, ratchet trailing to breakeven (entry)
+        // Rung 1: take `partialScaleOutPct`, ratchet trailing to breakeven (entry)
         const newTrail = isLong ? Math.max(trailing, entry) : Math.min(trailing, entry);
         return {
           kind: "PARTIAL_EXIT",
-          reason: `R-ladder rung 1: +1R hit (${(pnlPct * 100).toFixed(1)}%), trail → breakeven`,
-          pct: 1 / 3,
+          reason: `R-ladder rung 1: +1R hit (${(pnlPct * 100).toFixed(1)}%), scale ${Math.round(rung1Pct * 100)}%, trail → breakeven`,
+          pct: rung1Pct,
           price: currentPrice,
           nextRung: 1,
           trailingUpdate: newTrail,
         };
       }
       if (rung === 1 && rMult >= 2.0) {
-        // Rung 2: take another ⅓, ratchet trailing to +1R (lock first R)
+        // Rung 2: take half of remaining, ratchet trailing to +1R (lock first R)
         const lockPx = isLong ? entry + initRisk : entry - initRisk;
         const newTrail = isLong ? Math.max(trailing, lockPx) : Math.min(trailing, lockPx);
         return {
           kind: "PARTIAL_EXIT",
           reason: `R-ladder rung 2: +2R hit (${(pnlPct * 100).toFixed(1)}%), trail → +1R locked`,
-          pct: 0.5, // ½ of remaining = ⅓ of original
+          pct: 0.5,
           price: currentPrice,
           nextRung: 2,
           trailingUpdate: newTrail,
