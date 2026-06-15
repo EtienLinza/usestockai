@@ -281,7 +281,7 @@ export default function Onboarding() {
         </div>
       </main>
 
-      {checkoutElement}
+      
     </div>
   );
 }
