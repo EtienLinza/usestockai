@@ -258,7 +258,7 @@ export default function Onboarding() {
                               onClick={() => finishOnboarding(t)}
                               disabled={saving}
                             >
-                              Start with {t === "pro" ? "Pro" : "Elite"}
+                              Join {t === "pro" ? "Pro" : "Elite"} waitlist
                             </Button>
                           )}
                         </Card>
