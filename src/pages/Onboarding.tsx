@@ -39,7 +39,7 @@ export default function Onboarding() {
   const [experience, setExperience] = useState<string>("");
   const [focuses, setFocuses] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
-  const { openCheckout, checkoutElement } = useStripeCheckout();
+  
 
   useEffect(() => {
     if (!authLoading && !user) navigate("/auth?mode=signup");
