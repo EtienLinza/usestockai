@@ -237,7 +237,7 @@ export default function Pricing() {
 
       <Footer />
 
-      {checkoutElement}
+      
     </div>
   );
 }
