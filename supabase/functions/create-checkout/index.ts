@@ -153,4 +153,6 @@ async function _disabled_handler(req: Request) {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
-});
+}
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+const _legacy = _disabled_handler;
