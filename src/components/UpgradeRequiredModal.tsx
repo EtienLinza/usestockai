@@ -25,9 +25,10 @@ export const UpgradeRequiredModal = ({ open, onOpenChange, requiredTier, feature
               {TIER_LABELS[requiredTier]} feature
             </span>
           </div>
-          <DialogTitle>Upgrade to {TIER_LABELS[requiredTier]}</DialogTitle>
+          <DialogTitle>{TIER_LABELS[requiredTier]} is launching soon</DialogTitle>
           <DialogDescription>
-            {feature ? `${feature} is part of the ${TIER_LABELS[requiredTier]} plan.` : `This feature requires ${TIER_LABELS[requiredTier]}.`}
+            {feature ? `${feature} is part of the ${TIER_LABELS[requiredTier]} plan.` : `This feature is part of the ${TIER_LABELS[requiredTier]} plan.`}
+            {" "}Payments are paused — join the waitlist to be first in line.
           </DialogDescription>
         </DialogHeader>
         <ul className="space-y-2 my-2">
@@ -40,8 +41,8 @@ export const UpgradeRequiredModal = ({ open, onOpenChange, requiredTier, feature
         </ul>
         <DialogFooter>
           <Button variant="ghost" onClick={() => onOpenChange(false)}>Maybe later</Button>
-          <Button onClick={() => { onOpenChange(false); navigate("/pricing"); }}>
-            View pricing
+          <Button onClick={() => { onOpenChange(false); navigate(`/tier/${requiredTier}`); }}>
+            Join {TIER_LABELS[requiredTier]} waitlist
           </Button>
         </DialogFooter>
       </DialogContent>

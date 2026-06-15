@@ -71,6 +71,18 @@ Deno.serve(async (req) => {
     return new Response("Method not allowed", { status: 405, headers: corsHeaders });
   }
 
+  // EMERGENCY KILL-SWITCH: payments are paused while billing is finalized.
+  // Never create a checkout session — return 503 so any stray frontend
+  // caller fails closed instead of charging a test card.
+  return new Response(
+    JSON.stringify({ error: "Payments are temporarily disabled. Please join the waitlist." }),
+    { status: 503, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+  );
+});
+
+// Legacy handler retained below for reference only — kept intact so we can
+// flip payments back on without rewriting the integration.
+async function _disabled_handler(req: Request) {
   try {
     // Require authentication. Discard any client-supplied userId.
     const authHeader = req.headers.get("Authorization");
@@ -141,4 +153,6 @@ Deno.serve(async (req) => {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
-});
+}
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+const _legacy = _disabled_handler;

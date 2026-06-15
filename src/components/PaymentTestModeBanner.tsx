@@ -1,19 +1,19 @@
-const clientToken = import.meta.env.VITE_PAYMENTS_CLIENT_TOKEN as string | undefined;
+import { Link } from "react-router-dom";
 
+/**
+ * Payments are intentionally paused while we finish billing setup.
+ * Even though a Stripe test token is still configured in the env,
+ * checkout is disabled across the app. This banner makes that clear
+ * and routes interested users to the waitlist.
+ */
 export function PaymentTestModeBanner() {
-  if (!clientToken) {
-    return (
-      <div className="w-full bg-red-100 border-b border-red-300 px-4 py-2 text-center text-sm text-red-800">
-        Production checkout is not configured. Complete payments go-live to accept real payments.
-      </div>
-    );
-  }
-  if (clientToken.startsWith("pk_test_")) {
-    return (
-      <div className="w-full bg-orange-100 border-b border-orange-300 px-4 py-2 text-center text-sm text-orange-800">
-        All payments are currently in test mode — use card 4242 4242 4242 4242 to try checkout.
-      </div>
-    );
-  }
-  return null;
+  return (
+    <div className="w-full bg-amber-100 border-b border-amber-300 px-4 py-2 text-center text-sm text-amber-900">
+      Payments are paused while we finalize billing.{" "}
+      <Link to="/tier/pro" className="underline font-medium">
+        Join the waitlist
+      </Link>{" "}
+      for early access.
+    </div>
+  );
 }

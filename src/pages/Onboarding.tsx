@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Logo } from "@/components/Logo";
 import { SEO } from "@/components/SEO";
-import { useStripeCheckout } from "@/hooks/useStripeCheckout";
+
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { useTier } from "@/hooks/useTier";
@@ -39,7 +39,7 @@ export default function Onboarding() {
   const [experience, setExperience] = useState<string>("");
   const [focuses, setFocuses] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
-  const { openCheckout, checkoutElement } = useStripeCheckout();
+  
 
   useEffect(() => {
     if (!authLoading && !user) navigate("/auth?mode=signup");
@@ -52,8 +52,6 @@ export default function Onboarding() {
   const finishOnboarding = async (chosenTier?: Tier) => {
     if (!user) return;
     setSaving(true);
-    // Mark onboarding complete on Free. Paid tiers will be set by the Stripe
-    // webhook once checkout completes — until then, the user remains Free.
     const { error } = await supabase
       .from("profiles")
       .update({
@@ -64,23 +62,36 @@ export default function Onboarding() {
         onboarding_completed: true,
       })
       .eq("user_id", user.id);
+
+    // Payments are paused. If the user picked (or previously requested) a
+    // paid tier, record a waitlist entry instead of opening checkout.
+    let pendingTier: Tier | null = null;
+    try {
+      const stashed = localStorage.getItem("pending_waitlist_tier") as Tier | null;
+      if (stashed === "pro" || stashed === "elite") pendingTier = stashed;
+    } catch {}
+    const waitlistTier = chosenTier && chosenTier !== "free" ? chosenTier : pendingTier;
+    if (waitlistTier) {
+      await supabase.from("upgrade_waitlist").insert({
+        user_id: user.id,
+        requested_tier: waitlistTier,
+        billing_cycle: "monthly",
+      });
+      try { localStorage.removeItem("pending_waitlist_tier"); } catch {}
+    }
+
     setSaving(false);
     if (error) {
       toast.error("Could not save. Please try again.");
       return;
     }
     invalidate();
-    if (chosenTier && chosenTier !== "free") {
-      // Open Stripe checkout inline; user lands on /checkout/return after paying.
-      openCheckout({
-        priceId: TIER_PRICES[chosenTier].monthlyPriceId!,
-        customerEmail: user.email,
-        userId: user.id,
-      });
+    if (waitlistTier) {
+      toast.success(`You're on the ${waitlistTier === "elite" ? "Elite" : "Pro"} waitlist. Free preview unlocked.`);
     } else {
       toast.success("Welcome to StockAI");
-      navigate("/dashboard");
     }
+    navigate("/dashboard");
   };
 
   const steps = [
@@ -247,7 +258,7 @@ export default function Onboarding() {
                               onClick={() => finishOnboarding(t)}
                               disabled={saving}
                             >
-                              Start with {t === "pro" ? "Pro" : "Elite"}
+                              Join {t === "pro" ? "Pro" : "Elite"} waitlist
                             </Button>
                           )}
                         </Card>
@@ -270,7 +281,7 @@ export default function Onboarding() {
         </div>
       </main>
 
-      {checkoutElement}
+      
     </div>
   );
 }

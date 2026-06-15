@@ -28,6 +28,7 @@ const Disclosure = lazy(() => import("./pages/Disclosure"));
 const Pricing = lazy(() => import("./pages/Pricing"));
 const Onboarding = lazy(() => import("./pages/Onboarding"));
 const CheckoutReturn = lazy(() => import("./pages/CheckoutReturn"));
+const TierWaitlist = lazy(() => import("./pages/TierWaitlist"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 
 const queryClient = new QueryClient();
@@ -49,6 +50,7 @@ const App = () => (
                   <Route path="/pricing" element={<Pricing />} />
                   <Route path="/onboarding" element={<Onboarding />} />
                   <Route path="/checkout/return" element={<CheckoutReturn />} />
+                  <Route path="/tier/:tier" element={<TierWaitlist />} />
                   <Route path="/dashboard" element={<Dashboard />} />
                   <Route path="/watchlist" element={<Watchlist />} />
                   <Route path="/stock/:ticker" element={<StockDetail />} />

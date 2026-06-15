@@ -9,7 +9,6 @@ import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { SEO } from "@/components/SEO";
-import { useStripeCheckout } from "@/hooks/useStripeCheckout";
 import { useAuth } from "@/hooks/useAuth";
 import { useTier } from "@/hooks/useTier";
 import { Tier, TIER_PRICES, FEATURE_LABELS, FEATURE_REQUIRES, TIER_RANK } from "@/lib/tier-features";
@@ -51,31 +50,20 @@ export default function Pricing() {
   const { user } = useAuth();
   const { tier: currentTier } = useTier();
   const [annual, setAnnual] = useState(false);
-  const { openCheckout, checkoutElement } = useStripeCheckout();
 
   const handleCTA = (t: Tier) => {
     if (t === "free") {
       navigate(user ? "/dashboard" : "/auth?mode=signup");
       return;
     }
-    if (!user) {
-      navigate("/auth?mode=signup");
-      return;
-    }
-    const priceId = annual ? TIER_PRICES[t].annualPriceId : TIER_PRICES[t].monthlyPriceId;
-    if (!priceId) return;
-    openCheckout({
-      priceId,
-      customerEmail: user.email,
-      userId: user.id,
-    });
+    // Payments are paused — route every paid CTA to the waitlist landing.
+    navigate(`/tier/${t}`);
   };
 
   const ctaLabel = (t: Tier) => {
     if (currentTier === t) return "Current plan";
     if (t === "free") return user ? "Continue on Free" : "Get started";
-    const above = TIER_RANK[t] > TIER_RANK[currentTier];
-    return above ? `Upgrade to ${t === "pro" ? "Pro" : "Elite"}` : `Switch to ${t === "pro" ? "Pro" : "Elite"}`;
+    return `Join ${t === "pro" ? "Pro" : "Elite"} waitlist`;
   };
 
   return (
@@ -249,7 +237,7 @@ export default function Pricing() {
 
       <Footer />
 
-      {checkoutElement}
+      
     </div>
   );
 }
