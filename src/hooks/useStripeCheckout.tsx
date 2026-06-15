@@ -1,6 +1,5 @@
-import { useState, useCallback } from "react";
-import { Dialog, DialogContent } from "@/components/ui/dialog";
-import { StripeEmbeddedCheckout } from "@/components/StripeEmbeddedCheckout";
+import { useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 
 interface CheckoutOptions {
   priceId: string;
@@ -9,31 +8,29 @@ interface CheckoutOptions {
   returnUrl?: string;
 }
 
+/**
+ * Payments are paused. This hook used to open a Stripe Embedded Checkout;
+ * it now redirects any caller to the tier waitlist landing page so we
+ * never invoke the live payment provider. Kept as a shim so existing
+ * callers compile without changes.
+ */
 export function useStripeCheckout() {
-  const [isOpen, setIsOpen] = useState(false);
-  const [options, setOptions] = useState<CheckoutOptions | null>(null);
+  const navigate = useNavigate();
 
-  const openCheckout = useCallback((opts: CheckoutOptions) => {
-    setOptions(opts);
-    setIsOpen(true);
-  }, []);
-
-  const closeCheckout = useCallback(() => {
-    setIsOpen(false);
-    setOptions(null);
-  }, []);
-
-  const checkoutElement = (
-    <Dialog open={isOpen} onOpenChange={(open) => !open && closeCheckout()}>
-      <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto p-0">
-        {isOpen && options && (
-          <div className="p-4">
-            <StripeEmbeddedCheckout {...options} />
-          </div>
-        )}
-      </DialogContent>
-    </Dialog>
+  const openCheckout = useCallback(
+    (opts: CheckoutOptions) => {
+      const tier = opts.priceId?.startsWith("elite") ? "elite" : "pro";
+      navigate(`/tier/${tier}`);
+    },
+    [navigate],
   );
 
-  return { openCheckout, closeCheckout, isOpen, checkoutElement };
+  const closeCheckout = useCallback(() => {}, []);
+
+  return {
+    openCheckout,
+    closeCheckout,
+    isOpen: false as const,
+    checkoutElement: null,
+  };
 }
