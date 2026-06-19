@@ -13,6 +13,7 @@
 import { corsHeaders } from "npm:@supabase/supabase-js@2/cors";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import { META_FEATURE_NAMES, type MetaFeatures } from "../_shared/meta-labeler.ts";
+import { requireCronOrUser } from "../_shared/cron-auth.ts";
 
 interface OutcomeRow {
   conviction: number | null;
