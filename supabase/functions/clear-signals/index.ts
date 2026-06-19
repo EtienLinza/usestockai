@@ -12,7 +12,7 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
-  const denied = await requireCronOrUser(req, { allowAuthenticatedUser: true });
+  const denied = await requireCronOrUser(req);
   if (denied) return denied;
 
   try {
