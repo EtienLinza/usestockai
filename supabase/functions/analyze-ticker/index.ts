@@ -10,10 +10,11 @@ import { fetchDailyHistory } from "../_shared/yahoo-history.ts";
 import {
   calculateRSI, calculateMACD, calculateSMA, calculateATR, calculateADX,
 } from "../_shared/indicators.ts";
+import { requireCronOrUser } from "../_shared/cron-auth.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-cron-secret",
 };
 
 const TICKER_RE = /^[A-Z]{1,10}(-[A-Z]{2,4})?$/;
@@ -38,6 +39,9 @@ const lastFinite = (arr: number[]): number | null => {
 
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+
+  const denied = await requireCronOrUser(req, { allowAuthenticatedUser: true });
+  if (denied) return denied;
 
   try {
     const body = await req.json().catch(() => ({}));
