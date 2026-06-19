@@ -10,10 +10,11 @@ import { fetchDailyHistory } from "../_shared/yahoo-history.ts";
 import {
   calculateRSI, calculateMACD, calculateSMA, calculateATR, calculateADX,
 } from "../_shared/indicators.ts";
+import { requireCronOrUser } from "../_shared/cron-auth.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-cron-secret",
 };
 
 const TICKER_RE = /^[A-Z]{1,10}(-[A-Z]{2,4})?$/;
