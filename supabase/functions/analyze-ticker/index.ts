@@ -40,6 +40,9 @@ const lastFinite = (arr: number[]): number | null => {
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
+  const denied = await requireCronOrUser(req, { allowAuthenticatedUser: true });
+  if (denied) return denied;
+
   try {
     const body = await req.json().catch(() => ({}));
     const ticker = String(body?.ticker ?? "").trim().toUpperCase();
