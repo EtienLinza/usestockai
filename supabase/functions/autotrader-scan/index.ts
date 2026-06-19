@@ -964,29 +964,33 @@ function runLossExit(
   // ≥ 0.5R of unrealized progress, the thesis is stalling — cut early to
   // free capital for fresher setups. Uses initial risk derived from
   // hard_stop_price, ATR fallback, or 5% notional (H-7).
-  if (entry > 0 && barsHeld >= Math.max(3, Math.floor(maxHold / 2))) {
+  // Only allow R-progress stall to exit if the trade is at/above breakeven —
+  // never realize a red loss on a stall. The hard stop is the only path to red.
+  if (entry > 0 && barsHeld >= Math.max(3, Math.floor(maxHold / 2)) && pnlPct >= 0) {
     const initRiskPerShare = inferInitRiskPerShare(pos);
     if (initRiskPerShare > 0) {
       const progressR = (isLong ? currentPrice - entry : entry - currentPrice) / initRiskPerShare;
       if (progressR < 0.5) {
         return {
           kind: "FULL_EXIT",
-          reason: `R-progress stall: only ${progressR.toFixed(2)}R after ${barsHeld}/${maxHold} bars`,
+          reason: `R-progress stall at breakeven+: only ${progressR.toFixed(2)}R after ${barsHeld}/${maxHold} bars`,
           price: currentPrice,
         };
       }
     }
   }
 
-  // T3: Time stop
+  // T3: Time stop — only fire on green. On red, hold and let the hard stop
+  // (or a recovery) decide the exit. No "dead capital" sells at a loss.
   if (barsHeld >= maxHold) {
-    return {
-      kind: "FULL_EXIT",
-      reason: pnlPct > 0
-        ? `Time stop — taking the profit (+${(pnlPct * 100).toFixed(1)}%)`
-        : `Time stop — dead capital (${(pnlPct * 100).toFixed(1)}%)`,
-      price: currentPrice,
-    };
+    if (pnlPct > 0) {
+      return {
+        kind: "FULL_EXIT",
+        reason: `Time stop — taking the profit (+${(pnlPct * 100).toFixed(1)}%)`,
+        price: currentPrice,
+      };
+    }
+    // Red at time stop: do nothing. Hard stop remains the only red exit.
   }
 
   return null; // no loss-exit triggered
