@@ -5,47 +5,49 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from "@/components/ui/select";
-import {
-  DollarSign, TrendingUp, TrendingDown, Sparkles, AlertCircle, Clock,
+  DollarSign, TrendingUp, TrendingDown, Sparkles, AlertCircle, Minus,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface Props {
   ticker: string;
-  confidence: number;          // 0-100
+  confidence: number;
   currentPrice?: number | null;
   suggestedEntry?: number | null;
   suggestedTarget?: number | null;
-  annualizedVolPct?: number | null; // e.g. 32 (=32%)
-  kellyFraction?: number | null;    // 0..1
+  annualizedVolPct?: number | null;
+  kellyFraction?: number | null;
 }
 
 type HorizonKey =
   | "ultra_short" | "short" | "short_mid" | "mid"
   | "long_mid" | "long" | "extra_long" | "lifetime";
 
-const HORIZONS: { key: HorizonKey; label: string; months: number; hint: string }[] = [
-  { key: "ultra_short", label: "Ultra short term", months: 0.25, hint: "~1 week" },
-  { key: "short",       label: "Short term",       months: 1,    hint: "~1 month" },
-  { key: "short_mid",   label: "Short / mid term", months: 3,    hint: "~3 months" },
-  { key: "mid",         label: "Mid term",         months: 6,    hint: "~6 months" },
-  { key: "long_mid",    label: "Long / mid term",  months: 12,   hint: "1 year" },
-  { key: "long",        label: "Long term",        months: 36,   hint: "3 years" },
-  { key: "extra_long",  label: "Extra long term",  months: 60,   hint: "5 years" },
-  { key: "lifetime",    label: "Lifetime hold",    months: 360,  hint: "30 years" },
+const HORIZONS: { key: HorizonKey; short: string; long: string; months: number }[] = [
+  { key: "ultra_short", short: "1W",  long: "1 week",   months: 0.25 },
+  { key: "short",       short: "1M",  long: "1 month",  months: 1 },
+  { key: "short_mid",   short: "3M",  long: "3 months", months: 3 },
+  { key: "mid",         short: "6M",  long: "6 months", months: 6 },
+  { key: "long_mid",    short: "1Y",  long: "1 year",   months: 12 },
+  { key: "long",        short: "3Y",  long: "3 years",  months: 36 },
+  { key: "extra_long",  short: "5Y",  long: "5 years",  months: 60 },
+  { key: "lifetime",    short: "30Y", long: "Lifetime", months: 360 },
 ];
 
+const AMOUNT_PRESETS = [100, 500, 1000, 5000, 10000];
 const MIN_CONFIDENCE = 60;
 
-const fmtMoney = (v: number) =>
-  new Intl.NumberFormat("en-US", {
+const fmtMoney = (v: number, compact = false) => {
+  const useCompact = compact && Math.abs(v) >= 10000;
+  return new Intl.NumberFormat("en-US", {
     style: "currency", currency: "USD",
-    minimumFractionDigits: 2, maximumFractionDigits: 2,
+    notation: useCompact ? "compact" : "standard",
+    maximumFractionDigits: 2,
+    minimumFractionDigits: useCompact ? 0 : 2,
   }).format(v);
+};
 
-const fmtPct = (v: number) => `${v >= 0 ? "+" : ""}${(v * 100).toFixed(2)}%`;
+const fmtPct = (v: number) => `${v >= 0 ? "+" : ""}${(v * 100).toFixed(1)}%`;
 
 export const InvestmentSimulator = ({
   ticker, confidence, currentPrice, suggestedEntry, suggestedTarget,
@@ -60,33 +62,22 @@ export const InvestmentSimulator = ({
 
   const projection = useMemo(() => {
     if (lowConfidence || !entry || principal <= 0) return null;
-
-    // Edge derived from confidence: 50% = no edge, 100% = +25% alpha vs market baseline.
-    const baselineAnnual = 0.08;                                  // market-average drift
-    const edgeAlpha = ((confidence - 50) / 50) * 0.25;            // 0..0.25
-    // Kelly damping — if the engine wants to size small, trust the edge less.
+    const baselineAnnual = 0.08;
+    const edgeAlpha = ((confidence - 50) / 50) * 0.25;
     const kelly = Math.max(0, Math.min(1, kellyFraction ?? 0.5));
-    const dampedAlpha = edgeAlpha * (0.5 + 0.5 * kelly);          // 0.5..1.0× weight
+    const dampedAlpha = edgeAlpha * (0.5 + 0.5 * kelly);
     let annualReturn = baselineAnnual + dampedAlpha;
-
-    // Sanity check using the engine's own short-horizon target.
     if (suggestedTarget && entry > 0) {
       const tgtPct = (suggestedTarget - entry) / entry;
-      // Engine targets are typically 1-month swing — annualize then blend.
       const tgtAnnual = Math.pow(1 + tgtPct, 12) - 1;
       annualReturn = 0.5 * annualReturn + 0.5 * Math.max(-0.5, Math.min(1.5, tgtAnnual));
     }
-
     const annualVol = Math.max(0.05, (annualizedVolPct ?? 25) / 100);
     const years = HORIZONS.find((h) => h.key === horizon)!.months / 12;
-
-    // Compound growth across the horizon. Best/worst case = ±1 stdev band.
-    // Scale band by sqrt(time) so longer horizons widen (Brownian-ish).
     const band = annualVol * Math.sqrt(years);
     const expected = principal * Math.pow(1 + annualReturn, years);
     const best     = principal * Math.pow(1 + annualReturn + band / years, years);
     const worst    = principal * Math.pow(1 + Math.max(-0.95, annualReturn - band / years), years);
-
     return {
       annualReturn, annualVol, years,
       expected, best, worst,
@@ -94,6 +85,7 @@ export const InvestmentSimulator = ({
       bestPct: (best - principal) / principal,
       worstPct: (worst - principal) / principal,
       shares: principal / entry,
+      gain: expected - principal,
     };
   }, [lowConfidence, entry, principal, confidence, kellyFraction, suggestedTarget, annualizedVolPct, horizon]);
 
@@ -103,140 +95,207 @@ export const InvestmentSimulator = ({
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.25, delay: 0.05 }}
     >
-      <Card className="glass-card p-5 space-y-4">
-        <div className="flex items-center justify-between gap-3 flex-wrap">
-          <div className="flex items-center gap-2">
-            <Sparkles className="w-4 h-4 text-primary" />
-            <span className="text-sm font-medium">Simulate this trade</span>
-            <Badge variant="outline" className="font-mono text-[10px]">{ticker}</Badge>
+      <Card className="glass-card overflow-hidden">
+        <div className="px-4 sm:px-5 py-3 border-b border-border/50 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="w-7 h-7 rounded-md bg-primary/10 flex items-center justify-center shrink-0">
+              <Sparkles className="w-3.5 h-3.5 text-primary" />
+            </div>
+            <div className="min-w-0">
+              <div className="text-sm font-medium leading-tight truncate">Simulate this trade</div>
+              <div className="text-[10px] text-muted-foreground leading-tight">
+                Step 2 · {ticker} projection
+              </div>
+            </div>
           </div>
-          <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
-            Step 2 · Projection
-          </span>
+          <Badge variant="outline" className="font-mono text-[10px] shrink-0">
+            {Math.round(confidence)}% conf
+          </Badge>
         </div>
 
         {lowConfidence ? (
-          <div className="flex items-start gap-2 text-xs bg-muted/30 border border-border/50 rounded-md p-3">
-            <AlertCircle className="w-4 h-4 mt-0.5 shrink-0 text-muted-foreground" />
-            <div className="space-y-1">
-              <div className="font-medium">Not confident enough to simulate.</div>
-              <div className="text-muted-foreground leading-relaxed">
-                Confidence is {Math.round(confidence)}% — below the {MIN_CONFIDENCE}% threshold needed for a
-                meaningful growth projection. I can't give you a conclusive result on this one.
+          <div className="p-4 sm:p-5">
+            <div className="flex items-start gap-3 bg-muted/30 border border-border/50 rounded-lg p-4">
+              <AlertCircle className="w-4 h-4 mt-0.5 shrink-0 text-muted-foreground" />
+              <div className="space-y-1 text-xs">
+                <div className="font-medium">Not confident enough to simulate</div>
+                <div className="text-muted-foreground leading-relaxed">
+                  Signal is {Math.round(confidence)}% — below the {MIN_CONFIDENCE}% threshold needed for a
+                  meaningful projection. I can't give you a conclusive result on this one.
+                </div>
               </div>
             </div>
           </div>
         ) : (
-          <>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div className="space-y-2">
-                <Label htmlFor="sim-amount" className="text-xs text-muted-foreground">
-                  Investment amount
-                </Label>
-                <div className="relative">
-                  <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                  <Input
-                    id="sim-amount"
-                    type="number"
-                    inputMode="decimal"
-                    value={amount}
-                    onChange={(e) => setAmount(e.target.value)}
-                    placeholder="1000"
-                    className="pl-9 font-mono bg-secondary/50 border-border/50"
-                    min="0"
-                    step="100"
-                  />
-                </div>
+          <div className="p-4 sm:p-5 space-y-5">
+            <div className="space-y-2.5">
+              <Label htmlFor="sim-amount" className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                Investment amount
+              </Label>
+              <div className="relative">
+                <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                <Input
+                  id="sim-amount"
+                  type="number"
+                  inputMode="decimal"
+                  value={amount}
+                  onChange={(e) => setAmount(e.target.value)}
+                  placeholder="1000"
+                  className="pl-9 h-11 text-base font-mono bg-secondary/50 border-border/50 tabular-nums"
+                  min="0"
+                  step="100"
+                />
               </div>
-              <div className="space-y-2">
-                <Label className="text-xs text-muted-foreground">Time frame</Label>
-                <Select value={horizon} onValueChange={(v) => setHorizon(v as HorizonKey)}>
-                  <SelectTrigger className="bg-secondary/50 border-border/50">
-                    <Clock className="w-3.5 h-3.5 mr-2 text-muted-foreground" />
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent className="bg-popover z-50">
-                    {HORIZONS.map((h) => (
-                      <SelectItem key={h.key} value={h.key}>
-                        <span className="flex items-center justify-between gap-3 w-full">
-                          <span>{h.label}</span>
-                          <span className="text-[10px] text-muted-foreground">{h.hint}</span>
-                        </span>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+              <div className="flex flex-wrap gap-1.5">
+                {AMOUNT_PRESETS.map((preset) => {
+                  const active = parseFloat(amount) === preset;
+                  return (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() => setAmount(String(preset))}
+                      className={cn(
+                        "px-2.5 py-1 rounded-md text-[11px] font-mono border transition-colors",
+                        active
+                          ? "bg-primary/15 border-primary/40 text-primary"
+                          : "bg-secondary/40 border-border/40 text-muted-foreground hover:text-foreground hover:border-border"
+                      )}
+                    >
+                      ${preset >= 1000 ? `${preset / 1000}k` : preset}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="space-y-2.5">
+              <Label className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                Time frame
+              </Label>
+              <div className="grid grid-cols-4 gap-1.5">
+                {HORIZONS.map((h) => {
+                  const active = horizon === h.key;
+                  return (
+                    <button
+                      key={h.key}
+                      type="button"
+                      onClick={() => setHorizon(h.key)}
+                      className={cn(
+                        "flex items-center justify-center py-2 rounded-md border transition-all",
+                        active
+                          ? "bg-primary/15 border-primary/40 text-primary"
+                          : "bg-secondary/40 border-border/40 text-muted-foreground hover:text-foreground hover:border-border"
+                      )}
+                    >
+                      <span className="text-xs font-mono font-semibold">{h.short}</span>
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="text-[10px] text-muted-foreground text-center">
+                {HORIZONS.find((h) => h.key === horizon)!.long}
               </div>
             </div>
 
             {projection ? (
               <div className="space-y-3">
-                <div className="text-[11px] text-muted-foreground">
-                  At {fmtMoney(entry!)}/share you'd own{" "}
-                  <span className="font-mono text-foreground">{projection.shares.toFixed(4)}</span> shares.
-                  Model assumes ~{(projection.annualReturn * 100).toFixed(1)}% expected annualized return
-                  and ~{(projection.annualVol * 100).toFixed(1)}% vol.
+                <div className={cn(
+                  "rounded-lg p-4 border space-y-1",
+                  projection.expectedPct >= 0
+                    ? "bg-success/5 border-success/20"
+                    : "bg-destructive/5 border-destructive/20"
+                )}>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                      Expected value
+                    </span>
+                    <span className={cn(
+                      "text-[11px] font-mono font-medium tabular-nums",
+                      projection.expectedPct >= 0 ? "text-success" : "text-destructive"
+                    )}>
+                      {fmtPct(projection.expectedPct)}
+                    </span>
+                  </div>
+                  <div className={cn(
+                    "text-2xl sm:text-3xl font-mono font-semibold tabular-nums leading-tight",
+                    projection.expectedPct >= 0 ? "text-success" : "text-destructive"
+                  )}>
+                    {fmtMoney(projection.expected, true)}
+                  </div>
+                  <div className="text-[11px] text-muted-foreground tabular-nums">
+                    {projection.gain >= 0 ? "+" : "−"}{fmtMoney(Math.abs(projection.gain), true)}
+                    {" · "}
+                    {projection.shares.toFixed(4)} sh @ {fmtMoney(entry!)}
+                  </div>
                 </div>
 
-                <div className="grid grid-cols-3 gap-3">
-                  <ProjCard
-                    label="Worst case"
+                <div className="grid grid-cols-2 gap-2">
+                  <RangeCard
+                    label="Worst"
                     value={projection.worst}
                     pct={projection.worstPct}
                     tone={projection.worstPct >= 0 ? "neutral" : "down"}
                   />
-                  <ProjCard
-                    label="Expected"
-                    value={projection.expected}
-                    pct={projection.expectedPct}
-                    tone={projection.expectedPct >= 0 ? "up" : "down"}
-                    emphasis
-                  />
-                  <ProjCard
-                    label="Best case"
+                  <RangeCard
+                    label="Best"
                     value={projection.best}
                     pct={projection.bestPct}
                     tone="up"
                   />
                 </div>
 
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-muted-foreground pt-1">
+                  <span className="inline-flex items-center gap-1">
+                    <span className="w-1 h-1 rounded-full bg-muted-foreground/60" />
+                    {(projection.annualReturn * 100).toFixed(1)}% expected annual
+                  </span>
+                  <span className="inline-flex items-center gap-1">
+                    <span className="w-1 h-1 rounded-full bg-muted-foreground/60" />
+                    {(projection.annualVol * 100).toFixed(0)}% vol
+                  </span>
+                </div>
+
                 <p className="text-[10px] text-muted-foreground/70 leading-relaxed">
-                  Projections compound the model's annualized return over your selected horizon; the best/worst band
-                  scales with realized volatility. Real outcomes will differ — markets are stochastic and the engine
-                  can be wrong. Not financial advice.
+                  Projections compound the model's expected return over your horizon; best/worst scales with
+                  realized volatility. Real outcomes will differ — not financial advice.
                 </p>
               </div>
             ) : (
-              <div className="text-xs text-muted-foreground">Enter an amount to project growth.</div>
+              <div className="text-xs text-muted-foreground text-center py-2">
+                Enter an amount to project growth.
+              </div>
             )}
-          </>
+          </div>
         )}
       </Card>
     </motion.div>
   );
 };
 
-const ProjCard = ({
-  label, value, pct, tone, emphasis,
+const RangeCard = ({
+  label, value, pct, tone,
 }: {
   label: string; value: number; pct: number;
-  tone: "up" | "down" | "neutral"; emphasis?: boolean;
+  tone: "up" | "down" | "neutral";
 }) => {
-  const color = tone === "up" ? "text-success" : tone === "down" ? "text-destructive" : "text-foreground";
+  const color =
+    tone === "up" ? "text-success"
+    : tone === "down" ? "text-destructive"
+    : "text-foreground";
   const bg =
     tone === "up" ? "bg-success/5 border-success/20"
     : tone === "down" ? "bg-destructive/5 border-destructive/20"
     : "bg-muted/20 border-border/40";
-  const Arrow = tone === "down" ? TrendingDown : TrendingUp;
+  const Arrow = tone === "down" ? TrendingDown : tone === "up" ? TrendingUp : Minus;
   return (
-    <div className={cn("rounded-md p-3 border space-y-1", bg, emphasis && "ring-1 ring-primary/30")}>
+    <div className={cn("rounded-md p-3 border space-y-1", bg)}>
       <div className="text-[10px] uppercase tracking-wide text-muted-foreground flex items-center gap-1">
         <Arrow className={cn("w-3 h-3", color)} /> {label}
       </div>
-      <div className={cn("font-mono font-semibold", emphasis ? "text-lg" : "text-base", color)}>
-        {fmtMoney(value)}
+      <div className={cn("font-mono font-semibold text-base sm:text-lg tabular-nums leading-tight", color)}>
+        {fmtMoney(value, true)}
       </div>
-      <div className={cn("text-[10px] font-mono", color)}>{fmtPct(pct)}</div>
+      <div className={cn("text-[10px] font-mono tabular-nums", color)}>{fmtPct(pct)}</div>
     </div>
   );
 };
