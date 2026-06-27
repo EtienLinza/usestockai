@@ -111,6 +111,18 @@ export const TickerSearchBar = () => {
         />
       )}
 
+      {result && !result.insufficientData && result.decision === "BUY" && (
+        <InvestmentSimulator
+          ticker={result.ticker}
+          confidence={result.confidence}
+          currentPrice={result.currentPrice ?? null}
+          suggestedEntry={result.suggestedEntry ?? null}
+          suggestedTarget={result.suggestedTarget ?? null}
+          annualizedVolPct={result.stats?.annualizedVolPct ?? null}
+          kellyFraction={result.kellyFraction ?? null}
+        />
+      )}
+
       {result && (
         <PriceAlertModal
           isOpen={alertOpen}
