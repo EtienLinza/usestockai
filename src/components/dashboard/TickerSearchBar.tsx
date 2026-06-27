@@ -7,6 +7,7 @@ import { Search, ExternalLink, Brain, Loader2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { AnalysisResultCard, type AnalysisResult } from "./AnalysisResultCard";
+import { InvestmentSimulator } from "./InvestmentSimulator";
 import { PriceAlertModal } from "@/components/PriceAlertModal";
 import { useAuth } from "@/hooks/useAuth";
 
@@ -107,6 +108,18 @@ export const TickerSearchBar = () => {
           result={result}
           loading={loading}
           onSetAlert={result ? () => setAlertOpen(true) : undefined}
+        />
+      )}
+
+      {result && !result.insufficientData && result.decision === "BUY" && (
+        <InvestmentSimulator
+          ticker={result.ticker}
+          confidence={result.confidence}
+          currentPrice={result.currentPrice ?? null}
+          suggestedEntry={result.suggestedEntry ?? null}
+          suggestedTarget={result.suggestedTarget ?? null}
+          annualizedVolPct={result.stats?.annualizedVolPct ?? null}
+          kellyFraction={result.kellyFraction ?? null}
         />
       )}
 
