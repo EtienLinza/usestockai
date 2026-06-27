@@ -7,6 +7,7 @@ import { Search, ExternalLink, Brain, Loader2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { AnalysisResultCard, type AnalysisResult } from "./AnalysisResultCard";
+import { InvestmentSimulator } from "./InvestmentSimulator";
 import { PriceAlertModal } from "@/components/PriceAlertModal";
 import { useAuth } from "@/hooks/useAuth";
 
