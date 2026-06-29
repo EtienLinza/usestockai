@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/select";
 import { Shield, Loader2, Info, Bot, Sparkles, Clock, Activity, TrendingUp, TrendingDown, Minus, Wallet, AlertTriangle, ChevronDown, Settings as SettingsIcon, Heart, User as UserIcon, CreditCard, Compass, SlidersHorizontal, Skull, Gauge } from "lucide-react";
 import { AccountSection } from "@/components/AccountSection";
+import { TwoFactorSection } from "@/components/security/TwoFactorSection";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { useAuth } from "@/hooks/useAuth";
@@ -338,6 +339,7 @@ const Settings = () => {
 type SectionKey =
   | "account"
   | "billing"
+  | "security"
   | "at-status"
   | "at-core"
   | "at-discovery"
@@ -357,6 +359,7 @@ const NAV: NavGroup[] = [
     items: [
       { key: "account", label: "Profile", icon: UserIcon },
       { key: "billing", label: "Plan & billing", icon: CreditCard },
+      { key: "security", label: "Security & 2FA", icon: Shield },
     ],
   },
   {
@@ -463,6 +466,9 @@ function SettingsShell({ caps, setCaps, bot, setBot, adaptiveState, lastScanAt, 
         {active === "account" && <AccountSection />}
 
         {active === "billing" && <PlanBillingSection />}
+
+        {active === "security" && <TwoFactorSection />}
+
 
         {active === "at-status" && (
           <AdaptiveStatusCard

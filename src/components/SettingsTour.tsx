@@ -9,7 +9,7 @@ import {
 } from "lucide-react";
 
 export type TourSectionKey =
-  | "account" | "billing" | "at-status" | "at-core"
+  | "account" | "billing" | "security" | "at-status" | "at-core"
   | "at-discovery" | "at-advanced" | "at-danger" | "risk" | "system";
 
 
