@@ -109,8 +109,8 @@ const Auth = () => {
         if (error) {
           toast.error(error.message);
         } else {
-          toast.success("Welcome back!");
-          navigate("/dashboard");
+          const needsMfa = await maybeChallengeMfa();
+          if (!needsMfa) await finishLogin();
         }
       }
     } catch (err) {
