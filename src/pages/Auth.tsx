@@ -168,6 +168,34 @@ const Auth = () => {
               </CardDescription>
             </CardHeader>
             <CardContent>
+              {mfaChallengeId ? (
+                <form onSubmit={verifyMfa} className="space-y-4">
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <ShieldCheck className="w-4 h-4 text-primary" />
+                    Enter the 6-digit code from your authenticator app to finish signing in.
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="mfa-code">Authentication code</Label>
+                    <Input
+                      id="mfa-code"
+                      inputMode="numeric"
+                      autoComplete="one-time-code"
+                      maxLength={6}
+                      placeholder="123456"
+                      value={mfaCode}
+                      onChange={(e) => setMfaCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                      className="font-mono tracking-widest text-center text-lg"
+                      autoFocus
+                    />
+                  </div>
+                  <Button type="submit" variant="glow" size="lg" className="w-full" disabled={mfaCode.length !== 6 || mfaVerifying}>
+                    {mfaVerifying ? <Loader2 className="w-4 h-4 animate-spin" /> : "Verify & continue"}
+                  </Button>
+                  <Button type="button" variant="ghost" size="sm" className="w-full" onClick={cancelMfa}>
+                    Cancel and sign out
+                  </Button>
+                </form>
+              ) : (
               <form onSubmit={handleSubmit} className="space-y-4">
                 <div className="space-y-2">
                   <Label htmlFor="email">Email</Label>
@@ -223,19 +251,22 @@ const Auth = () => {
                   )}
                 </Button>
               </form>
+              )}
 
-              <div className="mt-6 text-center">
-                <button
-                  type="button"
-                  onClick={() => setIsSignUp(!isSignUp)}
-                  className="text-sm text-muted-foreground hover:text-primary transition-colors"
-                >
-                  {isSignUp 
-                    ? "Already have an account? Sign in" 
-                    : "Don't have an account? Sign up"
-                  }
-                </button>
-              </div>
+              {!mfaChallengeId && (
+                <div className="mt-6 text-center">
+                  <button
+                    type="button"
+                    onClick={() => setIsSignUp(!isSignUp)}
+                    className="text-sm text-muted-foreground hover:text-primary transition-colors"
+                  >
+                    {isSignUp
+                      ? "Already have an account? Sign in"
+                      : "Don't have an account? Sign up"
+                    }
+                  </button>
+                </div>
+              )}
             </CardContent>
           </Card>
 
