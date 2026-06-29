@@ -8,8 +8,10 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Logo } from "@/components/Logo";
 import { useAuth } from "@/hooks/useAuth";
+import { supabase } from "@/integrations/supabase/client";
+import { logAudit } from "@/lib/audit";
 import { toast } from "sonner";
-import { Loader2, Mail, Lock, ArrowLeft } from "lucide-react";
+import { Loader2, Mail, Lock, ArrowLeft, ShieldCheck } from "lucide-react";
 import { Link } from "react-router-dom";
 import { z } from "zod";
 
@@ -27,6 +29,59 @@ const Auth = () => {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+
+  // MFA challenge state
+  const [mfaFactorId, setMfaFactorId] = useState<string | null>(null);
+  const [mfaChallengeId, setMfaChallengeId] = useState<string | null>(null);
+  const [mfaCode, setMfaCode] = useState("");
+  const [mfaVerifying, setMfaVerifying] = useState(false);
+
+  const finishLogin = async () => {
+    await logAudit("login", undefined, { method: mfaFactorId ? "password+totp" : "password" });
+    toast.success("Welcome back!");
+    navigate("/dashboard");
+  };
+
+  const maybeChallengeMfa = async (): Promise<boolean> => {
+    const { data, error } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+    if (error || !data) return false;
+    if (data.currentLevel === "aal2" || data.nextLevel !== "aal2") return false;
+    const list = await supabase.auth.mfa.listFactors();
+    const factor = list.data?.totp?.find((f) => f.status === "verified");
+    if (!factor) return false;
+    const ch = await supabase.auth.mfa.challenge({ factorId: factor.id });
+    if (ch.error || !ch.data) {
+      toast.error(ch.error?.message ?? "Could not start 2FA challenge");
+      return false;
+    }
+    setMfaFactorId(factor.id);
+    setMfaChallengeId(ch.data.id);
+    return true;
+  };
+
+  const verifyMfa = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!mfaFactorId || !mfaChallengeId || mfaCode.length !== 6) return;
+    setMfaVerifying(true);
+    const { error } = await supabase.auth.mfa.verify({
+      factorId: mfaFactorId,
+      challengeId: mfaChallengeId,
+      code: mfaCode,
+    });
+    setMfaVerifying(false);
+    if (error) {
+      toast.error(error.message);
+      return;
+    }
+    await finishLogin();
+  };
+
+  const cancelMfa = async () => {
+    await supabase.auth.signOut();
+    setMfaFactorId(null);
+    setMfaChallengeId(null);
+    setMfaCode("");
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
