@@ -24,14 +24,14 @@ export async function logAudit(
   try {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
-    await supabase.from("audit_log").insert({
+    await supabase.from("audit_log").insert([{
       user_id: user.id,
       action,
-      target_type: target?.type ?? null,
-      target_id: target?.id ?? null,
-      metadata,
-      user_agent: typeof navigator !== "undefined" ? navigator.userAgent : null,
-    });
+      target_type: target?.type ?? undefined,
+      target_id: target?.id ?? undefined,
+      metadata: metadata as never,
+      user_agent: typeof navigator !== "undefined" ? navigator.userAgent : undefined,
+    }]);
   } catch (err) {
     console.warn("[audit] insert failed", err);
   }
