@@ -37,6 +37,9 @@ export const Footer = () => {
             <Link to="/disclosure" className="text-muted-foreground hover:text-foreground transition-colors">
               Risk Disclosure
             </Link>
+            <Link to="/security" className="text-muted-foreground hover:text-foreground transition-colors">
+              Security
+            </Link>
           </nav>
         </div>
       </div>
