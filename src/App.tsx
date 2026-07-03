@@ -31,6 +31,7 @@ const Pricing = lazy(() => import("./pages/Pricing"));
 const Onboarding = lazy(() => import("./pages/Onboarding"));
 const CheckoutReturn = lazy(() => import("./pages/CheckoutReturn"));
 const TierWaitlist = lazy(() => import("./pages/TierWaitlist"));
+const AiDividendStocks = lazy(() => import("./pages/guides/AiDividendStocks"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 
 const queryClient = new QueryClient();
