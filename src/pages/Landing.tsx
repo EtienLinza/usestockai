@@ -73,7 +73,7 @@ const Landing = () => {
     <div className="min-h-screen bg-background flex flex-col">
       <SEO
         title="StockAI — AI Stock Predictions, Signals & Screener"
-        description="StockAI scans 6,000+ tickers in real time, generates calibrated AI trading signals, and lets you backtest every strategy. Research and paper-trading platform."
+        description="StockAI scans 6,000+ tickers in real time, generates calibrated AI trading signals, and lets you backtest strategies. Research and paper-trading platform."
         path="/"
         jsonLd={[
           {
