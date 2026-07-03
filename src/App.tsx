@@ -31,6 +31,7 @@ const Pricing = lazy(() => import("./pages/Pricing"));
 const Onboarding = lazy(() => import("./pages/Onboarding"));
 const CheckoutReturn = lazy(() => import("./pages/CheckoutReturn"));
 const TierWaitlist = lazy(() => import("./pages/TierWaitlist"));
+const AiDividendStocks = lazy(() => import("./pages/guides/AiDividendStocks"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 
 const queryClient = new QueryClient();
@@ -64,6 +65,7 @@ const App = () => (
                   <Route path="/terms" element={<Terms />} />
                   <Route path="/privacy" element={<Privacy />} />
                   <Route path="/disclosure" element={<Disclosure />} />
+                  <Route path="/guides/ai-dividend-stocks" element={<AiDividendStocks />} />
                   <Route path="*" element={<NotFound />} />
                 </Routes>
               </Suspense>

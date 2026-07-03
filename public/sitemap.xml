@@ -14,5 +14,6 @@
   <url><loc>https://usestockai.lovable.app/privacy</loc><changefreq>monthly</changefreq><priority>0.3</priority></url>
   <url><loc>https://usestockai.lovable.app/security</loc><changefreq>monthly</changefreq><priority>0.4</priority></url>
   <url><loc>https://usestockai.lovable.app/settings/activity</loc><changefreq>monthly</changefreq><priority>0.3</priority></url>
+  <url><loc>https://usestockai.lovable.app/guides/ai-dividend-stocks</loc><changefreq>monthly</changefreq><priority>0.7</priority></url>
 
 </urlset>
