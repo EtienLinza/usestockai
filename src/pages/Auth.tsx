@@ -152,10 +152,14 @@ const Auth = () => {
             <div className="flex justify-center mb-4">
               <Logo size="md" />
             </div>
+            <h1 className="text-2xl font-semibold tracking-tight mb-2">
+              {isSignUp ? "Create your StockAI account" : "Sign in to StockAI"}
+            </h1>
             <p className="text-muted-foreground">
               {isSignUp ? "Create an account to start tracking the market" : "Sign in to access your dashboard"}
             </p>
           </div>
+
 
           <Card variant="glass">
             <CardHeader>
