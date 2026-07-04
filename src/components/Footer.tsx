@@ -21,6 +21,10 @@ export const Footer = () => {
           </p>
         </div>
 
+        <div className="flex justify-center mb-4">
+          <LaunchLlamaBadge />
+        </div>
+
         <div className="flex flex-col md:flex-row items-center justify-between gap-4">
           <p className="text-xs text-muted-foreground">
             © {new Date().getFullYear()} StockAI. Paper trading & market research.
