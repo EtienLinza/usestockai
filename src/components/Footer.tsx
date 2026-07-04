@@ -29,7 +29,10 @@ export const Footer = () => {
           <p className="text-xs text-muted-foreground">
             © {new Date().getFullYear()} StockAI. Paper trading & market research.
           </p>
-          <nav className="flex items-center gap-6 text-xs">
+          <nav className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-xs">
+            <Link to="/guides/ai-dividend-stocks" className="text-muted-foreground hover:text-foreground transition-colors">
+              Guides
+            </Link>
             <Link to="/pricing" className="text-muted-foreground hover:text-foreground transition-colors">
               Pricing
             </Link>

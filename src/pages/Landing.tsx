@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom";
 import { Navbar } from "@/components/Navbar";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -10,7 +10,7 @@ import { Footer } from "@/components/Footer";
 import { SEO } from "@/components/SEO";
 import {
   ArrowRight, TrendingUp, Brain, Zap, BarChart3, Shield,
-  Target, Activity, LineChart, PieChart, Bell, Eye,
+  Target, Activity, LineChart, PieChart, Bell, Eye, BookOpen,
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 
@@ -253,6 +253,30 @@ const Landing = () => {
                 <p className="text-xs text-muted-foreground">{item.desc}</p>
               </motion.div>
             ))}
+          </div>
+        </div>
+      </section>
+
+      {/* Guides Section */}
+      <section className="py-16 sm:py-24">
+        <div className="container mx-auto px-4 sm:px-6 max-w-5xl">
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            className="text-center mb-10"
+          >
+            <h2 className="text-2xl sm:text-3xl font-medium mb-3">Guides</h2>
+            <p className="text-sm text-muted-foreground">Deep dives on AI-driven investing strategies.</p>
+          </motion.div>
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            <Link to="/guides/ai-dividend-stocks">
+              <Card className="glass-card p-6 h-full hover:border-primary/30 transition-colors group">
+                <BookOpen className="w-6 h-6 text-primary mb-4" />
+                <h3 className="text-base font-medium mb-2 group-hover:text-primary transition-colors">AI Dividend Stocks</h3>
+                <p className="text-xs text-muted-foreground leading-relaxed">Screen SCHD, JEPI & dividend aristocrats with AI conviction scoring and backtesting.</p>
+              </Card>
+            </Link>
           </div>
         </div>
       </section>
