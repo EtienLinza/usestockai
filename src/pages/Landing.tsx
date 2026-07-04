@@ -10,7 +10,7 @@ import { Footer } from "@/components/Footer";
 import { SEO } from "@/components/SEO";
 import {
   ArrowRight, TrendingUp, Brain, Zap, BarChart3, Shield,
-  Target, Activity, LineChart, PieChart, Bell, Eye,
+  Target, Activity, LineChart, PieChart, Bell, Eye, BookOpen,
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 
