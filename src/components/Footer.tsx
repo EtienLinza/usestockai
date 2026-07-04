@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import { AlertTriangle } from "lucide-react";
+import { LaunchLlamaBadge } from "./LaunchLlamaBadge";
 
 export const Footer = () => {
   return (
@@ -18,6 +19,10 @@ export const Footer = () => {
             </Link>
             .
           </p>
+        </div>
+
+        <div className="flex justify-center mb-4">
+          <LaunchLlamaBadge />
         </div>
 
         <div className="flex flex-col md:flex-row items-center justify-between gap-4">
