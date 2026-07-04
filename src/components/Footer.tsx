@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import { AlertTriangle } from "lucide-react";
+import { LaunchLlamaBadge } from "./LaunchLlamaBadge";
 
 export const Footer = () => {
   return (
