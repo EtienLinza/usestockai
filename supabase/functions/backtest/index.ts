@@ -704,8 +704,6 @@ function runWalkForwardBacktest(
         }
         activeProfile = applyModeToProfile(smoothedProfile);
         lastClassifyBar = i;
-
-        console.log(`[Profile] ${ticker} bar=${i} class=${currentClassification.classification} wFast=${activeProfile.weeklyFastMA} wSlow=${activeProfile.weeklySlowMA} hardStop=${activeProfile.hardStopATRMult.toFixed(1)}`);
       }
     }
 
