@@ -27,6 +27,15 @@ import { BacktestUsageBanner, USAGE_QUERY_KEY } from "@/components/BacktestUsage
 import { UpgradeRequiredModal } from "@/components/UpgradeRequiredModal";
 import { useQueryClient } from "@tanstack/react-query";
 import type { Tier } from "@/lib/tier-features";
+import {
+  DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem,
+  DropdownMenuLabel, DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu";
+import {
+  exportSummaryCSV, exportTradeLogCSV, exportEquityCurveCSV,
+  exportJSON, exportMarkdown, exportHTML, exportExcel,
+} from "@/lib/backtest-export";
+import { FileText, FileSpreadsheet, FileJson, FileCode2, Printer, Table as TableIcon } from "lucide-react";
 
 interface BacktestReport {
   periods: { start: string; end: string; accuracy: number; returnPct: number; trades: number }[];
