@@ -555,11 +555,52 @@ const Backtest = () => {
                   </motion.div>
                 ) : report ? (
                   <motion.div key="report" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-6">
-                    {/* CSV Export */}
+                    {/* Export menu */}
                     <div className="flex justify-end">
-                      <Button variant="outline" size="sm" className="gap-1.5 text-xs" onClick={() => exportCSV(report)}>
-                        <Download className="w-3 h-3" /> Export CSV
-                      </Button>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="outline" size="sm" className="gap-1.5 text-xs">
+                            <Download className="w-3 h-3" /> Export
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-56">
+                          <DropdownMenuLabel className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                            Trade Log
+                          </DropdownMenuLabel>
+                          <DropdownMenuItem onClick={() => exportTradeLogCSV(report)}>
+                            <TableIcon className="w-4 h-4 mr-2" /> Full Trade Log (CSV)
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => exportEquityCurveCSV(report)}>
+                            <FileSpreadsheet className="w-4 h-4 mr-2" /> Equity + Drawdown (CSV)
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuLabel className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                            Summary
+                          </DropdownMenuLabel>
+                          <DropdownMenuItem onClick={() => exportSummaryCSV(report)}>
+                            <FileSpreadsheet className="w-4 h-4 mr-2" /> Metrics Summary (CSV)
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => exportMarkdown(report)}>
+                            <FileCode2 className="w-4 h-4 mr-2" /> Markdown Report
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => exportHTML(report)}>
+                            <FileText className="w-4 h-4 mr-2" /> HTML Report
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => exportHTML(report, { print: true })}>
+                            <Printer className="w-4 h-4 mr-2" /> Print / Save as PDF
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuLabel className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                            Complete
+                          </DropdownMenuLabel>
+                          <DropdownMenuItem onClick={() => exportExcel(report)}>
+                            <FileSpreadsheet className="w-4 h-4 mr-2" /> Excel Workbook (.xls)
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => exportJSON(report)}>
+                            <FileJson className="w-4 h-4 mr-2" /> Full JSON (raw data)
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </div>
 
                     {/* Metrics Health Warning */}
