@@ -68,6 +68,8 @@ const App = () => (
                   <Route path="/privacy" element={<Privacy />} />
                   <Route path="/disclosure" element={<Disclosure />} />
                   <Route path="/guides/ai-dividend-stocks" element={<AiDividendStocks />} />
+                  <Route path="/guides/ai-stock-signals-explained" element={<AiStockSignalsExplained />} />
+                  <Route path="/guides/backtest-trading-strategy" element={<BacktestTradingStrategy />} />
                   <Route path="*" element={<NotFound />} />
                 </Routes>
               </Suspense>
