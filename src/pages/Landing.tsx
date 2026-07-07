@@ -11,8 +11,20 @@ import { SEO } from "@/components/SEO";
 import {
   ArrowRight, TrendingUp, Brain, Zap, BarChart3, Shield,
   Target, Activity, LineChart, PieChart, Bell, Eye, BookOpen,
+  ArrowUpRight, ArrowDownRight, CheckCircle2, Lock,
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
+
+type LiveSignalPreview = {
+  id: string;
+  ticker: string;
+  signal_type: string;
+  confidence: number;
+  entry_price: number;
+  strategy: string | null;
+  regime: string | null;
+  reasoning: string | null;
+};
 
 const FAQS = [
   {
