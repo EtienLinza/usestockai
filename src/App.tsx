@@ -32,6 +32,8 @@ const Onboarding = lazy(() => import("./pages/Onboarding"));
 const CheckoutReturn = lazy(() => import("./pages/CheckoutReturn"));
 const TierWaitlist = lazy(() => import("./pages/TierWaitlist"));
 const AiDividendStocks = lazy(() => import("./pages/guides/AiDividendStocks"));
+const AiStockSignalsExplained = lazy(() => import("./pages/guides/AiStockSignalsExplained"));
+const BacktestTradingStrategy = lazy(() => import("./pages/guides/BacktestTradingStrategy"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 
 const queryClient = new QueryClient();
