@@ -205,6 +205,122 @@ const Landing = () => {
         </div>
       </section>
 
+      {/* Live Signals Preview — proof the product works */}
+      <section className="py-16 sm:py-24 relative">
+        <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-border to-transparent" />
+        <div className="container mx-auto px-4 sm:px-6 max-w-6xl">
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            className="text-center mb-10"
+          >
+            <Badge variant="outline" className="gap-1.5 mb-4 border-success/30 text-success">
+              <span className="w-1.5 h-1.5 rounded-full bg-success animate-pulse" />
+              Live from the scanner
+            </Badge>
+            <h2 className="text-2xl sm:text-3xl font-medium mb-3">This is what you actually get</h2>
+            <p className="text-sm text-muted-foreground max-w-xl mx-auto">
+              Real signals published by StockAI in the last few hours — ticker, direction, entry price, calibrated conviction, and the reasoning behind the call. No hidden picks, no cherry-picking.
+            </p>
+          </motion.div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+            {previewSignals.length > 0
+              ? previewSignals.map((s, i) => {
+                  const isBuy = s.signal_type?.toLowerCase().includes("buy");
+                  return (
+                    <motion.div
+                      key={s.id}
+                      initial={{ opacity: 0, y: 20 }}
+                      whileInView={{ opacity: 1, y: 0 }}
+                      viewport={{ once: true }}
+                      transition={{ delay: i * 0.08 }}
+                    >
+                      <Card className="glass-card p-5 h-full flex flex-col">
+                        <div className="flex items-center justify-between mb-3">
+                          <div className="flex items-center gap-2">
+                            <span className="font-mono font-medium text-base">{s.ticker}</span>
+                            <Badge
+                              variant="outline"
+                              className={`gap-1 text-[10px] ${isBuy ? "border-success/40 text-success" : "border-destructive/40 text-destructive"}`}
+                            >
+                              {isBuy ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}
+                              {s.signal_type?.toUpperCase()}
+                            </Badge>
+                          </div>
+                          <div className="text-right">
+                            <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Conviction</div>
+                            <div className="font-mono text-sm text-primary tabular-nums">{Math.round(s.confidence)}%</div>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-3 text-[11px] text-muted-foreground mb-3">
+                          <span>Entry <span className="font-mono text-foreground">${s.entry_price?.toFixed(2)}</span></span>
+                          {s.strategy && <span>· {s.strategy}</span>}
+                          {s.regime && <span>· {s.regime}</span>}
+                        </div>
+                        <p className="text-xs text-muted-foreground leading-relaxed line-clamp-4 flex-1">
+                          {s.reasoning || "Multi-indicator consensus with regime-adjusted conviction."}
+                        </p>
+                      </Card>
+                    </motion.div>
+                  );
+                })
+              : Array.from({ length: 3 }).map((_, i) => (
+                  <Card key={i} className="glass-card p-5 h-40 animate-pulse opacity-40" />
+                ))}
+          </div>
+          <div className="text-center">
+            <Button variant="outline" onClick={() => navigate("/dashboard")} className="group">
+              See all live signals
+              <ArrowRight className="w-4 h-4 ml-1 transition-transform group-hover:translate-x-1" />
+            </Button>
+          </div>
+        </div>
+      </section>
+
+      {/* Trust / What's included */}
+      <section className="py-16 sm:py-24 bg-secondary/20">
+        <div className="container mx-auto px-4 sm:px-6 max-w-5xl">
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            className="text-center mb-12"
+          >
+            <h2 className="text-2xl sm:text-3xl font-medium mb-3">What StockAI actually does for you</h2>
+            <p className="text-sm text-muted-foreground max-w-xl mx-auto">
+              No black boxes. Every signal shows its math, every backtest is reproducible, and nothing here is financial advice.
+            </p>
+          </motion.div>
+
+          <div className="grid sm:grid-cols-2 gap-4 mb-10">
+            {[
+              { icon: CheckCircle2, title: "You see every input", desc: "Each signal lists the indicators, regime, and confidence calibration used — not just a ticker and a vibe." },
+              { icon: CheckCircle2, title: "You can verify the edge", desc: "Backtest any strategy over years of data with Sharpe, Sortino, Monte Carlo, and walk-forward — export the full trade log." },
+              { icon: CheckCircle2, title: "You track paper trades", desc: "Register buys against live signals, watch real-time P&L, win rate, and drawdown before risking a cent." },
+              { icon: Lock, title: "Research only, transparent", desc: "StockAI is a research and paper-trading tool. No custody, no order routing, no hidden 'guaranteed' claims." },
+            ].map((item, i) => (
+              <motion.div
+                key={item.title}
+                initial={{ opacity: 0, y: 16 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true }}
+                transition={{ delay: i * 0.06 }}
+              >
+                <Card className="glass-card p-5 h-full flex gap-3">
+                  <item.icon className="w-5 h-5 text-primary shrink-0 mt-0.5" />
+                  <div>
+                    <h3 className="text-sm font-medium mb-1">{item.title}</h3>
+                    <p className="text-xs text-muted-foreground leading-relaxed">{item.desc}</p>
+                  </div>
+                </Card>
+              </motion.div>
+            ))}
+          </div>
+        </div>
+      </section>
+
       {/* Features Section */}
       <section className="py-16 sm:py-24 relative">
         <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-border to-transparent" />
