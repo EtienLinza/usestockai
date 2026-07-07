@@ -321,6 +321,78 @@ const Landing = () => {
         </div>
       </section>
 
+      {/* Competitor comparison */}
+      <section className="py-16 sm:py-24 relative">
+        <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-border to-transparent" />
+        <div className="container mx-auto px-4 sm:px-6 max-w-5xl">
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            className="text-center mb-10"
+          >
+            <h2 className="text-2xl sm:text-3xl font-medium mb-3">Why StockAI, not the alternatives</h2>
+            <p className="text-sm text-muted-foreground max-w-xl mx-auto">
+              An honest side-by-side. No feature checklists padded with vaporware — just what each tool actually does.
+            </p>
+          </motion.div>
+
+          {/* Desktop table */}
+          <div className="hidden md:block overflow-hidden rounded-lg border border-border/40">
+            <table className="w-full text-sm">
+              <thead className="bg-secondary/40">
+                <tr className="text-left">
+                  <th className="p-4 font-medium text-xs uppercase tracking-wider text-muted-foreground"></th>
+                  <th className="p-4 font-medium text-primary">StockAI</th>
+                  <th className="p-4 font-medium text-muted-foreground">Discord signal groups</th>
+                  <th className="p-4 font-medium text-muted-foreground">TradingView</th>
+                  <th className="p-4 font-medium text-muted-foreground">Tickeron / Danelfin</th>
+                </tr>
+              </thead>
+              <tbody>
+                {[
+                  ["Reasoning shown for every signal", "yes", "no", "n/a", "partial"],
+                  ["Calibrated conviction (not just a score)", "yes", "no", "no", "no"],
+                  ["Institutional backtester (Sharpe, Sortino, Monte Carlo, walk-forward)", "yes", "no", "partial", "partial"],
+                  ["Export full trade log (CSV, Excel, JSON, HTML)", "yes", "no", "partial", "no"],
+                  ["Regime-aware sizing & correlation gating", "yes", "no", "no", "no"],
+                  ["Scans 6,000+ tickers automatically", "yes", "no", "manual", "yes"],
+                  ["Paper-trading portfolio with live P&L", "yes", "no", "partial", "no"],
+                  ["Starts free", "yes", "no", "yes", "no"],
+                ].map(([feature, a, b, c, d], i) => (
+                  <tr key={i} className="border-t border-border/30">
+                    <td className="p-4 text-muted-foreground">{feature}</td>
+                    {[a, b, c, d].map((v, j) => (
+                      <td key={j} className="p-4">
+                        <ComparisonCell value={v as string} highlight={j === 0} />
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Mobile cards */}
+          <div className="md:hidden space-y-4">
+            {[
+              { name: "vs Discord signal groups", win: "Every signal ships with the indicators, regime, and math behind it — no anonymous 'trust me' picks." },
+              { name: "vs TradingView", win: "You get a pre-built ensemble scanner instead of writing Pine Script. TradingView still wins on charting depth." },
+              { name: "vs Tickeron / Danelfin", win: "Transparent multi-layer scoring, exportable trade logs, and a backtester that uses the same engine as live signals." },
+            ].map((c) => (
+              <Card key={c.name} className="glass-card p-5">
+                <div className="text-sm font-medium mb-1">{c.name}</div>
+                <p className="text-xs text-muted-foreground leading-relaxed">{c.win}</p>
+              </Card>
+            ))}
+          </div>
+
+          <p className="text-[11px] text-muted-foreground text-center mt-6 max-w-2xl mx-auto">
+            Comparison based on publicly listed features as of 2026. StockAI is a research and paper-trading tool — it does not execute real orders or hold custody of funds.
+          </p>
+        </div>
+      </section>
+
       {/* Features Section */}
       <section className="py-16 sm:py-24 relative">
         <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-border to-transparent" />
