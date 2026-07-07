@@ -69,7 +69,7 @@ const AiDividendStocks = () => {
   return (
     <div className="min-h-screen bg-background flex flex-col">
       <SEO
-        title="AI Dividend Stocks — Screen SCHD, JEPI & Dividend Aristocrats with AI"
+        title="AI Dividend Stocks — Screen SCHD & JEPI with Conviction"
         description="Use AI to score dividend stocks by sustainability, growth, and conviction. Backtest SCHD, JEPI, and dividend aristocrat strategies in one platform."
         path={PATH}
         type="article"
