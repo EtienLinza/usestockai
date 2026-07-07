@@ -26,6 +26,24 @@ type LiveSignalPreview = {
   reasoning: string | null;
 };
 
+const ComparisonCell = ({ value, highlight }: { value: string; highlight?: boolean }) => {
+  if (value === "yes") {
+    return <Check className={`w-4 h-4 ${highlight ? "text-primary" : "text-success/70"}`} />;
+  }
+  if (value === "no") {
+    return <X className="w-4 h-4 text-muted-foreground/40" />;
+  }
+  if (value === "partial" || value === "manual" || value === "n/a") {
+    return (
+      <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+        <Minus className="w-3 h-3" />
+        {value === "n/a" ? "n/a" : value === "manual" ? "manual" : "partial"}
+      </span>
+    );
+  }
+  return <span className="text-xs text-muted-foreground">{value}</span>;
+};
+
 const FAQS = [
   {
     q: "Is there an AI that can predict stocks?",
