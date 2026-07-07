@@ -407,13 +407,19 @@ const Landing = () => {
             <p className="text-sm text-muted-foreground">Deep dives on AI-driven investing strategies.</p>
           </motion.div>
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            <Link to="/guides/ai-dividend-stocks">
-              <Card className="glass-card p-6 h-full hover:border-primary/30 transition-colors group">
-                <BookOpen className="w-6 h-6 text-primary mb-4" />
-                <h3 className="text-base font-medium mb-2 group-hover:text-primary transition-colors">AI Dividend Stocks</h3>
-                <p className="text-xs text-muted-foreground leading-relaxed">Screen SCHD, JEPI & dividend aristocrats with AI conviction scoring and backtesting.</p>
-              </Card>
-            </Link>
+            {[
+              { to: "/guides/ai-dividend-stocks", title: "AI Dividend Stocks", desc: "Screen SCHD, JEPI & dividend aristocrats with AI conviction scoring and backtesting." },
+              { to: "/guides/ai-stock-signals-explained", title: "AI Stock Signals Explained", desc: "How conviction scoring, calibration, and regime detection actually work under the hood." },
+              { to: "/guides/backtest-trading-strategy", title: "How to Backtest a Strategy", desc: "The institutional playbook: Sharpe, Sortino, walk-forward, and Monte Carlo stress tests." },
+            ].map((g) => (
+              <Link key={g.to} to={g.to}>
+                <Card className="glass-card p-6 h-full hover:border-primary/30 transition-colors group">
+                  <BookOpen className="w-6 h-6 text-primary mb-4" />
+                  <h3 className="text-base font-medium mb-2 group-hover:text-primary transition-colors">{g.title}</h3>
+                  <p className="text-xs text-muted-foreground leading-relaxed">{g.desc}</p>
+                </Card>
+              </Link>
+            ))}
           </div>
         </div>
       </section>
