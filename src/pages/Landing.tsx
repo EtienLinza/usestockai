@@ -411,6 +411,7 @@ const Landing = () => {
               { to: "/guides/ai-dividend-stocks", title: "AI Dividend Stocks", desc: "Screen SCHD, JEPI & dividend aristocrats with AI conviction scoring and backtesting." },
               { to: "/guides/ai-stock-signals-explained", title: "AI Stock Signals Explained", desc: "How conviction scoring, calibration, and regime detection actually work under the hood." },
               { to: "/guides/backtest-trading-strategy", title: "How to Backtest a Strategy", desc: "The institutional playbook: Sharpe, Sortino, walk-forward, and Monte Carlo stress tests." },
+              { to: "/guides/best-ai-stocks-to-buy-now", title: "Best AI Stocks to Buy Now", desc: "NVDA, MSFT, GOOGL, META, AMD & TSMC — evaluated with AI conviction, not headline hype." },
             ].map((g) => (
               <Link key={g.to} to={g.to}>
                 <Card className="glass-card p-6 h-full hover:border-primary/30 transition-colors group">
