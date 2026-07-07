@@ -11,7 +11,9 @@ import { SEO } from "@/components/SEO";
 import {
   ArrowRight, TrendingUp, Brain, Zap, BarChart3, Shield,
   Target, Activity, LineChart, PieChart, Bell, Eye, BookOpen,
-  ArrowUpRight, ArrowDownRight, CheckCircle2, Lock,
+  ArrowRight, TrendingUp, Brain, Zap, BarChart3, Shield,
+  Target, Activity, LineChart, PieChart, Bell, Eye, BookOpen,
+  ArrowUpRight, ArrowDownRight, CheckCircle2, Lock, Check, X, Minus,
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 
