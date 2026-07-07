@@ -44,16 +44,25 @@ const FAQS = [
 const Landing = () => {
   const navigate = useNavigate();
   const [signalCount, setSignalCount] = useState<number | null>(null);
+  const [previewSignals, setPreviewSignals] = useState<LiveSignalPreview[]>([]);
 
   useEffect(() => {
-    const fetchCount = async () => {
+    const fetchData = async () => {
       const { count } = await supabase
         .from("live_signals")
         .select("*", { count: "exact", head: true })
         .gte("expires_at", new Date().toISOString());
       if (count !== null) setSignalCount(count);
+
+      const { data } = await supabase
+        .from("live_signals")
+        .select("id, ticker, signal_type, confidence, entry_price, strategy, regime, reasoning")
+        .gte("expires_at", new Date().toISOString())
+        .order("confidence", { ascending: false })
+        .limit(3);
+      if (data) setPreviewSignals(data as LiveSignalPreview[]);
     };
-    fetchCount();
+    fetchData();
   }, []);
 
   const features = [
