@@ -1415,6 +1415,11 @@ serve(async (req) => {
     const strategyTilts = (weightsRes.data?.strategy_tilts as Record<string, { multiplier: number }> | null) ?? {};
     const tickerCalibration = (weightsRes.data?.ticker_calibration as Record<string, { adjust: number }> | null) ?? {};
 
+    if (scanMode !== "exits" && !isMarketOpen()) {
+      await recordHeartbeat("autotrader-scan", startedAt, "ok", `entries skipped: market closed mode=${scanMode}`);
+      return json({ status: "skipped-market-closed", mode: scanMode, summary });
+    }
+
     // 3. Per-user processing — gated by per-user next_scan_at
     const now = new Date();
     let skippedNotDue = 0;
