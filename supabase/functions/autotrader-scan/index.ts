@@ -1487,7 +1487,8 @@ serve(async (req) => {
 
       // Per-user cadence gate applies only to entry scans. Exit scans must keep
       // running every cron tick so stops and take-profits are never delayed.
-      if (scanMode !== "exits" && rawSettings.next_scan_at && new Date(rawSettings.next_scan_at) > now) {
+      const shouldApplyCadenceGate = scanMode === "all" || (scanMode === "entries" && entryShardCount <= 1);
+      if (shouldApplyCadenceGate && rawSettings.next_scan_at && new Date(rawSettings.next_scan_at) > now) {
         skippedNotDue++;
         continue;
       }
@@ -1608,7 +1609,7 @@ serve(async (req) => {
 
         // Update cadence timestamps
         const timestampPatch: Record<string, string> = { last_scan_at: now.toISOString() };
-        if (scanMode !== "exits") {
+        if (scanMode === "all" || (scanMode === "entries" && entryShardCount <= 1)) {
           const intervalMin = rawSettings.advanced_mode
             ? rawSettings.scan_interval_minutes
             : algoScanIntervalMinutes(macro, vixRegime);
