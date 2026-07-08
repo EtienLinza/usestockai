@@ -516,6 +516,16 @@ type EntryAction =
       slippageBpsEst?: number | null }
   | { kind: "HOLD" | "BLOCKED"; reason: string };
 
+type ScanMode = "all" | "exits" | "entries";
+
+const MAX_ENTRY_TICKERS_PER_INVOCATION = 30;
+
+function tickerShard(ticker: string, shards: number): number {
+  let h = 0;
+  for (let i = 0; i < ticker.length; i++) h = (h * 31 + ticker.charCodeAt(i)) >>> 0;
+  return h % Math.max(1, shards);
+}
+
 // ============================================================================
 // Helper: compute the 4 non-trailing peak signals (RSI div, climax, MACD roll,
 // thesis done) — used by runner-mode exhaustion check. Returns trailing as a
@@ -1323,6 +1333,14 @@ serve(async (req) => {
   if (denied) return denied;
 
   const startedAt = Date.now();
+  const body = await req.json().catch(() => ({}));
+  const scanMode: ScanMode = body?.mode === "exits"
+    ? "exits"
+    : body?.mode === "entries"
+    ? "entries"
+    : "all";
+  const entryShardCount = Math.max(1, Math.min(12, Number(body?.shards ?? 1) || 1));
+  const entryShard = Math.max(0, Math.min(entryShardCount - 1, Number(body?.shard ?? 0) || 0));
   const supabase = createClient(
     Deno.env.get("SUPABASE_URL")!,
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
@@ -1397,6 +1415,11 @@ serve(async (req) => {
     const strategyTilts = (weightsRes.data?.strategy_tilts as Record<string, { multiplier: number }> | null) ?? {};
     const tickerCalibration = (weightsRes.data?.ticker_calibration as Record<string, { adjust: number }> | null) ?? {};
 
+    if (scanMode !== "exits" && !isMarketOpen()) {
+      await recordHeartbeat("autotrader-scan", startedAt, "ok", `entries skipped: market closed mode=${scanMode}`);
+      return json({ status: "skipped-market-closed", mode: scanMode, summary });
+    }
+
     // 3. Per-user processing — gated by per-user next_scan_at
     const now = new Date();
     let skippedNotDue = 0;
@@ -1467,8 +1490,10 @@ serve(async (req) => {
         continue;
       }
 
-      // Per-user cadence gate
-      if (rawSettings.next_scan_at && new Date(rawSettings.next_scan_at) > now) {
+      // Per-user cadence gate applies only to entry scans. Exit scans must keep
+      // running every cron tick so stops and take-profits are never delayed.
+      const shouldApplyCadenceGate = scanMode === "all" || (scanMode === "entries" && entryShardCount <= 1);
+      if (shouldApplyCadenceGate && rawSettings.next_scan_at && new Date(rawSettings.next_scan_at) > now) {
         skippedNotDue++;
         continue;
       }
@@ -1561,7 +1586,20 @@ serve(async (req) => {
 
       try {
         const userSummary = { entries: 0, exits: 0, partials: 0, holds: 0, blocked: 0, errors: 0, watchlistSize: 0, openPositions: 0, evaluated: 0 };
-        await processUser(supabase, settings, macro, summary, userSummary, exitCalibration, volScalar, calibrationCurve, strategyTilts, tickerCalibration);
+        await processUser(
+          supabase,
+          settings,
+          macro,
+          summary,
+          userSummary,
+          exitCalibration,
+          volScalar,
+          calibrationCurve,
+          strategyTilts,
+          tickerCalibration,
+          scanMode,
+          { shard: entryShard, shards: entryShardCount },
+        );
 
         // Always write a per-scan rollup so users see the bot is alive even when
         // no trades fire. This is the single source of "scan happened" visibility.
@@ -1575,12 +1613,15 @@ serve(async (req) => {
         });
 
         // Update cadence timestamps
-        const intervalMin = rawSettings.advanced_mode
-          ? rawSettings.scan_interval_minutes
-          : algoScanIntervalMinutes(macro, vixRegime);
-        const nextScan = new Date(now.getTime() + intervalMin * 60_000);
+        const timestampPatch: Record<string, string> = { last_scan_at: now.toISOString() };
+        if (scanMode === "all" || (scanMode === "entries" && (entryShardCount <= 1 || entryShard === 0))) {
+          const intervalMin = rawSettings.advanced_mode
+            ? rawSettings.scan_interval_minutes
+            : algoScanIntervalMinutes(macro, vixRegime);
+          timestampPatch.next_scan_at = new Date(now.getTime() + intervalMin * 60_000).toISOString();
+        }
         await supabase.from("autotrade_settings")
-          .update({ last_scan_at: now.toISOString(), next_scan_at: nextScan.toISOString() })
+          .update(timestampPatch)
           .eq("user_id", rawSettings.user_id);
       } catch (err) {
         // Circuit breaker trips abort the current scan only — no global state is
@@ -1622,7 +1663,7 @@ serve(async (req) => {
       "ok",
       `users=${summary.users} entries=${summary.entries} exits=${summary.exits} errors=${summary.errors}`,
     );
-    return json({ status: "ok", summary });
+    return json({ status: "ok", mode: scanMode, shard: entryShard, shards: entryShardCount, summary });
   } catch (err) {
     console.error("AutoTrader top-level error:", err);
     await recordHeartbeat("autotrader-scan", startedAt, "error", (err as Error).message ?? "unknown");
@@ -1678,7 +1719,7 @@ function isMarketOpen(now: Date = new Date()): boolean {
 
 // ── AUTO-DISCOVERY: pull good live_signals into watchlist + prune stale auto-adds ──
 async function syncAutoWatchlist(
-  supabase: ReturnType<typeof createClient>,
+  supabase: any,
   settings: Settings,
   currentWatch: Array<{ ticker: string; source: string | null }>,
   openPositionTickers: string[],
@@ -1694,6 +1735,7 @@ async function syncAutoWatchlist(
     .select("ticker, confidence, created_at")
     .gte("confidence", floor)
     .gte("created_at", since)
+    .gt("expires_at", new Date().toISOString())
     .order("confidence", { ascending: false });
   if (sErr) {
     console.warn("auto-add: live_signals fetch failed", sErr);
@@ -1787,7 +1829,7 @@ async function syncAutoWatchlist(
  *  Reuses the same accounting path as a normal FULL_EXIT so unrealized P&L,
  *  cooldowns, and sell_alert notifications stay consistent. */
 async function liquidateAllPositions(
-  supabase: ReturnType<typeof createClient>,
+  supabase: any,
   userId: string,
 ): Promise<number> {
   const { data: posRows } = await supabase
@@ -1824,7 +1866,7 @@ async function liquidateAllPositions(
 /** Run only the exit pass (stops, take-profits, partials) for a frozen user.
  *  Skips watchlist, entries, sizing — pure risk management. */
 async function runExitOnlyPass(
-  supabase: ReturnType<typeof createClient>,
+  supabase: any,
   rawSettings: Settings,
   macro: MacroContext | null,
   exitCalibration: Record<string, { trailMultAdjust: number }> | null,
@@ -1895,7 +1937,7 @@ async function runExitOnlyPass(
 
 
 async function processUser(
-  supabase: ReturnType<typeof createClient>,
+  supabase: any,
   settings: Settings,
   macro: MacroContext | null,
   summary: { entries: number; exits: number; partials: number; holds: number; blocked: number; errors: number },
@@ -1905,6 +1947,8 @@ async function processUser(
   calibrationCurve: Record<string, { adjust: number }>,
   strategyTilts: Record<string, { multiplier: number }>,
   tickerCalibration: Record<string, { adjust: number }>,
+  scanMode: ScanMode = "all",
+  entryShard: { shard: number; shards: number } = { shard: 0, shards: 1 },
 ) {
   const userId = settings.user_id;
 
@@ -1919,7 +1963,9 @@ async function processUser(
   const caps = (capsRes.data ?? null) as { enabled: boolean; enforcement_mode: string; sector_max_pct: number; portfolio_beta_max: number } | null;
 
   // ── AUTO-DISCOVERY: pull promising tickers from live_signals into watchlist ──
-  if (settings.auto_add_watchlist) {
+  // Run this in the entry cadence, not the 5-min exit cadence, so watchlist
+  // refreshes remain cheap and don't compete with risk-management exits.
+  if (scanMode !== "exits" && settings.auto_add_watchlist && entryShard.shard === 0) {
     await syncAutoWatchlist(supabase, settings, watchRows, positions.map(p => p.ticker.toUpperCase()));
     // Re-read so the rest of the scan picks up newly-added rows
     const refreshed = await supabase.from("watchlist")
@@ -1932,10 +1978,16 @@ async function processUser(
   userSummary.openPositions = positions.length;
 
   // Build deduped ticker list
-  const allTickers = Array.from(new Set([
-    ...positions.map(p => p.ticker.toUpperCase()),
-    ...watchlist,
-  ]));
+  const entryCandidatesForShard = watchlist.filter(t =>
+    entryShard.shards <= 1 || tickerShard(t, entryShard.shards) === entryShard.shard
+  );
+  const entryTickers = entryCandidatesForShard.slice(0, MAX_ENTRY_TICKERS_PER_INVOCATION);
+  const tickersForThisMode = scanMode === "exits"
+    ? positions.map(p => p.ticker.toUpperCase())
+    : scanMode === "entries"
+    ? entryTickers
+    : [...positions.map(p => p.ticker.toUpperCase()), ...entryTickers];
+  const allTickers = Array.from(new Set(tickersForThisMode));
   if (allTickers.length === 0) return;
 
   // C-2 FIX: hydrate the per-ticker signal cooldown tracker from DB so that
@@ -1994,7 +2046,7 @@ async function processUser(
   let totalNavExposureDollars = 0;
   let unrealizedToday = 0;
 
-  for (const pos of positions) {
+  if (scanMode !== "entries") for (const pos of positions) {
     const data = priceCache.get(pos.ticker.toUpperCase());
     if (!data || data.close.length < 200) continue;
     const currentPrice = data.close[data.close.length - 1];
@@ -2090,6 +2142,20 @@ async function processUser(
   // ── ENTRIES ─────────────────────────────────────────────────────────────
   // Only users with autotrader enabled get new entries. Users with disabled
   // autotrader still benefit from the exit pass above (manual buys auto-close).
+  if (scanMode === "exits") {
+    await supabase.from("virtual_portfolio_log").upsert(
+      {
+        user_id: userId, date: today,
+        total_value: currentNav,
+        cash: Math.max(0, currentNav - totalNavExposureDollars),
+        positions_value: totalNavExposureDollars,
+      },
+      { onConflict: "user_id,date" },
+    );
+    await persistTrackerCacheToDB(supabase);
+    return;
+  }
+
   if (!settings.enabled) {
     await supabase.from("virtual_portfolio_log").upsert(
       {
@@ -2144,28 +2210,38 @@ async function processUser(
   const MAX_ENTRIES_PER_SCAN = 2;
   type Pending =
     | { kind: "enter"; ticker: string; decision: Extract<EntryAction, { kind: "ENTER" }> }
-    | { kind: "blocked"; ticker: string; decision: Extract<EntryAction, { kind: "BLOCKED" }> }
+    | { kind: "blocked"; ticker: string; decision: { kind: "BLOCKED"; reason: string } }
     | { kind: "hold" };
   const pending: Pending[] = [];
 
   // Pre-load Danelfin AI Scores for the whole watchlist in one query — used
   // as a SUPPORTING conviction factor inside evaluateSignal. Missing scores
   // are neutral (never block).
-  const danelfinMap = await loadDanelfinScores(watchlist);
+  const watchlistForEntry = entryTickers;
+  if (watchlistForEntry.length < entryCandidatesForShard.length) {
+    await supabase.from("autotrade_log").insert({
+      user_id: userId,
+      ticker: "SCAN",
+      action: "HOLD",
+      reason: `Entry scan chunked: evaluating ${watchlistForEntry.length}/${entryCandidatesForShard.length} eligible watchlist tickers this run to stay within CPU budget`,
+    });
+  }
+
+  const danelfinMap = await loadDanelfinScores(watchlistForEntry);
   if (danelfinMap.size > 0) {
-    console.log(`autotrader-scan: Danelfin coverage ${danelfinMap.size}/${watchlist.length}`);
+    console.log(`autotrader-scan: Danelfin coverage ${danelfinMap.size}/${watchlistForEntry.length}`);
   }
 
   // Pre-load EPS revision scores — supporting fundamental factor (never blocks).
-  const epsRevisionMap = await loadEpsRevisions(watchlist);
+  const epsRevisionMap = await loadEpsRevisions(watchlistForEntry);
   if (epsRevisionMap.size > 0) {
-    console.log(`autotrader-scan: EPS revision coverage ${epsRevisionMap.size}/${watchlist.length}`);
+    console.log(`autotrader-scan: EPS revision coverage ${epsRevisionMap.size}/${watchlistForEntry.length}`);
   }
 
   // Pre-load short-interest velocity map — supporting factor (never blocks).
-  const shortInterestMap = await loadShortInterestMap(watchlist);
+  const shortInterestMap = await loadShortInterestMap(watchlistForEntry);
   if (shortInterestMap.size > 0) {
-    console.log(`autotrader-scan: short-interest coverage ${shortInterestMap.size}/${watchlist.length}`);
+    console.log(`autotrader-scan: short-interest coverage ${shortInterestMap.size}/${watchlistForEntry.length}`);
   }
 
   // Pre-load current market regime (cached daily) + meta-label model (latest).
@@ -2242,7 +2318,7 @@ async function processUser(
     }
   } catch (e) { console.warn("strategyEdges load failed", e); }
 
-  for (const ticker of watchlist) {
+  for (const ticker of watchlistForEntry) {
     if (heldTickers.has(ticker)) continue;
 
     // Cooldown check (most-recent close)
@@ -2282,7 +2358,7 @@ async function processUser(
 
 
     if (decision.kind === "ENTER") pending.push({ kind: "enter", ticker, decision });
-    else if (decision.kind === "BLOCKED") pending.push({ kind: "blocked", ticker, decision });
+    else if (decision.kind === "BLOCKED") pending.push({ kind: "blocked", ticker, decision: { kind: "BLOCKED", reason: decision.reason } });
     else pending.push({ kind: "hold" });
   }
 
@@ -2318,7 +2394,7 @@ async function processUser(
   for (const pos of positions) {
     const entry = Number(pos.entry_price);
     const stop = inferHardStopPrice(pos);
-    if (!Number.isFinite(entry) || !Number.isFinite(stop)) continue;
+    if (!Number.isFinite(entry) || stop == null || !Number.isFinite(stop)) continue;
     openRiskDollars += Math.abs(entry - stop) * Number(pos.shares);
   }
   if (capsActive) {
@@ -2357,7 +2433,7 @@ async function processUser(
   const logInserts: Promise<unknown>[] = [];
   const queueLog = (row: Record<string, unknown>) => {
     logInserts.push(
-      supabase.from("autotrade_log").insert(row).then(() => {}, (e: unknown) => {
+      Promise.resolve(supabase.from("autotrade_log").insert(row)).then(() => {}, (e: unknown) => {
         console.warn("autotrade_log insert failed", e);
       }),
     );
@@ -2675,7 +2751,7 @@ async function processUser(
 
 // ── Execute helpers ───────────────────────────────────────────────────────
 async function executeExit(
-  supabase: ReturnType<typeof createClient>,
+  supabase: any,
   pos: Position, action: ExitAction, profile: ProfileParams,
   summary: { exits: number; partials: number; holds: number },
 ) {
@@ -2780,7 +2856,7 @@ async function executeExit(
 }
 
 async function executeEntry(
-  supabase: ReturnType<typeof createClient>,
+  supabase: any,
   settings: Settings, ticker: string, e: Extract<EntryAction, { kind: "ENTER" }>,
   summary: { entries: number },
   openedByRotation = false,
