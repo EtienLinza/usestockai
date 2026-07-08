@@ -2960,6 +2960,99 @@ async function processUser(
     if (p.kind === "hold") { summary.holds++; userSummary.holds++; }
   }
 
+  // ── ADD-ON / RE-ENTRY PASS ──────────────────────────────────────────────
+  // Re-query open positions so we see updated trim state written during the
+  // exit pass (partial_trim_shares / reentry_deadline). Restricted to this
+  // shard so CPU stays bounded across cron shards.
+  try {
+    const { data: freshPositions } = await supabase
+      .from("virtual_positions").select("*")
+      .eq("user_id", userId).eq("status", "open");
+    const openList = (freshPositions ?? []) as unknown as Position[];
+    const openTix = openList.map(p => p.ticker.toUpperCase());
+    const nowMs = Date.now();
+    const MAX_ADDS_PER_SCAN = 2;
+    let addsDone = 0;
+
+    for (const pos of openList) {
+      if (addsDone >= MAX_ADDS_PER_SCAN) break;
+      const ticker = pos.ticker.toUpperCase();
+      if (entryShard.shards > 1 && tickerShard(ticker, entryShard.shards) !== entryShard.shard) continue;
+      const data = priceCache.get(ticker);
+      if (!data || data.close.length < 200) continue;
+
+      const trimShares = Number(pos.partial_trim_shares ?? 0);
+      const deadlineOk = pos.reentry_deadline
+        ? new Date(pos.reentry_deadline).getTime() > nowMs
+        : false;
+      const canReenter = trimShares > 0 && deadlineOk;
+      const mode: "ADD_ON" | "RE_ENTRY" = canReenter ? "RE_ENTRY" : "ADD_ON";
+
+      // Portfolio heat + single-name headroom pre-check (cheap gate before
+      // running signal engine). Uses starting_nav from settings for heat.
+      const stopPx = inferHardStopPrice(pos);
+      const currentPx = data.close[data.close.length - 1];
+      const posDollars = currentPx * Number(pos.shares);
+      const singleNameHeadroomPct = settings.max_single_name_pct - (posDollars / currentNav) * 100;
+      if (singleNameHeadroomPct <= 0.5) {
+        // Already at single-name cap
+        continue;
+      }
+      const navHeadroomPct = settings.max_nav_exposure_pct - navExposurePct;
+      if (navHeadroomPct <= 0.5) continue;
+
+      const decision = await evaluateAddOnCandidate(
+        ticker, data, pos, macro, settings,
+        danelfinMap, epsRevisionMap, marketRegime, metaModel,
+        strategyEdges, metaGate,
+        calibrationCurve, strategyTilts, tickerCalibration,
+        openTix, mode,
+      );
+
+      if (decision.kind === "SKIP") continue;
+      if (decision.kind === "BLOCKED") {
+        await supabase.from("autotrade_log").insert({
+          user_id: userId, ticker, action: "BLOCKED",
+          reason: `${mode}: ${decision.reason}`,
+        });
+        continue;
+      }
+
+      // Clamp add dollars to headroom + heat cap
+      const maxByHeadroom = Math.min(
+        currentNav * (singleNameHeadroomPct / 100),
+        currentNav * (navHeadroomPct / 100),
+      );
+      const stopDist = stopPx != null ? Math.abs(currentPx - stopPx) : currentPx * 0.05;
+      const heatBudgetRemaining = Math.max(0, currentNav * 0.06 - openRiskDollars);
+      const maxByHeat = stopDist > 0 ? (heatBudgetRemaining / stopDist) * currentPx : maxByHeadroom;
+      const cappedDollars = Math.min(decision.addDollars, maxByHeadroom, maxByHeat);
+      if (cappedDollars < currentPx) {
+        await supabase.from("autotrade_log").insert({
+          user_id: userId, ticker, action: "BLOCKED",
+          reason: `${mode} blocked: sizing shrunk below 1 share by heat/headroom caps`,
+        });
+        continue;
+      }
+
+      const ok = await executeAddOn(supabase, pos, {
+        ...decision,
+        addDollars: cappedDollars,
+      }, settings);
+      if (ok) {
+        addsDone++;
+        // Update running exposure for subsequent iterations
+        const addShares = Math.floor(cappedDollars / currentPx);
+        totalNavExposureDollars += addShares * currentPx;
+        openRiskDollars += stopDist * addShares;
+      }
+    }
+  } catch (e) {
+    console.warn("add-on/re-entry pass failed", e);
+  }
+
+
+
   // Portfolio snapshot — true MTM equity (closes audit gap G-2 so the rolling
   // drawdown circuit breaker reacts to UNrealized losses too, not just closed).
   await supabase.from("virtual_portfolio_log").upsert(
