@@ -1940,6 +1940,8 @@ async function processUser(
   calibrationCurve: Record<string, { adjust: number }>,
   strategyTilts: Record<string, { multiplier: number }>,
   tickerCalibration: Record<string, { adjust: number }>,
+  scanMode: ScanMode = "all",
+  entryShard: { shard: number; shards: number } = { shard: 0, shards: 1 },
 ) {
   const userId = settings.user_id;
 
@@ -1954,7 +1956,9 @@ async function processUser(
   const caps = (capsRes.data ?? null) as { enabled: boolean; enforcement_mode: string; sector_max_pct: number; portfolio_beta_max: number } | null;
 
   // ── AUTO-DISCOVERY: pull promising tickers from live_signals into watchlist ──
-  if (settings.auto_add_watchlist) {
+  // Run this in the entry cadence, not the 5-min exit cadence, so watchlist
+  // refreshes remain cheap and don't compete with risk-management exits.
+  if (scanMode !== "exits" && settings.auto_add_watchlist) {
     await syncAutoWatchlist(supabase, settings, watchRows, positions.map(p => p.ticker.toUpperCase()));
     // Re-read so the rest of the scan picks up newly-added rows
     const refreshed = await supabase.from("watchlist")
@@ -1967,10 +1971,16 @@ async function processUser(
   userSummary.openPositions = positions.length;
 
   // Build deduped ticker list
-  const allTickers = Array.from(new Set([
-    ...positions.map(p => p.ticker.toUpperCase()),
-    ...watchlist,
-  ]));
+  const entryCandidatesForShard = watchlist.filter(t =>
+    entryShard.shards <= 1 || tickerShard(t, entryShard.shards) === entryShard.shard
+  );
+  const entryTickers = entryCandidatesForShard.slice(0, MAX_ENTRY_TICKERS_PER_INVOCATION);
+  const tickersForThisMode = scanMode === "exits"
+    ? positions.map(p => p.ticker.toUpperCase())
+    : scanMode === "entries"
+    ? entryTickers
+    : [...positions.map(p => p.ticker.toUpperCase()), ...entryTickers];
+  const allTickers = Array.from(new Set(tickersForThisMode));
   if (allTickers.length === 0) return;
 
   // C-2 FIX: hydrate the per-ticker signal cooldown tracker from DB so that
@@ -2029,7 +2039,7 @@ async function processUser(
   let totalNavExposureDollars = 0;
   let unrealizedToday = 0;
 
-  for (const pos of positions) {
+  if (scanMode !== "entries") for (const pos of positions) {
     const data = priceCache.get(pos.ticker.toUpperCase());
     if (!data || data.close.length < 200) continue;
     const currentPrice = data.close[data.close.length - 1];
@@ -2125,6 +2135,20 @@ async function processUser(
   // ── ENTRIES ─────────────────────────────────────────────────────────────
   // Only users with autotrader enabled get new entries. Users with disabled
   // autotrader still benefit from the exit pass above (manual buys auto-close).
+  if (scanMode === "exits") {
+    await supabase.from("virtual_portfolio_log").upsert(
+      {
+        user_id: userId, date: today,
+        total_value: currentNav,
+        cash: Math.max(0, currentNav - totalNavExposureDollars),
+        positions_value: totalNavExposureDollars,
+      },
+      { onConflict: "user_id,date" },
+    );
+    await persistTrackerCacheToDB(supabase);
+    return;
+  }
+
   if (!settings.enabled) {
     await supabase.from("virtual_portfolio_log").upsert(
       {
@@ -2186,21 +2210,31 @@ async function processUser(
   // Pre-load Danelfin AI Scores for the whole watchlist in one query — used
   // as a SUPPORTING conviction factor inside evaluateSignal. Missing scores
   // are neutral (never block).
-  const danelfinMap = await loadDanelfinScores(watchlist);
+  const watchlistForEntry = entryTickers;
+  if (watchlistForEntry.length < entryCandidatesForShard.length) {
+    await supabase.from("autotrade_log").insert({
+      user_id: userId,
+      ticker: "SCAN",
+      action: "HOLD",
+      reason: `Entry scan chunked: evaluating ${watchlistForEntry.length}/${entryCandidatesForShard.length} eligible watchlist tickers this run to stay within CPU budget`,
+    });
+  }
+
+  const danelfinMap = await loadDanelfinScores(watchlistForEntry);
   if (danelfinMap.size > 0) {
-    console.log(`autotrader-scan: Danelfin coverage ${danelfinMap.size}/${watchlist.length}`);
+    console.log(`autotrader-scan: Danelfin coverage ${danelfinMap.size}/${watchlistForEntry.length}`);
   }
 
   // Pre-load EPS revision scores — supporting fundamental factor (never blocks).
-  const epsRevisionMap = await loadEpsRevisions(watchlist);
+  const epsRevisionMap = await loadEpsRevisions(watchlistForEntry);
   if (epsRevisionMap.size > 0) {
-    console.log(`autotrader-scan: EPS revision coverage ${epsRevisionMap.size}/${watchlist.length}`);
+    console.log(`autotrader-scan: EPS revision coverage ${epsRevisionMap.size}/${watchlistForEntry.length}`);
   }
 
   // Pre-load short-interest velocity map — supporting factor (never blocks).
-  const shortInterestMap = await loadShortInterestMap(watchlist);
+  const shortInterestMap = await loadShortInterestMap(watchlistForEntry);
   if (shortInterestMap.size > 0) {
-    console.log(`autotrader-scan: short-interest coverage ${shortInterestMap.size}/${watchlist.length}`);
+    console.log(`autotrader-scan: short-interest coverage ${shortInterestMap.size}/${watchlistForEntry.length}`);
   }
 
   // Pre-load current market regime (cached daily) + meta-label model (latest).
@@ -2277,7 +2311,7 @@ async function processUser(
     }
   } catch (e) { console.warn("strategyEdges load failed", e); }
 
-  for (const ticker of watchlist) {
+  for (const ticker of watchlistForEntry) {
     if (heldTickers.has(ticker)) continue;
 
     // Cooldown check (most-recent close)
