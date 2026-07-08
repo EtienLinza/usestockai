@@ -123,6 +123,13 @@ interface Position {
   opened_by_rotation: boolean;
   signal_id: string | null;
   partial_exits_taken: number;
+  // Pyramid / re-entry state (add-on engine)
+  add_on_count: number | null;
+  last_add_on_at: string | null;
+  original_shares: number | null;
+  partial_trim_price: number | null;
+  partial_trim_shares: number | null;
+  reentry_deadline: string | null;
 }
 
 interface Settings {
@@ -1323,8 +1330,228 @@ async function runEntryDecision(
 }
 
 // ============================================================================
+// ADD-ON & RE-ENTRY ENGINE — "buy more" on winners + re-buy R1/R2 partials
+// ============================================================================
+// Both paths reuse evaluateSignal + all live gates (meta-label, correlation,
+// heat cap, earnings blackout, market regime). Never widens the hard stop;
+// trailing stop rebases off the new weighted-average entry.
+// Everything scales with conviction/ATR/regime — no hard-coded caps.
+// ============================================================================
+
+type AddOnAction =
+  | { kind: "ADD_ON" | "RE_ENTRY"; conviction: number; price: number; addDollars: number;
+      strategy: string; profile: StockProfile; atr: number; reasoning: string; addScale: number }
+  | { kind: "SKIP"; reason: string }
+  | { kind: "BLOCKED"; reason: string };
+
+/** Adaptive add-on cap: higher conviction → allow more scale-ins. */
+function maxAddsForConviction(c: number): number {
+  return Math.max(0, Math.round(c / 30) - 1); // 60→1, 90→2, 100→2
+}
+
+/** Adaptive cooldown between add-ons in ms — calmer stocks unlock faster. */
+function addOnCooldownMs(atrPct: number): number {
+  const bars = Math.max(1, Math.ceil(atrPct * 100)); // 1..10 bars
+  return bars * 6.5 * 3600 * 1000; // 6.5h ≈ one RTH session
+}
+
+async function evaluateAddOnCandidate(
+  ticker: string,
+  data: DataSet,
+  pos: Position,
+  macro: MacroContext | null,
+  settings: Settings,
+  danelfinMap: Map<string, number> | undefined,
+  epsRevisionMap: Map<string, number> | undefined,
+  marketRegime: string | null | undefined,
+  metaModel: MetaLabelModel | null | undefined,
+  strategyEdges: Record<string, { winRate: number; avgWin: number; avgLoss: number; sampleSize: number }> | undefined,
+  metaGate: { pass: number; skip: number } | undefined,
+  calibrationCurve: Record<string, { adjust: number }>,
+  strategyTilts: Record<string, { multiplier: number }>,
+  tickerCalibration: Record<string, { adjust: number }>,
+  openTickers: string[],
+  mode: "ADD_ON" | "RE_ENTRY",
+): Promise<AddOnAction> {
+  // Emergency / drawdown / daily loss shortcuts inherited from parent flow
+  if (settings.current_drawdown_pct >= ROLLING_DD_HARD_BLOCK_PCT) {
+    return { kind: "BLOCKED", reason: `Add-on blocked: rolling DD ${settings.current_drawdown_pct.toFixed(1)}%` };
+  }
+  if (settings.current_cdar_pct >= CDAR_HARD_BLOCK_PCT) {
+    return { kind: "BLOCKED", reason: `Add-on blocked: CDaR ${settings.current_cdar_pct.toFixed(1)}%` };
+  }
+
+  // Earnings blackout — same rule as fresh entries
+  try {
+    const d = await getEarningsBlackoutDays(ticker);
+    if (d !== null && d <= 3) return { kind: "SKIP", reason: `Earnings in ~${d}d — no add-on` };
+  } catch (_e) { /* non-fatal */ }
+
+  const danelfin = danelfinMap?.get(ticker.toUpperCase()) ?? null;
+  const epsRev = epsRevisionMap?.get(ticker.toUpperCase()) ?? null;
+  const peek = evaluateSignal(data, ticker, undefined, macro, undefined, undefined, danelfin, epsRev, marketRegime);
+  const edge = peek?.strategy ? strategyEdges?.[peek.strategy] : undefined;
+  const sig = evaluateSignal(data, ticker, undefined, macro, undefined, undefined, danelfin, epsRev, marketRegime, edge ?? null);
+  if (!sig) return { kind: "SKIP", reason: "Insufficient data" };
+  if (sig.decision === "HOLD") return { kind: "SKIP", reason: "Signal HOLD" };
+
+  const posSide: "BUY" | "SHORT" = pos.position_type === "long" ? "BUY" : "SHORT";
+  if (sig.decision !== posSide) return { kind: "SKIP", reason: `Fresh signal ${sig.decision} opposes open ${posSide}` };
+
+  // Calibrate conviction (identical stacking to runEntryDecision)
+  let conviction = sig.conviction * (strategyTilts[sig.strategy]?.multiplier ?? 1.0);
+  const iso = (calibrationCurve as any)?.__isotonic as IsotonicAnchor[] | undefined;
+  if (iso && iso.length >= 3) conviction = applyIsotonicCalibration(conviction, iso);
+  else conviction = conviction + (calibrationCurve[bucketKeyAT(conviction)]?.adjust ?? 0);
+  conviction = Math.max(0, Math.min(100, Math.round(
+    conviction + (tickerCalibration[ticker.toUpperCase()]?.adjust ?? 0)
+  )));
+
+  // Meta-label gate
+  const gate = metaGate ?? { pass: 0.45, skip: 0.30 };
+  const metaScore = scoreMetaLabel(metaModel ?? null, {
+    conviction, atrPct: sig.atrPct, relStrength: 0, sectorMomentum: 0,
+    epsRevisionScore: sig.epsRevisionScore ?? 0,
+    regime: sig.marketRegime ?? marketRegime ?? null,
+    hourOfDay: (new Date().getUTCHours() + 19) % 24,
+    dayOfWeek: new Date().getUTCDay(),
+  });
+  if (metaScore !== null && Number.isFinite(metaScore) && metaScore < gate.skip) {
+    return { kind: "SKIP", reason: `Meta-label skip (${metaScore.toFixed(3)})` };
+  }
+
+  // Conviction floors — add-ons need a real upgrade, re-entries slightly relaxed
+  const baseFloor = Math.max(settings.min_conviction, mode === "ADD_ON" ? 78 : settings.min_conviction + 3);
+  if (conviction < baseFloor) {
+    return { kind: "SKIP", reason: `Conviction ${conviction} < add floor ${baseFloor}` };
+  }
+
+  // Correlation gate — still applies (adds to concentration risk)
+  const others = openTickers.filter(t => t !== ticker.toUpperCase());
+  if (others.length > 0) {
+    const corr = maxCorrelationToBook(ticker, others);
+    if (corr && corr.maxAbs >= CORR_THRESHOLD) {
+      return { kind: "SKIP", reason: `Corr ${corr.maxAbs.toFixed(2)} vs ${corr.against}` };
+    }
+  }
+
+  const currentPrice = data.close[data.close.length - 1];
+  const entry = Number(pos.entry_price);
+  const isLong = pos.position_type === "long";
+
+  if (mode === "ADD_ON") {
+    // Only add to winners
+    const pnlPct = isLong ? (currentPrice - entry) / entry : (entry - currentPrice) / entry;
+    if (pnlPct <= 0) return { kind: "SKIP", reason: "Not in profit — no pyramid" };
+
+    const addCount = Number(pos.add_on_count ?? 0);
+    const maxAdds = maxAddsForConviction(conviction);
+    if (addCount >= maxAdds) return { kind: "SKIP", reason: `Add cap reached (${addCount}/${maxAdds})` };
+
+    // Cooldown
+    if (pos.last_add_on_at) {
+      const since = Date.now() - new Date(pos.last_add_on_at).getTime();
+      const need = addOnCooldownMs(sig.atrPct);
+      if (since < need) {
+        return { kind: "SKIP", reason: `Add cooldown ${Math.round((need - since) / 3600000)}h remaining` };
+      }
+    }
+  } else {
+    // RE_ENTRY: adaptive price gate off VWAP of trims
+    const trimPx = Number(pos.partial_trim_price ?? 0);
+    if (trimPx <= 0) return { kind: "SKIP", reason: "No trim reference price" };
+    const dipTarget = trimPx * (1 - 0.5 * sig.atrPct);
+    const premiumOk = currentPrice <= trimPx * (1 + 0.25 * sig.atrPct) && conviction >= 80;
+    const dipOk = isLong ? currentPrice <= dipTarget : currentPrice >= dipTarget;
+    // For shorts we mirror: dip = higher price, premium = lower price
+    if (!(dipOk || premiumOk)) {
+      return { kind: "SKIP", reason: `Re-entry price gate: px ${currentPrice.toFixed(2)} vs trim ${trimPx.toFixed(2)}` };
+    }
+  }
+
+  // Sizing: adaptive to conviction & realized edge. Base = original notional.
+  const originalShares = Number(pos.original_shares ?? pos.shares ?? 0);
+  const baseDollars = originalShares > 0 ? originalShares * currentPrice : Number(pos.shares) * currentPrice;
+  const addScale = Math.max(0.25, Math.min(1.5, (conviction - 60) / 40));
+  let addDollars = baseDollars * addScale;
+
+  if (mode === "RE_ENTRY") {
+    // Never re-buy more than what was trimmed (in notional at current px)
+    const trimShares = Number(pos.partial_trim_shares ?? 0);
+    const trimNotional = trimShares * currentPrice;
+    if (trimNotional > 0) addDollars = Math.min(addDollars, trimNotional);
+  }
+  if (addDollars < currentPrice) return { kind: "SKIP", reason: "Add too small (< 1 share)" };
+
+  return {
+    kind: mode,
+    conviction, price: currentPrice, addDollars,
+    strategy: sig.strategy, profile: sig.profile, atr: sig.atr,
+    addScale,
+    reasoning: `${mode === "ADD_ON" ? "Pyramid" : "Re-entry"} scale ${addScale.toFixed(2)}× | ${sig.reasoning}`,
+  };
+}
+
+/** Execute an approved add-on / re-entry: merges shares into the open row
+ *  with weighted-avg entry, rebases trailing stop, NEVER widens hard stop. */
+async function executeAddOn(
+  supabase: any,
+  pos: Position,
+  action: Extract<AddOnAction, { kind: "ADD_ON" | "RE_ENTRY" }>,
+  settings: Settings,
+): Promise<boolean> {
+  if (!isMarketOpen()) return false;
+  const live = await fetchLiveQuote(pos.ticker);
+  if (!live) return false;
+  const fillPrice = live.price;
+  const addShares = Math.floor(action.addDollars / fillPrice);
+  if (addShares < 1) return false;
+
+  const currentShares = Number(pos.shares);
+  const currentEntry = Number(pos.entry_price);
+  const newShares = currentShares + addShares;
+  const newEntry = (currentEntry * currentShares + fillPrice * addShares) / newShares;
+
+  // Trailing stop rebases off weighted entry but is NEVER widened
+  const isLong = pos.position_type === "long";
+  const trail = pos.trailing_stop_price ?? pos.hard_stop_price ?? currentEntry;
+  const structRail = isLong ? Math.max(trail, newEntry * 0.95) : Math.min(trail, newEntry * 1.05);
+  const nextTrail = isLong ? Math.max(trail, structRail) : Math.min(trail, structRail);
+
+  const updates: Record<string, unknown> = {
+    shares: newShares,
+    entry_price: newEntry,
+    trailing_stop_price: nextTrail,
+    add_on_count: Number(pos.add_on_count ?? 0) + 1,
+    last_add_on_at: new Date().toISOString(),
+  };
+  if (action.kind === "RE_ENTRY") {
+    const trimShares = Number(pos.partial_trim_shares ?? 0);
+    const remainingTrim = Math.max(0, trimShares - addShares);
+    updates.partial_trim_shares = remainingTrim;
+    if (remainingTrim === 0) {
+      updates.partial_trim_price = null;
+      updates.reentry_deadline = null;
+    }
+  }
+
+  const { error } = await supabase.from("virtual_positions").update(updates).eq("id", pos.id);
+  if (error) { console.error("add-on update failed", error); return false; }
+
+  await supabase.from("autotrade_log").insert({
+    user_id: settings.user_id, ticker: pos.ticker, action: action.kind,
+    reason: `${action.reasoning} | fill $${fillPrice.toFixed(2)} × ${addShares} sh → new avg $${newEntry.toFixed(2)}`,
+    price: fillPrice, shares: addShares,
+    conviction: action.conviction, strategy: action.strategy, profile: action.profile,
+    position_id: pos.id,
+  });
+  return true;
+}
+
+// ============================================================================
 // MAIN HANDLER
 // ============================================================================
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
@@ -2733,6 +2960,99 @@ async function processUser(
     if (p.kind === "hold") { summary.holds++; userSummary.holds++; }
   }
 
+  // ── ADD-ON / RE-ENTRY PASS ──────────────────────────────────────────────
+  // Re-query open positions so we see updated trim state written during the
+  // exit pass (partial_trim_shares / reentry_deadline). Restricted to this
+  // shard so CPU stays bounded across cron shards.
+  try {
+    const { data: freshPositions } = await supabase
+      .from("virtual_positions").select("*")
+      .eq("user_id", userId).eq("status", "open");
+    const openList = (freshPositions ?? []) as unknown as Position[];
+    const openTix = openList.map(p => p.ticker.toUpperCase());
+    const nowMs = Date.now();
+    const MAX_ADDS_PER_SCAN = 2;
+    let addsDone = 0;
+
+    for (const pos of openList) {
+      if (addsDone >= MAX_ADDS_PER_SCAN) break;
+      const ticker = pos.ticker.toUpperCase();
+      if (entryShard.shards > 1 && tickerShard(ticker, entryShard.shards) !== entryShard.shard) continue;
+      const data = priceCache.get(ticker);
+      if (!data || data.close.length < 200) continue;
+
+      const trimShares = Number(pos.partial_trim_shares ?? 0);
+      const deadlineOk = pos.reentry_deadline
+        ? new Date(pos.reentry_deadline).getTime() > nowMs
+        : false;
+      const canReenter = trimShares > 0 && deadlineOk;
+      const mode: "ADD_ON" | "RE_ENTRY" = canReenter ? "RE_ENTRY" : "ADD_ON";
+
+      // Portfolio heat + single-name headroom pre-check (cheap gate before
+      // running signal engine). Uses starting_nav from settings for heat.
+      const stopPx = inferHardStopPrice(pos);
+      const currentPx = data.close[data.close.length - 1];
+      const posDollars = currentPx * Number(pos.shares);
+      const singleNameHeadroomPct = settings.max_single_name_pct - (posDollars / currentNav) * 100;
+      if (singleNameHeadroomPct <= 0.5) {
+        // Already at single-name cap
+        continue;
+      }
+      const navHeadroomPct = settings.max_nav_exposure_pct - navExposurePct;
+      if (navHeadroomPct <= 0.5) continue;
+
+      const decision = await evaluateAddOnCandidate(
+        ticker, data, pos, macro, settings,
+        danelfinMap, epsRevisionMap, marketRegime, metaModel,
+        strategyEdges, metaGate,
+        calibrationCurve, strategyTilts, tickerCalibration,
+        openTix, mode,
+      );
+
+      if (decision.kind === "SKIP") continue;
+      if (decision.kind === "BLOCKED") {
+        await supabase.from("autotrade_log").insert({
+          user_id: userId, ticker, action: "BLOCKED",
+          reason: `${mode}: ${decision.reason}`,
+        });
+        continue;
+      }
+
+      // Clamp add dollars to headroom + heat cap
+      const maxByHeadroom = Math.min(
+        currentNav * (singleNameHeadroomPct / 100),
+        currentNav * (navHeadroomPct / 100),
+      );
+      const stopDist = stopPx != null ? Math.abs(currentPx - stopPx) : currentPx * 0.05;
+      const heatBudgetRemaining = Math.max(0, currentNav * 0.06 - openRiskDollars);
+      const maxByHeat = stopDist > 0 ? (heatBudgetRemaining / stopDist) * currentPx : maxByHeadroom;
+      const cappedDollars = Math.min(decision.addDollars, maxByHeadroom, maxByHeat);
+      if (cappedDollars < currentPx) {
+        await supabase.from("autotrade_log").insert({
+          user_id: userId, ticker, action: "BLOCKED",
+          reason: `${mode} blocked: sizing shrunk below 1 share by heat/headroom caps`,
+        });
+        continue;
+      }
+
+      const ok = await executeAddOn(supabase, pos, {
+        ...decision,
+        addDollars: cappedDollars,
+      }, settings);
+      if (ok) {
+        addsDone++;
+        // Update running exposure for subsequent iterations
+        const addShares = Math.floor(cappedDollars / currentPx);
+        totalNavExposureDollars += addShares * currentPx;
+        openRiskDollars += stopDist * addShares;
+      }
+    }
+  } catch (e) {
+    console.warn("add-on/re-entry pass failed", e);
+  }
+
+
+
   // Portfolio snapshot — true MTM equity (closes audit gap G-2 so the rolling
   // drawdown circuit breaker reacts to UNrealized losses too, not just closed).
   await supabase.from("virtual_portfolio_log").upsert(
@@ -2829,8 +3149,29 @@ async function executeExit(
       ? (action.price - entry) * sharesToClose
       : (entry - action.price) * sharesToClose;
 
+    // ── Track trimmed slice for potential re-entry ─────────────────────────
+    // VWAP-blend across successive R1/R2 trims so re-entry compares against
+    // the average price we sold at, not just the last rung.
+    const priorTrimShares = Number(pos.partial_trim_shares ?? 0);
+    const priorTrimPx = Number(pos.partial_trim_price ?? 0);
+    const newTrimShares = priorTrimShares + sharesToClose;
+    const newTrimPx = priorTrimShares > 0 && priorTrimPx > 0
+      ? (priorTrimPx * priorTrimShares + action.price * sharesToClose) / newTrimShares
+      : action.price;
+    // Re-entry window scales inversely with volatility (ATR%): low-vol names
+    // get up to ~10 trading days, high-vol get ~1 day. Clamp [1..10] days.
+    const atrForWindow = Number(pos.entry_atr ?? 0);
+    const atrPctApprox = entry > 0 && atrForWindow > 0 ? atrForWindow / entry : 0.02;
+    const windowDays = Math.max(1, Math.min(10, Math.round(3 / Math.max(0.005, atrPctApprox))));
+    const reentryDeadline = new Date(Date.now() + windowDays * 86400000).toISOString();
+
     // Reduce shares on the open row
-    const partialUpdates: Record<string, unknown> = { shares: remaining };
+    const partialUpdates: Record<string, unknown> = {
+      shares: remaining,
+      partial_trim_shares: newTrimShares,
+      partial_trim_price: newTrimPx,
+      reentry_deadline: reentryDeadline,
+    };
     if (action.nextRung != null) partialUpdates.partial_exits_taken = action.nextRung;
     if (action.trailingUpdate != null) partialUpdates.trailing_stop_price = action.trailingUpdate;
     await supabase.from("virtual_positions").update(partialUpdates).eq("id", pos.id);
@@ -2848,7 +3189,8 @@ async function executeExit(
 
     await supabase.from("autotrade_log").insert({
       user_id: pos.user_id, ticker: pos.ticker, action: "PARTIAL_EXIT",
-      reason: action.reason, price: action.price, shares: sharesToClose,
+      reason: `${action.reason} | re-entry window: ${windowDays}d`,
+      price: action.price, shares: sharesToClose,
       pnl_pct: pnlPct, conviction: pos.entry_conviction, strategy: pos.entry_strategy,
       profile: pos.entry_profile, position_id: pos.id,
     });
@@ -2937,6 +3279,7 @@ async function executeEntry(
     hard_stop_price: hardStop,
     trailing_stop_price: hardStop,
     peak_price: fillPrice,
+    original_shares: shares,
   }).select("id").single();
   if (insErr) {
     // P-4: the partial unique index `uniq_open_position_per_user_ticker` rejects

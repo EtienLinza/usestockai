@@ -1,83 +1,103 @@
-# Security hardening pass
 
-Close the three real gaps (2FA, in-app audit log, vulnerability disclosure) and flip on one free Supabase Auth toggle (HIBP leaked-password check) that costs nothing to enable.
+# Add-On & Re-Entry Engine ("Buy More" / Double-Down)
 
-## 1. 2FA (TOTP) enrollment in Settings
+Extend the autotrader so that, on top of the existing single-shot entry, it can:
+1. **Pyramid** into an open winner when the engine re-fires a high-conviction BUY.
+2. **Re-buy trimmed size** after R1/R2 partials when the setup is still valid.
 
-Supabase Auth already supports TOTP MFA server-side — just need the UI.
+Both behaviours are fully adaptive — size, trigger threshold, cooldown, and re-entry window are all derived from the same conviction / ATR / regime / heat inputs the engine already uses, so nothing is hard-coded.
 
-- New component `src/components/security/TwoFactorSection.tsx` mounted inside `src/pages/Settings.tsx` under a new "Security" card (above Account).
-- States it handles:
-  - **Not enrolled** → "Enable two-factor authentication" button → calls `supabase.auth.mfa.enroll({ factorType: 'totp' })` → renders the returned QR code (SVG from `totp.qr_code`) + manual secret string → user scans with Authenticator/1Password/Authy → enters 6-digit code → `supabase.auth.mfa.challenge` + `verify` → success toast.
-  - **Enrolled** → shows "2FA active" + factor created date + "Disable" button (re-prompts for a fresh TOTP code, then `supabase.auth.mfa.unenroll`).
-- Sign-in flow: extend `src/pages/Auth.tsx` to check `supabase.auth.mfa.getAuthenticatorAssuranceLevel()` after password login. If `nextLevel === 'aal2'` and `currentLevel === 'aal1'`, show an inline 6-digit code input that calls `challenge` + `verify` before routing to `/dashboard`.
-- Add a one-step tour entry to `SettingsTour.tsx` pointing at the new card.
+---
 
-## 2. In-app audit log
+## 1. New position state (DB)
 
-A first-party trail of sensitive user actions, visible to the user (and useful for support).
+Add columns to `virtual_positions` so the algo can reason about scale-ins:
 
-- New table `public.audit_log` via migration:
-  - columns: `user_id uuid` (FK auth.users), `action text` (enum-like: `login`, `password_change`, `mfa_enabled`, `mfa_disabled`, `position_opened`, `position_closed_manual`, `autotrader_toggled`, `settings_changed`, `alert_created`, `alert_deleted`, `api_key_rotated`), `target_type text`, `target_id text`, `metadata jsonb`, `ip_address text`, `user_agent text`, `created_at timestamptz`
-  - GRANT `SELECT` to authenticated (own rows only), `INSERT/ALL` to service_role. No UPDATE/DELETE policy (immutable).
-  - RLS: users read their own; only service_role writes.
-- Write path: small helper `src/lib/audit.ts` → `logAudit(action, target?, metadata?)` that inserts via supabase client; also called from edge functions (`autotrader-scan`, `create-checkout` kill-switch, `delete-account`) using service-role.
-- Wire emit points: register-buy dialog, close-position action, autotrader settings save, price-alert create/delete, MFA enroll/unenroll, password change.
-- New page `src/pages/SecurityActivity.tsx` (linked from the Settings → Security card): paginated table of the last 100 events with action badge, timestamp, IP, and metadata expander. Mobile = stacked cards per the project's card-vs-table pattern.
+- `add_on_count int default 0` — how many pyramids executed
+- `last_add_on_at timestamptz` — for adaptive cooldown
+- `original_shares numeric` — snapshot at first entry, used as the pyramid base
+- `partial_trim_price numeric` — VWAP of shares removed at R1/R2 (null until trimmed)
+- `partial_trim_shares numeric default 0` — how many shares are eligible to re-buy
+- `reentry_deadline timestamptz` — computed at trim time from ATR/regime; null means no active re-entry window
 
-## 3. Vulnerability disclosure
+No change to existing exit/stop logic — everything above is additive.
 
-Lightweight but real — what every responsible-disclosure scanner looks for.
+## 2. Signal path (autotrader-scan, entries mode)
 
-- `public/.well-known/security.txt` (RFC 9116) with contact, expiration, preferred language, and policy URL. Also a flat `public/security.txt` redirect for legacy crawlers.
-- New page `src/pages/Security.tsx` at `/security` with:
-  - Scope (in-scope: `*.lovable.app` + custom domain; out-of-scope: third-party APIs)
-  - Reporting channel (email — needs your address; I'll stub `security@usestockai.lovable.app` and you swap it)
-  - Safe-harbor language (no legal action for good-faith testing)
-  - Response SLA (acknowledge ≤ 5 days, triage ≤ 14)
-  - "Hall of fame" placeholder section
-- Footer link added in `src/components/Footer.tsx` → "Security".
-- `public/robots.txt` allow + sitemap entry in `public/sitemap.xml`.
+Today `runEntryDecision` short-circuits if a position is already open. Replace that early-return with a router:
 
-## 4. HIBP leaked-password check (free win)
+```text
+if no open position     → existing entry flow
+elif partial_trim_shares > 0 and now < reentry_deadline → try RE_ENTRY
+else                     → try ADD_ON
+```
 
-Call `supabase--configure_auth` with `password_hibp_enabled: true` so signups/password changes are checked against Have I Been Pwned. Zero code, zero UX change unless the password is in a breach list.
+Both paths reuse `evaluateSignal` + all current gates (meta-label, correlation, sector cap, heat cap, ADWIN, earnings blackout, market regime). Nothing bypasses safety.
 
-## Out of scope (explicitly)
+### Add-on rule (pyramid)
+Fires only when **all** are true:
+- New signal is BUY, same direction as open position.
+- `conviction ≥ dynamicAddFloor` where floor = `max(regimeFloor + 8, 78)` — meaningfully higher than the base entry floor so we only pyramid on conviction upgrades.
+- Current unrealized P/L > 0 (only add to winners).
+- ADX / trend still intact per the strategy that opened the trade.
+- `add_on_count < maxAdds` where `maxAdds = round(conviction / 30) - 1` → conviction 60→1, 90→2, 100→2 (adaptive, no hard-coded 2).
+- Adaptive cooldown elapsed: `cooldownBars = ceil(atrPct * 100)` (calmer stocks = shorter cooldown, volatile = longer).
 
-- **Penetration test** — requires an external firm; I can't perform one. I'll add a TODO note in the Security page so you remember to commission one before any real launch.
-- **Custom WAF rules** — Cloudflare baseline stays; custom rules would need workspace-level access we don't have from in-app.
-- **Rotating CRON_SECRET / Stripe keys on a schedule** — manual ops task, not code.
+### Re-entry rule (after R1/R2)
+Fires only when:
+- `partial_trim_shares > 0` and `now < reentry_deadline`.
+- New BUY signal same direction, conviction ≥ regimeFloor + 3.
+- Price condition (adaptive, in this preference order):
+  1. `price ≤ trim_price * (1 − 0.5 * atrPct)` → preferred "buy the dip"
+  2. `price ≤ trim_price * (1 + 0.25 * atrPct) AND conviction ≥ 80` → same-price / small-premium re-buy allowed on strong conviction
+- Reuses meta-label + correlation gates.
 
-## Technical details
+### Re-entry window
+Set at the moment R1/R2 fires inside `processExits`:
+```
+reentry_deadline = now + clamp(round(3 / atrPct), 1, 10) trading days
+```
+Low-vol name (atrPct 0.01) → ~10 days; high-vol (atrPct 0.05) → ~1 day. Purely parameter-driven.
 
-- MFA: uses Supabase JS `auth.mfa.*`. AAL2 enforcement is per-session, not global — users without 2FA keep working normally.
-- Audit insert failures are fire-and-forget (try/catch + console.warn) so they never block the user action they describe.
-- `security.txt` `Expires` field set to 1 year out; add a calendar reminder to refresh.
-- No new dependencies. QR rendering uses the SVG string Supabase returns directly — no `qrcode` package needed.
+## 3. Sizing (conviction × risk × heat)
 
-## Files touched
+Reuse existing `computePositionSize` with three modifiers:
 
-**New**
-- `src/components/security/TwoFactorSection.tsx`
-- `src/pages/SecurityActivity.tsx`
-- `src/pages/Security.tsx`
-- `src/lib/audit.ts`
-- `public/.well-known/security.txt`
-- `public/security.txt`
+- **Add-on dollars** = `baseSize × addScale`, where `addScale = (conviction − 60) / 40` clamped to `[0.25, 1.5]`. Conviction 70 → 0.25×, 80 → 0.5×, 90 → 0.75×, 100 → 1.0×; if `realKelly` sample ≥30 and edge is strong, allowed up to 1.5×.
+- **Re-entry dollars** = `min(trim_notional, computePositionSize output)` — never re-buy more than what was trimmed.
+- **All sizes are then clamped** by the existing pre-pass: single-name cap, sector cap, correlation gate, and the 6% portfolio heat cap. If any cap would be breached, size is scaled down; if that pushes it below the min-notional, the add is skipped (logged as `ADD_BLOCKED_HEAT` / `ADD_BLOCKED_SECTOR` / etc.). This is how the user's "depends on stock parameters" preference is honoured — the guardrails already scale with risk, we just plug pyramids into the same pre-pass.
 
-**Edited**
-- `src/pages/Settings.tsx` (mount Security card)
-- `src/pages/Auth.tsx` (AAL2 challenge step)
-- `src/App.tsx` (routes for `/security`, `/settings/activity`)
-- `src/components/Footer.tsx` (Security link)
-- `src/components/SettingsTour.tsx` (one extra step)
-- `src/components/dashboard/RegisterBuyDialog.tsx` + close-position handler + autotrade settings save + price-alert mutations (audit emits)
-- `supabase/functions/delete-account/index.ts`, `autotrader-scan/index.ts` (service-role audit emits)
-- `public/sitemap.xml`, `public/robots.txt`
+## 4. Stops & exits after an add
 
-**Migration**
-- Create `audit_log` table + GRANTs + RLS.
+- Recompute weighted-average entry across original + adds.
+- **Hard stop stays at the original** (never widen risk on a pyramid — this is the one non-negotiable rule; without it, add-ons blow up the R-model).
+- Trailing stop / R1 / R2 recompute off the new weighted entry.
+- On re-entry after R1/R2, restore R1/R2 targets on the re-bought slice only, so the trimmed profits stay banked.
 
-**Auth config**
-- `password_hibp_enabled: true`.
+## 5. Logging & UX
+
+- New `autotrade_log` action types: `ADD_ON`, `RE_ENTRY`, `ADD_BLOCKED_*`.
+- Include `add_on_count`, `dynamic_add_floor`, `reentry_reason` in the log payload.
+- `AutotraderLog.tsx` gets two new badge variants and the position card shows "×2" / "×3" pips when pyramided.
+- No dashboard behaviour changes beyond that; virtual-position math already reads from the same table.
+
+---
+
+## Technical section
+
+**Files:**
+- `supabase/migrations/<new>.sql` — add 5 columns to `virtual_positions`.
+- `supabase/functions/autotrader-scan/index.ts`:
+  - New `runAddOnDecision(pos, signal, ctx)` and `runReEntryDecision(pos, signal, ctx)` helpers.
+  - `runEntryDecision` router switch (see §2).
+  - `processExits` writes `partial_trim_price`, `partial_trim_shares`, `reentry_deadline` when R1/R2 fires.
+  - Weighted-entry recompute on successful add.
+- `supabase/functions/_shared/signal-engine-v2.ts`: expose small helper `computeAddOnSize(baseSize, conviction, realizedEdge)` so backtest can reuse identical math later.
+- `src/pages/AutotraderLog.tsx`: badge/label additions.
+- `src/integrations/supabase/types.ts` — regenerated automatically after migration.
+
+**Sharding:** add-on / re-entry evaluation runs inside the existing `mode=entries` shards; each open position that gets a fresh signal counts as one unit toward `MAX_ENTRY_TICKERS_PER_INVOCATION`, so CPU budget stays bounded.
+
+**Backtest parity:** add-on math lives in `_shared/signal-engine-v2.ts`; the backtester can adopt it in a follow-up without diverging.
+
+**Safety invariants preserved:** hard stop never widens, 6% heat cap, single-name cap, sector cap, correlation gate, meta-label SKIP, ADWIN drift halt, earnings blackout — all still gate every add.
