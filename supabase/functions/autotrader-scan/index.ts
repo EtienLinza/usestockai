@@ -1330,8 +1330,228 @@ async function runEntryDecision(
 }
 
 // ============================================================================
+// ADD-ON & RE-ENTRY ENGINE — "buy more" on winners + re-buy R1/R2 partials
+// ============================================================================
+// Both paths reuse evaluateSignal + all live gates (meta-label, correlation,
+// heat cap, earnings blackout, market regime). Never widens the hard stop;
+// trailing stop rebases off the new weighted-average entry.
+// Everything scales with conviction/ATR/regime — no hard-coded caps.
+// ============================================================================
+
+type AddOnAction =
+  | { kind: "ADD_ON" | "RE_ENTRY"; conviction: number; price: number; addDollars: number;
+      strategy: string; profile: StockProfile; atr: number; reasoning: string; addScale: number }
+  | { kind: "SKIP"; reason: string }
+  | { kind: "BLOCKED"; reason: string };
+
+/** Adaptive add-on cap: higher conviction → allow more scale-ins. */
+function maxAddsForConviction(c: number): number {
+  return Math.max(0, Math.round(c / 30) - 1); // 60→1, 90→2, 100→2
+}
+
+/** Adaptive cooldown between add-ons in ms — calmer stocks unlock faster. */
+function addOnCooldownMs(atrPct: number): number {
+  const bars = Math.max(1, Math.ceil(atrPct * 100)); // 1..10 bars
+  return bars * 6.5 * 3600 * 1000; // 6.5h ≈ one RTH session
+}
+
+async function evaluateAddOnCandidate(
+  ticker: string,
+  data: DataSet,
+  pos: Position,
+  macro: MacroContext | null,
+  settings: Settings,
+  danelfinMap: Map<string, number> | undefined,
+  epsRevisionMap: Map<string, number> | undefined,
+  marketRegime: string | null | undefined,
+  metaModel: MetaLabelModel | null | undefined,
+  strategyEdges: Record<string, { winRate: number; avgWin: number; avgLoss: number; sampleSize: number }> | undefined,
+  metaGate: { pass: number; skip: number } | undefined,
+  calibrationCurve: Record<string, { adjust: number }>,
+  strategyTilts: Record<string, { multiplier: number }>,
+  tickerCalibration: Record<string, { adjust: number }>,
+  openTickers: string[],
+  mode: "ADD_ON" | "RE_ENTRY",
+): Promise<AddOnAction> {
+  // Emergency / drawdown / daily loss shortcuts inherited from parent flow
+  if (settings.current_drawdown_pct >= ROLLING_DD_HARD_BLOCK_PCT) {
+    return { kind: "BLOCKED", reason: `Add-on blocked: rolling DD ${settings.current_drawdown_pct.toFixed(1)}%` };
+  }
+  if (settings.current_cdar_pct >= CDAR_HARD_BLOCK_PCT) {
+    return { kind: "BLOCKED", reason: `Add-on blocked: CDaR ${settings.current_cdar_pct.toFixed(1)}%` };
+  }
+
+  // Earnings blackout — same rule as fresh entries
+  try {
+    const d = await getEarningsBlackoutDays(ticker);
+    if (d !== null && d <= 3) return { kind: "SKIP", reason: `Earnings in ~${d}d — no add-on` };
+  } catch (_e) { /* non-fatal */ }
+
+  const danelfin = danelfinMap?.get(ticker.toUpperCase()) ?? null;
+  const epsRev = epsRevisionMap?.get(ticker.toUpperCase()) ?? null;
+  const peek = evaluateSignal(data, ticker, undefined, macro, undefined, undefined, danelfin, epsRev, marketRegime);
+  const edge = peek?.strategy ? strategyEdges?.[peek.strategy] : undefined;
+  const sig = evaluateSignal(data, ticker, undefined, macro, undefined, undefined, danelfin, epsRev, marketRegime, edge ?? null);
+  if (!sig) return { kind: "SKIP", reason: "Insufficient data" };
+  if (sig.decision === "HOLD") return { kind: "SKIP", reason: "Signal HOLD" };
+
+  const posSide: "BUY" | "SHORT" = pos.position_type === "long" ? "BUY" : "SHORT";
+  if (sig.decision !== posSide) return { kind: "SKIP", reason: `Fresh signal ${sig.decision} opposes open ${posSide}` };
+
+  // Calibrate conviction (identical stacking to runEntryDecision)
+  let conviction = sig.conviction * (strategyTilts[sig.strategy]?.multiplier ?? 1.0);
+  const iso = (calibrationCurve as any)?.__isotonic as IsotonicAnchor[] | undefined;
+  if (iso && iso.length >= 3) conviction = applyIsotonicCalibration(conviction, iso);
+  else conviction = conviction + (calibrationCurve[bucketKeyAT(conviction)]?.adjust ?? 0);
+  conviction = Math.max(0, Math.min(100, Math.round(
+    conviction + (tickerCalibration[ticker.toUpperCase()]?.adjust ?? 0)
+  )));
+
+  // Meta-label gate
+  const gate = metaGate ?? { pass: 0.45, skip: 0.30 };
+  const metaScore = scoreMetaLabel(metaModel ?? null, {
+    conviction, atrPct: sig.atrPct, relStrength: 0, sectorMomentum: 0,
+    epsRevisionScore: sig.epsRevisionScore ?? 0,
+    regime: sig.marketRegime ?? marketRegime ?? null,
+    hourOfDay: (new Date().getUTCHours() + 19) % 24,
+    dayOfWeek: new Date().getUTCDay(),
+  });
+  if (metaScore !== null && Number.isFinite(metaScore) && metaScore < gate.skip) {
+    return { kind: "SKIP", reason: `Meta-label skip (${metaScore.toFixed(3)})` };
+  }
+
+  // Conviction floors — add-ons need a real upgrade, re-entries slightly relaxed
+  const baseFloor = Math.max(settings.min_conviction, mode === "ADD_ON" ? 78 : settings.min_conviction + 3);
+  if (conviction < baseFloor) {
+    return { kind: "SKIP", reason: `Conviction ${conviction} < add floor ${baseFloor}` };
+  }
+
+  // Correlation gate — still applies (adds to concentration risk)
+  const others = openTickers.filter(t => t !== ticker.toUpperCase());
+  if (others.length > 0) {
+    const corr = maxCorrelationToBook(ticker, others);
+    if (corr && corr.maxAbs >= CORR_THRESHOLD) {
+      return { kind: "SKIP", reason: `Corr ${corr.maxAbs.toFixed(2)} vs ${corr.against}` };
+    }
+  }
+
+  const currentPrice = data.close[data.close.length - 1];
+  const entry = Number(pos.entry_price);
+  const isLong = pos.position_type === "long";
+
+  if (mode === "ADD_ON") {
+    // Only add to winners
+    const pnlPct = isLong ? (currentPrice - entry) / entry : (entry - currentPrice) / entry;
+    if (pnlPct <= 0) return { kind: "SKIP", reason: "Not in profit — no pyramid" };
+
+    const addCount = Number(pos.add_on_count ?? 0);
+    const maxAdds = maxAddsForConviction(conviction);
+    if (addCount >= maxAdds) return { kind: "SKIP", reason: `Add cap reached (${addCount}/${maxAdds})` };
+
+    // Cooldown
+    if (pos.last_add_on_at) {
+      const since = Date.now() - new Date(pos.last_add_on_at).getTime();
+      const need = addOnCooldownMs(sig.atrPct);
+      if (since < need) {
+        return { kind: "SKIP", reason: `Add cooldown ${Math.round((need - since) / 3600000)}h remaining` };
+      }
+    }
+  } else {
+    // RE_ENTRY: adaptive price gate off VWAP of trims
+    const trimPx = Number(pos.partial_trim_price ?? 0);
+    if (trimPx <= 0) return { kind: "SKIP", reason: "No trim reference price" };
+    const dipTarget = trimPx * (1 - 0.5 * sig.atrPct);
+    const premiumOk = currentPrice <= trimPx * (1 + 0.25 * sig.atrPct) && conviction >= 80;
+    const dipOk = isLong ? currentPrice <= dipTarget : currentPrice >= dipTarget;
+    // For shorts we mirror: dip = higher price, premium = lower price
+    if (!(dipOk || premiumOk)) {
+      return { kind: "SKIP", reason: `Re-entry price gate: px ${currentPrice.toFixed(2)} vs trim ${trimPx.toFixed(2)}` };
+    }
+  }
+
+  // Sizing: adaptive to conviction & realized edge. Base = original notional.
+  const originalShares = Number(pos.original_shares ?? pos.shares ?? 0);
+  const baseDollars = originalShares > 0 ? originalShares * currentPrice : Number(pos.shares) * currentPrice;
+  const addScale = Math.max(0.25, Math.min(1.5, (conviction - 60) / 40));
+  let addDollars = baseDollars * addScale;
+
+  if (mode === "RE_ENTRY") {
+    // Never re-buy more than what was trimmed (in notional at current px)
+    const trimShares = Number(pos.partial_trim_shares ?? 0);
+    const trimNotional = trimShares * currentPrice;
+    if (trimNotional > 0) addDollars = Math.min(addDollars, trimNotional);
+  }
+  if (addDollars < currentPrice) return { kind: "SKIP", reason: "Add too small (< 1 share)" };
+
+  return {
+    kind: mode,
+    conviction, price: currentPrice, addDollars,
+    strategy: sig.strategy, profile: sig.profile, atr: sig.atr,
+    addScale,
+    reasoning: `${mode === "ADD_ON" ? "Pyramid" : "Re-entry"} scale ${addScale.toFixed(2)}× | ${sig.reasoning}`,
+  };
+}
+
+/** Execute an approved add-on / re-entry: merges shares into the open row
+ *  with weighted-avg entry, rebases trailing stop, NEVER widens hard stop. */
+async function executeAddOn(
+  supabase: any,
+  pos: Position,
+  action: Extract<AddOnAction, { kind: "ADD_ON" | "RE_ENTRY" }>,
+  settings: Settings,
+): Promise<boolean> {
+  if (!isMarketOpen()) return false;
+  const live = await fetchLiveQuote(pos.ticker);
+  if (!live) return false;
+  const fillPrice = live.price;
+  const addShares = Math.floor(action.addDollars / fillPrice);
+  if (addShares < 1) return false;
+
+  const currentShares = Number(pos.shares);
+  const currentEntry = Number(pos.entry_price);
+  const newShares = currentShares + addShares;
+  const newEntry = (currentEntry * currentShares + fillPrice * addShares) / newShares;
+
+  // Trailing stop rebases off weighted entry but is NEVER widened
+  const isLong = pos.position_type === "long";
+  const trail = pos.trailing_stop_price ?? pos.hard_stop_price ?? currentEntry;
+  const structRail = isLong ? Math.max(trail, newEntry * 0.95) : Math.min(trail, newEntry * 1.05);
+  const nextTrail = isLong ? Math.max(trail, structRail) : Math.min(trail, structRail);
+
+  const updates: Record<string, unknown> = {
+    shares: newShares,
+    entry_price: newEntry,
+    trailing_stop_price: nextTrail,
+    add_on_count: Number(pos.add_on_count ?? 0) + 1,
+    last_add_on_at: new Date().toISOString(),
+  };
+  if (action.kind === "RE_ENTRY") {
+    const trimShares = Number(pos.partial_trim_shares ?? 0);
+    const remainingTrim = Math.max(0, trimShares - addShares);
+    updates.partial_trim_shares = remainingTrim;
+    if (remainingTrim === 0) {
+      updates.partial_trim_price = null;
+      updates.reentry_deadline = null;
+    }
+  }
+
+  const { error } = await supabase.from("virtual_positions").update(updates).eq("id", pos.id);
+  if (error) { console.error("add-on update failed", error); return false; }
+
+  await supabase.from("autotrade_log").insert({
+    user_id: settings.user_id, ticker: pos.ticker, action: action.kind,
+    reason: `${action.reasoning} | fill $${fillPrice.toFixed(2)} × ${addShares} sh → new avg $${newEntry.toFixed(2)}`,
+    price: fillPrice, shares: addShares,
+    conviction: action.conviction, strategy: action.strategy, profile: action.profile,
+    position_id: pos.id,
+  });
+  return true;
+}
+
+// ============================================================================
 // MAIN HANDLER
 // ============================================================================
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
