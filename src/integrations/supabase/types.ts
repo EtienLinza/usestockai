@@ -1276,6 +1276,7 @@ export type Database = {
       }
       virtual_positions: {
         Row: {
+          add_on_count: number
           breakout_failed_count: number
           closed_at: string | null
           cooldown_until: string | null
@@ -1291,12 +1292,17 @@ export type Database = {
           exit_reason: string | null
           hard_stop_price: number | null
           id: string
+          last_add_on_at: string | null
           opened_by: string
           opened_by_rotation: boolean
+          original_shares: number | null
           partial_exits_taken: number
+          partial_trim_price: number | null
+          partial_trim_shares: number
           peak_price: number | null
           pnl: number | null
           position_type: string
+          reentry_deadline: string | null
           shares: number
           signal_id: string | null
           status: string
@@ -1306,6 +1312,7 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          add_on_count?: number
           breakout_failed_count?: number
           closed_at?: string | null
           cooldown_until?: string | null
@@ -1321,12 +1328,17 @@ export type Database = {
           exit_reason?: string | null
           hard_stop_price?: number | null
           id?: string
+          last_add_on_at?: string | null
           opened_by?: string
           opened_by_rotation?: boolean
+          original_shares?: number | null
           partial_exits_taken?: number
+          partial_trim_price?: number | null
+          partial_trim_shares?: number
           peak_price?: number | null
           pnl?: number | null
           position_type?: string
+          reentry_deadline?: string | null
           shares: number
           signal_id?: string | null
           status?: string
@@ -1336,6 +1348,7 @@ export type Database = {
           user_id: string
         }
         Update: {
+          add_on_count?: number
           breakout_failed_count?: number
           closed_at?: string | null
           cooldown_until?: string | null
@@ -1351,12 +1364,17 @@ export type Database = {
           exit_reason?: string | null
           hard_stop_price?: number | null
           id?: string
+          last_add_on_at?: string | null
           opened_by?: string
           opened_by_rotation?: boolean
+          original_shares?: number | null
           partial_exits_taken?: number
+          partial_trim_price?: number | null
+          partial_trim_shares?: number
           peak_price?: number | null
           pnl?: number | null
           position_type?: string
+          reentry_deadline?: string | null
           shares?: number
           signal_id?: string | null
           status?: string
