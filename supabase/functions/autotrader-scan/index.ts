@@ -2836,8 +2836,29 @@ async function executeExit(
       ? (action.price - entry) * sharesToClose
       : (entry - action.price) * sharesToClose;
 
+    // ── Track trimmed slice for potential re-entry ─────────────────────────
+    // VWAP-blend across successive R1/R2 trims so re-entry compares against
+    // the average price we sold at, not just the last rung.
+    const priorTrimShares = Number(pos.partial_trim_shares ?? 0);
+    const priorTrimPx = Number(pos.partial_trim_price ?? 0);
+    const newTrimShares = priorTrimShares + sharesToClose;
+    const newTrimPx = priorTrimShares > 0 && priorTrimPx > 0
+      ? (priorTrimPx * priorTrimShares + action.price * sharesToClose) / newTrimShares
+      : action.price;
+    // Re-entry window scales inversely with volatility (ATR%): low-vol names
+    // get up to ~10 trading days, high-vol get ~1 day. Clamp [1..10] days.
+    const atrForWindow = Number(pos.entry_atr ?? 0);
+    const atrPctApprox = entry > 0 && atrForWindow > 0 ? atrForWindow / entry : 0.02;
+    const windowDays = Math.max(1, Math.min(10, Math.round(3 / Math.max(0.005, atrPctApprox))));
+    const reentryDeadline = new Date(Date.now() + windowDays * 86400000).toISOString();
+
     // Reduce shares on the open row
-    const partialUpdates: Record<string, unknown> = { shares: remaining };
+    const partialUpdates: Record<string, unknown> = {
+      shares: remaining,
+      partial_trim_shares: newTrimShares,
+      partial_trim_price: newTrimPx,
+      reentry_deadline: reentryDeadline,
+    };
     if (action.nextRung != null) partialUpdates.partial_exits_taken = action.nextRung;
     if (action.trailingUpdate != null) partialUpdates.trailing_stop_price = action.trailingUpdate;
     await supabase.from("virtual_positions").update(partialUpdates).eq("id", pos.id);
@@ -2855,7 +2876,8 @@ async function executeExit(
 
     await supabase.from("autotrade_log").insert({
       user_id: pos.user_id, ticker: pos.ticker, action: "PARTIAL_EXIT",
-      reason: action.reason, price: action.price, shares: sharesToClose,
+      reason: `${action.reason} | re-entry window: ${windowDays}d`,
+      price: action.price, shares: sharesToClose,
       pnl_pct: pnlPct, conviction: pos.entry_conviction, strategy: pos.entry_strategy,
       profile: pos.entry_profile, position_id: pos.id,
     });
