@@ -516,6 +516,16 @@ type EntryAction =
       slippageBpsEst?: number | null }
   | { kind: "HOLD" | "BLOCKED"; reason: string };
 
+type ScanMode = "all" | "exits" | "entries";
+
+const MAX_ENTRY_TICKERS_PER_INVOCATION = 30;
+
+function tickerShard(ticker: string, shards: number): number {
+  let h = 0;
+  for (let i = 0; i < ticker.length; i++) h = (h * 31 + ticker.charCodeAt(i)) >>> 0;
+  return h % Math.max(1, shards);
+}
+
 // ============================================================================
 // Helper: compute the 4 non-trailing peak signals (RSI div, climax, MACD roll,
 // thesis done) — used by runner-mode exhaustion check. Returns trailing as a
@@ -1323,6 +1333,14 @@ serve(async (req) => {
   if (denied) return denied;
 
   const startedAt = Date.now();
+  const body = await req.json().catch(() => ({}));
+  const scanMode: ScanMode = body?.mode === "exits"
+    ? "exits"
+    : body?.mode === "entries"
+    ? "entries"
+    : "all";
+  const entryShardCount = Math.max(1, Math.min(12, Number(body?.shards ?? 1) || 1));
+  const entryShard = Math.max(0, Math.min(entryShardCount - 1, Number(body?.shard ?? 0) || 0));
   const supabase = createClient(
     Deno.env.get("SUPABASE_URL")!,
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
@@ -1467,8 +1485,9 @@ serve(async (req) => {
         continue;
       }
 
-      // Per-user cadence gate
-      if (rawSettings.next_scan_at && new Date(rawSettings.next_scan_at) > now) {
+      // Per-user cadence gate applies only to entry scans. Exit scans must keep
+      // running every cron tick so stops and take-profits are never delayed.
+      if (scanMode !== "exits" && rawSettings.next_scan_at && new Date(rawSettings.next_scan_at) > now) {
         skippedNotDue++;
         continue;
       }
@@ -1561,7 +1580,20 @@ serve(async (req) => {
 
       try {
         const userSummary = { entries: 0, exits: 0, partials: 0, holds: 0, blocked: 0, errors: 0, watchlistSize: 0, openPositions: 0, evaluated: 0 };
-        await processUser(supabase, settings, macro, summary, userSummary, exitCalibration, volScalar, calibrationCurve, strategyTilts, tickerCalibration);
+        await processUser(
+          supabase,
+          settings,
+          macro,
+          summary,
+          userSummary,
+          exitCalibration,
+          volScalar,
+          calibrationCurve,
+          strategyTilts,
+          tickerCalibration,
+          scanMode,
+          { shard: entryShard, shards: entryShardCount },
+        );
 
         // Always write a per-scan rollup so users see the bot is alive even when
         // no trades fire. This is the single source of "scan happened" visibility.
@@ -1575,12 +1607,15 @@ serve(async (req) => {
         });
 
         // Update cadence timestamps
-        const intervalMin = rawSettings.advanced_mode
-          ? rawSettings.scan_interval_minutes
-          : algoScanIntervalMinutes(macro, vixRegime);
-        const nextScan = new Date(now.getTime() + intervalMin * 60_000);
+        const timestampPatch: Record<string, string> = { last_scan_at: now.toISOString() };
+        if (scanMode !== "exits") {
+          const intervalMin = rawSettings.advanced_mode
+            ? rawSettings.scan_interval_minutes
+            : algoScanIntervalMinutes(macro, vixRegime);
+          timestampPatch.next_scan_at = new Date(now.getTime() + intervalMin * 60_000).toISOString();
+        }
         await supabase.from("autotrade_settings")
-          .update({ last_scan_at: now.toISOString(), next_scan_at: nextScan.toISOString() })
+          .update(timestampPatch)
           .eq("user_id", rawSettings.user_id);
       } catch (err) {
         // Circuit breaker trips abort the current scan only — no global state is
@@ -1622,7 +1657,7 @@ serve(async (req) => {
       "ok",
       `users=${summary.users} entries=${summary.entries} exits=${summary.exits} errors=${summary.errors}`,
     );
-    return json({ status: "ok", summary });
+    return json({ status: "ok", mode: scanMode, shard: entryShard, shards: entryShardCount, summary });
   } catch (err) {
     console.error("AutoTrader top-level error:", err);
     await recordHeartbeat("autotrader-scan", startedAt, "error", (err as Error).message ?? "unknown");
