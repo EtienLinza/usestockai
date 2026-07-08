@@ -46,6 +46,8 @@ const actionMeta: Record<LogRow["action"], { label: string; cls: string; Icon: t
   ERROR: { label: "Error", cls: "text-destructive border-destructive/30 bg-destructive/10", Icon: Ban },
   AUTO_ADD: { label: "Watch+", cls: "text-primary border-primary/30 bg-primary/10", Icon: Eye },
   AUTO_REMOVE: { label: "Watch−", cls: "text-muted-foreground border-muted-foreground/30 bg-muted/40", Icon: EyeOff },
+  ADD_ON: { label: "Buy More", cls: "text-success border-success/40 bg-success/15", Icon: PlusCircle },
+  RE_ENTRY: { label: "Re-Buy", cls: "text-success border-success/30 bg-success/10", Icon: RotateCw },
 };
 
 const AutotraderLog = () => {
