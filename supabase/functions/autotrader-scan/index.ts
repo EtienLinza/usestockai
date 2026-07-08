@@ -1609,7 +1609,7 @@ serve(async (req) => {
 
         // Update cadence timestamps
         const timestampPatch: Record<string, string> = { last_scan_at: now.toISOString() };
-        if (scanMode === "all" || (scanMode === "entries" && entryShardCount <= 1)) {
+        if (scanMode === "all" || (scanMode === "entries" && (entryShardCount <= 1 || entryShard === 0))) {
           const intervalMin = rawSettings.advanced_mode
             ? rawSettings.scan_interval_minutes
             : algoScanIntervalMinutes(macro, vixRegime);
