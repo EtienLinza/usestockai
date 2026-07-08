@@ -1714,7 +1714,7 @@ function isMarketOpen(now: Date = new Date()): boolean {
 
 // ── AUTO-DISCOVERY: pull good live_signals into watchlist + prune stale auto-adds ──
 async function syncAutoWatchlist(
-  supabase: ReturnType<typeof createClient>,
+  supabase: any,
   settings: Settings,
   currentWatch: Array<{ ticker: string; source: string | null }>,
   openPositionTickers: string[],
@@ -1823,7 +1823,7 @@ async function syncAutoWatchlist(
  *  Reuses the same accounting path as a normal FULL_EXIT so unrealized P&L,
  *  cooldowns, and sell_alert notifications stay consistent. */
 async function liquidateAllPositions(
-  supabase: ReturnType<typeof createClient>,
+  supabase: any,
   userId: string,
 ): Promise<number> {
   const { data: posRows } = await supabase
@@ -1860,7 +1860,7 @@ async function liquidateAllPositions(
 /** Run only the exit pass (stops, take-profits, partials) for a frozen user.
  *  Skips watchlist, entries, sizing — pure risk management. */
 async function runExitOnlyPass(
-  supabase: ReturnType<typeof createClient>,
+  supabase: any,
   rawSettings: Settings,
   macro: MacroContext | null,
   exitCalibration: Record<string, { trailMultAdjust: number }> | null,
@@ -1931,7 +1931,7 @@ async function runExitOnlyPass(
 
 
 async function processUser(
-  supabase: ReturnType<typeof createClient>,
+  supabase: any,
   settings: Settings,
   macro: MacroContext | null,
   summary: { entries: number; exits: number; partials: number; holds: number; blocked: number; errors: number },
@@ -2204,7 +2204,7 @@ async function processUser(
   const MAX_ENTRIES_PER_SCAN = 2;
   type Pending =
     | { kind: "enter"; ticker: string; decision: Extract<EntryAction, { kind: "ENTER" }> }
-    | { kind: "blocked"; ticker: string; decision: Extract<EntryAction, { kind: "BLOCKED" }> }
+    | { kind: "blocked"; ticker: string; decision: { kind: "BLOCKED"; reason: string } }
     | { kind: "hold" };
   const pending: Pending[] = [];
 
@@ -2352,7 +2352,7 @@ async function processUser(
 
 
     if (decision.kind === "ENTER") pending.push({ kind: "enter", ticker, decision });
-    else if (decision.kind === "BLOCKED") pending.push({ kind: "blocked", ticker, decision });
+    else if (decision.kind === "BLOCKED") pending.push({ kind: "blocked", ticker, decision: { kind: "BLOCKED", reason: decision.reason } });
     else pending.push({ kind: "hold" });
   }
 
@@ -2388,7 +2388,7 @@ async function processUser(
   for (const pos of positions) {
     const entry = Number(pos.entry_price);
     const stop = inferHardStopPrice(pos);
-    if (!Number.isFinite(entry) || !Number.isFinite(stop)) continue;
+    if (!Number.isFinite(entry) || stop == null || !Number.isFinite(stop)) continue;
     openRiskDollars += Math.abs(entry - stop) * Number(pos.shares);
   }
   if (capsActive) {
@@ -2427,7 +2427,7 @@ async function processUser(
   const logInserts: Promise<unknown>[] = [];
   const queueLog = (row: Record<string, unknown>) => {
     logInserts.push(
-      supabase.from("autotrade_log").insert(row).then(() => {}, (e: unknown) => {
+      Promise.resolve(supabase.from("autotrade_log").insert(row)).then(() => {}, (e: unknown) => {
         console.warn("autotrade_log insert failed", e);
       }),
     );
@@ -2745,7 +2745,7 @@ async function processUser(
 
 // ── Execute helpers ───────────────────────────────────────────────────────
 async function executeExit(
-  supabase: ReturnType<typeof createClient>,
+  supabase: any,
   pos: Position, action: ExitAction, profile: ProfileParams,
   summary: { exits: number; partials: number; holds: number },
 ) {
@@ -2850,7 +2850,7 @@ async function executeExit(
 }
 
 async function executeEntry(
-  supabase: ReturnType<typeof createClient>,
+  supabase: any,
   settings: Settings, ticker: string, e: Extract<EntryAction, { kind: "ENTER" }>,
   summary: { entries: number },
   openedByRotation = false,
