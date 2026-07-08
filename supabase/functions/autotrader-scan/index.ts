@@ -123,6 +123,13 @@ interface Position {
   opened_by_rotation: boolean;
   signal_id: string | null;
   partial_exits_taken: number;
+  // Pyramid / re-entry state (add-on engine)
+  add_on_count: number | null;
+  last_add_on_at: string | null;
+  original_shares: number | null;
+  partial_trim_price: number | null;
+  partial_trim_shares: number | null;
+  reentry_deadline: string | null;
 }
 
 interface Settings {
