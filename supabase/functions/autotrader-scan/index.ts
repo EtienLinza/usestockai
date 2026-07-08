@@ -1730,6 +1730,7 @@ async function syncAutoWatchlist(
     .select("ticker, confidence, created_at")
     .gte("confidence", floor)
     .gte("created_at", since)
+    .gt("expires_at", new Date().toISOString())
     .order("confidence", { ascending: false });
   if (sErr) {
     console.warn("auto-add: live_signals fetch failed", sErr);
