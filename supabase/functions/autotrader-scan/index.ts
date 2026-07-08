@@ -1960,7 +1960,7 @@ async function processUser(
   // ── AUTO-DISCOVERY: pull promising tickers from live_signals into watchlist ──
   // Run this in the entry cadence, not the 5-min exit cadence, so watchlist
   // refreshes remain cheap and don't compete with risk-management exits.
-  if (scanMode !== "exits" && settings.auto_add_watchlist) {
+  if (scanMode !== "exits" && settings.auto_add_watchlist && entryShard.shard === 0) {
     await syncAutoWatchlist(supabase, settings, watchRows, positions.map(p => p.ticker.toUpperCase()));
     // Re-read so the rest of the scan picks up newly-added rows
     const refreshed = await supabase.from("watchlist")
