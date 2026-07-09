@@ -1127,10 +1127,11 @@ async function runEntryDecision(
   // crashing together) without forcing the user to enforce sector caps manually.
   if (openTickers.length > 0) {
     const corr = maxCorrelationToBook(ticker, openTickers);
-    if (corr && corr.maxAbs >= CORR_THRESHOLD) {
+    const corrCutoff = adaptiveCorrThreshold(marketRegime, vixRegimeOf(macro?.vix ?? null));
+    if (corr && corr.maxAbs >= corrCutoff) {
       return {
         kind: "BLOCKED",
-        reason: `Correlation gate: |ρ|=${corr.maxAbs.toFixed(2)} vs ${corr.against} ≥ ${CORR_THRESHOLD} over ${CORR_LOOKBACK_BARS}d`,
+        reason: `Correlation gate: |ρ|=${corr.maxAbs.toFixed(2)} vs ${corr.against} ≥ ${corrCutoff.toFixed(2)} (regime-adaptive) over ${CORR_LOOKBACK_BARS}d`,
       };
     }
   }
@@ -1451,8 +1452,9 @@ async function evaluateAddOnCandidate(
   const others = openTickers.filter(t => t !== ticker.toUpperCase());
   if (others.length > 0) {
     const corr = maxCorrelationToBook(ticker, others);
-    if (corr && corr.maxAbs >= CORR_THRESHOLD) {
-      return { kind: "SKIP", reason: `Corr ${corr.maxAbs.toFixed(2)} vs ${corr.against}` };
+    const corrCutoff = adaptiveCorrThreshold(marketRegime, vixRegimeOf(macro?.vix ?? null));
+    if (corr && corr.maxAbs >= corrCutoff) {
+      return { kind: "SKIP", reason: `Corr ${corr.maxAbs.toFixed(2)} vs ${corr.against} ≥ ${corrCutoff.toFixed(2)}` };
     }
   }
 
@@ -2809,11 +2811,12 @@ async function processUser(
     const liveBook = Array.from(heldTickers);
     if (liveBook.length > 0) {
       const corr = maxCorrelationToBook(p.ticker, liveBook);
-      if (corr && corr.maxAbs >= CORR_THRESHOLD) {
+      const corrCutoff = adaptiveCorrThreshold(marketRegime, vixRegimeOf(macro?.vix ?? null));
+      if (corr && corr.maxAbs >= corrCutoff) {
         summary.blocked++; userSummary.blocked++;
         queueLog({
           user_id: userId, ticker: p.ticker, action: "BLOCKED",
-          reason: `Correlation gate (intra-scan): |ρ|=${corr.maxAbs.toFixed(2)} vs ${corr.against} ≥ ${CORR_THRESHOLD}`,
+          reason: `Correlation gate (intra-scan): |ρ|=${corr.maxAbs.toFixed(2)} vs ${corr.against} ≥ ${corrCutoff.toFixed(2)} (regime-adaptive)`,
           conviction: p.decision.conviction, strategy: p.decision.strategy, profile: p.decision.profile,
         });
         continue;
