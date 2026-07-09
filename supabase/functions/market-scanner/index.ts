@@ -955,6 +955,10 @@ serve(async (req) => {
       strategy: string;
       sector: string;
       qualityScore: number;
+      danelfin_score?: number | null;
+      danelfin_delta?: number;
+      eps_revision_score?: number | null;
+      eps_revision_delta?: number;
     }[] = [];
 
     // Phase 1 #4 — Earnings blackout. Pre-fetch in parallel for all candidate
