@@ -1310,7 +1310,7 @@ async function runEntryDecision(
   // (0.35% → 0.70%). Conviction still scales linearly within the window so
   // higher-quality setups get more risk budget, but the window itself moves
   // with the tape instead of being a hard-coded pair.
-  const _vixReg: "calm"|"normal"|"elevated"|"crisis" = macro?.stressed ? "elevated" : "normal";
+  const _vixReg = (macro?.stressed ? "elevated" : "normal") as "calm"|"normal"|"elevated"|"crisis";
   let minRiskPct = 0.0030, maxRiskPct = 0.0060;
   if (marketRegime === "bear_volatile" || _vixReg === "crisis") { minRiskPct = 0.0020; maxRiskPct = 0.0045; }
   else if (marketRegime === "bear_quiet" || marketRegime === "bull_volatile" || _vixReg === "elevated") { minRiskPct = 0.0025; maxRiskPct = 0.0055; }
