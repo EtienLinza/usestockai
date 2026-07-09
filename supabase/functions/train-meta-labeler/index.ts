@@ -10,7 +10,10 @@
 // the loader returns null and the runtime treats meta-labeling as a no-op.
 // ============================================================================
 
-import { corsHeaders } from "npm:@supabase/supabase-js@2/cors";
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-cron-secret",
+};
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import { META_FEATURE_NAMES, type MetaFeatures } from "../_shared/meta-labeler.ts";
 import { requireCronOrUser } from "../_shared/cron-auth.ts";
