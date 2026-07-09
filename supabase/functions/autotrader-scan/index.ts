@@ -1132,7 +1132,7 @@ async function runEntryDecision(
   // crashing together) without forcing the user to enforce sector caps manually.
   if (openTickers.length > 0) {
     const corr = maxCorrelationToBook(ticker, openTickers);
-    const corrCutoff = adaptiveCorrThreshold(marketRegime, vixRegimeOf(macro?.vix ?? null));
+    const corrCutoff = adaptiveCorrThreshold(marketRegime, macro?.stressed ? "elevated" : "normal");
     if (corr && corr.maxAbs >= corrCutoff) {
       return {
         kind: "BLOCKED",
@@ -1459,7 +1459,7 @@ async function evaluateAddOnCandidate(
   const others = openTickers.filter(t => t !== ticker.toUpperCase());
   if (others.length > 0) {
     const corr = maxCorrelationToBook(ticker, others);
-    const corrCutoff = adaptiveCorrThreshold(marketRegime, vixRegimeOf(macro?.vix ?? null));
+    const corrCutoff = adaptiveCorrThreshold(marketRegime, macro?.stressed ? "elevated" : "normal");
     if (corr && corr.maxAbs >= corrCutoff) {
       return { kind: "SKIP", reason: `Corr ${corr.maxAbs.toFixed(2)} vs ${corr.against} ≥ ${corrCutoff.toFixed(2)}` };
     }
@@ -2839,7 +2839,7 @@ async function processUser(
     const liveBook = Array.from(heldTickers);
     if (liveBook.length > 0) {
       const corr = maxCorrelationToBook(p.ticker, liveBook);
-      const corrCutoff = adaptiveCorrThreshold(marketRegime, vixRegimeOf(macro?.vix ?? null));
+      const corrCutoff = adaptiveCorrThreshold(marketRegime, macro?.stressed ? "elevated" : "normal");
       if (corr && corr.maxAbs >= corrCutoff) {
         summary.blocked++; userSummary.blocked++;
         queueLog({
