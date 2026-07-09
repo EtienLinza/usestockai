@@ -139,7 +139,7 @@ async function _disabled_handler(req: Request) {
       customer: customerId,
       metadata: { userId },
       ...(isRecurring && { subscription_data: { metadata: { userId } } }),
-    });
+    } as any);
 
     return new Response(JSON.stringify({ clientSecret: session.client_secret }), {
       status: 200,
