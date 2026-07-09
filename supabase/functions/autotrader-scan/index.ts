@@ -1303,20 +1303,22 @@ async function runEntryDecision(
   }
   const hardStop = isLong ? currentPrice - stopDist : currentPrice + stopDist;
 
-  // ── FAT-TAIL GUARD: Risk-parity sizing ─────────────────────────────────
-  // Cap dollar risk per trade at MAX_RISK_PCT of NAV. If the adaptive stop
-  // is wide (high-ATR name), shares shrink so $-at-risk stays constant.
-  // If the stop is tight (low-ATR name), shares can grow up to the existing
-  // single-name / headroom caps. This eliminates the UAMY/SATS-style
-  // outliers without sacrificing volatility adaptivity. Conviction scales
-  // the budget linearly between MIN and MAX so higher-quality setups can
-  // risk slightly more.
-  const MIN_RISK_PCT = 0.0030;  // 0.30% NAV at min_conviction
-  const MAX_RISK_PCT = 0.0060;  // 0.60% NAV at conviction=95+
+  // ── FAT-TAIL GUARD: Risk-parity sizing (ADAPTIVE — Phase 1 sweep) ─────
+  // Cap dollar risk per trade at a regime-adjusted % of NAV. Base window is
+  // 0.30% → 0.60% (min-conv → 95+ conv). We tighten in stress (bear_volatile
+  // or crisis VIX → 0.20% → 0.45%) and loosen modestly in bull_quiet
+  // (0.35% → 0.70%). Conviction still scales linearly within the window so
+  // higher-quality setups get more risk budget, but the window itself moves
+  // with the tape instead of being a hard-coded pair.
+  const _vixReg = vixRegimeOf(macro?.vix ?? null);
+  let minRiskPct = 0.0030, maxRiskPct = 0.0060;
+  if (marketRegime === "bear_volatile" || _vixReg === "crisis") { minRiskPct = 0.0020; maxRiskPct = 0.0045; }
+  else if (marketRegime === "bear_quiet" || marketRegime === "bull_volatile" || _vixReg === "elevated") { minRiskPct = 0.0025; maxRiskPct = 0.0055; }
+  else if (marketRegime === "bull_quiet" && _vixReg === "calm") { minRiskPct = 0.0035; maxRiskPct = 0.0070; }
   const convBlend = Math.max(0, Math.min(1,
     (effectiveConviction - settings.min_conviction) / Math.max(1, 95 - settings.min_conviction)
   ));
-  const riskPct = MIN_RISK_PCT + (MAX_RISK_PCT - MIN_RISK_PCT) * convBlend;
+  const riskPct = minRiskPct + (maxRiskPct - minRiskPct) * convBlend;
   const riskBudgetDollars = navForSizing * riskPct;
   if (stopDist > 0) {
     const maxSharesByRisk = riskBudgetDollars / stopDist;
