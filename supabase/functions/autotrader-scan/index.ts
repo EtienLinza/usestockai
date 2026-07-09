@@ -454,7 +454,28 @@ type ExitAction =
 // the Pearson correlation coefficient. Returns null if either series is too
 // short or has zero variance (avoids NaN poisoning the gate).
 const CORR_LOOKBACK_BARS = 60;
-const CORR_THRESHOLD = 0.75;
+// Correlation gate is now **adaptive** (Phase 1 of the adaptive-constants sweep).
+// Base 0.75 stays as the neutral / bull_quiet reading, but volatile regimes
+// tighten toward 0.60 because a single factor blow-up in a stressed tape is
+// far more likely to take multiple positions with it. VIX regime can only
+// tighten further, never loosen. Kept as a helper so every call site pulls
+// from the same source of truth.
+function adaptiveCorrThreshold(
+  marketRegime: string | null | undefined,
+  vixRegime: "calm" | "normal" | "elevated" | "crisis",
+): number {
+  let t = 0.75;
+  switch (marketRegime) {
+    case "bull_quiet":     t = 0.80; break;
+    case "bull_volatile":  t = 0.68; break;
+    case "bear_quiet":     t = 0.68; break;
+    case "bear_volatile":  t = 0.60; break;
+    default:               t = 0.75;
+  }
+  if (vixRegime === "crisis")   t = Math.min(t, 0.58);
+  else if (vixRegime === "elevated") t = Math.min(t, 0.66);
+  return t;
+}
 
 function dailyReturns(close: number[], lookback: number): number[] {
   const n = close.length;
