@@ -842,9 +842,13 @@ function runWalkForwardBacktest(
           // (smaller edge per trade, defensive mode).
           // ============================================================
           const convictionScalar = Math.max(0, Math.min(1, currentTargetAllocation));
-          let kellyFraction = 0.10 + 0.20 * convictionScalar; // 10% .. 30%
+          // Adaptive Kelly: base range widens for volatile names (more edge per trade
+          // via ATR-scaled stops) and shrinks for calm names.
+          const kellyMax = Math.max(0.18, Math.min(0.35, 0.30 * (0.6 + 0.4 * stockVolScalar)));
+          const kellyMin = 0.08;
+          let kellyFraction = kellyMin + (kellyMax - kellyMin) * convictionScalar;
           if (isLowVolStock) kellyFraction *= 0.75;
-          kellyFraction = Math.max(0.05, Math.min(0.30, kellyFraction));
+          kellyFraction = Math.max(0.05, Math.min(kellyMax, kellyFraction));
           const positionSize = capital * kellyFraction;
 
           if (positionSize > 10 && entryPrice > 0) {
