@@ -840,9 +840,15 @@ export function computeStrategySignal(
   // Phase 1 #3 — Apply divergence as a discrete cross-strategy modifier on
   // Trend and Breakout (MR already uses it as a scoring condition above).
   // Confirmed (RSI + MACD agree) doubles the bonus / deepens the penalty.
-  const divBonusBase = 6;
-  const divPenaltyMult = 0.85;
-  const divPenaltyMultConfirmed = 0.75;
+  // ADAPTIVE (Phase 2 sweep): divergence swings scale with realized volatility
+  // — a bearish divergence on a 4% ATR name is a much stronger signal than
+  // the same setup on a 1% ATR utility. Base bonus 6 fits ~2% ATR; scaled
+  // linearly and clamped to keep the effect bounded.
+  const _atrPctChoose = currentPrice > 0 ? currentATR / currentPrice : 0.02;
+  const _volScale = Math.max(0.6, Math.min(1.6, _atrPctChoose / 0.02));
+  const divBonusBase = Math.round(6 * _volScale);                          // 4–10
+  const divPenaltyMult = Math.max(0.75, Math.min(0.92, 0.85 + (1 - _volScale) * 0.04));  // 0.79–0.92
+  const divPenaltyMultConfirmed = Math.max(0.65, Math.min(0.85, 0.75 + (1 - _volScale) * 0.04)); // 0.69–0.82
   const applyDiv = (sig: "BUY" | "SHORT" | "HOLD", conv: number): number => {
     if (sig === "HOLD" || conv <= 0) return conv;
     if (sig === "BUY") {
@@ -912,12 +918,16 @@ export function computeStrategySignal(
     adjustedConviction *= 0.7;
   }
 
-  // Own-trend bonus pooled
+  // Own-trend bonus pooled — ADAPTIVE (Phase 2 sweep). Bonus scales with the
+  // strength of the 200-SMA slope: shallow trends get the base +6, strong
+  // trends earn up to +12. Slope of ±0.02 is the gate; the +0.02 above that
+  // maps to +6 → +12 linearly then clamps.
+  const _otBonus = Math.max(6, Math.min(12, 6 + 200 * Math.max(0, Math.abs(sma200Slope) - 0.02)));
   if (above200 && sma200Slope > 0.02 && rsiVal > 40 && rsiVal < 70 && bestSignal === "BUY") {
-    adjustedConviction = applyBonusPool(adjustedConviction, 8, 8);
+    adjustedConviction = applyBonusPool(adjustedConviction, _otBonus, 10);
   }
   if (below200 && sma200Slope < -0.02 && rsiVal > 30 && rsiVal < 60 && bestSignal === "SHORT") {
-    adjustedConviction = applyBonusPool(adjustedConviction, 8, 8);
+    adjustedConviction = applyBonusPool(adjustedConviction, _otBonus, 10);
   }
 
   const cappedConviction = Math.min(100, adjustedConviction);
@@ -939,7 +949,12 @@ export function computeStrategySignal(
   const consensusScore = bestSignal === "BUY" ? cappedConviction : -cappedConviction;
 
   let confidence = cappedConviction;
-  if (regime.includes("strong")) confidence += 3;
+  // ADAPTIVE strong-regime bump (Phase 2 sweep): calm strong regimes offer
+  // the best signal-to-noise ratio (low chop, strong direction) — reward them
+  // more. Fixed +3 → +5 when strong regime AND vol below target, +2 otherwise.
+  if (regime.includes("strong")) {
+    confidence += (currentVol > 0 && currentVol < TARGET_VOL) ? 5 : 2;
+  }
   confidence = Math.max(0, Math.min(100, Math.round(confidence)));
 
   return { consensusScore, regime, confidence, strategy: bestStrategy, positionSizeMultiplier, atr: currentATR };
