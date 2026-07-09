@@ -19,7 +19,7 @@ const FAIL_STREAK_LIMIT = 5;
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
-async function writeHeartbeat(supabase: ReturnType<typeof createClient>, status: string, notes: string, durationMs: number) {
+async function writeHeartbeat(supabase: any, status: string, notes: string, durationMs: number) {
   try {
     await supabase.from("cron_heartbeat").upsert({
       job_name: "refresh-short-interest",
