@@ -406,6 +406,8 @@ function runWalkForwardBacktest(
 
   // Detect low-volatility stock: weekly ATR% < 2% on average
   let isLowVolStock = false;
+  let stockVolScalar = 1.0; // adaptive: <1 for calm names, >1 for volatile names
+  let avgWeeklyAtrPctGlobal = 0.02;
   {
     let wAtrPctSum = 0, wAtrPctCount = 0;
     for (let wi = 14; wi < weeklyData.close.length; wi++) {
@@ -415,13 +417,13 @@ function runWalkForwardBacktest(
       }
     }
     const avgWeeklyAtrPct = wAtrPctCount > 0 ? wAtrPctSum / wAtrPctCount : 0;
+    avgWeeklyAtrPctGlobal = avgWeeklyAtrPct;
     isLowVolStock = avgWeeklyAtrPct < 0.02;
+    // Adaptive vol scalar: normalized to 2% "typical" weekly ATR baseline.
+    stockVolScalar = Math.max(0.5, Math.min(2.0, avgWeeklyAtrPct / 0.02));
     if (isLowVolStock) {
       console.log(`[LowVol] ${ticker}: weekly ATR%=${(avgWeeklyAtrPct * 100).toFixed(2)}% → switching to defensive mean-reversion mode`);
     }
-    // Expose stock-level vol scalar for adaptive cooldowns / Kelly caps below.
-    // volScalar: <1 for low-vol (calm) names, >1 for high-vol names. Clamped [0.5, 2.0].
-    (globalThis as any).__btVolScalar = Math.max(0.5, Math.min(2.0, avgWeeklyAtrPct / 0.02));
   }
 
   // Build SPY regime maps
