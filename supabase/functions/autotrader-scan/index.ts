@@ -454,7 +454,28 @@ type ExitAction =
 // the Pearson correlation coefficient. Returns null if either series is too
 // short or has zero variance (avoids NaN poisoning the gate).
 const CORR_LOOKBACK_BARS = 60;
-const CORR_THRESHOLD = 0.75;
+// Correlation gate is now **adaptive** (Phase 1 of the adaptive-constants sweep).
+// Base 0.75 stays as the neutral / bull_quiet reading, but volatile regimes
+// tighten toward 0.60 because a single factor blow-up in a stressed tape is
+// far more likely to take multiple positions with it. VIX regime can only
+// tighten further, never loosen. Kept as a helper so every call site pulls
+// from the same source of truth.
+function adaptiveCorrThreshold(
+  marketRegime: string | null | undefined,
+  vixRegime: "calm" | "normal" | "elevated" | "crisis",
+): number {
+  let t = 0.75;
+  switch (marketRegime) {
+    case "bull_quiet":     t = 0.80; break;
+    case "bull_volatile":  t = 0.68; break;
+    case "bear_quiet":     t = 0.68; break;
+    case "bear_volatile":  t = 0.60; break;
+    default:               t = 0.75;
+  }
+  if (vixRegime === "crisis")   t = Math.min(t, 0.58);
+  else if (vixRegime === "elevated") t = Math.min(t, 0.66);
+  return t;
+}
 
 function dailyReturns(close: number[], lookback: number): number[] {
   const n = close.length;
@@ -724,10 +745,15 @@ function runWinExit(
     }
   }
 
-  // Below +6% we don't try to time a peak — hold or let loss-engine cut
-  const MIN_PROFIT_FOR_PEAK = 0.06;
-  if (pnlPct < MIN_PROFIT_FOR_PEAK) {
-    return { kind: "HOLD", reason: "below peak-detection floor", trailingUpdate: trailing, peakUpdate: newPeak };
+  // Below a floor P&L we don't try to time a peak — hold or let loss-engine cut.
+  // ADAPTIVE (Phase 1 sweep): the old fixed 6% floor fit ~2%-ATR names but
+  // triggered too early on low-vol tickers (e.g. utilities at 0.8% ATR) and
+  // too late on high-vol names (5% ATR crypto proxies). Formula: ~3× ATR%,
+  // clamped to a sane [3%, 12%] range so we still guard against noise on both ends.
+  const atrPctForPeak = atr > 0 && entry > 0 ? atr / entry : 0.02;
+  const minProfitForPeak = Math.max(0.03, Math.min(0.12, atrPctForPeak * 3));
+  if (pnlPct < minProfitForPeak) {
+    return { kind: "HOLD", reason: `below peak-detection floor (${(minProfitForPeak * 100).toFixed(1)}%, atr-adaptive)`, trailingUpdate: trailing, peakUpdate: newPeak };
   }
 
   const n = data.close.length;
@@ -1106,10 +1132,11 @@ async function runEntryDecision(
   // crashing together) without forcing the user to enforce sector caps manually.
   if (openTickers.length > 0) {
     const corr = maxCorrelationToBook(ticker, openTickers);
-    if (corr && corr.maxAbs >= CORR_THRESHOLD) {
+    const corrCutoff = adaptiveCorrThreshold(marketRegime, macro?.stressed ? "elevated" : "normal");
+    if (corr && corr.maxAbs >= corrCutoff) {
       return {
         kind: "BLOCKED",
-        reason: `Correlation gate: |ρ|=${corr.maxAbs.toFixed(2)} vs ${corr.against} ≥ ${CORR_THRESHOLD} over ${CORR_LOOKBACK_BARS}d`,
+        reason: `Correlation gate: |ρ|=${corr.maxAbs.toFixed(2)} vs ${corr.against} ≥ ${corrCutoff.toFixed(2)} (regime-adaptive) over ${CORR_LOOKBACK_BARS}d`,
       };
     }
   }
@@ -1276,20 +1303,22 @@ async function runEntryDecision(
   }
   const hardStop = isLong ? currentPrice - stopDist : currentPrice + stopDist;
 
-  // ── FAT-TAIL GUARD: Risk-parity sizing ─────────────────────────────────
-  // Cap dollar risk per trade at MAX_RISK_PCT of NAV. If the adaptive stop
-  // is wide (high-ATR name), shares shrink so $-at-risk stays constant.
-  // If the stop is tight (low-ATR name), shares can grow up to the existing
-  // single-name / headroom caps. This eliminates the UAMY/SATS-style
-  // outliers without sacrificing volatility adaptivity. Conviction scales
-  // the budget linearly between MIN and MAX so higher-quality setups can
-  // risk slightly more.
-  const MIN_RISK_PCT = 0.0030;  // 0.30% NAV at min_conviction
-  const MAX_RISK_PCT = 0.0060;  // 0.60% NAV at conviction=95+
+  // ── FAT-TAIL GUARD: Risk-parity sizing (ADAPTIVE — Phase 1 sweep) ─────
+  // Cap dollar risk per trade at a regime-adjusted % of NAV. Base window is
+  // 0.30% → 0.60% (min-conv → 95+ conv). We tighten in stress (bear_volatile
+  // or crisis VIX → 0.20% → 0.45%) and loosen modestly in bull_quiet
+  // (0.35% → 0.70%). Conviction still scales linearly within the window so
+  // higher-quality setups get more risk budget, but the window itself moves
+  // with the tape instead of being a hard-coded pair.
+  const _vixReg = (macro?.stressed ? "elevated" : "normal") as "calm"|"normal"|"elevated"|"crisis";
+  let minRiskPct = 0.0030, maxRiskPct = 0.0060;
+  if (marketRegime === "bear_volatile" || _vixReg === "crisis") { minRiskPct = 0.0020; maxRiskPct = 0.0045; }
+  else if (marketRegime === "bear_quiet" || marketRegime === "bull_volatile" || _vixReg === "elevated") { minRiskPct = 0.0025; maxRiskPct = 0.0055; }
+  else if (marketRegime === "bull_quiet" && _vixReg === "calm") { minRiskPct = 0.0035; maxRiskPct = 0.0070; }
   const convBlend = Math.max(0, Math.min(1,
     (effectiveConviction - settings.min_conviction) / Math.max(1, 95 - settings.min_conviction)
   ));
-  const riskPct = MIN_RISK_PCT + (MAX_RISK_PCT - MIN_RISK_PCT) * convBlend;
+  const riskPct = minRiskPct + (maxRiskPct - minRiskPct) * convBlend;
   const riskBudgetDollars = navForSizing * riskPct;
   if (stopDist > 0) {
     const maxSharesByRisk = riskBudgetDollars / stopDist;
@@ -1430,8 +1459,9 @@ async function evaluateAddOnCandidate(
   const others = openTickers.filter(t => t !== ticker.toUpperCase());
   if (others.length > 0) {
     const corr = maxCorrelationToBook(ticker, others);
-    if (corr && corr.maxAbs >= CORR_THRESHOLD) {
-      return { kind: "SKIP", reason: `Corr ${corr.maxAbs.toFixed(2)} vs ${corr.against}` };
+    const corrCutoff = adaptiveCorrThreshold(marketRegime, macro?.stressed ? "elevated" : "normal");
+    if (corr && corr.maxAbs >= corrCutoff) {
+      return { kind: "SKIP", reason: `Corr ${corr.maxAbs.toFixed(2)} vs ${corr.against} ≥ ${corrCutoff.toFixed(2)}` };
     }
   }
 
@@ -2431,10 +2461,7 @@ async function processUser(
 
 
   // PASS 1 — gather decisions for every eligible ticker (no DB writes yet).
-  // This lets us rank ENTER candidates by conviction and stagger entries
-  // (cap at MAX_ENTRIES_PER_SCAN per run) so we don't open 4–8 positions in a
-  // single tick at correlated highs.
-  const MAX_ENTRIES_PER_SCAN = 2;
+  // (Entry-stagger cap is computed *after* marketRegime is loaded — see below.)
   type Pending =
     | { kind: "enter"; ticker: string; decision: Extract<EntryAction, { kind: "ENTER" }> }
     | { kind: "blocked"; ticker: string; decision: { kind: "BLOCKED"; reason: string } }
@@ -2590,6 +2617,16 @@ async function processUser(
   }
 
   // PASS 2 — sort ENTER candidates by conviction desc, take top N, defer the rest.
+  // ADAPTIVE entry-stagger cap (Phase 1 sweep). Scales with regime (rich
+  // bull_quiet tapes deserve more fills, bear_volatile deserves fewer) and
+  // dampens when the book is drawing down.
+  let maxEntriesPerScan = 2;
+  if (marketRegime === "bull_quiet") maxEntriesPerScan = 4;
+  else if (marketRegime === "bull_volatile" || marketRegime === "neutral") maxEntriesPerScan = 3;
+  else if (marketRegime === "bear_quiet") maxEntriesPerScan = 2;
+  else if (marketRegime === "bear_volatile") maxEntriesPerScan = 1;
+  if (settings.current_drawdown_pct >= 5) maxEntriesPerScan = Math.max(1, maxEntriesPerScan - 1);
+  const MAX_ENTRIES_PER_SCAN = maxEntriesPerScan;
   const enterCandidates = pending
     .filter((p): p is Extract<Pending, { kind: "enter" }> => p.kind === "enter")
     .sort((a, b) => b.decision.conviction - a.decision.conviction);
@@ -2650,8 +2687,21 @@ async function processUser(
   // and downstream NAV / correlation re-checks see the new state.
   const livePositions: Position[] = [...positions];
   let rotationsDoneThisScan = 0;
-  const HIGH_CONVICTION_ROTATION_FLOOR = 85;
-  const MIN_POSITION_AGE_MS = 30 * 60_000; // don't rotate fresh entries
+  // ADAPTIVE rotation floor (Phase 1 sweep): base 85, but lifts with the
+  // effective min_conviction (which already moves with regime + drawdown in
+  // computeEffectiveSettings) so we never rotate on a marginally-above-floor
+  // candidate. Bear-vol regimes get an extra +5 because displacement costs
+  // (slippage + tax) hurt more when the tape is punishing.
+  const HIGH_CONVICTION_ROTATION_FLOOR =
+    Math.max(85, settings.min_conviction + 15) + (marketRegime === "bear_volatile" ? 5 : 0);
+  // ADAPTIVE min-age gate: fresh entries are protected from immediate
+  // rotation, but the "fresh" horizon should scale with volatility. High-vol
+  // names need less time to prove themselves (a 5% ATR move plays out fast),
+  // low-vol names deserve longer. Base 30 min → scaled by SPY realized vol.
+  const _spyVolAnn = macro ? (realizedVolAnnualized(macro.spyClose, 20) ?? 0.18) : 0.18;
+  const MIN_POSITION_AGE_MS = Math.round(
+    30 * 60_000 * Math.max(0.5, Math.min(2.0, 0.18 / Math.max(0.05, _spyVolAnn))),
+  );
 
   // ── Engine-speed: fire-and-forget log inserts ────────────────────────────
   // Each candidate may emit a BLOCKED/HOLD/WARN row to autotrade_log; awaiting
@@ -2788,11 +2838,12 @@ async function processUser(
     const liveBook = Array.from(heldTickers);
     if (liveBook.length > 0) {
       const corr = maxCorrelationToBook(p.ticker, liveBook);
-      if (corr && corr.maxAbs >= CORR_THRESHOLD) {
+      const corrCutoff = adaptiveCorrThreshold(marketRegime, macro?.stressed ? "elevated" : "normal");
+      if (corr && corr.maxAbs >= corrCutoff) {
         summary.blocked++; userSummary.blocked++;
         queueLog({
           user_id: userId, ticker: p.ticker, action: "BLOCKED",
-          reason: `Correlation gate (intra-scan): |ρ|=${corr.maxAbs.toFixed(2)} vs ${corr.against} ≥ ${CORR_THRESHOLD}`,
+          reason: `Correlation gate (intra-scan): |ρ|=${corr.maxAbs.toFixed(2)} vs ${corr.against} ≥ ${corrCutoff.toFixed(2)} (regime-adaptive)`,
           conviction: p.decision.conviction, strategy: p.decision.strategy, profile: p.decision.profile,
         });
         continue;
