@@ -41,13 +41,13 @@ const TIER_LIMITS: Record<Tier, { backtests: number; maxTickers: number; maxYear
   elite: { backtests: Number.POSITIVE_INFINITY, maxTickers: 10, maxYears: 15, allowMonteCarlo: true, allowWalkForward: true, allowRobustness: true },
 };
 
-async function getUserTier(adminClient: ReturnType<typeof createClient>, userId: string): Promise<Tier> {
+async function getUserTier(adminClient: any, userId: string): Promise<Tier> {
   const { data } = await adminClient.rpc("get_user_tier", { _user_id: userId });
   return ((data as Tier) ?? "free");
 }
 
 async function checkAndIncrementBacktests(
-  adminClient: ReturnType<typeof createClient>,
+  adminClient: any,
   userId: string,
   tier: Tier,
 ): Promise<{ ok: true; used: number } | { ok: false; used: number; limit: number }> {
