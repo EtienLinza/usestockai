@@ -419,6 +419,9 @@ function runWalkForwardBacktest(
     if (isLowVolStock) {
       console.log(`[LowVol] ${ticker}: weekly ATR%=${(avgWeeklyAtrPct * 100).toFixed(2)}% → switching to defensive mean-reversion mode`);
     }
+    // Expose stock-level vol scalar for adaptive cooldowns / Kelly caps below.
+    // volScalar: <1 for low-vol (calm) names, >1 for high-vol names. Clamped [0.5, 2.0].
+    (globalThis as any).__btVolScalar = Math.max(0.5, Math.min(2.0, avgWeeklyAtrPct / 0.02));
   }
 
   // Build SPY regime maps
