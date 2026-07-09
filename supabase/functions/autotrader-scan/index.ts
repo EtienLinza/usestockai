@@ -2461,18 +2461,7 @@ async function processUser(
 
 
   // PASS 1 — gather decisions for every eligible ticker (no DB writes yet).
-  // ADAPTIVE entry-stagger cap (Phase 1 sweep). Old fixed cap of 2/scan meant
-  // rich bull_quiet tapes with 5 great setups only got 2 filled per tick,
-  // leaving alpha on the table; and bear_volatile tapes still allowed 2 which
-  // is one too many when correlations are spiking. Scales with regime and
-  // dampens if the book is drawing down.
-  let maxEntriesPerScan = 2;
-  if (marketRegime === "bull_quiet") maxEntriesPerScan = 4;
-  else if (marketRegime === "bull_volatile" || marketRegime === "neutral") maxEntriesPerScan = 3;
-  else if (marketRegime === "bear_quiet") maxEntriesPerScan = 2;
-  else if (marketRegime === "bear_volatile") maxEntriesPerScan = 1;
-  if (settings.current_drawdown_pct >= 5) maxEntriesPerScan = Math.max(1, maxEntriesPerScan - 1);
-  const MAX_ENTRIES_PER_SCAN = maxEntriesPerScan;
+  // (Entry-stagger cap is computed *after* marketRegime is loaded — see below.)
   type Pending =
     | { kind: "enter"; ticker: string; decision: Extract<EntryAction, { kind: "ENTER" }> }
     | { kind: "blocked"; ticker: string; decision: { kind: "BLOCKED"; reason: string } }
