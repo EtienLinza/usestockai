@@ -2461,10 +2461,18 @@ async function processUser(
 
 
   // PASS 1 — gather decisions for every eligible ticker (no DB writes yet).
-  // This lets us rank ENTER candidates by conviction and stagger entries
-  // (cap at MAX_ENTRIES_PER_SCAN per run) so we don't open 4–8 positions in a
-  // single tick at correlated highs.
-  const MAX_ENTRIES_PER_SCAN = 2;
+  // ADAPTIVE entry-stagger cap (Phase 1 sweep). Old fixed cap of 2/scan meant
+  // rich bull_quiet tapes with 5 great setups only got 2 filled per tick,
+  // leaving alpha on the table; and bear_volatile tapes still allowed 2 which
+  // is one too many when correlations are spiking. Scales with regime and
+  // dampens if the book is drawing down.
+  let maxEntriesPerScan = 2;
+  if (marketRegime === "bull_quiet") maxEntriesPerScan = 4;
+  else if (marketRegime === "bull_volatile" || marketRegime === "neutral") maxEntriesPerScan = 3;
+  else if (marketRegime === "bear_quiet") maxEntriesPerScan = 2;
+  else if (marketRegime === "bear_volatile") maxEntriesPerScan = 1;
+  if (settings.current_drawdown_pct >= 5) maxEntriesPerScan = Math.max(1, maxEntriesPerScan - 1);
+  const MAX_ENTRIES_PER_SCAN = maxEntriesPerScan;
   type Pending =
     | { kind: "enter"; ticker: string; decision: Extract<EntryAction, { kind: "ENTER" }> }
     | { kind: "blocked"; ticker: string; decision: { kind: "BLOCKED"; reason: string } }
@@ -2680,8 +2688,21 @@ async function processUser(
   // and downstream NAV / correlation re-checks see the new state.
   const livePositions: Position[] = [...positions];
   let rotationsDoneThisScan = 0;
-  const HIGH_CONVICTION_ROTATION_FLOOR = 85;
-  const MIN_POSITION_AGE_MS = 30 * 60_000; // don't rotate fresh entries
+  // ADAPTIVE rotation floor (Phase 1 sweep): base 85, but lifts with the
+  // effective min_conviction (which already moves with regime + drawdown in
+  // computeEffectiveSettings) so we never rotate on a marginally-above-floor
+  // candidate. Bear-vol regimes get an extra +5 because displacement costs
+  // (slippage + tax) hurt more when the tape is punishing.
+  const HIGH_CONVICTION_ROTATION_FLOOR =
+    Math.max(85, settings.min_conviction + 15) + (marketRegime === "bear_volatile" ? 5 : 0);
+  // ADAPTIVE min-age gate: fresh entries are protected from immediate
+  // rotation, but the "fresh" horizon should scale with volatility. High-vol
+  // names need less time to prove themselves (a 5% ATR move plays out fast),
+  // low-vol names deserve longer. Base 30 min → scaled by SPY realized vol.
+  const _spyVolAnn = macro ? (realizedVolAnnualized(macro.spyClose, 20) ?? 0.18) : 0.18;
+  const MIN_POSITION_AGE_MS = Math.round(
+    30 * 60_000 * Math.max(0.5, Math.min(2.0, 0.18 / Math.max(0.05, _spyVolAnn))),
+  );
 
   // ── Engine-speed: fire-and-forget log inserts ────────────────────────────
   // Each candidate may emit a BLOCKED/HOLD/WARN row to autotrade_log; awaiting
