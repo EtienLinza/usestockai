@@ -2617,6 +2617,16 @@ async function processUser(
   }
 
   // PASS 2 — sort ENTER candidates by conviction desc, take top N, defer the rest.
+  // ADAPTIVE entry-stagger cap (Phase 1 sweep). Scales with regime (rich
+  // bull_quiet tapes deserve more fills, bear_volatile deserves fewer) and
+  // dampens when the book is drawing down.
+  let maxEntriesPerScan = 2;
+  if (marketRegime === "bull_quiet") maxEntriesPerScan = 4;
+  else if (marketRegime === "bull_volatile" || marketRegime === "neutral") maxEntriesPerScan = 3;
+  else if (marketRegime === "bear_quiet") maxEntriesPerScan = 2;
+  else if (marketRegime === "bear_volatile") maxEntriesPerScan = 1;
+  if (settings.current_drawdown_pct >= 5) maxEntriesPerScan = Math.max(1, maxEntriesPerScan - 1);
+  const MAX_ENTRIES_PER_SCAN = maxEntriesPerScan;
   const enterCandidates = pending
     .filter((p): p is Extract<Pending, { kind: "enter" }> => p.kind === "enter")
     .sort((a, b) => b.decision.conviction - a.decision.conviction);
