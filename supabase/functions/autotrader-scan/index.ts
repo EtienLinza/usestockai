@@ -745,10 +745,15 @@ function runWinExit(
     }
   }
 
-  // Below +6% we don't try to time a peak — hold or let loss-engine cut
-  const MIN_PROFIT_FOR_PEAK = 0.06;
-  if (pnlPct < MIN_PROFIT_FOR_PEAK) {
-    return { kind: "HOLD", reason: "below peak-detection floor", trailingUpdate: trailing, peakUpdate: newPeak };
+  // Below a floor P&L we don't try to time a peak — hold or let loss-engine cut.
+  // ADAPTIVE (Phase 1 sweep): the old fixed 6% floor fit ~2%-ATR names but
+  // triggered too early on low-vol tickers (e.g. utilities at 0.8% ATR) and
+  // too late on high-vol names (5% ATR crypto proxies). Formula: ~3× ATR%,
+  // clamped to a sane [3%, 12%] range so we still guard against noise on both ends.
+  const atrPctForPeak = atr > 0 && entry > 0 ? atr / entry : 0.02;
+  const minProfitForPeak = Math.max(0.03, Math.min(0.12, atrPctForPeak * 3));
+  if (pnlPct < minProfitForPeak) {
+    return { kind: "HOLD", reason: `below peak-detection floor (${(minProfitForPeak * 100).toFixed(1)}%, atr-adaptive)`, trailingUpdate: trailing, peakUpdate: newPeak };
   }
 
   const n = data.close.length;
