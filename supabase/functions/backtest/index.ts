@@ -406,6 +406,8 @@ function runWalkForwardBacktest(
 
   // Detect low-volatility stock: weekly ATR% < 2% on average
   let isLowVolStock = false;
+  let stockVolScalar = 1.0; // adaptive: <1 for calm names, >1 for volatile names
+  let avgWeeklyAtrPctGlobal = 0.02;
   {
     let wAtrPctSum = 0, wAtrPctCount = 0;
     for (let wi = 14; wi < weeklyData.close.length; wi++) {
@@ -415,7 +417,10 @@ function runWalkForwardBacktest(
       }
     }
     const avgWeeklyAtrPct = wAtrPctCount > 0 ? wAtrPctSum / wAtrPctCount : 0;
+    avgWeeklyAtrPctGlobal = avgWeeklyAtrPct;
     isLowVolStock = avgWeeklyAtrPct < 0.02;
+    // Adaptive vol scalar: normalized to 2% "typical" weekly ATR baseline.
+    stockVolScalar = Math.max(0.5, Math.min(2.0, avgWeeklyAtrPct / 0.02));
     if (isLowVolStock) {
       console.log(`[LowVol] ${ticker}: weekly ATR%=${(avgWeeklyAtrPct * 100).toFixed(2)}% → switching to defensive mean-reversion mode`);
     }
@@ -560,7 +565,11 @@ function runWalkForwardBacktest(
         allocationAtEntry: pos.currentAllocation,
       });
     }
-    cooldownUntil = barIdx + 10; // 10-bar cooldown after full exit
+    // Adaptive cooldown: calm names (low ATR%) get longer wait to avoid whipsaw
+    // (mean-reversion regime), volatile names get shorter to catch fresh momentum.
+    // Base 10 bars * inverse vol scalar → range ~[5, 20] bars.
+    const adaptiveCooldown = Math.round(Math.max(5, Math.min(20, 10 / stockVolScalar)));
+    cooldownUntil = barIdx + adaptiveCooldown;
   };
 
   // --- Helper: scale down position ---
@@ -833,9 +842,13 @@ function runWalkForwardBacktest(
           // (smaller edge per trade, defensive mode).
           // ============================================================
           const convictionScalar = Math.max(0, Math.min(1, currentTargetAllocation));
-          let kellyFraction = 0.10 + 0.20 * convictionScalar; // 10% .. 30%
+          // Adaptive Kelly: base range widens for volatile names (more edge per trade
+          // via ATR-scaled stops) and shrinks for calm names.
+          const kellyMax = Math.max(0.18, Math.min(0.35, 0.30 * (0.6 + 0.4 * stockVolScalar)));
+          const kellyMin = 0.08;
+          let kellyFraction = kellyMin + (kellyMax - kellyMin) * convictionScalar;
           if (isLowVolStock) kellyFraction *= 0.75;
-          kellyFraction = Math.max(0.05, Math.min(0.30, kellyFraction));
+          kellyFraction = Math.max(0.05, Math.min(kellyMax, kellyFraction));
           const positionSize = capital * kellyFraction;
 
           if (positionSize > 10 && entryPrice > 0) {
