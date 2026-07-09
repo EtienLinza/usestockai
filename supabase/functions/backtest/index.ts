@@ -565,7 +565,11 @@ function runWalkForwardBacktest(
         allocationAtEntry: pos.currentAllocation,
       });
     }
-    cooldownUntil = barIdx + 10; // 10-bar cooldown after full exit
+    // Adaptive cooldown: calm names (low ATR%) get longer wait to avoid whipsaw
+    // (mean-reversion regime), volatile names get shorter to catch fresh momentum.
+    // Base 10 bars * inverse vol scalar → range ~[5, 20] bars.
+    const adaptiveCooldown = Math.round(Math.max(5, Math.min(20, 10 / stockVolScalar)));
+    cooldownUntil = barIdx + adaptiveCooldown;
   };
 
   // --- Helper: scale down position ---
