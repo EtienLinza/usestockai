@@ -554,6 +554,32 @@ function SettingsShell({ caps, setCaps, bot, setBot, adaptiveState, lastScanAt, 
         {active === "at-discovery" && (
           <Card className="glass-card p-5 space-y-4">
             <ToggleRow
+              label="Single-stock mode"
+              hint="Point the live AutoTrader at exactly one ticker. Overrides your watchlist and turns off auto-discovery — the bot enters, manages, and exits only this symbol using the same signal engine."
+              checked={bot.single_stock_mode}
+              onChange={(v) => setBot({ ...bot, single_stock_mode: v })}
+            />
+            {bot.single_stock_mode && (
+              <div className="space-y-1 pt-1 border-t border-border/40">
+                <Label htmlFor="single-stock-ticker" className="text-xs text-muted-foreground">Ticker</Label>
+                <Input
+                  id="single-stock-ticker"
+                  type="text"
+                  placeholder="e.g. NVDA"
+                  value={bot.single_stock_ticker ?? ""}
+                  onChange={(e) => {
+                    const raw = e.target.value.toUpperCase().replace(/[^A-Z-]/g, "").slice(0, 15);
+                    setBot({ ...bot, single_stock_ticker: raw || null });
+                  }}
+                  className="h-8 text-sm uppercase"
+                />
+                <p className="text-[10px] text-muted-foreground">
+                  Must be a valid symbol (e.g. AAPL, BRK-B). Watchlist and auto-discovery are ignored while this is on.
+                </p>
+              </div>
+            )}
+            <div className={bot.single_stock_mode ? "opacity-50 pointer-events-none" : ""}>
+            <ToggleRow
               label="Auto-discover tickers"
               hint={`Automatically add promising tickers from the live signal feed to your watchlist. Auto-added tickers are removed if no qualifying signal appears for ${bot.auto_watchlist_stale_days} days (held positions are never removed).`}
               checked={bot.auto_add_watchlist}
