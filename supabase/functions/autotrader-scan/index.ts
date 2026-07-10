@@ -1260,6 +1260,28 @@ async function runEntryDecision(
     return { kind: "HOLD", reason: `Calibrated conviction ${conviction} (raw ${sig.conviction}) < min ${settings.min_conviction}` };
   }
 
+  // ── ATR% entry ceiling (Phase 3 — BEAM fix, guard #1) ───────────────────
+  // Volatility-normalized admission gate. BEAM-style disasters happen when a
+  // 7%-ATR name enters the `momentum` bucket where hardStopATRMult=3.0 → the
+  // structural anchor still leaves a ~10% stop and one overnight gap wipes
+  // out multiple winning trades. Reject high-ATR names outright unless
+  // conviction is exceptional. Override band = 1.4× when conviction ≥ 85.
+  const ATR_PCT_CEILING: Record<string, number> = {
+    momentum: 0.050,
+    trend:    0.060,
+    value:    0.040,
+    volatile: 0.090,
+    index:    0.030,
+  };
+  const atrCeiling = ATR_PCT_CEILING[sig.profile] ?? 0.06;
+  const atrOverride = conviction >= 85 ? atrCeiling * 1.4 : atrCeiling;
+  if (sig.atrPct > atrOverride) {
+    return {
+      kind: "BLOCKED",
+      reason: `ATR% ${(sig.atrPct * 100).toFixed(2)}% exceeds ${sig.profile} ceiling ${(atrCeiling * 100).toFixed(1)}%${conviction >= 85 ? ` (override ${(atrOverride * 100).toFixed(1)}%)` : ""} — vol too high for stop-loss discipline`,
+    };
+  }
+
   // ── Meta-label gate (cold-start safe — null model passes through).
   // Audit fix: runs AFTER calibration so the conviction feature matches the
   // value the trainer sees in `signal_outcomes.conviction` (also calibrated).
