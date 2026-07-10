@@ -192,6 +192,7 @@ export default function PortfolioBacktest() {
       <SEO
         title="Portfolio Backtest — Run the live autotrader over history"
         description="Backtest your entire trading strategy across a universe of tickers with the same gate stack we use live."
+        path="/portfolio-backtest"
       />
       <Navbar />
       <main className="max-w-6xl mx-auto px-4 sm:px-6 py-8 space-y-6">
