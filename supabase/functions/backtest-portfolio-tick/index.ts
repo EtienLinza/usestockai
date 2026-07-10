@@ -188,7 +188,16 @@ async function tickJob(service: any, job: any) {
     const state: SimState = (job.state && job.state.cash != null) ? job.state : initState(params);
     const cursor = { dayIdx: job.cursor?.dayIdx ?? 0, totalDays: dates.length };
 
-    const out = simulateChunk(state, barsMap, dates, params, cursor, CPU_BUDGET_MS);
+    // Time-accurate universe: pull constituent windows if the job was created
+    // with an index_name (unlimited-mode / index-based runs). Free custom lists
+    // pass no index and skip the filter, remaining always-active.
+    const indexName = job.params?.index_name || null;
+    const activeWindows = indexName
+      ? await loadActiveWindows(service, indexName, job.universe)
+      : undefined;
+
+    const out = simulateChunk(state, barsMap, dates, params, cursor, CPU_BUDGET_MS, activeWindows);
+
 
     const simPct = Math.min(99, 20 + Math.round((out.cursor.dayIdx / dates.length) * 79));
     if (out.done) {
