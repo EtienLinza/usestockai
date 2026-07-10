@@ -110,14 +110,34 @@ const AutotraderLog = () => {
       <main className="container mx-auto px-4 sm:px-6 pt-20 md:pt-24 pb-24 md:pb-12 max-w-5xl">
         <LockedFeature requiredTier="elite" feature="AutoTrader">
         <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-5">
-          <div className="flex items-center gap-2 mb-1">
-            <Bot className="w-5 h-5 text-primary" />
-            <h1 className="text-2xl font-medium tracking-tight">AutoTrader Activity</h1>
+          <div className="flex items-center justify-between gap-3 mb-1">
+            <div className="flex items-center gap-2">
+              <Bot className="w-5 h-5 text-primary" />
+              <h1 className="text-2xl font-medium tracking-tight">AutoTrader Activity</h1>
+            </div>
+            <Button size="sm" variant="outline" onClick={() => setExportOpen(true)} className="gap-1.5">
+              <Download className="w-3.5 h-3.5" /> Export
+            </Button>
           </div>
           <p className="text-sm text-muted-foreground">
             Every decision your automated trader makes — entries, exits, holds, and scan rollups.
             Auto-runs every 5–15 minutes during U.S. market hours.
           </p>
+
+          {user && (
+            <ExportDialog
+              open={exportOpen}
+              onOpenChange={setExportOpen}
+              title="Export AutoTrader Activity"
+              description="Every decision, reason, sentiment score and headline set within a date range."
+              userId={user.id}
+              datasets={[
+                { key: "autotrade_log", label: "AutoTrader Log (entries, exits, holds, blocks + sentiment)", table: "autotrade_log", dateColumn: "created_at" },
+              ]}
+            />
+          )}
+
+
 
           {loading ? (
             <Card className="glass-card p-12 flex items-center justify-center">
