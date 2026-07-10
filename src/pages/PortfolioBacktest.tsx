@@ -19,8 +19,10 @@ import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Separator } from "@/components/ui/separator";
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from "recharts";
-import { Play, Loader2, XCircle, Clock, TrendingUp, TrendingDown, Trophy, Percent, DollarSign, RefreshCw, Trash2 } from "lucide-react";
+import { Play, Loader2, XCircle, Clock, TrendingUp, TrendingDown, Trophy, Percent, DollarSign, RefreshCw, Trash2, Infinity as InfinityIcon } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
 
