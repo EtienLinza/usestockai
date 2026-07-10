@@ -746,19 +746,23 @@ function runWinExit(
   }
 
   // ── Stale-sliver harvest ───────────────────────────────────────────────
+  // ── Stale-sliver harvest (fully adaptive) ──────────────────────────────
   // After the R-ladder has trimmed a position (rung ≥ 1), the remaining
   // notional can become so small that further upside is dominated by noise
   // and there's no capital-efficient reason to keep the slot occupied.
   // Case in point (CSSI): after r1 + r2 partials the sliver was making
   // ~$5–6 total — not enough to justify the slot, not bad enough to stop
-  // out. Harvest it whenever ALL of the following hold:
-  //   • at least one partial has fired (rung ≥ 1)
-  //   • unrealized P&L is positive (never turn a winner into a loss here)
-  //   • remaining notional ≤ 30% of original notional (truly trimmed to sliver)
-  //   • remaining unrealized $ ≤ 0.5 R (upside noise-dominated) OR
-  //     remaining notional < $300 absolute floor (too small to matter)
-  // This is adaptive: the R-floor scales per position via initRisk × shares,
-  // and the 30% notional gate scales with each user's starting size.
+  // out. All three thresholds scale per-position:
+  //   • notionalGate  — % of original notional considered "sliver". Bigger
+  //     on high-ATR names (noise eats slivers faster), smaller on calm
+  //     names where a small remainder can still compound cleanly. Also
+  //     tightened for high-conviction runners (be more patient).
+  //   • rFloor        — how many R of upside is still "worth waiting for".
+  //     Scales with ATR% (noisy names need more R to matter) and rung
+  //     depth (deeper rungs = thinner justification to hold).
+  //   • absFloor      — hard $ floor as % of original notional, clamped to
+  //     a sane band so tiny accounts don't hold $50 slivers and large
+  //     accounts don't hold $2k slivers of a $50k original.
   {
     const rung = pos.partial_exits_taken ?? 0;
     if (rung >= 1 && pnlPct > 0) {
@@ -768,16 +772,32 @@ function runWinExit(
       const originalNotional = originalShares * entry;
       const initRisk = inferInitRiskPerShare(pos);
       const unrealizedDollars = (isLong ? currentPrice - entry : entry - currentPrice) * shares;
-      const halfR = initRisk > 0 ? 0.5 * initRisk * shares : 0;
 
-      const trimmedToSliver = originalNotional > 0 && remainingNotional <= 0.30 * originalNotional;
-      const noiseDominated = halfR > 0 && unrealizedDollars <= halfR;
-      const belowAbsFloor = remainingNotional < 300;
+      // Adaptivity inputs
+      const atrPct = atr > 0 && entry > 0 ? atr / entry : 0.02;        // 2% typical
+      const atrScalar = Math.max(0.5, Math.min(2.0, atrPct / 0.02));   // 0.5×..2×
+      const conv = Number(pos.entry_conviction ?? 70);
+      const convScalar = Math.max(0.7, Math.min(1.2, 1 + (conv - 70) / 100));
+      // higher conviction → shrink notionalGate (hold longer); low conv → widen
+      const notionalGate = Math.max(
+        0.20,
+        Math.min(0.45, (0.30 * atrScalar) / convScalar),
+      );
+      // rung 1 → 0.5R base, rung 2 → 0.7R base (thinner sliver, needs more upside)
+      const rBase = rung >= 2 ? 0.70 : 0.50;
+      const rFloorMult = Math.max(0.30, Math.min(1.00, rBase * atrScalar));
+      const rFloorDollars = initRisk > 0 ? rFloorMult * initRisk * shares : 0;
+      // 5% of original notional, clamped $150..$1000
+      const absFloor = Math.max(150, Math.min(1000, 0.05 * originalNotional));
+
+      const trimmedToSliver = originalNotional > 0 && remainingNotional <= notionalGate * originalNotional;
+      const noiseDominated = rFloorDollars > 0 && unrealizedDollars <= rFloorDollars;
+      const belowAbsFloor = remainingNotional < absFloor;
 
       if (trimmedToSliver && (noiseDominated || belowAbsFloor)) {
         return {
           kind: "FULL_EXIT",
-          reason: `Stale sliver harvest: ${(remainingNotional).toFixed(0)}$ left after ${rung} partial${rung > 1 ? "s" : ""} (+${(pnlPct * 100).toFixed(1)}%, +$${unrealizedDollars.toFixed(0)}) — freeing slot`,
+          reason: `Stale sliver harvest: $${remainingNotional.toFixed(0)} left after ${rung} partial${rung > 1 ? "s" : ""} (+${(pnlPct * 100).toFixed(1)}%, +$${unrealizedDollars.toFixed(0)}) — gate ${(notionalGate * 100).toFixed(0)}% / ${rFloorMult.toFixed(2)}R adaptive, freeing slot`,
           price: currentPrice,
         };
       }
