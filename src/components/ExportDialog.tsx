@@ -93,8 +93,9 @@ export function ExportDialog({
           .lte(ds.dateColumn, toEnd)
           .order(ds.dateColumn, { ascending: false })
           .limit(50000);
-        if (scopeToUser) q = q.eq("user_id", userId);
+        if (ds.scopeToUser !== false) q = q.eq("user_id", userId);
         for (const [k, v] of Object.entries(ds.filters ?? {})) q = q.eq(k, v as never);
+
 
         const { data, error } = await q;
         if (error) throw error;
