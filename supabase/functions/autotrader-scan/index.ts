@@ -1382,6 +1382,27 @@ async function runEntryDecision(
       stopDist = Math.min(atrStopDist, Math.max(minDist, structDist));
     }
   }
+  // ── Absolute stop-distance cap (Phase 3 — BEAM fix, guard #2) ──────────
+  // Even after structural anchoring, high-ATR names can leave stops 10%+
+  // away from entry — a single overnight gap through the stop then blows
+  // the risk budget (BEAM: -10.5% vs intended -6%). Clamp stopDist to a
+  // profile-scoped % of price so worst-case realized loss (stop + slippage)
+  // stays bounded. Risk-parity sizing below automatically raises shares to
+  // hold dollar-risk constant when the clamp fires.
+  const STOP_DIST_CAP_PCT: Record<string, number> = {
+    momentum: 0.06, trend: 0.07, value: 0.05, volatile: 0.10, index: 0.04,
+  };
+  const stopCapPct = STOP_DIST_CAP_PCT[sig.profile] ?? 0.07;
+  const capDist = currentPrice * stopCapPct;
+  if (stopDist > capDist) {
+    if (capDist < minDist) {
+      return {
+        kind: "HOLD",
+        reason: `Stop-cap collision: 0.8·ATR (${(minDist / currentPrice * 100).toFixed(2)}%) exceeds ${sig.profile} stop cap ${(stopCapPct * 100).toFixed(1)}% — ATR too wide for profile`,
+      };
+    }
+    stopDist = capDist;
+  }
   const hardStop = isLong ? currentPrice - stopDist : currentPrice + stopDist;
 
   // ── FAT-TAIL GUARD: Risk-parity sizing (ADAPTIVE — Phase 1 sweep) ─────
