@@ -620,6 +620,7 @@ function SettingsShell({ caps, setCaps, bot, setBot, adaptiveState, lastScanAt, 
                 </div>
               </div>
             )}
+            </div>
           </Card>
         )}
 
