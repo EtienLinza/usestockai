@@ -324,11 +324,11 @@ export default function PortfolioBacktest() {
           <Card className="p-6 space-y-4">
             <div className="flex items-start justify-between gap-3 flex-wrap">
               <div>
-                <div className="flex items-center gap-2">
-                  <Badge variant={job.status === "done" ? "default" : job.status === "failed" || job.status === "cancelled" ? "destructive" : "secondary"}>
-                    {job.status}
+                <div className="flex items-center gap-2 flex-wrap">
+                  <Badge variant={statusVariant(job.status)} className="font-normal">
+                    {STATUS_LABEL[job.status] ?? job.status}
                   </Badge>
-                  <span className="text-sm font-medium">{job.name}</span>
+                  <span className="text-sm font-medium truncate">{job.name}</span>
                 </div>
                 <div className="text-xs text-muted-foreground mt-1">
                   {job.universe.length} tickers · {job.start_date} → {job.end_date} · started {new Date(job.created_at).toLocaleString()}
