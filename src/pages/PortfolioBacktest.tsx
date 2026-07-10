@@ -82,33 +82,34 @@ export default function PortfolioBacktest() {
     return Math.max(1, Math.round(tickerDays / 40_000));
   }, [parsedUniverse.length, startDate, endDate]);
 
+  // NOTE: status/cancel/list previously went through edge functions that were
+  // just RLS-gated table reads/updates. Moved to direct supabase-js calls to
+  // eliminate per-poll edge-function invocations (every 3s × every open tab).
   async function loadHistory() {
     try {
-      const { data, error } = await supabase.functions.invoke("backtest-portfolio-status", {
-        method: "GET" as any,
-      });
-      // The functions client doesn't support query strings well; call fetch directly.
-      const sessionRes = await supabase.auth.getSession();
-      const token = sessionRes.data.session?.access_token;
-      const url = `${(import.meta as any).env.VITE_SUPABASE_URL || ""}/functions/v1/backtest-portfolio-status?list=1`;
-      const r = await fetch(url, { headers: { Authorization: `Bearer ${token}`, apikey: (import.meta as any).env.VITE_SUPABASE_PUBLISHABLE_KEY || "" } });
-      const j = await r.json();
-      if (j?.jobs) setHistory(j.jobs);
-      void data; void error;
+      const { data, error } = await supabase
+        .from("backtest_portfolio_jobs")
+        .select("id,name,universe,start_date,end_date,starting_nav,status,stage,progress_pct,current_step_note,cpu_ms_spent,created_at,finished_at,error")
+        .order("created_at", { ascending: false })
+        .limit(50);
+      if (error) throw error;
+      setHistory(data ?? []);
     } catch (e) { console.error(e); }
   }
   useEffect(() => { if (user) loadHistory(); }, [user]);
 
   async function pollJob(id: string) {
     try {
-      const sessionRes = await supabase.auth.getSession();
-      const token = sessionRes.data.session?.access_token;
-      const url = `${(import.meta as any).env.VITE_SUPABASE_URL || ""}/functions/v1/backtest-portfolio-status?job_id=${id}&omit_state=1`;
-      const r = await fetch(url, { headers: { Authorization: `Bearer ${token}`, apikey: (import.meta as any).env.VITE_SUPABASE_PUBLISHABLE_KEY || "" } });
-      const j = await r.json();
-      if (j?.job) {
-        setJob(j.job);
-        if (["done", "failed", "cancelled"].includes(j.job.status)) {
+      // omit the large `state` blob during polling — only pull it when needed
+      const { data, error } = await supabase
+        .from("backtest_portfolio_jobs")
+        .select("id,name,universe,start_date,end_date,starting_nav,status,stage,progress_pct,current_step_note,cpu_ms_spent,created_at,finished_at,error,report")
+        .eq("id", id)
+        .maybeSingle();
+      if (error) throw error;
+      if (data) {
+        setJob(data);
+        if (["done", "failed", "cancelled"].includes(data.status)) {
           if (pollRef.current) { window.clearInterval(pollRef.current); pollRef.current = null; }
           loadHistory();
         }
@@ -162,7 +163,12 @@ export default function PortfolioBacktest() {
   async function cancelJob() {
     if (!jobId) return;
     try {
-      await supabase.functions.invoke("backtest-portfolio-cancel", { body: { job_id: jobId } });
+      const { error } = await supabase
+        .from("backtest_portfolio_jobs")
+        .update({ status: "cancelled", finished_at: new Date().toISOString() })
+        .eq("id", jobId)
+        .in("status", ["queued", "fetching_bars", "simulating", "finalizing"]);
+      if (error) throw error;
       toast.success("Backtest cancelled");
       pollJob(jobId);
     } catch (e: any) { toast.error(e?.message || "Cancel failed"); }
