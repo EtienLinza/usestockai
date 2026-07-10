@@ -234,6 +234,7 @@ export default function PortfolioBacktest() {
           <div className="inline-flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
             <span className="h-1 w-1 rounded-full bg-primary" />
             Portfolio Backtest
+            <span className="ml-1 rounded-sm border border-primary/40 text-primary px-1.5 py-[1px] text-[10px] tracking-widest">ELITE</span>
           </div>
           <h1 className="text-3xl sm:text-4xl font-light tracking-tight">Run the live engine over history</h1>
           <p className="text-sm text-muted-foreground max-w-2xl leading-relaxed">
