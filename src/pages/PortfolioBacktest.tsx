@@ -24,6 +24,8 @@ import { Separator } from "@/components/ui/separator";
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from "recharts";
 import { Play, Loader2, XCircle, Clock, TrendingUp, TrendingDown, Trophy, Percent, DollarSign, RefreshCw, Trash2, Infinity as InfinityIcon } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
+import { useTier } from "@/hooks/useTier";
+import { UpgradeRequiredModal } from "@/components/UpgradeRequiredModal";
 import { supabase } from "@/integrations/supabase/client";
 
 type JobStatus = "queued" | "fetching_bars" | "simulating" | "finalizing" | "done" | "failed" | "cancelled";
