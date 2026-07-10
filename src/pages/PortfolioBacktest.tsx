@@ -434,21 +434,24 @@ export default function PortfolioBacktest() {
 
         {/* History */}
         {history.length > 0 && (
-          <Card className="p-4">
-            <div className="text-sm font-medium mb-3">Your backtest history</div>
-            <div className="space-y-2">
+          <Card className="p-6">
+            <div className="flex items-baseline justify-between mb-4">
+              <div className="text-xs uppercase tracking-[0.18em] text-muted-foreground">History</div>
+              <div className="text-[11px] text-muted-foreground">{history.length} run{history.length === 1 ? "" : "s"}</div>
+            </div>
+            <div className="divide-y divide-border/50">
               {history.map(h => (
-                <div key={h.id} className="flex items-center justify-between p-3 border rounded-md hover:bg-muted/30">
-                  <div className="min-w-0">
+                <div key={h.id} className="flex items-center justify-between gap-3 py-3 first:pt-0 last:pb-0">
+                  <div className="min-w-0 flex-1">
                     <div className="text-sm font-medium truncate">{h.name || `${h.universe.length} tickers`}</div>
-                    <div className="text-xs text-muted-foreground">
+                    <div className="text-xs text-muted-foreground mt-0.5">
                       {h.universe.length} tickers · {h.start_date} → {h.end_date} · {new Date(h.created_at).toLocaleDateString()}
                     </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <Badge variant={h.status === "done" ? "default" : h.status === "failed" || h.status === "cancelled" ? "destructive" : "secondary"}>{h.status}</Badge>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <Badge variant={statusVariant(h.status)} className="font-normal">{STATUS_LABEL[h.status] ?? h.status}</Badge>
                     <Button size="sm" variant="ghost" onClick={() => reopen(h.id)}>Open</Button>
-                    <Button size="sm" variant="ghost" onClick={() => deleteRun(h.id)}><Trash2 className="h-4 w-4" /></Button>
+                    <Button size="sm" variant="ghost" onClick={() => deleteRun(h.id)} className="text-muted-foreground hover:text-destructive"><Trash2 className="h-4 w-4" /></Button>
                   </div>
                 </div>
               ))}
