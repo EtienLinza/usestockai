@@ -2133,8 +2133,10 @@ serve(async (req) => {
       tradeDependency: null,
     };
 
-    if (elapsedMs > 1500) {
-      console.log(`CPU budget exceeded (${elapsedMs}ms), skipping robustness tests`);
+    // Auto-degrade heavy analyses on long windows (elite may run 10-25y).
+    const bigWindow = years > 5 || tickerCount > 2;
+    if (elapsedMs > 1500 || bigWindow) {
+      console.log(`Skipping robustness tests (elapsedMs=${elapsedMs}, years=${years}, tickers=${tickerCount})`);
       robustnessSkipped = true;
     } else if (firstTickerData && firstTickerData.close.length >= 100) {
       const baseReturn = metrics.totalReturn || 0;
