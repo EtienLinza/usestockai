@@ -100,13 +100,19 @@ async function tickJob(service: any, job: any) {
     const range = pickYahooRange(job.start_date, job.end_date);
     // Which tickers still need fetching? Check cache first.
     const missing: string[] = [];
-    const { data: cached } = await service
-      .from("backtest_bars_cache")
-      .select("ticker")
-      .in("ticker", job.universe)
-      .eq("bars_version", "v1");
-    const have = new Set((cached ?? []).map((r: any) => r.ticker));
+    const have = new Set<string>();
+    const CHK = 100;
+    for (let i = 0; i < job.universe.length; i += CHK) {
+      const chunk = job.universe.slice(i, i + CHK);
+      const { data: cached } = await service
+        .from("backtest_bars_cache")
+        .select("ticker")
+        .in("ticker", chunk)
+        .eq("bars_version", "v1");
+      for (const r of cached ?? []) have.add(r.ticker);
+    }
     for (const t of job.universe) if (!have.has(t)) missing.push(t);
+
 
     if (missing.length === 0) {
       // All bars available → move to simulate stage
