@@ -17,7 +17,7 @@ import {
   Brain, TrendingUp, TrendingDown, Shield,
   Loader2, AlertTriangle, RefreshCw, Zap, DollarSign, Target,
   ArrowUpRight, ArrowDownRight, Package, BarChart3, Clock, Bell,
-  Trophy, ChevronDown, Activity, Sparkles, Trash2,
+  Trophy, ChevronDown, Activity, Sparkles, Trash2, Download,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { TickerLink } from "@/components/TickerLink";
@@ -25,6 +25,8 @@ import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine,
 } from "recharts";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { ExportDialog } from "@/components/ExportDialog";
+
 
 interface Signal {
   id: string;
