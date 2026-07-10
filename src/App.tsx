@@ -7,7 +7,7 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { ThemeProvider } from "next-themes";
 import { AuthProvider } from "@/hooks/useAuth";
 import { RequireOnboarding } from "./components/RequireOnboarding";
-import { PaymentTestModeBanner } from "./components/PaymentTestModeBanner";
+// PaymentTestModeBanner import removed — banner deleted from app root
 import { MobileBottomNav } from "./components/MobileBottomNav";
 import { PageSkeleton } from "./components/PageSkeleton";
 
@@ -48,7 +48,7 @@ const App = () => (
           <Toaster />
           <Sonner />
           <BrowserRouter>
-            <PaymentTestModeBanner />
+            {/* Banner removed — was rendering under fixed navbar app-wide. Pricing/tier pages carry the waitlist message themselves. */}
             <RequireOnboarding>
               <Suspense fallback={<PageSkeleton />}>
                 <Routes>

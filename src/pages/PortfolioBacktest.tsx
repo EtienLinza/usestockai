@@ -19,8 +19,10 @@ import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Separator } from "@/components/ui/separator";
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from "recharts";
-import { Play, Loader2, XCircle, Clock, TrendingUp, TrendingDown, Trophy, Percent, DollarSign, RefreshCw, Trash2 } from "lucide-react";
+import { Play, Loader2, XCircle, Clock, TrendingUp, TrendingDown, Trophy, Percent, DollarSign, RefreshCw, Trash2, Infinity as InfinityIcon } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
 
@@ -49,6 +51,20 @@ const PRESETS: Record<string, string[]> = {
   "Nasdaq 25 (Tech-heavy)": ["AAPL","MSFT","NVDA","GOOG","AMZN","META","TSLA","AVGO","COST","NFLX","ADBE","PEP","AMD","INTC","QCOM","INTU","AMAT","BKNG","CSCO","TXN","HON","SBUX","GILD","MDLZ","ADI"],
   "Small basket (5)": ["AAPL","MSFT","NVDA","TSLA","AMD"],
 };
+
+const STATUS_LABEL: Record<string, string> = {
+  queued: "Queued",
+  fetching_bars: "Fetching bars",
+  simulating: "Simulating",
+  finalizing: "Finalizing",
+  done: "Complete",
+  failed: "Failed",
+  cancelled: "Cancelled",
+};
+const statusVariant = (s: string): "default" | "secondary" | "destructive" | "outline" =>
+  s === "done" ? "default"
+  : s === "failed" || s === "cancelled" ? "destructive"
+  : "secondary";
 
 export default function PortfolioBacktest() {
   const navigate = useNavigate();
@@ -208,94 +224,97 @@ export default function PortfolioBacktest() {
         path="/portfolio-backtest"
       />
       <Navbar />
-      <main className="max-w-6xl mx-auto px-4 sm:px-6 py-8 space-y-6">
-        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-2">
-          <h1 className="text-3xl font-light tracking-tight">Portfolio Backtest</h1>
-          <p className="text-sm text-muted-foreground">
-            Run the live autotrader (scan → gates → open → manage) over history. Long-running jobs are safe to leave —
-            the backtest continues in the background and results are archived to your history.
+      <main className="max-w-6xl mx-auto px-4 sm:px-6 pt-24 pb-16 space-y-8">
+        <motion.header initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-3">
+          <div className="inline-flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
+            <span className="h-1 w-1 rounded-full bg-primary" />
+            Portfolio Backtest
+          </div>
+          <h1 className="text-3xl sm:text-4xl font-light tracking-tight">Run the live engine over history</h1>
+          <p className="text-sm text-muted-foreground max-w-2xl leading-relaxed">
+            The same scan, gate, and management stack the autotrader uses live — replayed across your chosen universe and window. Jobs run in the background; you can close the tab.
           </p>
-        </motion.div>
+        </motion.header>
 
         {/* Setup card */}
-        <Card className="p-6 space-y-5">
-          <label className="flex items-start gap-3 p-3 rounded-md border bg-primary/5 border-primary/20 cursor-pointer">
-            <input
-              type="checkbox"
+        <Card className="p-6 sm:p-8 space-y-6">
+          <label
+            htmlFor="unlimited-mode"
+            className="group flex items-start gap-3 p-4 rounded-lg border border-primary/25 bg-primary/[0.04] cursor-pointer transition-colors hover:bg-primary/[0.06]"
+          >
+            <Checkbox
+              id="unlimited-mode"
               checked={unlimited}
-              onChange={(e) => setUnlimited(e.target.checked)}
-              className="mt-1"
+              onCheckedChange={(v) => setUnlimited(Boolean(v))}
+              className="mt-0.5"
             />
-            <div className="flex-1">
-              <div className="text-sm font-medium">Unlimited mode — full S&amp;P 500, time-accurate</div>
-              <div className="text-xs text-muted-foreground mt-1">
-                Runs the live engine against every S&amp;P 500 constituent that existed inside your date range. No 250-ticker cap.
-                A ticker is only tradeable on days it was actually in the index (e.g. no TSLA in 2005, no META in 2000).
-                First run fetches ~500 tickers of history — bars are cached globally so every subsequent run skips fetch entirely.
-                Expect the first run to take significantly longer.
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 text-sm font-medium">
+                <InfinityIcon className="h-3.5 w-3.5 text-primary" />
+                Unlimited mode — full S&amp;P 500, time-accurate
               </div>
+              <p className="text-xs text-muted-foreground mt-1.5 leading-relaxed">
+                Trades every constituent that existed in your window. Membership is enforced per day, so a name only trades when it was actually in the index. First run fetches ~500 tickers; bars are cached globally forever after.
+              </p>
             </div>
           </label>
 
           {!unlimited && (
             <div className="space-y-2">
-              <Label>Universe (comma or newline separated tickers)</Label>
+              <Label className="text-xs uppercase tracking-wider text-muted-foreground">Universe</Label>
               <Textarea
                 value={universeText}
                 onChange={(e) => setUniverseText(e.target.value)}
                 rows={4}
-                className="font-mono text-xs"
+                className="font-mono text-xs resize-none"
                 placeholder="AAPL, MSFT, NVDA…"
               />
-              <div className="flex flex-wrap gap-2 items-center text-xs">
-                <span className="text-muted-foreground">Presets:</span>
+              <div className="flex flex-wrap gap-1.5 items-center pt-1">
+                <span className="text-[11px] uppercase tracking-wider text-muted-foreground mr-1">Presets</span>
                 {Object.keys(PRESETS).map(k => (
-                  <Button key={k} type="button" size="sm" variant="ghost" onClick={() => setUniverseText(PRESETS[k].join(", "))}>
+                  <Button key={k} type="button" size="sm" variant="outline" className="h-7 text-xs font-normal" onClick={() => setUniverseText(PRESETS[k].join(", "))}>
                     {k}
                   </Button>
                 ))}
               </div>
-              <div className="flex items-center gap-3 text-xs">
+              <div className="flex items-center gap-3 text-xs pt-1">
                 <span className="text-muted-foreground">{parsedUniverse.length} valid ticker{parsedUniverse.length === 1 ? "" : "s"}</span>
                 {invalid.length > 0 && <span className="text-destructive">Invalid: {invalid.slice(0, 5).join(", ")}</span>}
               </div>
             </div>
           )}
 
-          <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+          <Separator />
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <div className="space-y-2">
-              <Label>Start date</Label>
-              <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+              <Label className="text-xs uppercase tracking-wider text-muted-foreground">Start date</Label>
+              <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="[color-scheme:dark]" />
             </div>
             <div className="space-y-2">
-              <Label>End date</Label>
-              <Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+              <Label className="text-xs uppercase tracking-wider text-muted-foreground">End date</Label>
+              <Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="[color-scheme:dark]" />
             </div>
             <div className="space-y-2">
-              <Label>Starting capital ($)</Label>
+              <Label className="text-xs uppercase tracking-wider text-muted-foreground">Starting capital</Label>
               <Input type="number" min={1000} step={1000} value={startingNav} onChange={(e) => setStartingNav(Number(e.target.value) || 100_000)} />
             </div>
             <div className="space-y-2">
-              <Label>Run name (optional)</Label>
-              <Input value={runName} onChange={(e) => setRunName(e.target.value)} placeholder="e.g. 'Tech 2023'" />
+              <Label className="text-xs uppercase tracking-wider text-muted-foreground">Run name</Label>
+              <Input value={runName} onChange={(e) => setRunName(e.target.value)} placeholder="Optional" />
             </div>
           </div>
 
-          <div className="p-3 rounded-md border bg-muted/30 text-xs text-muted-foreground">
-            <div className="flex items-center gap-2 font-medium text-foreground">
+          <div className="flex items-center justify-between gap-4 pt-2 flex-wrap">
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
               <Clock className="h-3.5 w-3.5" />
-              Estimated runtime: ~{estimateMinutes} minute{estimateMinutes === 1 ? "" : "s"}
+              Est. runtime <span className="text-foreground font-medium">~{estimateMinutes} min</span>
+              <span className="opacity-40">·</span>
+              Bars cached globally after first fetch
             </div>
-            <p className="mt-1">
-              Bars are fetched once and cached globally so repeat runs on the same tickers skip that step.
-              You can close this tab — the backtest continues on the server. Cap: 250 tickers per run.
-            </p>
-          </div>
-
-          <div className="flex justify-end gap-2">
-            <Button onClick={startBacktest} disabled={loading || Boolean(isActive)} className="gap-2">
+            <Button onClick={startBacktest} disabled={loading || Boolean(isActive)} className="gap-2 min-w-[220px]">
               {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
-              {isActive ? "A run is in progress" : "Start portfolio backtest"}
+              {isActive ? "Run in progress…" : "Start backtest"}
             </Button>
           </div>
         </Card>
@@ -305,11 +324,11 @@ export default function PortfolioBacktest() {
           <Card className="p-6 space-y-4">
             <div className="flex items-start justify-between gap-3 flex-wrap">
               <div>
-                <div className="flex items-center gap-2">
-                  <Badge variant={job.status === "done" ? "default" : job.status === "failed" || job.status === "cancelled" ? "destructive" : "secondary"}>
-                    {job.status}
+                <div className="flex items-center gap-2 flex-wrap">
+                  <Badge variant={statusVariant(job.status)} className="font-normal">
+                    {STATUS_LABEL[job.status] ?? job.status}
                   </Badge>
-                  <span className="text-sm font-medium">{job.name}</span>
+                  <span className="text-sm font-medium truncate">{job.name}</span>
                 </div>
                 <div className="text-xs text-muted-foreground mt-1">
                   {job.universe.length} tickers · {job.start_date} → {job.end_date} · started {new Date(job.created_at).toLocaleString()}
@@ -415,21 +434,24 @@ export default function PortfolioBacktest() {
 
         {/* History */}
         {history.length > 0 && (
-          <Card className="p-4">
-            <div className="text-sm font-medium mb-3">Your backtest history</div>
-            <div className="space-y-2">
+          <Card className="p-6">
+            <div className="flex items-baseline justify-between mb-4">
+              <div className="text-xs uppercase tracking-[0.18em] text-muted-foreground">History</div>
+              <div className="text-[11px] text-muted-foreground">{history.length} run{history.length === 1 ? "" : "s"}</div>
+            </div>
+            <div className="divide-y divide-border/50">
               {history.map(h => (
-                <div key={h.id} className="flex items-center justify-between p-3 border rounded-md hover:bg-muted/30">
-                  <div className="min-w-0">
+                <div key={h.id} className="flex items-center justify-between gap-3 py-3 first:pt-0 last:pb-0">
+                  <div className="min-w-0 flex-1">
                     <div className="text-sm font-medium truncate">{h.name || `${h.universe.length} tickers`}</div>
-                    <div className="text-xs text-muted-foreground">
+                    <div className="text-xs text-muted-foreground mt-0.5">
                       {h.universe.length} tickers · {h.start_date} → {h.end_date} · {new Date(h.created_at).toLocaleDateString()}
                     </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <Badge variant={h.status === "done" ? "default" : h.status === "failed" || h.status === "cancelled" ? "destructive" : "secondary"}>{h.status}</Badge>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <Badge variant={statusVariant(h.status)} className="font-normal">{STATUS_LABEL[h.status] ?? h.status}</Badge>
                     <Button size="sm" variant="ghost" onClick={() => reopen(h.id)}>Open</Button>
-                    <Button size="sm" variant="ghost" onClick={() => deleteRun(h.id)}><Trash2 className="h-4 w-4" /></Button>
+                    <Button size="sm" variant="ghost" onClick={() => deleteRun(h.id)} className="text-muted-foreground hover:text-destructive"><Trash2 className="h-4 w-4" /></Button>
                   </div>
                 </div>
               ))}
