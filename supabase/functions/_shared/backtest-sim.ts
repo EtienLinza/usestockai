@@ -431,6 +431,9 @@ function stepDay(
 }
 
 // Public API — run days from cursor.dayIdx forward until CPU budget expires.
+// activeWindows: per-ticker inclusive [from, to] date window during which the
+// ticker was a member of the target index. Tickers with no window are treated
+// as always-active (back-compat for small custom universes).
 export function simulateChunk(
   state: SimState,
   bars: Map<string, DataSet>,
@@ -438,6 +441,7 @@ export function simulateChunk(
   params: SimParams,
   cursor: SimCursor,
   cpuBudgetMs: number,
+  activeWindows?: Map<string, { from: string; to: string | null }[]>,
 ): { state: SimState; cursor: SimCursor; done: boolean } {
   const start = Date.now();
   const endIdxMap = new Map<string, Map<string, number>>();
@@ -448,19 +452,29 @@ export function simulateChunk(
   }
   const tickers = Array.from(bars.keys());
 
+  const isActive = (tk: string, date: string): boolean => {
+    if (!activeWindows || activeWindows.size === 0) return true;
+    const wins = activeWindows.get(tk);
+    if (!wins || wins.length === 0) return true; // no window => treat as always active
+    for (const w of wins) {
+      if (date >= w.from && (w.to == null || date < w.to)) return true;
+    }
+    return false;
+  };
+
   for (; cursor.dayIdx < dates.length; cursor.dayIdx++) {
     const date = dates[cursor.dayIdx];
     const perTickerIdx = new Map<string, number>();
+    const activeTickers: string[] = [];
     for (const tk of tickers) {
       const mi = endIdxMap.get(tk)!;
       const idx = mi.get(date);
       if (idx != null) perTickerIdx.set(tk, idx);
+      if (isActive(tk, date)) activeTickers.push(tk);
     }
-    // Skip days no ticker trades
     if (perTickerIdx.size === 0) continue;
-    stepDay(state, bars, perTickerIdx, date, tickers, params);
+    stepDay(state, bars, perTickerIdx, date, activeTickers, params);
 
-    // Budget check every 5 days
     if (cursor.dayIdx % 5 === 0 && Date.now() - start > cpuBudgetMs) {
       cursor.dayIdx += 1;
       return { state, cursor, done: false };
@@ -468,6 +482,7 @@ export function simulateChunk(
   }
   return { state, cursor, done: true };
 }
+
 
 // Close everything at the last available price → for finalize stage
 export function forceCloseAll(state: SimState, bars: Map<string, DataSet>): void {
