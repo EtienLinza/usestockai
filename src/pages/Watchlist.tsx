@@ -20,7 +20,10 @@ import {
   Bell,
   BellRing,
   X,
+  Download,
 } from "lucide-react";
+import { ExportDialog } from "@/components/ExportDialog";
+
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
