@@ -107,6 +107,8 @@ const AUTOTRADE_DEFAULTS: AutoTradeSettings = {
   auto_add_watchlist: true,
   auto_watchlist_consideration_floor: 60,
   auto_watchlist_stale_days: 14,
+  single_stock_mode: false,
+  single_stock_ticker: null,
 };
 
 const RISK_PROFILE_LABEL: Record<RiskProfile, { label: string; hint: string }> = {
