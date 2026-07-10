@@ -188,18 +188,12 @@ interface Settings {
   current_cdar_pct: number;
 }
 
-interface AdaptiveContext {
-  vix: number | null;
-  vixRegime: "calm" | "normal" | "elevated" | "crisis";
-  spyTrend: "up" | "down" | "flat";
-  recentPnlPct: number;        // last 7-day realized P&L % vs starting NAV
-  windowDays: number;
-  /** 30-day rolling NAV drawdown % from peak (positive number). */
-  rollingDrawdownPct: number;
-  /** 30-day CDaR at α=0.95 — mean of worst 5% of daily peak-to-current drawdowns. */
-  rollingCdarPct: number;
-  adjustments: string[];       // human-readable reasons applied
-}
+interface AdaptiveContext extends _SharedAdaptiveContext {}
+// (constants + adaptive helpers moved to _shared/adaptive-context.ts)
+const computeEffectiveSettings = _sharedComputeEffectiveSettings as unknown as (
+  s: Settings, ctx: AdaptiveContext, regimeFloors: Record<string, number> | null,
+) => Settings;
+
 
 // ── Rolling drawdown circuit breaker (Phase 3 #16) ─────────────────────────
 // Hard-block all new entries once trailing 30-day NAV drawdown exceeds this
