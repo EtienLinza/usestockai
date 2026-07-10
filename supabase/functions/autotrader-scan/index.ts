@@ -2722,10 +2722,20 @@ async function processUser(
   let watchRows = (watchRes.data ?? []) as Array<{ ticker: string; source: string | null }>;
   const caps = (capsRes.data ?? null) as { enabled: boolean; enforcement_mode: string; sector_max_pct: number; portfolio_beta_max: number } | null;
 
-  // ── AUTO-DISCOVERY: pull promising tickers from live_signals into watchlist ──
-  // Run this in the entry cadence, not the 5-min exit cadence, so watchlist
-  // refreshes remain cheap and don't compete with risk-management exits.
-  if (scanMode !== "exits" && settings.auto_add_watchlist && entryShard.shard === 0) {
+  // ── SINGLE-STOCK MODE ────────────────────────────────────────────────
+  // When enabled, the AutoTrader ignores the watchlist and trades exactly
+  // one ticker. Auto-discovery is bypassed. Exits for any other open
+  // positions still run (defensive), but no new entries fire outside the
+  // chosen ticker.
+  const singleStockTicker = settings.single_stock_mode && settings.single_stock_ticker
+    ? String(settings.single_stock_ticker).toUpperCase().trim()
+    : null;
+  if (singleStockTicker && /^[A-Z]{1,10}(-[A-Z]{2,4})?$/.test(singleStockTicker)) {
+    watchRows = [{ ticker: singleStockTicker, source: "single_stock" }];
+  } else if (scanMode !== "exits" && settings.auto_add_watchlist && entryShard.shard === 0) {
+    // ── AUTO-DISCOVERY: pull promising tickers from live_signals into watchlist ──
+    // Run this in the entry cadence, not the 5-min exit cadence, so watchlist
+    // refreshes remain cheap and don't compete with risk-management exits.
     await syncAutoWatchlist(supabase, settings, watchRows, positions.map(p => p.ticker.toUpperCase()));
     // Re-read so the rest of the scan picks up newly-added rows
     const refreshed = await supabase.from("watchlist")
