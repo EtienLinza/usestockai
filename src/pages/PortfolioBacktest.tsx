@@ -71,7 +71,7 @@ const statusVariant = (s: string): "default" | "secondary" | "destructive" | "ou
 export default function PortfolioBacktest() {
   const navigate = useNavigate();
   const { user } = useAuth();
-  const { isElite, isLoading: tierLoading } = useTier();
+  const { isElite, loading: tierLoading } = useTier();
   const [gateOpen, setGateOpen] = useState<boolean>(false);
   const [universeText, setUniverseText] = useState<string>(PRESETS["S&P 30 (Blue chip)"].join(", "));
   const [startDate, setStartDate] = useState<string>("2023-01-01");
