@@ -8,7 +8,7 @@ import { fetchDailyHistory } from "../_shared/yahoo-history.ts";
 import type { DataSet } from "../_shared/signal-engine-v2.ts";
 import {
   simulateChunk, forceCloseAll, computeReport, initState,
-  DEFAULT_PARAMS, type SimParams, type SimState,
+  DEFAULT_PARAMS, type SimParams, type SimState, type AdaptiveInputs,
 } from "../_shared/backtest-sim.ts";
 
 const corsHeaders = {
@@ -93,17 +93,22 @@ async function loadActiveWindows(
 async function tickJob(service: any, job: any) {
   const params: SimParams = { ...DEFAULT_PARAMS, ...(job.params || {}), starting_nav: Number(job.starting_nav) };
 
+  // Benchmark bars (SPY + ^VIX) are always fetched alongside the universe so
+  // per-day adaptive tuning has real data. Cached under the same table.
+  const BENCHMARKS = ["SPY", "^VIX"];
+  const universeWithBench = Array.from(new Set([...(job.universe as string[]), ...BENCHMARKS]));
+
   // ── Stage: fetch_bars ──────────────────────────────────────────────────
   if (job.stage === "fetch_bars") {
     const cursor = job.cursor || { tickerIdx: 0 };
-    const total = job.universe.length;
+    const total = universeWithBench.length;
     const range = pickYahooRange(job.start_date, job.end_date);
     // Which tickers still need fetching? Check cache first.
     const missing: string[] = [];
     const have = new Set<string>();
     const CHK = 100;
-    for (let i = 0; i < job.universe.length; i += CHK) {
-      const chunk = job.universe.slice(i, i + CHK);
+    for (let i = 0; i < universeWithBench.length; i += CHK) {
+      const chunk = universeWithBench.slice(i, i + CHK);
       const { data: cached } = await service
         .from("backtest_bars_cache")
         .select("ticker")
@@ -111,7 +116,8 @@ async function tickJob(service: any, job: any) {
         .eq("bars_version", "v1");
       for (const r of cached ?? []) have.add(r.ticker);
     }
-    for (const t of job.universe) if (!have.has(t)) missing.push(t);
+    for (const t of universeWithBench) if (!have.has(t)) missing.push(t);
+
 
 
     if (missing.length === 0) {
@@ -161,15 +167,23 @@ async function tickJob(service: any, job: any) {
 
   // ── Stage: simulate ────────────────────────────────────────────────────
   if (job.stage === "simulate") {
-    const barsMap = await loadBars(service, job.universe);
+    // Load ticker bars + benchmark bars (SPY / ^VIX) in one shot.
+    const barsMap = await loadBars(service, universeWithBench);
     if (barsMap.size === 0) {
       await service.from("backtest_portfolio_jobs").update({
         status: "failed", error: "No bars available in cache.", finished_at: new Date().toISOString(),
       }).eq("id", job.id);
       return { advance: false };
     }
+    // Pull out benchmarks before slicing (they need full history, incl. warmup).
+    const spyBars = barsMap.get("SPY") ?? null;
+    const vixBars = barsMap.get("^VIX") ?? null;
+    barsMap.delete("SPY");
+    barsMap.delete("^VIX");
+
     // Slice each series to the requested end date (keep pre-start bars for warmup).
     for (const [k, v] of barsMap) barsMap.set(k, sliceBarsByDate(v, job.start_date, job.end_date));
+
     // Build the union of trading dates that fall within [start_date, end_date].
     const dateSet = new Set<string>();
     for (const d of barsMap.values()) {
@@ -188,15 +202,32 @@ async function tickJob(service: any, job: any) {
     const state: SimState = (job.state && job.state.cash != null) ? job.state : initState(params);
     const cursor = { dayIdx: job.cursor?.dayIdx ?? 0, totalDays: dates.length };
 
-    // Time-accurate universe: pull constituent windows if the job was created
-    // with an index_name (unlimited-mode / index-based runs). Free custom lists
-    // pass no index and skip the filter, remaining always-active.
+    // Time-accurate universe: pull constituent windows for index-based runs.
     const indexName = job.params?.index_name || null;
     const activeWindows = indexName
       ? await loadActiveWindows(service, indexName, job.universe)
       : undefined;
 
-    const out = simulateChunk(state, barsMap, dates, params, cursor, CPU_BUDGET_MS, activeWindows);
+    // Load active nightly calibration weights (same source live uses).
+    const { data: weightsRow } = await service
+      .from("strategy_weights")
+      .select("regime_floors, calibration_curve, strategy_tilts, ticker_calibration")
+      .eq("is_active", true)
+      .order("computed_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    const adaptive: AdaptiveInputs = {
+      spyBars: spyBars ? sliceBarsByDate(spyBars, job.start_date, job.end_date) : null,
+      vixBars: vixBars ? sliceBarsByDate(vixBars, job.start_date, job.end_date) : null,
+      regimeFloors: (weightsRow?.regime_floors as Record<string, number> | null) ?? null,
+      strategyTilts: (weightsRow?.strategy_tilts as any) ?? null,
+      calibrationCurve: (weightsRow?.calibration_curve as any) ?? null,
+      tickerCalibration: (weightsRow?.ticker_calibration as any) ?? null,
+    };
+
+    const out = simulateChunk(state, barsMap, dates, params, cursor, CPU_BUDGET_MS, activeWindows, adaptive);
+
 
 
     const simPct = Math.min(99, 20 + Math.round((out.cursor.dayIdx / dates.length) * 79));

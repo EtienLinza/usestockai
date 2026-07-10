@@ -1,99 +1,103 @@
-# Portfolio-Mode Backtest — Brainstorm
+# Make Portfolio Backtest = Live Autotrader (Exactly)
 
-Goal: let users backtest the same way we trade live — scan a universe every "day", run the full autotrader gate stack (conviction, reversal-risk, ATR envelope, sector/beta caps, portfolio heat, CVaR, correlation), open/manage/exit positions with the R-ladder — over multi-year windows. Long runtimes are OK; **completion** is the requirement.
+**Goal:** The portfolio backtest calls the *same functions* the live scanner does — not a lookalike copy. If a live behavior changes, the backtest inherits it automatically.
 
-The current single-ticker `backtest` function already dies on 5y × 2 tickers. A portfolio sim over 500 tickers × 5y in one edge call is not physically possible under the 400 s / worker-memory limits. So the whole design has to be about **splitting the work** so no single invocation exceeds the limit, and **caching** so we don't recompute the expensive parts.
+## The problem
 
-## The real cost drivers (what actually blows up)
+`_shared/backtest-sim.ts` is a "faithful but simplified" reimplementation of `autotrader-scan/index.ts`. It duplicates:
 
-1. **Bar fetches** — Yahoo history for N tickers × Y years. Network-bound, not CPU. Solve once, reuse forever.
-2. **Per-bar signal evaluation** — `evaluateSignal` over the whole universe per day. This is the CPU killer: ~500 tickers × 1260 days × ~2 ms = ~20 min pure compute.
-3. **Portfolio gates per candidate day** — CVaR base rebuild, correlation matrix, sector/heat math. Cheap per-call, but multiplied by open-book churn.
-4. **Trade-management ticks** — R-ladder / trailing stop / gap-trim per open position per bar. Small but non-trivial across long windows.
+- Entry gates (conviction floor, ATR ceiling, correlation, heat, exposure)
+- Sizing (kellyFraction only — no vol-target scalar, no ticker calibration, no strategy tilts)
+- Position management (R-ladder + trail — missing add-ons, meta-label filter, reversal-risk, guard envelope, drift events)
+- No adaptive tuning (regime floors, VIX gating, drawdown tightening, CDaR)
+- No sector caps, no portfolio beta cap, no correlation-book gate with adaptive threshold
+- No emergency mode / daily-loss halt / rotation / cooldowns
+- No isotonic calibration curve or per-ticker calibration
 
-Wall-clock isn't the enemy — **per-invocation CPU** and **memory ceiling** are.
+That's why results diverge from live.
 
-## Four architecture options
+## The fix — lift, don't copy
 
-### Option A — Job queue with a coordinator + day-shard workers (recommended)
+Extract the live decision logic into `_shared/` modules that **both** `autotrader-scan` and the backtest sim import. The live scanner keeps working unchanged (same behavior, same call sites). The backtest replaces its handcrafted stepDay with calls into those same modules.
 
-Split the backtest into three tiers, mirroring the live scan pipeline:
+### New shared modules
 
-```text
-[client] → backtest-portfolio-start (create job row, seed universe, return job_id)
-              │
-              ├── prefetch-bars-batch (chunked; writes ticker_bars_cache_backtest)
-              ├── precompute-signals (day-shard: N days per invocation, writes signal_shard rows)
-              └── simulate-portfolio (walks days in order, reads pre-computed signals,
-                                     runs gates + trade mgmt, persists state after each chunk)
+1. `_shared/adaptive-context.ts` — `computeEffectiveSettings`, `vixRegimeOf`, `spyTrendOf`, `volTargetScalar`, `realizedVolAnnualized`, `RISK_PROFILE_BASELINES`, `adaptiveCorrThreshold`, `algoScanIntervalMinutes`.
 
-[client] polls backtest-status(job_id) → progress %, partial metrics, final report
-```
+2. `_shared/entry-gates.ts` — `computeEntryGuardEnvelope`, `assessReversalRisk`, `maxCorrelationToBook`, `pearson`, `dailyReturns`, `inferInitRiskPerShare`, `inferHardStopPrice`, `bucketKeyAT`, plus a new `evaluateEntryCandidate(args)` that wraps the entry portion of `runEntryDecision` and returns `{decision, size, stops, reasons}` without any DB writes.
 
-Each stage checkpoints to a `backtest_jobs` / `backtest_state` table. Any invocation that runs out of CPU just returns "chunk done", the coordinator (pg_cron or a lightweight self-invoking edge function) picks up the next chunk. No single call exceeds its budget; the *job* takes as long as it needs.
+3. `_shared/exit-manager.ts` — `runWinExit`, `runLossExit`, `computePeakSignals`, add-on eval — returning intents (`{action, shares, price, reason}`) instead of writing to DB.
 
-Key properties:
-- **Resumable.** Kill an invocation mid-shard → next tick continues from checkpoint.
-- **Cacheable.** Bars + pre-computed signals for date D and ticker T are deterministic given the engine version. Hash the engine version; reuse across users.
-- **Observable.** User sees a real progress bar, ETA, "currently simulating 2023-04-11", cancel button.
-- **Cost-scoped.** Elite tier gets unlimited window; free/pro capped by shard budget.
+4. `_shared/portfolio-caps.ts` — sector-max, portfolio-beta, correlated-position caps as pure functions.
 
-### Option B — Client-driven chunked simulation (no long server calls)
+### Refactor `autotrader-scan/index.ts`
 
-The browser is the coordinator. It calls a stateless `backtest-chunk` edge function with `{state, dateRangeStart, dateRangeEnd}` where the chunk is small enough (say 20 trading days) to always fit in the CPU budget. The function returns the updated portfolio state; the client loops until done and renders the final report.
+- Delete the extracted function bodies and import them.
+- `runEntryDecision`, `runWinExit`, `runLossExit` become thin wrappers: call shared → apply intent to DB.
+- No behavior change; commit signature identical.
 
-Pros: dead simple, no new tables, works today. Zero server orchestration.
-Cons: user must keep the tab open; state blobs get big; harder to share/persist a completed run.
+### Rewrite `_shared/backtest-sim.ts`
 
-### Option C — Vectorized offline pre-compute + fast sim
+- Delete the handcrafted `stepDay` gate stack.
+- Each simulated day now runs the exact live sequence:
+  1. Build a `MacroContext` from SPY bars sliced up to `date` (already have SPY in bars if included; if not, pre-fetch SPY + ^VIX once and pass in).
+  2. Build `AdaptiveContext` via `computeEffectiveSettings` (VIX regime, SPY trend, vol scalar, drawdown/CDaR).
+  3. For each open position → `runWinExit` + `runLossExit` intents → apply to sim state (fill at OHLC).
+  4. For each active-in-index candidate → `evaluateEntryCandidate` → apply intent (open at close).
+  5. Add-on evaluation for existing positions.
+- Same order-fill model (market at bar close, gaps fill at open) but using live-derived intents.
+- Time-accurate universe filter stays as-is.
+- CPU-budgeted chunking stays as-is.
 
-One-time (per engine version) job: pre-compute every signal for every ticker for every day into `historical_signals_cache(ticker, date, conviction, decision, atr_pct, ...)`. Then the actual "backtest" is just a small function that reads pre-computed signals for the date range and simulates portfolio gates + trade management — cheap enough to fit in one invocation for reasonable universes.
+### Sim adapters for the shared modules
 
-Pros: near-instant repeat backtests (great UX for parameter sweeps).
-Cons: big upfront batch (needs the queue from Option A to build it); cache invalidates on any engine change.
+Shared functions were written against Supabase DB reads for things like `strategy_weights`, `signal_cooldown`, `meta_label_model`, `ticker_calibration`. Refactor these to take the loaded values as **arguments** (dependency-injected). The live scanner loads them once from DB per scan; the backtest loads them once at job start and passes the same objects. Zero DB reads inside per-bar hot path.
 
-### Option D — External compute
+### Data the sim must pre-load once per job (in `simulate` stage init)
 
-Run the sim in a Cloud Run / Fly.io / self-hosted container triggered by an edge function. No CPU limit at all. But: new infra, new secrets, new billing surface, and we lose the "everything in Lovable Cloud" property.
+- Active `strategy_weights` row (regime_floors, exit_calibration, calibration_curve, strategy_tilts, ticker_calibration)
+- SPY + ^VIX bars (added to `backtest_bars_cache`)
+- Sector map for the universe (from a static JSON or from `finnhub_cache`)
+- `portfolio_caps` defaults (or per-user row for backwards compat)
 
-## Recommendation
+### What we intentionally skip in backtest
 
-**Ship Option A, and use its infrastructure to enable Option C later.**
+- Emergency mode / kill switch (user-facing runtime state, N/A)
+- Rotation (relies on live conviction stream — could add later)
+- Auto-add-to-watchlist (universe is fixed for the run)
+- Real order execution / notifications
+- Live news sentiment (no historical NewsAPI archive — signal engine already handles this gracefully with nulls)
 
-Option A gives us:
-- Real portfolio backtests today (long-running but reliable).
-- The `historical_signals_cache` table falls out naturally from the "precompute-signals" stage — that's Option C for free the next day.
-- Clean progress/cancel UX for the disclaimer flow you mentioned.
+Everything else — every gate, cap, scalar, calibration, R-ladder rung, trail, add-on rule — runs identically.
 
-## Rough shape (technical section)
+## Technical notes
 
-Data model:
-- `backtest_jobs(id, user_id, params_json, universe[], status, progress_pct, current_date, cpu_ms_spent, created_at, finished_at, error)`
-- `backtest_state(job_id, positions_json, cash, nav_history_json, open_risk, cvar_base_json, checkpoint_date)`
-- `historical_signals_cache(ticker, engine_version, date, conviction, decision, atr_pct, strategy, profile, regime, extras_json)` — global (unique on ticker+engine_version+date), so cache hits across users.
-- Reuse existing `ticker_bars_cache` for bars.
+- `runEntryDecision` currently mixes decision + persistence. The extraction returns a pure `EntryIntent` object; the live scanner applies it via existing `executeEntry`; the backtest applies it via a new `applyEntryToSimState` that mirrors the persistence semantics against in-memory state.
+- `runWinExit` / `runLossExit` similarly split into `evaluateWinExit` / `applyExitToSimState`.
+- We do NOT change signatures the outside world depends on (`serve` handlers, cron jobs) — only internal factoring.
+- Engine version bumps to `v3` in `backtest_bars_cache` if we start caching SPY/VIX under the same table (or use a separate `benchmark_bars_cache` — cleaner).
 
-Functions:
-- `backtest-portfolio-start` — validate params, create job, enqueue first chunk.
-- `backtest-portfolio-tick` — the workhorse; picks the next unfinished stage/chunk for one job and runs until ~200 s of CPU, then checkpoints and returns. Re-invoked by pg_cron every N seconds while jobs are `running`.
-- `backtest-portfolio-status` — read-only, returns progress + partial equity curve for the UI.
-- `backtest-portfolio-cancel` — flip status.
+## Files touched
 
-Simulation loop reuses the existing engine directly:
-- Bar loop uses `evaluateSignal` from `_shared/signal-engine-v2.ts` (same code path as live).
-- Gate stack imports the exact helpers from `autotrader-scan` (extract `computeEntryGuardEnvelope`, `assessReversalRisk`, sector/beta/heat/CVaR/correlation checks into `_shared/portfolio-gates.ts` — a refactor step so live and backtest share one implementation).
-- Trade management: same R-ladder + gap-trim + trailing stop code, again lifted to `_shared/trade-manager.ts`.
+**New:**
+- `supabase/functions/_shared/adaptive-context.ts`
+- `supabase/functions/_shared/entry-gates.ts`
+- `supabase/functions/_shared/exit-manager.ts`
+- `supabase/functions/_shared/portfolio-caps.ts`
 
-That refactor is the meat of the work — the backtest becomes "loop through days, call the same functions live uses" instead of a parallel implementation that drifts.
+**Rewritten:**
+- `supabase/functions/_shared/backtest-sim.ts`
+- `supabase/functions/backtest-portfolio-tick/index.ts` (pre-loads strategy_weights / SPY / VIX / sector map)
 
-UI:
-- New "Portfolio Backtest" tab on `Backtest.tsx` with universe picker (S&P 500 / Nasdaq 100 / custom watchlist), date range, disclaimer "This may take X-Y minutes", start button.
-- Progress card polls status every 3 s, shows current date + partial equity curve.
-- Report reuses existing Recharts components once done.
+**Edited:**
+- `supabase/functions/autotrader-scan/index.ts` (imports from new shared modules; delete duplicated bodies)
 
-## Open questions
+## Estimate
 
-1. **Universe scope** — should the default be S&P 500, Nasdaq 100, current watchlist, or user-defined?
-2. **Cache reuse** — happy for pre-computed signals to be shared across all users (same engine version), or keep per-user?
-3. **Cancel/replay** — do you want completed backtests archived (viewable later) or ephemeral?
-4. **Trigger cadence** — pg_cron every 10 s for the tick function, or self-invoke chain (function re-invokes itself when a chunk finishes)?
+Large refactor. ~2000 lines moved, ~400 lines new glue. The live scanner needs to be re-verified after extraction — I'll run `tsgo --noEmit` after each shared-module extraction and after the sim rewrite. Expect a longer-than-usual turn.
+
+## Confirm before I start
+
+This is the right shape, but I want to flag one tradeoff: **speed will drop**. The live gate stack is heavier than the current sim; a 500-name × 3-year unlimited run that currently takes ~15 min will likely take 45–60 min on first run (bars are still cached after that). Acceptable given your "runnable regardless of duration" stance from earlier, but confirm.
+
+Say **go** and I'll ship it. Say **narrow it** if you want fewer shared modules first (e.g. just entry gates), and I'll trim.
