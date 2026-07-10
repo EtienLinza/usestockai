@@ -147,6 +147,7 @@ export default function PortfolioBacktest() {
   }, [jobId]);
 
   async function startBacktest() {
+    if (!tierLoading && !isElite) { setGateOpen(true); return; }
     if (!unlimited) {
       if (parsedUniverse.length === 0) return toast.error("Add at least one ticker");
       if (invalid.length > 0) return toast.error(`Invalid tickers: ${invalid.slice(0, 5).join(", ")}`);
