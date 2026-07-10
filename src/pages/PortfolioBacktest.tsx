@@ -156,11 +156,33 @@ export default function PortfolioBacktest() {
     } catch (e) { console.error(e); }
   }
 
+  const stuckSinceRef = useRef<{ id: string; at: number; last: string } | null>(null);
+  async function nudgeTick(id: string) {
+    try { await supabase.functions.invoke("backtest-portfolio-tick", { body: { job_id: id } }); } catch { /* ignore */ }
+  }
+
   useEffect(() => {
     if (!jobId) return;
     pollJob(jobId);
     if (pollRef.current) window.clearInterval(pollRef.current);
-    pollRef.current = window.setInterval(() => pollJob(jobId), 3000);
+    pollRef.current = window.setInterval(async () => {
+      await pollJob(jobId);
+      // Nudge if the job appears stalled (no progress for 30s while non-terminal).
+      setJob((cur) => {
+        if (!cur || cur.id !== jobId) return cur;
+        if (["done", "failed", "cancelled"].includes(cur.status)) return cur;
+        const key = `${cur.status}:${cur.progress_pct}:${cur.current_step_note ?? ""}`;
+        const now = Date.now();
+        const prev = stuckSinceRef.current;
+        if (!prev || prev.id !== jobId || prev.last !== key) {
+          stuckSinceRef.current = { id: jobId, at: now, last: key };
+        } else if (now - prev.at > 30_000) {
+          nudgeTick(jobId);
+          stuckSinceRef.current = { id: jobId, at: now, last: key };
+        }
+        return cur;
+      });
+    }, 3000);
     return () => { if (pollRef.current) { window.clearInterval(pollRef.current); pollRef.current = null; } };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jobId]);
