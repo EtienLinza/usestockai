@@ -62,6 +62,7 @@ const App = () => (
                   <Route path="/watchlist" element={<Watchlist />} />
                   <Route path="/stock/:ticker" element={<StockDetail />} />
                   <Route path="/backtest" element={<Backtest />} />
+                  <Route path="/portfolio-backtest" element={<PortfolioBacktest />} />
                   <Route path="/settings" element={<Settings />} />
                   <Route path="/settings/activity" element={<SecurityActivity />} />
                   <Route path="/security" element={<Security />} />
