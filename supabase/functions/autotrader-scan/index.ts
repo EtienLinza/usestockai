@@ -2076,6 +2076,19 @@ function isMarketOpen(now: Date = new Date()): boolean {
   return minutes >= 9 * 60 + 30 && minutes < close;
 }
 
+// True if we are within `minutesBefore` of the NYSE close (default 15 min).
+// Used by the overnight-gap trim rule to only fire late in the session.
+function isNearMarketClose(now: Date = new Date(), minutesBefore = 15): boolean {
+  if (!isMarketOpen(now)) return false;
+  const nyStr = now.toLocaleString("en-US", { timeZone: "America/New_York", hour12: false });
+  const m = nyStr.match(/(\d{1,2})\/(\d{1,2})\/(\d{4}),\s*(\d{1,2}):(\d{2}):(\d{2})/);
+  if (!m) return false;
+  const hh = Number(m[4]), mm = Number(m[5]);
+  const minutes = hh * 60 + mm;
+  const close = nyseCloseMinute(now);
+  return minutes >= close - minutesBefore && minutes < close;
+}
+
 // ── AUTO-DISCOVERY: pull good live_signals into watchlist + prune stale auto-adds ──
 async function syncAutoWatchlist(
   supabase: any,
