@@ -49,7 +49,7 @@ export const FEATURE_REQUIRES: Record<FeatureKey, Tier> = {
 export const TIER_LIMITS = {
   free: { backtests_per_month: 3, max_tickers_per_backtest: 1, max_backtest_years: 1 },
   pro: { backtests_per_month: 20, max_tickers_per_backtest: 3, max_backtest_years: 10 },
-  elite: { backtests_per_month: Infinity, max_tickers_per_backtest: 10, max_backtest_years: 25 },
+  elite: { backtests_per_month: Infinity, max_tickers_per_backtest: 10, max_backtest_years: Infinity },
 } as const;
 
 export const FEATURE_LABELS: Record<FeatureKey, string> = {
