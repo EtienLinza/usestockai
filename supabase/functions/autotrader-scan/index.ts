@@ -1162,6 +1162,304 @@ function bucketKeyAT(c: number): string {
   return "90+";
 }
 
+// ============================================================================
+// ADAPTIVE ENTRY-GUARD ENVELOPE  (Phase 4 — BEAM follow-up)
+// ============================================================================
+// The three post-BEAM guards used fixed per-profile constants. Real trading
+// tapes are non-stationary — the same ATR% that is dangerous in bear_volatile
+// is routine in bull_quiet. This helper returns per-decision guard params
+// that adapt to:
+//   • market regime    (bull_quiet loosens, bear_volatile tightens)
+//   • macro stress     (VIX-elevated → additional 10% tighten)
+//   • conviction       (higher conv earns more ATR/stop headroom linearly)
+//   • liquidity        (thin ADV names → tighter stop caps, avoid gap traps)
+// ----------------------------------------------------------------------------
+// The BASE values equal the constants from the fixed guards (so behavior
+// under `neutral` regime, `normal` stress, mid conviction, and liquid names
+// is unchanged). Multipliers only widen/narrow around the base.
+// ============================================================================
+
+interface EntryGuardEnvelope {
+  atrCeiling: number;          // hard reject when sig.atrPct > this
+  atrOverrideCeiling: number;  // exceptional-conviction bypass ceiling
+  stopCapPct: number;          // max hard-stop distance as fraction of price
+  minStopPct: number;          // never let clamps push below this (0.8*ATR floor)
+  overnightTrimAtrPct: number; // atrPct floor to trigger overnight-gap trim
+  overnightTrimPeakR: number;  // peak-R floor: below → unproven
+  overnightTrimPct: number;    // fraction of position to trim
+  reversalRiskCeiling: number; // reject entries with reversal_score > this
+  highConvFloor: number;       // conviction threshold for "runner" mode
+}
+
+const BASE_ENVELOPE: Record<string, { atr: number; stop: number }> = {
+  momentum: { atr: 0.050, stop: 0.06 },
+  trend:    { atr: 0.060, stop: 0.07 },
+  value:    { atr: 0.040, stop: 0.05 },
+  volatile: { atr: 0.090, stop: 0.10 },
+  index:    { atr: 0.030, stop: 0.04 },
+};
+
+function computeEntryGuardEnvelope(args: {
+  profile: string;
+  regime: string | null;
+  macroStressed: boolean;
+  conviction: number;
+  minConviction: number;
+  advDollars: number | null;
+  atrValue: number;
+  currentPrice: number;
+}): EntryGuardEnvelope {
+  const base = BASE_ENVELOPE[args.profile] ?? { atr: 0.06, stop: 0.07 };
+
+  // ── Regime multiplier: bull_quiet loosens (+15%), bear_volatile tightens
+  // (−25%). Neutral = 1.0 so legacy behavior is preserved when the regime
+  // detector hasn't populated yet.
+  let regimeMult = 1.00;
+  switch (args.regime) {
+    case "bull_quiet":     regimeMult = 1.15; break;
+    case "bull_volatile":  regimeMult = 0.90; break;
+    case "bear_quiet":     regimeMult = 0.92; break;
+    case "bear_volatile":  regimeMult = 0.75; break;
+    default:               regimeMult = 1.00;
+  }
+  // Macro-stress overlay (VIX elevated / crisis)
+  if (args.macroStressed) regimeMult *= 0.90;
+
+  // Conviction blend: at min_conviction → 1.00×; at 95 → 1.30× headroom on
+  // ATR and stop cap. Clamped so a bear_volatile 95-conv doesn't outrun the
+  // regime discipline.
+  const convBlend = Math.max(0, Math.min(1,
+    (args.conviction - args.minConviction) / Math.max(1, 95 - args.minConviction)
+  ));
+  const convMult = 1.00 + 0.30 * convBlend;
+
+  // Liquidity: names with <$5M ADV get −15% on stopCap (thinner books gap
+  // through wider stops), and their overnight trim triggers earlier. Missing
+  // volume data (advDollars null) → no adjustment.
+  let liqMult = 1.00;
+  if (args.advDollars != null && Number.isFinite(args.advDollars) && args.advDollars > 0) {
+    if (args.advDollars < 2_000_000) liqMult = 0.75;
+    else if (args.advDollars < 5_000_000) liqMult = 0.85;
+    else if (args.advDollars < 20_000_000) liqMult = 0.95;
+  }
+
+  const atrCeiling = base.atr * regimeMult * convMult * liqMult;
+  // Exceptional-conviction override band scales with the same envelope but
+  // never below the raw base ceiling — so a 95-conv setup in bear_volatile
+  // still can't wave through a 12% ATR name.
+  const atrOverrideCeiling = Math.max(base.atr, atrCeiling * 1.35);
+
+  const stopCapPct = base.stop * regimeMult * (0.90 + 0.20 * convBlend) * liqMult;
+  const minStopPct = args.currentPrice > 0
+    ? (args.atrValue * 0.8) / args.currentPrice
+    : 0.005;
+
+  // Overnight-trim envelope: threshold to CONSIDER trimming scales with
+  // regime — in bull_quiet a 6% ATR name is routine; in bear_volatile 4%
+  // already deserves overnight defense.
+  const overnightTrimAtrPct = 0.050 * regimeMult;
+  const overnightTrimPeakR = 0.5 * regimeMult;              // higher bar for "proven" in bull_quiet
+  const overnightTrimPct = Math.max(0.20, Math.min(0.60, 0.33 / regimeMult)); // trim more in stress
+
+  const reversalRiskCeiling = Math.max(0.35, Math.min(0.75, 0.55 * regimeMult)); // 0.35..0.75
+
+  // High-conviction "runner" floor moves with the tape — in bear_volatile
+  // we demand near-perfection (97), in bull_quiet a 92 is acceptable.
+  let highConvFloor = 95;
+  if (args.regime === "bull_quiet") highConvFloor = 92;
+  else if (args.regime === "bear_volatile") highConvFloor = 97;
+
+  return {
+    atrCeiling,
+    atrOverrideCeiling,
+    stopCapPct,
+    minStopPct,
+    overnightTrimAtrPct,
+    overnightTrimPeakR,
+    overnightTrimPct,
+    reversalRiskCeiling,
+    highConvFloor,
+  };
+}
+
+// ============================================================================
+// REVERSAL-RISK ASSESSOR  (Phase 4 — prevent instant-crash entries)
+// ============================================================================
+// A pre-entry screen that estimates the probability the price is at/near a
+// short-term reversal / exhaustion point. Returns a score in [0,1] where 1 =
+// severe exhaustion and 0 = clean setup, plus human-readable tags for logs.
+//
+// Signals combined (weighted):
+//   1. Parabolic distance from SMA20 in ATR-of-price-move units
+//   2. Extension from EMA20 in raw ATRs
+//   3. Chasing gap-up (today's open >> prev close AND price still above open)
+//   4. Extreme short-horizon RSI (RSI2 > 95 for longs)
+//   5. Bollinger %B > 0.98 (upper band pierced)
+//   6. Distribution days: down bars with above-avg volume in the last 5
+//   7. Wick rejection on the current bar (upper-wick > 2× body)
+//
+// A composite `score` and `tags[]` are returned; the caller compares against
+// the regime-adaptive `reversalRiskCeiling` from the envelope.
+// ============================================================================
+
+interface ReversalRisk {
+  score: number;
+  tags: string[];
+  details: Record<string, number | boolean>;
+}
+
+function assessReversalRisk(
+  data: DataSet,
+  atrValue: number,
+  side: "BUY" | "SHORT",
+): ReversalRisk {
+  const n = data.close.length;
+  const tags: string[] = [];
+  const details: Record<string, number | boolean> = {};
+  let scoreSum = 0;
+  let weightSum = 0;
+
+  const price = data.close[n - 1];
+  const isLong = side === "BUY";
+  const dir = isLong ? 1 : -1;
+
+  // ── 1. Parabolic distance from SMA20 (weight 1.5) ──────────────────────
+  if (n >= 21 && atrValue > 0 && price > 0) {
+    const sma20 = calculateSMA(data.close, 20);
+    const s = sma20[n - 1];
+    if (Number.isFinite(s) && s > 0) {
+      const parabolicRatio = (price - s) / s * dir;
+      const atrPct = atrValue / price;
+      // Expected 20-bar drift band ≈ 2.0 * atrPct * √20 ≈ 8.94 * atrPct
+      const expectedBand = 2.0 * atrPct * Math.sqrt(20);
+      const norm = expectedBand > 0 ? parabolicRatio / expectedBand : 0;
+      details.parabolic_norm = Number(norm.toFixed(3));
+      if (norm > 1.0) {
+        const contrib = Math.min(1.0, (norm - 1.0) / 0.75);
+        scoreSum += contrib * 1.5; weightSum += 1.5;
+        if (contrib > 0.4) tags.push(`parabolic(${norm.toFixed(2)}×band)`);
+      } else {
+        weightSum += 1.5;
+      }
+    }
+  }
+
+  // ── 2. Extension from EMA20 in ATRs (weight 1.2) ────────────────────────
+  if (n >= 21 && atrValue > 0) {
+    const ema20 = calculateEMA(data.close, 20);
+    const e = ema20[n - 1];
+    if (Number.isFinite(e)) {
+      const distAtr = (price - e) * dir / atrValue;
+      details.ema20_extension_atr = Number(distAtr.toFixed(2));
+      if (distAtr > 2.5) {
+        const contrib = Math.min(1.0, (distAtr - 2.5) / 2.0);
+        scoreSum += contrib * 1.2; weightSum += 1.2;
+        if (contrib > 0.4) tags.push(`extended(${distAtr.toFixed(1)}ATR>EMA20)`);
+      } else {
+        weightSum += 1.2;
+      }
+    }
+  }
+
+  // ── 3. Chasing gap-up entry (weight 1.3) ────────────────────────────────
+  if (n >= 2 && atrValue > 0) {
+    const prevClose = data.close[n - 2];
+    const openToday = data.open[n - 1];
+    if (prevClose > 0 && openToday > 0) {
+      const gap = (openToday - prevClose) / prevClose * dir;
+      const atrPct = atrValue / price;
+      const gapNorm = atrPct > 0 ? gap / (1.5 * atrPct) : 0;
+      details.gap_norm = Number(gapNorm.toFixed(2));
+      const chasing = isLong ? price >= openToday : price <= openToday;
+      if (gapNorm > 1.0 && chasing) {
+        const contrib = Math.min(1.0, (gapNorm - 1.0) / 1.0);
+        scoreSum += contrib * 1.3; weightSum += 1.3;
+        if (contrib > 0.4) tags.push(`chasing-gap(${(gap*100).toFixed(1)}%)`);
+      } else {
+        weightSum += 1.3;
+      }
+    }
+  }
+
+  // ── 4. Extreme RSI(2) (weight 1.0) ──────────────────────────────────────
+  if (n >= 4) {
+    const rsi2 = calculateRSI(data.close, 2);
+    const r = rsi2[n - 1];
+    if (Number.isFinite(r)) {
+      const extreme = isLong ? Math.max(0, r - 90) / 10 : Math.max(0, 10 - r) / 10;
+      details.rsi2 = Number(r.toFixed(1));
+      scoreSum += extreme * 1.0; weightSum += 1.0;
+      if (extreme > 0.5) tags.push(`rsi2=${r.toFixed(0)}`);
+    }
+  }
+
+  // ── 5. Bollinger %B > 0.98 (weight 1.0) ─────────────────────────────────
+  if (n >= 21) {
+    const sma20 = calculateSMA(data.close, 20);
+    const m = sma20[n - 1];
+    if (Number.isFinite(m)) {
+      let variance = 0;
+      for (let i = n - 20; i < n; i++) { const d = data.close[i] - m; variance += d * d; }
+      const sd = Math.sqrt(variance / 20);
+      if (sd > 0) {
+        const upper = m + 2 * sd, lower = m - 2 * sd;
+        const pctB = (price - lower) / (upper - lower);
+        const bValue = isLong ? pctB : 1 - pctB;
+        details.bb_pctB = Number(pctB.toFixed(3));
+        if (bValue > 0.98) {
+          const contrib = Math.min(1.0, (bValue - 0.98) / 0.10);
+          scoreSum += contrib * 1.0; weightSum += 1.0;
+          if (contrib > 0.3) tags.push(`bb%B=${bValue.toFixed(2)}`);
+        } else {
+          weightSum += 1.0;
+        }
+      }
+    }
+  }
+
+  // ── 6. Distribution days in last 5 (weight 0.8) ─────────────────────────
+  if (n >= 25 && data.volume && data.volume.length === n) {
+    let avgVol = 0;
+    for (let i = n - 20; i < n; i++) avgVol += data.volume[i];
+    avgVol /= 20;
+    let distDays = 0;
+    for (let i = n - 5; i < n; i++) {
+      const barDown = isLong ? data.close[i] < data.open[i] : data.close[i] > data.open[i];
+      if (barDown && data.volume[i] > 1.3 * avgVol) distDays++;
+    }
+    details.distribution_days_5 = distDays;
+    if (distDays >= 2) {
+      const contrib = Math.min(1.0, (distDays - 1) / 3);
+      scoreSum += contrib * 0.8; weightSum += 0.8;
+      tags.push(`distribution(${distDays}/5)`);
+    } else {
+      weightSum += 0.8;
+    }
+  }
+
+  // ── 7. Rejection wick on current bar (weight 0.7) ───────────────────────
+  {
+    const o = data.open[n - 1], c = data.close[n - 1];
+    const h = data.high[n - 1], l = data.low[n - 1];
+    const body = Math.abs(c - o);
+    const rejWick = isLong ? h - Math.max(o, c) : Math.min(o, c) - l;
+    const wickRatio = body > 0 ? rejWick / body : 0;
+    details.rejection_wick_ratio = Number(wickRatio.toFixed(2));
+    if (wickRatio > 2.0) {
+      const contrib = Math.min(1.0, (wickRatio - 2.0) / 3.0);
+      scoreSum += contrib * 0.7; weightSum += 0.7;
+      if (contrib > 0.3) tags.push(`rejection-wick(${wickRatio.toFixed(1)}×)`);
+    } else {
+      weightSum += 0.7;
+    }
+  }
+
+  const score = weightSum > 0 ? scoreSum / weightSum : 0;
+  return { score: Number(score.toFixed(3)), tags, details };
+}
+
+
+
 async function runEntryDecision(
   ticker: string,
   data: DataSet,
