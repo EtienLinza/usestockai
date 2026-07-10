@@ -103,7 +103,18 @@ async function tickJob(service: any, job: any) {
     const cursor = job.cursor || { tickerIdx: 0 };
     const total = universeWithBench.length;
     const range = pickYahooRange(job.start_date, job.end_date);
-    // Which tickers still need fetching? Check cache first.
+    // Which tickers still need fetching? Cache is global & shared across jobs,
+    // so a ticker is only reusable when its cached range actually covers this
+    // job's required window (start_date minus ~1yr warmup → end_date). A
+    // shorter cached slice (e.g. from a 2023-2026 run) is treated as missing
+    // for a 1990-2026 run and re-fetched with a wider Yahoo range, then
+    // upserts (overwrite) the broader bars back into the shared cache — so
+    // future narrow runs benefit from the widest range ever fetched.
+    const warmupStart = (() => {
+      const d = new Date(job.start_date);
+      d.setDate(d.getDate() - 400); // ~200 trading-day warmup buffer
+      return d.toISOString().slice(0, 10);
+    })();
     const missing: string[] = [];
     const have = new Set<string>();
     const CHK = 100;
@@ -111,10 +122,14 @@ async function tickJob(service: any, job: any) {
       const chunk = universeWithBench.slice(i, i + CHK);
       const { data: cached } = await service
         .from("backtest_bars_cache")
-        .select("ticker")
+        .select("ticker,first_date,last_date")
         .in("ticker", chunk)
         .eq("bars_version", "v1");
-      for (const r of cached ?? []) have.add(r.ticker);
+      for (const r of cached ?? []) {
+        const covers = (r.first_date ?? "9999") <= warmupStart
+                    && (r.last_date  ?? "0000") >= job.end_date;
+        if (covers) have.add(r.ticker);
+      }
     }
     for (const t of universeWithBench) if (!have.has(t)) missing.push(t);
 
