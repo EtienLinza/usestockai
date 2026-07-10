@@ -1001,6 +1001,37 @@ function runLossExit(
   const entry = Number(pos.entry_price);
   const pnlPct = isLong ? (currentPrice - entry) / entry : (entry - currentPrice) / entry;
 
+  // ── T0.5: Overnight-gap trim for un-proven high-ATR longs (Phase 3) ────
+  // High-ATR longs held overnight without proving themselves (peak < +0.5R)
+  // carry outsized gap risk (BEAM 07/2026: entered $36.89 w/ 7% ATR, gapped
+  // through $33.18 stop overnight → -10.5% instead of the -6-7% intended).
+  // Trim 33% into the close only when the position is flat/slightly green —
+  // never chase a losing position out on this rule (that's the hard stop's
+  // job) and only when no R-ladder rung has fired yet.
+  {
+    const entryAtr = pos.entry_atr ? Number(pos.entry_atr) : 0;
+    const atrPctEntry = entry > 0 ? entryAtr / entry : 0;
+    if (
+      isLong &&
+      atrPctEntry > 0.05 &&
+      pnlPct >= -0.01 &&
+      (pos.partial_exits_taken ?? 0) === 0 &&
+      isNearMarketClose()
+    ) {
+      const barsHeldForTrim = businessDaysSince(pos.created_at);
+      const peak = pos.peak_price != null ? Number(pos.peak_price) : entry;
+      const peakR = entryAtr > 0 ? (peak - entry) / entryAtr : 0;
+      if (barsHeldForTrim >= 1 && peakR < 0.5) {
+        return {
+          kind: "PARTIAL_EXIT",
+          reason: `Overnight-gap trim: high-ATR (${(atrPctEntry * 100).toFixed(1)}%) unproven after ${barsHeldForTrim} bar${barsHeldForTrim === 1 ? "" : "s"} (peak +${peakR.toFixed(2)}R) — reduce gap exposure`,
+          pct: 0.33,
+          price: currentPrice,
+        };
+      }
+    }
+  }
+
   // T1: Hard stop — non-negotiable. For legacy positions without an explicit
   // hard_stop_price, synthesize one from entry_atr (H-7) so the safety net
   // still fires.
@@ -1260,6 +1291,28 @@ async function runEntryDecision(
     return { kind: "HOLD", reason: `Calibrated conviction ${conviction} (raw ${sig.conviction}) < min ${settings.min_conviction}` };
   }
 
+  // ── ATR% entry ceiling (Phase 3 — BEAM fix, guard #1) ───────────────────
+  // Volatility-normalized admission gate. BEAM-style disasters happen when a
+  // 7%-ATR name enters the `momentum` bucket where hardStopATRMult=3.0 → the
+  // structural anchor still leaves a ~10% stop and one overnight gap wipes
+  // out multiple winning trades. Reject high-ATR names outright unless
+  // conviction is exceptional. Override band = 1.4× when conviction ≥ 85.
+  const ATR_PCT_CEILING: Record<string, number> = {
+    momentum: 0.050,
+    trend:    0.060,
+    value:    0.040,
+    volatile: 0.090,
+    index:    0.030,
+  };
+  const atrCeiling = ATR_PCT_CEILING[sig.profile] ?? 0.06;
+  const atrOverride = conviction >= 85 ? atrCeiling * 1.4 : atrCeiling;
+  if (sig.atrPct > atrOverride) {
+    return {
+      kind: "BLOCKED",
+      reason: `ATR% ${(sig.atrPct * 100).toFixed(2)}% exceeds ${sig.profile} ceiling ${(atrCeiling * 100).toFixed(1)}%${conviction >= 85 ? ` (override ${(atrOverride * 100).toFixed(1)}%)` : ""} — vol too high for stop-loss discipline`,
+    };
+  }
+
   // ── Meta-label gate (cold-start safe — null model passes through).
   // Audit fix: runs AFTER calibration so the conviction feature matches the
   // value the trainer sees in `signal_outcomes.conviction` (also calibrated).
@@ -1359,6 +1412,27 @@ async function runEntryDecision(
     if (Number.isFinite(structDist) && structDist > 0) {
       stopDist = Math.min(atrStopDist, Math.max(minDist, structDist));
     }
+  }
+  // ── Absolute stop-distance cap (Phase 3 — BEAM fix, guard #2) ──────────
+  // Even after structural anchoring, high-ATR names can leave stops 10%+
+  // away from entry — a single overnight gap through the stop then blows
+  // the risk budget (BEAM: -10.5% vs intended -6%). Clamp stopDist to a
+  // profile-scoped % of price so worst-case realized loss (stop + slippage)
+  // stays bounded. Risk-parity sizing below automatically raises shares to
+  // hold dollar-risk constant when the clamp fires.
+  const STOP_DIST_CAP_PCT: Record<string, number> = {
+    momentum: 0.06, trend: 0.07, value: 0.05, volatile: 0.10, index: 0.04,
+  };
+  const stopCapPct = STOP_DIST_CAP_PCT[sig.profile] ?? 0.07;
+  const capDist = currentPrice * stopCapPct;
+  if (stopDist > capDist) {
+    if (capDist < minDist) {
+      return {
+        kind: "HOLD",
+        reason: `Stop-cap collision: 0.8·ATR (${(minDist / currentPrice * 100).toFixed(2)}%) exceeds ${sig.profile} stop cap ${(stopCapPct * 100).toFixed(1)}% — ATR too wide for profile`,
+      };
+    }
+    stopDist = capDist;
   }
   const hardStop = isLong ? currentPrice - stopDist : currentPrice + stopDist;
 
@@ -2031,6 +2105,19 @@ function isMarketOpen(now: Date = new Date()): boolean {
   const minutes = hh * 60 + mm;
   const close = nyseCloseMinute(now); // 16:00 normal, 13:00 on early-close days
   return minutes >= 9 * 60 + 30 && minutes < close;
+}
+
+// True if we are within `minutesBefore` of the NYSE close (default 15 min).
+// Used by the overnight-gap trim rule to only fire late in the session.
+function isNearMarketClose(now: Date = new Date(), minutesBefore = 15): boolean {
+  if (!isMarketOpen(now)) return false;
+  const nyStr = now.toLocaleString("en-US", { timeZone: "America/New_York", hour12: false });
+  const m = nyStr.match(/(\d{1,2})\/(\d{1,2})\/(\d{4}),\s*(\d{1,2}):(\d{2}):(\d{2})/);
+  if (!m) return false;
+  const hh = Number(m[4]), mm = Number(m[5]);
+  const minutes = hh * 60 + mm;
+  const close = nyseCloseMinute(now);
+  return minutes >= close - minutesBefore && minutes < close;
 }
 
 // ── AUTO-DISCOVERY: pull good live_signals into watchlist + prune stale auto-adds ──
