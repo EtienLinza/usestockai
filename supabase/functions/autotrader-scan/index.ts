@@ -716,13 +716,19 @@ function runWinExit(
     if (entry > 0 && initRisk > 0) {
       const rMult = (isLong ? currentPrice - entry : entry - currentPrice) / initRisk;
       const rung = pos.partial_exits_taken ?? 0;
-      const rung1Pct = Math.min(0.75, Math.max(0.10, profile.partialScaleOutPct ?? (1 / 3)));
+      // High-conviction runner: halve the rung-1 scale-out so the position
+      // keeps more shares working when the entry conviction was in the
+      // "runner" band (≥92). The trail-to-breakeven ratchet still fires so
+      // the remainder is a free trade.
+      const isRunner = (pos.entry_conviction ?? 0) >= 92;
+      const baseRung1 = Math.min(0.75, Math.max(0.10, profile.partialScaleOutPct ?? (1 / 3)));
+      const rung1Pct = isRunner ? Math.max(0.10, baseRung1 * 0.5) : baseRung1;
       if (rung === 0 && rMult >= 1.0) {
-        // Rung 1: take `partialScaleOutPct`, ratchet trailing to breakeven (entry)
+        // Rung 1: take `rung1Pct`, ratchet trailing to breakeven (entry)
         const newTrail = isLong ? Math.max(trailing, entry) : Math.min(trailing, entry);
         return {
           kind: "PARTIAL_EXIT",
-          reason: `R-ladder rung 1: +1R hit (${(pnlPct * 100).toFixed(1)}%), scale ${Math.round(rung1Pct * 100)}%, trail → breakeven`,
+          reason: `R-ladder rung 1: +1R hit (${(pnlPct * 100).toFixed(1)}%), scale ${Math.round(rung1Pct * 100)}%${isRunner ? " [runner]" : ""}, trail → breakeven`,
           pct: rung1Pct,
           price: currentPrice,
           nextRung: 1,
