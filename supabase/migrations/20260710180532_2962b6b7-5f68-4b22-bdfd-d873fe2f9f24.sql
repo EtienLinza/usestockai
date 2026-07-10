@@ -1,0 +1,14 @@
+DELETE FROM public.autotrade_log           WHERE ticker = 'BEAM';
+DELETE FROM public.virtual_positions       WHERE ticker = 'BEAM';
+DELETE FROM public.live_signals            WHERE ticker = 'BEAM';
+DELETE FROM public.sell_alerts             WHERE ticker = 'BEAM';
+DELETE FROM public.signal_outcomes         WHERE ticker = 'BEAM';
+DELETE FROM public.signal_cooldown         WHERE ticker = 'BEAM';
+DELETE FROM public.price_alerts            WHERE ticker = 'BEAM';
+DELETE FROM public.watchlist               WHERE ticker = 'BEAM';
+DELETE FROM public.news_sentiment_cache    WHERE ticker = 'BEAM';
+DELETE FROM public.danelfin_scores         WHERE ticker = 'BEAM';
+DELETE FROM public.eps_revisions           WHERE ticker = 'BEAM';
+DELETE FROM public.short_interest_history  WHERE ticker = 'BEAM';
+DELETE FROM public.ticker_bars_cache       WHERE ticker = 'BEAM';
+DELETE FROM public.prediction_runs         WHERE ticker = 'BEAM';
