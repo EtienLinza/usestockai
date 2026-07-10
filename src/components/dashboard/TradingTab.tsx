@@ -551,7 +551,7 @@ export function TradingTab({
                 datasets={[
                   { key: "virtual_positions", label: "Virtual Positions (open + closed, full trade lifecycle)", table: "virtual_positions", dateColumn: "created_at" },
                   { key: "virtual_portfolio_log", label: "Portfolio Equity Log (daily equity, P&L, exposure)", table: "virtual_portfolio_log", dateColumn: "date" },
-                  { key: "live_signals", label: "Live Signals feed (all signals in window)", table: "live_signals", dateColumn: "created_at" },
+                  { key: "live_signals", label: "Live Signals feed (public — all signals in window)", table: "live_signals", dateColumn: "created_at", scopeToUser: false },
                   { key: "sell_alerts", label: "Sell Alerts (triggered exit warnings)", table: "sell_alerts", dateColumn: "created_at" },
                 ]}
               />
