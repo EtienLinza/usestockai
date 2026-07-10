@@ -31,6 +31,8 @@ export interface ExportDataset {
   filters?: Record<string, unknown>;
   /** Human-readable filename slug (defaults to key) */
   filenameSlug?: string;
+  /** Set false for public tables that have no user_id column (e.g. live_signals). Defaults to true. */
+  scopeToUser?: boolean;
 }
 
 interface ExportDialogProps {
@@ -40,9 +42,8 @@ interface ExportDialogProps {
   description?: string;
   userId: string;
   datasets: ExportDataset[];
-  /** When true, scopes queries with user_id = userId (default true). Set false for public data. */
-  scopeToUser?: boolean;
 }
+
 
 export function ExportDialog({
   open, onOpenChange, title, description, userId, datasets, scopeToUser = true,
