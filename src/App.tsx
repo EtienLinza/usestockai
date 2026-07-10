@@ -20,6 +20,7 @@ const Dashboard = lazy(() => import("./pages/Dashboard"));
 const Watchlist = lazy(() => import("./pages/Watchlist"));
 const StockDetail = lazy(() => import("./pages/StockDetail"));
 const Backtest = lazy(() => import("./pages/Backtest"));
+const PortfolioBacktest = lazy(() => import("./pages/PortfolioBacktest"));
 const Settings = lazy(() => import("./pages/Settings"));
 const SecurityActivity = lazy(() => import("./pages/SecurityActivity"));
 const Security = lazy(() => import("./pages/Security"));
@@ -61,6 +62,7 @@ const App = () => (
                   <Route path="/watchlist" element={<Watchlist />} />
                   <Route path="/stock/:ticker" element={<StockDetail />} />
                   <Route path="/backtest" element={<Backtest />} />
+                  <Route path="/portfolio-backtest" element={<PortfolioBacktest />} />
                   <Route path="/settings" element={<Settings />} />
                   <Route path="/settings/activity" element={<SecurityActivity />} />
                   <Route path="/security" element={<Security />} />
