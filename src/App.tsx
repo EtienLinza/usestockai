@@ -7,7 +7,7 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { ThemeProvider } from "next-themes";
 import { AuthProvider } from "@/hooks/useAuth";
 import { RequireOnboarding } from "./components/RequireOnboarding";
-import { PaymentTestModeBanner } from "./components/PaymentTestModeBanner";
+// PaymentTestModeBanner import removed — banner deleted from app root
 import { MobileBottomNav } from "./components/MobileBottomNav";
 import { PageSkeleton } from "./components/PageSkeleton";
 
