@@ -156,6 +156,8 @@ interface Settings {
   auto_add_watchlist: boolean;
   auto_watchlist_consideration_floor: number;
   auto_watchlist_stale_days: number;
+  single_stock_mode: boolean;
+  single_stock_ticker: string | null;
   /** Computed at runtime — 30-day rolling NAV drawdown % (positive = decline). */
   current_drawdown_pct: number;
   /** Computed at runtime — 30-day CDaR_0.95 (mean of worst 5% daily drawdowns). */
