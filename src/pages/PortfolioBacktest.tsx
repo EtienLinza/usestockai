@@ -186,14 +186,14 @@ export default function PortfolioBacktest() {
 
   async function reopen(id: string) {
     setJobId(id);
-    // fetch full report
     try {
-      const sessionRes = await supabase.auth.getSession();
-      const token = sessionRes.data.session?.access_token;
-      const url = `${(import.meta as any).env.VITE_SUPABASE_URL || ""}/functions/v1/backtest-portfolio-status?job_id=${id}&omit_state=1`;
-      const r = await fetch(url, { headers: { Authorization: `Bearer ${token}`, apikey: (import.meta as any).env.VITE_SUPABASE_PUBLISHABLE_KEY || "" } });
-      const j = await r.json();
-      if (j?.job) setJob(j.job);
+      const { data, error } = await supabase
+        .from("backtest_portfolio_jobs")
+        .select("id,name,universe,start_date,end_date,starting_nav,status,stage,progress_pct,current_step_note,cpu_ms_spent,created_at,finished_at,error,report")
+        .eq("id", id)
+        .maybeSingle();
+      if (error) throw error;
+      if (data) setJob(data);
     } catch (e) { console.error(e); }
   }
 
