@@ -1589,26 +1589,66 @@ async function runEntryDecision(
     return { kind: "HOLD", reason: `Calibrated conviction ${conviction} (raw ${sig.conviction}) < min ${settings.min_conviction}` };
   }
 
-  // ── ATR% entry ceiling (Phase 3 — BEAM fix, guard #1) ───────────────────
-  // Volatility-normalized admission gate. BEAM-style disasters happen when a
-  // 7%-ATR name enters the `momentum` bucket where hardStopATRMult=3.0 → the
-  // structural anchor still leaves a ~10% stop and one overnight gap wipes
-  // out multiple winning trades. Reject high-ATR names outright unless
-  // conviction is exceptional. Override band = 1.4× when conviction ≥ 85.
-  const ATR_PCT_CEILING: Record<string, number> = {
-    momentum: 0.050,
-    trend:    0.060,
-    value:    0.040,
-    volatile: 0.090,
-    index:    0.030,
-  };
-  const atrCeiling = ATR_PCT_CEILING[sig.profile] ?? 0.06;
-  const atrOverride = conviction >= 85 ? atrCeiling * 1.4 : atrCeiling;
-  if (sig.atrPct > atrOverride) {
-    return {
-      kind: "BLOCKED",
-      reason: `ATR% ${(sig.atrPct * 100).toFixed(2)}% exceeds ${sig.profile} ceiling ${(atrCeiling * 100).toFixed(1)}%${conviction >= 85 ? ` (override ${(atrOverride * 100).toFixed(1)}%)` : ""} — vol too high for stop-loss discipline`,
-    };
+  // ── ADAPTIVE GUARDS — Phase 4 (post-BEAM) ───────────────────────────────
+  // Compute a per-decision guard envelope that adapts to regime, macro
+  // stress, conviction, and liquidity. All Phase-3 fixed thresholds are
+  // reproduced when regime=neutral / non-stressed / mid-conviction / liquid,
+  // and widened or narrowed from there.
+  const _priceForEnv = data.close[data.close.length - 1];
+  let _advForEnv: number | null = null;
+  if (data.volume && data.volume.length >= 20) {
+    const n = data.close.length;
+    let s = 0;
+    for (let i = n - 20; i < n; i++) s += data.close[i] * data.volume[i];
+    _advForEnv = s / 20;
+  }
+  const envelope = computeEntryGuardEnvelope({
+    profile: sig.profile,
+    regime: sig.marketRegime ?? marketRegime ?? null,
+    macroStressed: !!macro?.stressed,
+    conviction,
+    minConviction: settings.min_conviction,
+    advDollars: _advForEnv,
+    atrValue: sig.atr,
+    currentPrice: _priceForEnv,
+  });
+
+  // ── Guard #1 (adaptive): ATR% entry ceiling ─────────────────────────────
+  // Base 5.0% momentum / 6.0% trend / 9.0% volatile, scaled by regime,
+  // conviction, and liquidity. Override band = envelope.atrOverrideCeiling
+  // when calibrated conviction ≥ envelope.highConvFloor (adaptive: 92 in
+  // bull_quiet, 95 in neutral, 97 in bear_volatile).
+  {
+    const isHighConv = conviction >= envelope.highConvFloor;
+    const activeCeiling = isHighConv ? envelope.atrOverrideCeiling : envelope.atrCeiling;
+    if (sig.atrPct > activeCeiling) {
+      return {
+        kind: "BLOCKED",
+        reason: `ATR% ${(sig.atrPct * 100).toFixed(2)}% > adaptive ${sig.profile} ceiling ${(envelope.atrCeiling * 100).toFixed(2)}%${isHighConv ? ` (override ${(envelope.atrOverrideCeiling*100).toFixed(2)}% @ conv≥${envelope.highConvFloor})` : ""} — vol too high for regime/liquidity`,
+      };
+    }
+  }
+
+  // ── Reversal-risk pre-entry screen (Phase 4) ────────────────────────────
+  // Prevent buys/shorts that instantly reverse after entry. Composite score
+  // over parabolic distance, EMA extension, gap-chasing, RSI(2) extremes,
+  // Bollinger %B, distribution days, and rejection wicks. Threshold adapts
+  // to regime via envelope.reversalRiskCeiling. High-conviction runners
+  // (conv ≥ envelope.highConvFloor) can bypass unless the score is severe
+  // (>0.80) — a near-perfect setup should still be blocked when the tape
+  // itself screams "reversal in progress".
+  const reversalRisk = assessReversalRisk(data, sig.atr, sig.decision);
+  {
+    const isHighConv = conviction >= envelope.highConvFloor;
+    const ceiling = isHighConv
+      ? Math.max(envelope.reversalRiskCeiling, 0.80)
+      : envelope.reversalRiskCeiling;
+    if (reversalRisk.score > ceiling) {
+      return {
+        kind: "BLOCKED",
+        reason: `Reversal risk ${reversalRisk.score.toFixed(2)} > ${ceiling.toFixed(2)} — ${reversalRisk.tags.join(", ") || "exhaustion pattern"}`,
+      };
+    }
   }
 
   // ── Meta-label gate (cold-start safe — null model passes through).
