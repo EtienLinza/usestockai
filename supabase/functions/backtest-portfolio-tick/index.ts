@@ -93,17 +93,22 @@ async function loadActiveWindows(
 async function tickJob(service: any, job: any) {
   const params: SimParams = { ...DEFAULT_PARAMS, ...(job.params || {}), starting_nav: Number(job.starting_nav) };
 
+  // Benchmark bars (SPY + ^VIX) are always fetched alongside the universe so
+  // per-day adaptive tuning has real data. Cached under the same table.
+  const BENCHMARKS = ["SPY", "^VIX"];
+  const universeWithBench = Array.from(new Set([...(job.universe as string[]), ...BENCHMARKS]));
+
   // ── Stage: fetch_bars ──────────────────────────────────────────────────
   if (job.stage === "fetch_bars") {
     const cursor = job.cursor || { tickerIdx: 0 };
-    const total = job.universe.length;
+    const total = universeWithBench.length;
     const range = pickYahooRange(job.start_date, job.end_date);
     // Which tickers still need fetching? Check cache first.
     const missing: string[] = [];
     const have = new Set<string>();
     const CHK = 100;
-    for (let i = 0; i < job.universe.length; i += CHK) {
-      const chunk = job.universe.slice(i, i + CHK);
+    for (let i = 0; i < universeWithBench.length; i += CHK) {
+      const chunk = universeWithBench.slice(i, i + CHK);
       const { data: cached } = await service
         .from("backtest_bars_cache")
         .select("ticker")
@@ -111,7 +116,8 @@ async function tickJob(service: any, job: any) {
         .eq("bars_version", "v1");
       for (const r of cached ?? []) have.add(r.ticker);
     }
-    for (const t of job.universe) if (!have.has(t)) missing.push(t);
+    for (const t of universeWithBench) if (!have.has(t)) missing.push(t);
+
 
 
     if (missing.length === 0) {
