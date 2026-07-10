@@ -187,6 +187,8 @@ const Settings = () => {
           auto_add_watchlist: botRes.data.auto_add_watchlist ?? true,
           auto_watchlist_consideration_floor: Number(botRes.data.auto_watchlist_consideration_floor ?? 60),
           auto_watchlist_stale_days: Number(botRes.data.auto_watchlist_stale_days ?? 14),
+          single_stock_mode: Boolean((botRes.data as any).single_stock_mode ?? false),
+          single_stock_ticker: ((botRes.data as any).single_stock_ticker as string | null) ?? null,
         });
         setLastScanAt(botRes.data.last_scan_at as string | null);
         setNextScanAt(botRes.data.next_scan_at as string | null);
