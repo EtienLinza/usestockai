@@ -96,11 +96,30 @@ export default function PortfolioBacktest() {
   const invalid = useMemo(() => parsedUniverse.filter(t => !/^[A-Z]{1,10}(-[A-Z]{2,4})?$/.test(t)), [parsedUniverse]);
 
   const estimateMinutes = useMemo(() => {
-    const days = Math.max(1, Math.round((new Date(endDate).getTime() - new Date(startDate).getTime()) / (24 * 3600 * 1000)));
-    const tickerDays = parsedUniverse.length * days;
-    // rough: ~40k ticker-days per minute of server compute
-    return Math.max(1, Math.round(tickerDays / 40_000));
-  }, [parsedUniverse.length, startDate, endDate]);
+    const calDays = Math.max(1, Math.round((new Date(endDate).getTime() - new Date(startDate).getTime()) / (24 * 3600 * 1000)));
+    const tradingDays = Math.max(1, Math.round(calDays * (252 / 365)));
+    const tickers = unlimited ? 500 : parsedUniverse.length;
+    // Sim throughput: ~120k ticker-days/min. First-run fetch: ~4s/ticker (cached after).
+    const simMin = (tickers * tradingDays) / 120_000;
+    const fetchMin = (tickers * 4) / 60; // upper bound; skipped when cached
+    return Math.max(1, Math.round(simMin + fetchMin));
+  }, [parsedUniverse.length, startDate, endDate, unlimited]);
+
+  // Queue position: how many active jobs are ahead of ours (server processes one at a time).
+  const [queueAhead, setQueueAhead] = useState<number>(0);
+  useEffect(() => {
+    if (!job || job.status !== "queued") { setQueueAhead(0); return; }
+    let cancelled = false;
+    (async () => {
+      const { count } = await supabase
+        .from("backtest_portfolio_jobs")
+        .select("id", { count: "exact", head: true })
+        .in("status", ["queued", "fetching_bars", "simulating", "finalizing"])
+        .lt("created_at", job.created_at);
+      if (!cancelled) setQueueAhead(count ?? 0);
+    })();
+    return () => { cancelled = true; };
+  }, [job?.status, job?.created_at]);
 
   // NOTE: status/cancel/list previously went through edge functions that were
   // just RLS-gated table reads/updates. Moved to direct supabase-js calls to
