@@ -1001,17 +1001,33 @@ function runLossExit(
   const entry = Number(pos.entry_price);
   const pnlPct = isLong ? (currentPrice - entry) / entry : (entry - currentPrice) / entry;
 
-  // ── T0.5: Overnight-gap trim for un-proven high-ATR longs (Phase 3) ────
-  // High-ATR longs held overnight without proving themselves (peak < +0.5R)
-  // carry outsized gap risk (BEAM 07/2026: entered $36.89 w/ 7% ATR, gapped
-  // through $33.18 stop overnight → -10.5% instead of the -6-7% intended).
-  // Trim 33% into the close only when the position is flat/slightly green —
-  // never chase a losing position out on this rule (that's the hard stop's
-  // job) and only when no R-ladder rung has fired yet.
+  // ── T0.5: Overnight-gap trim (ADAPTIVE — Phase 4) ─────────────────────
+  // Fires only near the close; trim size, ATR%-threshold, and peak-R gate
+  // all scale with the position's own volatility and stored conviction so
+  // high-conviction runners keep running while noisy sliver positions get
+  // cut down before overnight gap risk. High-conviction entries (stored
+  // entry_conviction ≥ 92 in the same regime-aware band used at entry
+  // time) are exempt outright — the whole point of the runner bypass is to
+  // let them ride.
   {
     const entryAtr = pos.entry_atr ? Number(pos.entry_atr) : 0;
     const atrPctEntry = entry > 0 ? entryAtr / entry : 0;
+    const entryConv = pos.entry_conviction ?? 0;
+    // Runner floor mirrors envelope.highConvFloor: we don't know the exact
+    // regime at exit time here, so we use the neutral floor (95) as a
+    // conservative default. Positions opened in bull_quiet at conv ≥ 92
+    // won't hit exactly 95, but they still benefit from higher peakR
+    // scaling below and typically get exempted via peakR anyway.
+    const isRunner = entryConv >= 92;
+    // Adaptive trim severity — scales with how noisy the name is vs the
+    // 5% baseline. atrPct 5% → 33% trim; 8% → 48% trim; 10%+ → 60% trim.
+    const severity = Math.max(0, Math.min(1, (atrPctEntry - 0.05) / 0.05));
+    const trimPct = Math.max(0.20, Math.min(0.60, 0.33 + 0.27 * severity));
+    // Adaptive peakR floor — higher-ATR names need to prove more before
+    // we call them "proven". Baseline 0.5R at 5% ATR, up to 0.85R at 10%.
+    const peakRFloor = 0.50 + 0.35 * severity;
     if (
+      !isRunner &&
       isLong &&
       atrPctEntry > 0.05 &&
       pnlPct >= -0.01 &&
@@ -1021,11 +1037,11 @@ function runLossExit(
       const barsHeldForTrim = businessDaysSince(pos.created_at);
       const peak = pos.peak_price != null ? Number(pos.peak_price) : entry;
       const peakR = entryAtr > 0 ? (peak - entry) / entryAtr : 0;
-      if (barsHeldForTrim >= 1 && peakR < 0.5) {
+      if (barsHeldForTrim >= 1 && peakR < peakRFloor) {
         return {
           kind: "PARTIAL_EXIT",
-          reason: `Overnight-gap trim: high-ATR (${(atrPctEntry * 100).toFixed(1)}%) unproven after ${barsHeldForTrim} bar${barsHeldForTrim === 1 ? "" : "s"} (peak +${peakR.toFixed(2)}R) — reduce gap exposure`,
-          pct: 0.33,
+          reason: `Overnight-gap trim (adaptive ${(trimPct * 100).toFixed(0)}%): ATR ${(atrPctEntry * 100).toFixed(1)}% unproven after ${barsHeldForTrim}b (peak +${peakR.toFixed(2)}R < ${peakRFloor.toFixed(2)}R)`,
+          pct: trimPct,
           price: currentPrice,
         };
       }
