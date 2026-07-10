@@ -33,6 +33,17 @@ serve(async (req) => {
       });
     }
 
+    // ── ELITE-ONLY GATE ─────────────────────────────────────────────────
+    // Portfolio backtest is compute-heavy and reserved for Elite. Anon key
+    // client can read the caller's own profile via RLS.
+    const { data: prof } = await supabase
+      .from("profiles").select("subscription_tier").eq("user_id", user.id).maybeSingle();
+    if ((prof?.subscription_tier ?? "free") !== "elite") {
+      return new Response(JSON.stringify({ error: "Portfolio backtest is an Elite-only feature." }), {
+        status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     const body = await req.json();
     const start_date = String(body?.start_date || "");
     const end_date = String(body?.end_date || "");

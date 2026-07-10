@@ -24,6 +24,8 @@ import { Separator } from "@/components/ui/separator";
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from "recharts";
 import { Play, Loader2, XCircle, Clock, TrendingUp, TrendingDown, Trophy, Percent, DollarSign, RefreshCw, Trash2, Infinity as InfinityIcon } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
+import { useTier } from "@/hooks/useTier";
+import { UpgradeRequiredModal } from "@/components/UpgradeRequiredModal";
 import { supabase } from "@/integrations/supabase/client";
 
 type JobStatus = "queued" | "fetching_bars" | "simulating" | "finalizing" | "done" | "failed" | "cancelled";
@@ -69,6 +71,8 @@ const statusVariant = (s: string): "default" | "secondary" | "destructive" | "ou
 export default function PortfolioBacktest() {
   const navigate = useNavigate();
   const { user } = useAuth();
+  const { isElite, loading: tierLoading } = useTier();
+  const [gateOpen, setGateOpen] = useState<boolean>(false);
   const [universeText, setUniverseText] = useState<string>(PRESETS["S&P 30 (Blue chip)"].join(", "));
   const [startDate, setStartDate] = useState<string>("2023-01-01");
   const [endDate, setEndDate] = useState<string>(new Date().toISOString().slice(0, 10));
@@ -143,6 +147,7 @@ export default function PortfolioBacktest() {
   }, [jobId]);
 
   async function startBacktest() {
+    if (!tierLoading && !isElite) { setGateOpen(true); return; }
     if (!unlimited) {
       if (parsedUniverse.length === 0) return toast.error("Add at least one ticker");
       if (invalid.length > 0) return toast.error(`Invalid tickers: ${invalid.slice(0, 5).join(", ")}`);
@@ -229,6 +234,7 @@ export default function PortfolioBacktest() {
           <div className="inline-flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
             <span className="h-1 w-1 rounded-full bg-primary" />
             Portfolio Backtest
+            <span className="ml-1 rounded-sm border border-primary/40 text-primary px-1.5 py-[1px] text-[10px] tracking-widest">ELITE</span>
           </div>
           <h1 className="text-3xl sm:text-4xl font-light tracking-tight">Run the live engine over history</h1>
           <p className="text-sm text-muted-foreground max-w-2xl leading-relaxed">
@@ -459,6 +465,12 @@ export default function PortfolioBacktest() {
           </Card>
         )}
       </main>
+      <UpgradeRequiredModal
+        open={gateOpen}
+        onOpenChange={setGateOpen}
+        requiredTier="elite"
+        feature="Portfolio backtest"
+      />
     </div>
   );
 }
