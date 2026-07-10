@@ -46,8 +46,9 @@ interface ExportDialogProps {
 
 
 export function ExportDialog({
-  open, onOpenChange, title, description, userId, datasets, scopeToUser = true,
+  open, onOpenChange, title, description, userId, datasets,
 }: ExportDialogProps) {
+
   const [selected, setSelected] = useState<Set<string>>(new Set(datasets.map((d) => d.key)));
   const [from, setFrom] = useState<Date | undefined>(() => {
     const d = new Date();
