@@ -58,6 +58,7 @@ export default function PortfolioBacktest() {
   const [endDate, setEndDate] = useState<string>(new Date().toISOString().slice(0, 10));
   const [startingNav, setStartingNav] = useState<number>(100_000);
   const [runName, setRunName] = useState<string>("");
+  const [unlimited, setUnlimited] = useState<boolean>(false);
   const [jobId, setJobId] = useState<string | null>(null);
   const [job, setJob] = useState<JobRow | null>(null);
   const [history, setHistory] = useState<JobRow[]>([]);
