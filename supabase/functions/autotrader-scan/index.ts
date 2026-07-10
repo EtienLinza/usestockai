@@ -33,6 +33,30 @@ import {
   type StockProfile,
 } from "../_shared/signal-engine-v2.ts";
 import { isMarketHoliday, nyseCloseMinute } from "../_shared/market-calendar.ts";
+import {
+  RISK_PROFILE_BASELINES,
+  ROLLING_DD_HARD_BLOCK_PCT,
+  CDAR_ALPHA,
+  CDAR_HARD_BLOCK_PCT,
+  CDAR_HALF_EXPOSURE_PCT,
+  CDAR_TIGHTEN_PCT,
+  VOL_TARGET_ANNUAL,
+  VOL_LOOKBACK,
+  VOL_LOOKBACK_FAST,
+  VOL_SCALAR_MIN,
+  VOL_SCALAR_MAX,
+  CORR_LOOKBACK_BARS,
+  spyTrendOf,
+  isBearishMacro,
+  vixRegimeOf,
+  realizedVolAnnualized,
+  volTargetScalar,
+  adaptiveCorrThreshold,
+  dailyReturns,
+  pearson,
+  computeEffectiveSettings as _sharedComputeEffectiveSettings,
+  type AdaptiveContext as _SharedAdaptiveContext,
+} from "../_shared/adaptive-context.ts";
 import { evaluateScanHealth, type TickerHealth } from "../_shared/circuit-breaker.ts";
 import { fetchDailyHistory } from "../_shared/yahoo-history.ts";
 import { getQuoteWithFallback, getEarningsBlackoutDays, getSector, getBeta } from "../_shared/finnhub.ts";
