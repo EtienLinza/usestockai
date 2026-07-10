@@ -51,14 +51,44 @@ function sliceBarsByDate(d: DataSet, startDate: string, endDate: string): DataSe
 
 async function loadBars(service: any, tickers: string[]): Promise<Map<string, DataSet>> {
   const map = new Map<string, DataSet>();
-  const { data } = await service
-    .from("backtest_bars_cache")
-    .select("ticker,bars")
-    .in("ticker", tickers)
-    .eq("bars_version", "v1");
-  for (const row of data ?? []) map.set(row.ticker, row.bars as DataSet);
+  // Batch the .in() to avoid URL-length issues on unlimited-mode (500+ tickers)
+  const BATCH = 100;
+  for (let i = 0; i < tickers.length; i += BATCH) {
+    const chunk = tickers.slice(i, i + BATCH);
+    const { data } = await service
+      .from("backtest_bars_cache")
+      .select("ticker,bars")
+      .in("ticker", chunk)
+      .eq("bars_version", "v1");
+    for (const row of data ?? []) map.set(row.ticker, row.bars as DataSet);
+  }
   return map;
 }
+
+// Load per-ticker index-membership windows so the simulator only trades a
+// name on dates it was actually a constituent (e.g. no TSLA before 2010).
+async function loadActiveWindows(
+  service: any, indexName: string, tickers: string[],
+): Promise<Map<string, { from: string; to: string | null }[]>> {
+  const out = new Map<string, { from: string; to: string | null }[]>();
+  if (!indexName) return out;
+  const BATCH = 200;
+  for (let i = 0; i < tickers.length; i += BATCH) {
+    const chunk = tickers.slice(i, i + BATCH);
+    const { data } = await service
+      .from("historical_constituents")
+      .select("ticker, effective_from, effective_to")
+      .eq("index_name", indexName)
+      .in("ticker", chunk);
+    for (const row of data ?? []) {
+      const arr = out.get(row.ticker) ?? [];
+      arr.push({ from: row.effective_from, to: row.effective_to });
+      out.set(row.ticker, arr);
+    }
+  }
+  return out;
+}
+
 
 async function tickJob(service: any, job: any) {
   const params: SimParams = { ...DEFAULT_PARAMS, ...(job.params || {}), starting_nav: Number(job.starting_nav) };
