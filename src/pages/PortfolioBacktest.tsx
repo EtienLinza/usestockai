@@ -464,6 +464,12 @@ export default function PortfolioBacktest() {
           </Card>
         )}
       </main>
+      <UpgradeRequiredModal
+        open={gateOpen}
+        onOpenChange={setGateOpen}
+        requiredTier="elite"
+        feature="Portfolio backtest"
+      />
     </div>
   );
 }
