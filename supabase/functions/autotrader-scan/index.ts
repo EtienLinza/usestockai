@@ -745,6 +745,45 @@ function runWinExit(
     }
   }
 
+  // ── Stale-sliver harvest ───────────────────────────────────────────────
+  // After the R-ladder has trimmed a position (rung ≥ 1), the remaining
+  // notional can become so small that further upside is dominated by noise
+  // and there's no capital-efficient reason to keep the slot occupied.
+  // Case in point (CSSI): after r1 + r2 partials the sliver was making
+  // ~$5–6 total — not enough to justify the slot, not bad enough to stop
+  // out. Harvest it whenever ALL of the following hold:
+  //   • at least one partial has fired (rung ≥ 1)
+  //   • unrealized P&L is positive (never turn a winner into a loss here)
+  //   • remaining notional ≤ 30% of original notional (truly trimmed to sliver)
+  //   • remaining unrealized $ ≤ 0.5 R (upside noise-dominated) OR
+  //     remaining notional < $300 absolute floor (too small to matter)
+  // This is adaptive: the R-floor scales per position via initRisk × shares,
+  // and the 30% notional gate scales with each user's starting size.
+  {
+    const rung = pos.partial_exits_taken ?? 0;
+    if (rung >= 1 && pnlPct > 0) {
+      const shares = Number(pos.shares) || 0;
+      const originalShares = Number(pos.original_shares ?? shares) || shares;
+      const remainingNotional = shares * currentPrice;
+      const originalNotional = originalShares * entry;
+      const initRisk = inferInitRiskPerShare(pos);
+      const unrealizedDollars = (isLong ? currentPrice - entry : entry - currentPrice) * shares;
+      const halfR = initRisk > 0 ? 0.5 * initRisk * shares : 0;
+
+      const trimmedToSliver = originalNotional > 0 && remainingNotional <= 0.30 * originalNotional;
+      const noiseDominated = halfR > 0 && unrealizedDollars <= halfR;
+      const belowAbsFloor = remainingNotional < 300;
+
+      if (trimmedToSliver && (noiseDominated || belowAbsFloor)) {
+        return {
+          kind: "FULL_EXIT",
+          reason: `Stale sliver harvest: ${(remainingNotional).toFixed(0)}$ left after ${rung} partial${rung > 1 ? "s" : ""} (+${(pnlPct * 100).toFixed(1)}%, +$${unrealizedDollars.toFixed(0)}) — freeing slot`,
+          price: currentPrice,
+        };
+      }
+    }
+  }
+
   // Below a floor P&L we don't try to time a peak — hold or let loss-engine cut.
   // ADAPTIVE (Phase 1 sweep): the old fixed 6% floor fit ~2%-ATR names but
   // triggered too early on low-vol tickers (e.g. utilities at 0.8% ATR) and
