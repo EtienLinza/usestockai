@@ -150,7 +150,7 @@ const Settings = () => {
           .select("sector_max_pct, portfolio_beta_max, max_correlated_positions, enforcement_mode, enabled")
           .eq("user_id", user.id).maybeSingle(),
         supabase.from("autotrade_settings")
-          .select("enabled, kill_switch, emergency_mode, rotation_enabled, rotation_min_delta_conviction, rotation_max_per_day, paper_mode, advanced_mode, adaptive_mode, risk_profile, scan_interval_minutes, min_conviction, max_positions, max_nav_exposure_pct, max_single_name_pct, daily_loss_limit_pct, starting_nav, last_scan_at, next_scan_at, auto_add_watchlist, auto_watchlist_consideration_floor, auto_watchlist_stale_days")
+          .select("enabled, kill_switch, emergency_mode, rotation_enabled, rotation_min_delta_conviction, rotation_max_per_day, paper_mode, advanced_mode, adaptive_mode, risk_profile, scan_interval_minutes, min_conviction, max_positions, max_nav_exposure_pct, max_single_name_pct, daily_loss_limit_pct, starting_nav, last_scan_at, next_scan_at, auto_add_watchlist, auto_watchlist_consideration_floor, auto_watchlist_stale_days, single_stock_mode, single_stock_ticker")
           .eq("user_id", user.id).maybeSingle(),
         supabase.from("autotrader_state")
           .select("effective_min_conviction, effective_max_positions, effective_max_nav_exposure_pct, effective_max_single_name_pct, vix_value, vix_regime, spy_trend, recent_pnl_pct, adjustments, reason, computed_at")
