@@ -62,6 +62,8 @@ const Watchlist = () => {
   const [alertModalOpen, setAlertModalOpen] = useState(false);
   const [selectedItem, setSelectedItem] = useState<WatchlistItem | null>(null);
   const [upgradeOpen, setUpgradeOpen] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
+
   const { canUse } = useTier();
 
   useEffect(() => {
