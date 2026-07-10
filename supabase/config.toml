@@ -27,8 +27,6 @@ verify_jwt = false
 [functions.market-scanner]
 verify_jwt = false
 
-[functions.calibration-stats]
-verify_jwt = false
 
 [functions.calibrate-weights]
 verify_jwt = false
