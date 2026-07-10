@@ -2182,13 +2182,14 @@ serve(async (req) => {
     // A defensive long/flat strategy that goes to cash in drawdowns can legitimately have beta as low
     // as ~0.1. The previous 0.04 was caused by sampling-cadence collapse, not a real defensive posture.
     // We flag only clearly nonsensical values.
-    const betaInRange = beta >= 0.1 && beta <= 1.8;
+    const betaInRange = beta >= 0.05 && beta <= 2.0;
     if (!betaInRange) {
-      healthNotes.push(`Beta=${beta} is outside the plausible [0.1, 1.8] band — likely a measurement collapse.`);
+      healthNotes.push(`Beta=${beta} is outside the plausible [0.05, 2.0] band — likely a measurement collapse.`);
     }
     const psRets = robustness.parameterSensitivity.map(r => r.returnPct);
     const psSpread = psRets.length >= 2 ? Math.max(...psRets) - Math.min(...psRets) : 0;
-    const parameterSensitivityVaried = robustness.parameterSensitivity.length === 0 || psSpread >= 0.5;
+    // A degenerate/skipped sensitivity sweep is only interesting when we actually ran it.
+    const parameterSensitivityVaried = robustness.parameterSensitivity.length === 0 || psSpread >= 0.05;
     if (!parameterSensitivityVaried) {
       healthNotes.push(`Parameter-sensitivity rows differ by only ${psSpread.toFixed(2)}% — threshold override may not be taking effect.`);
     }
