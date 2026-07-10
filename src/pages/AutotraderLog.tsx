@@ -5,12 +5,15 @@ import { useNavigate } from "react-router-dom";
 import { Navbar } from "@/components/Navbar";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Bot, Loader2, ArrowDownRight, ArrowUpRight, Pause, Ban, Newspaper, ChevronDown, ExternalLink, Radar, Eye, EyeOff, PlusCircle, RotateCw } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Bot, Loader2, ArrowDownRight, ArrowUpRight, Pause, Ban, Newspaper, ChevronDown, ExternalLink, Radar, Eye, EyeOff, PlusCircle, RotateCw, Download } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
 import { LockedFeature } from "@/components/LockedFeature";
 import { TickerLink } from "@/components/TickerLink";
+import { ExportDialog } from "@/components/ExportDialog";
+
 
 function sentimentTone(score: number): { cls: string; label: string } {
   if (score <= -60) return { cls: "text-destructive border-destructive/30 bg-destructive/10", label: "Very Negative" };
