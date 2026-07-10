@@ -5,12 +5,15 @@ import { useNavigate } from "react-router-dom";
 import { Navbar } from "@/components/Navbar";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Bot, Loader2, ArrowDownRight, ArrowUpRight, Pause, Ban, Newspaper, ChevronDown, ExternalLink, Radar, Eye, EyeOff, PlusCircle, RotateCw } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Bot, Loader2, ArrowDownRight, ArrowUpRight, Pause, Ban, Newspaper, ChevronDown, ExternalLink, Radar, Eye, EyeOff, PlusCircle, RotateCw, Download } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
 import { LockedFeature } from "@/components/LockedFeature";
 import { TickerLink } from "@/components/TickerLink";
+import { ExportDialog } from "@/components/ExportDialog";
+
 
 function sentimentTone(score: number): { cls: string; label: string } {
   if (score <= -60) return { cls: "text-destructive border-destructive/30 bg-destructive/10", label: "Very Negative" };
@@ -56,6 +59,8 @@ const AutotraderLog = () => {
   const [rows, setRows] = useState<LogRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [exportOpen, setExportOpen] = useState(false);
+
 
   const toggleExpanded = (id: string) => {
     setExpanded((prev) => {
@@ -105,14 +110,34 @@ const AutotraderLog = () => {
       <main className="container mx-auto px-4 sm:px-6 pt-20 md:pt-24 pb-24 md:pb-12 max-w-5xl">
         <LockedFeature requiredTier="elite" feature="AutoTrader">
         <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-5">
-          <div className="flex items-center gap-2 mb-1">
-            <Bot className="w-5 h-5 text-primary" />
-            <h1 className="text-2xl font-medium tracking-tight">AutoTrader Activity</h1>
+          <div className="flex items-center justify-between gap-3 mb-1">
+            <div className="flex items-center gap-2">
+              <Bot className="w-5 h-5 text-primary" />
+              <h1 className="text-2xl font-medium tracking-tight">AutoTrader Activity</h1>
+            </div>
+            <Button size="sm" variant="outline" onClick={() => setExportOpen(true)} className="gap-1.5">
+              <Download className="w-3.5 h-3.5" /> Export
+            </Button>
           </div>
           <p className="text-sm text-muted-foreground">
             Every decision your automated trader makes — entries, exits, holds, and scan rollups.
             Auto-runs every 5–15 minutes during U.S. market hours.
           </p>
+
+          {user && (
+            <ExportDialog
+              open={exportOpen}
+              onOpenChange={setExportOpen}
+              title="Export AutoTrader Activity"
+              description="Every decision, reason, sentiment score and headline set within a date range."
+              userId={user.id}
+              datasets={[
+                { key: "autotrade_log", label: "AutoTrader Log (entries, exits, holds, blocks + sentiment)", table: "autotrade_log", dateColumn: "created_at" },
+              ]}
+            />
+          )}
+
+
 
           {loading ? (
             <Card className="glass-card p-12 flex items-center justify-center">

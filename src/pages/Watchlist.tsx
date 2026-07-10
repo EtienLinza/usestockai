@@ -20,7 +20,10 @@ import {
   Bell,
   BellRing,
   X,
+  Download,
 } from "lucide-react";
+import { ExportDialog } from "@/components/ExportDialog";
+
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
@@ -59,6 +62,8 @@ const Watchlist = () => {
   const [alertModalOpen, setAlertModalOpen] = useState(false);
   const [selectedItem, setSelectedItem] = useState<WatchlistItem | null>(null);
   const [upgradeOpen, setUpgradeOpen] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
+
   const { canUse } = useTier();
 
   useEffect(() => {
@@ -314,8 +319,28 @@ const Watchlist = () => {
                     <span>{activeAlertsCount} alerts</span>
                   </div>
                 )}
+                {user && (
+                  <Button size="sm" variant="outline" onClick={() => setExportOpen(true)} className="gap-1.5 h-8">
+                    <Download className="w-3.5 h-3.5" /> Export
+                  </Button>
+                )}
               </div>
             </div>
+
+            {user && (
+              <ExportDialog
+                open={exportOpen}
+                onOpenChange={setExportOpen}
+                title="Export Watchlist & Alerts"
+                description="Watchlist entries and price alerts (active + triggered) within a date range."
+                userId={user.id}
+                datasets={[
+                  { key: "watchlist", label: "Watchlist entries", table: "watchlist", dateColumn: "created_at" },
+                  { key: "price_alerts", label: "Price Alerts (targets, triggers, timestamps)", table: "price_alerts", dateColumn: "created_at" },
+                ]}
+              />
+            )}
+
 
             {/* Add Ticker Form */}
             <Card className="glass-card p-3 sm:p-4">
