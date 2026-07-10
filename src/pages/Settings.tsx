@@ -58,6 +58,8 @@ interface AutoTradeSettings {
   auto_add_watchlist: boolean;
   auto_watchlist_consideration_floor: number;
   auto_watchlist_stale_days: number;
+  single_stock_mode: boolean;
+  single_stock_ticker: string | null;
 }
 
 interface AutotraderState {
@@ -105,6 +107,8 @@ const AUTOTRADE_DEFAULTS: AutoTradeSettings = {
   auto_add_watchlist: true,
   auto_watchlist_consideration_floor: 60,
   auto_watchlist_stale_days: 14,
+  single_stock_mode: false,
+  single_stock_ticker: null,
 };
 
 const RISK_PROFILE_LABEL: Record<RiskProfile, { label: string; hint: string }> = {
@@ -146,7 +150,7 @@ const Settings = () => {
           .select("sector_max_pct, portfolio_beta_max, max_correlated_positions, enforcement_mode, enabled")
           .eq("user_id", user.id).maybeSingle(),
         supabase.from("autotrade_settings")
-          .select("enabled, kill_switch, emergency_mode, rotation_enabled, rotation_min_delta_conviction, rotation_max_per_day, paper_mode, advanced_mode, adaptive_mode, risk_profile, scan_interval_minutes, min_conviction, max_positions, max_nav_exposure_pct, max_single_name_pct, daily_loss_limit_pct, starting_nav, last_scan_at, next_scan_at, auto_add_watchlist, auto_watchlist_consideration_floor, auto_watchlist_stale_days")
+          .select("enabled, kill_switch, emergency_mode, rotation_enabled, rotation_min_delta_conviction, rotation_max_per_day, paper_mode, advanced_mode, adaptive_mode, risk_profile, scan_interval_minutes, min_conviction, max_positions, max_nav_exposure_pct, max_single_name_pct, daily_loss_limit_pct, starting_nav, last_scan_at, next_scan_at, auto_add_watchlist, auto_watchlist_consideration_floor, auto_watchlist_stale_days, single_stock_mode, single_stock_ticker")
           .eq("user_id", user.id).maybeSingle(),
         supabase.from("autotrader_state")
           .select("effective_min_conviction, effective_max_positions, effective_max_nav_exposure_pct, effective_max_single_name_pct, vix_value, vix_regime, spy_trend, recent_pnl_pct, adjustments, reason, computed_at")
@@ -183,6 +187,8 @@ const Settings = () => {
           auto_add_watchlist: botRes.data.auto_add_watchlist ?? true,
           auto_watchlist_consideration_floor: Number(botRes.data.auto_watchlist_consideration_floor ?? 60),
           auto_watchlist_stale_days: Number(botRes.data.auto_watchlist_stale_days ?? 14),
+          single_stock_mode: Boolean((botRes.data as any).single_stock_mode ?? false),
+          single_stock_ticker: ((botRes.data as any).single_stock_ticker as string | null) ?? null,
         });
         setLastScanAt(botRes.data.last_scan_at as string | null);
         setNextScanAt(botRes.data.next_scan_at as string | null);
@@ -548,6 +554,32 @@ function SettingsShell({ caps, setCaps, bot, setBot, adaptiveState, lastScanAt, 
         {active === "at-discovery" && (
           <Card className="glass-card p-5 space-y-4">
             <ToggleRow
+              label="Single-stock mode"
+              hint="Point the live AutoTrader at exactly one ticker. Overrides your watchlist and turns off auto-discovery — the bot enters, manages, and exits only this symbol using the same signal engine."
+              checked={bot.single_stock_mode}
+              onChange={(v) => setBot({ ...bot, single_stock_mode: v })}
+            />
+            {bot.single_stock_mode && (
+              <div className="space-y-1 pt-1 border-t border-border/40">
+                <Label htmlFor="single-stock-ticker" className="text-xs text-muted-foreground">Ticker</Label>
+                <Input
+                  id="single-stock-ticker"
+                  type="text"
+                  placeholder="e.g. NVDA"
+                  value={bot.single_stock_ticker ?? ""}
+                  onChange={(e) => {
+                    const raw = e.target.value.toUpperCase().replace(/[^A-Z-]/g, "").slice(0, 15);
+                    setBot({ ...bot, single_stock_ticker: raw || null });
+                  }}
+                  className="h-8 text-sm uppercase"
+                />
+                <p className="text-[10px] text-muted-foreground">
+                  Must be a valid symbol (e.g. AAPL, BRK-B). Watchlist and auto-discovery are ignored while this is on.
+                </p>
+              </div>
+            )}
+            <div className={bot.single_stock_mode ? "opacity-50 pointer-events-none" : ""}>
+            <ToggleRow
               label="Auto-discover tickers"
               hint={`Automatically add promising tickers from the live signal feed to your watchlist. Auto-added tickers are removed if no qualifying signal appears for ${bot.auto_watchlist_stale_days} days (held positions are never removed).`}
               checked={bot.auto_add_watchlist}
@@ -588,6 +620,7 @@ function SettingsShell({ caps, setCaps, bot, setBot, adaptiveState, lastScanAt, 
                 </div>
               </div>
             )}
+            </div>
           </Card>
         )}
 

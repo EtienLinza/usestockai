@@ -137,6 +137,8 @@ export type Database = {
           rotation_max_per_day: number
           rotation_min_delta_conviction: number
           scan_interval_minutes: number
+          single_stock_mode: boolean
+          single_stock_ticker: string | null
           starting_nav: number
           updated_at: string
           user_id: string
@@ -167,6 +169,8 @@ export type Database = {
           rotation_max_per_day?: number
           rotation_min_delta_conviction?: number
           scan_interval_minutes?: number
+          single_stock_mode?: boolean
+          single_stock_ticker?: string | null
           starting_nav?: number
           updated_at?: string
           user_id: string
@@ -197,6 +201,8 @@ export type Database = {
           rotation_max_per_day?: number
           rotation_min_delta_conviction?: number
           scan_interval_minutes?: number
+          single_stock_mode?: boolean
+          single_stock_ticker?: string | null
           starting_nav?: number
           updated_at?: string
           user_id?: string
