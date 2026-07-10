@@ -350,8 +350,10 @@ export function TradingTab({
   user, tradingStyle, setTradingStyle,
   runScan, onClearSignals, fetchCurrentPrices, onRegisterSignal, onClosePosition, onDismissAlert, onSellAlertClose,
 }: TradingTabProps) {
+  const [exportOpen, setExportOpen] = useState(false);
 
   const buySignals = useMemo(() => signals.filter(s => s.signal_type === "BUY"), [signals]);
+
 
   const filteredSignals = useMemo(() => {
     return signals.filter(s => matchesTradingStyle(s, tradingStyle));
