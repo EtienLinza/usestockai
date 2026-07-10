@@ -213,28 +213,48 @@ export default function PortfolioBacktest() {
 
         {/* Setup card */}
         <Card className="p-6 space-y-5">
-          <div className="space-y-2">
-            <Label>Universe (comma or newline separated tickers)</Label>
-            <Textarea
-              value={universeText}
-              onChange={(e) => setUniverseText(e.target.value)}
-              rows={4}
-              className="font-mono text-xs"
-              placeholder="AAPL, MSFT, NVDA…"
+          <label className="flex items-start gap-3 p-3 rounded-md border bg-primary/5 border-primary/20 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={unlimited}
+              onChange={(e) => setUnlimited(e.target.checked)}
+              className="mt-1"
             />
-            <div className="flex flex-wrap gap-2 items-center text-xs">
-              <span className="text-muted-foreground">Presets:</span>
-              {Object.keys(PRESETS).map(k => (
-                <Button key={k} type="button" size="sm" variant="ghost" onClick={() => setUniverseText(PRESETS[k].join(", "))}>
-                  {k}
-                </Button>
-              ))}
+            <div className="flex-1">
+              <div className="text-sm font-medium">Unlimited mode — full S&amp;P 500, time-accurate</div>
+              <div className="text-xs text-muted-foreground mt-1">
+                Runs the live engine against every S&amp;P 500 constituent that existed inside your date range. No 250-ticker cap.
+                A ticker is only tradeable on days it was actually in the index (e.g. no TSLA in 2005, no META in 2000).
+                First run fetches ~500 tickers of history — bars are cached globally so every subsequent run skips fetch entirely.
+                Expect the first run to take significantly longer.
+              </div>
             </div>
-            <div className="flex items-center gap-3 text-xs">
-              <span className="text-muted-foreground">{parsedUniverse.length} valid ticker{parsedUniverse.length === 1 ? "" : "s"}</span>
-              {invalid.length > 0 && <span className="text-destructive">Invalid: {invalid.slice(0, 5).join(", ")}</span>}
+          </label>
+
+          {!unlimited && (
+            <div className="space-y-2">
+              <Label>Universe (comma or newline separated tickers)</Label>
+              <Textarea
+                value={universeText}
+                onChange={(e) => setUniverseText(e.target.value)}
+                rows={4}
+                className="font-mono text-xs"
+                placeholder="AAPL, MSFT, NVDA…"
+              />
+              <div className="flex flex-wrap gap-2 items-center text-xs">
+                <span className="text-muted-foreground">Presets:</span>
+                {Object.keys(PRESETS).map(k => (
+                  <Button key={k} type="button" size="sm" variant="ghost" onClick={() => setUniverseText(PRESETS[k].join(", "))}>
+                    {k}
+                  </Button>
+                ))}
+              </div>
+              <div className="flex items-center gap-3 text-xs">
+                <span className="text-muted-foreground">{parsedUniverse.length} valid ticker{parsedUniverse.length === 1 ? "" : "s"}</span>
+                {invalid.length > 0 && <span className="text-destructive">Invalid: {invalid.slice(0, 5).join(", ")}</span>}
+              </div>
             </div>
-          </div>
+          )}
 
           <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
             <div className="space-y-2">
