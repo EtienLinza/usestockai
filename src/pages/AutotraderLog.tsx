@@ -59,6 +59,8 @@ const AutotraderLog = () => {
   const [rows, setRows] = useState<LogRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [exportOpen, setExportOpen] = useState(false);
+
 
   const toggleExpanded = (id: string) => {
     setExpanded((prev) => {
