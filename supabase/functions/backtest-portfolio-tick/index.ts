@@ -51,14 +51,44 @@ function sliceBarsByDate(d: DataSet, startDate: string, endDate: string): DataSe
 
 async function loadBars(service: any, tickers: string[]): Promise<Map<string, DataSet>> {
   const map = new Map<string, DataSet>();
-  const { data } = await service
-    .from("backtest_bars_cache")
-    .select("ticker,bars")
-    .in("ticker", tickers)
-    .eq("bars_version", "v1");
-  for (const row of data ?? []) map.set(row.ticker, row.bars as DataSet);
+  // Batch the .in() to avoid URL-length issues on unlimited-mode (500+ tickers)
+  const BATCH = 100;
+  for (let i = 0; i < tickers.length; i += BATCH) {
+    const chunk = tickers.slice(i, i + BATCH);
+    const { data } = await service
+      .from("backtest_bars_cache")
+      .select("ticker,bars")
+      .in("ticker", chunk)
+      .eq("bars_version", "v1");
+    for (const row of data ?? []) map.set(row.ticker, row.bars as DataSet);
+  }
   return map;
 }
+
+// Load per-ticker index-membership windows so the simulator only trades a
+// name on dates it was actually a constituent (e.g. no TSLA before 2010).
+async function loadActiveWindows(
+  service: any, indexName: string, tickers: string[],
+): Promise<Map<string, { from: string; to: string | null }[]>> {
+  const out = new Map<string, { from: string; to: string | null }[]>();
+  if (!indexName) return out;
+  const BATCH = 200;
+  for (let i = 0; i < tickers.length; i += BATCH) {
+    const chunk = tickers.slice(i, i + BATCH);
+    const { data } = await service
+      .from("historical_constituents")
+      .select("ticker, effective_from, effective_to")
+      .eq("index_name", indexName)
+      .in("ticker", chunk);
+    for (const row of data ?? []) {
+      const arr = out.get(row.ticker) ?? [];
+      arr.push({ from: row.effective_from, to: row.effective_to });
+      out.set(row.ticker, arr);
+    }
+  }
+  return out;
+}
+
 
 async function tickJob(service: any, job: any) {
   const params: SimParams = { ...DEFAULT_PARAMS, ...(job.params || {}), starting_nav: Number(job.starting_nav) };
@@ -70,13 +100,19 @@ async function tickJob(service: any, job: any) {
     const range = pickYahooRange(job.start_date, job.end_date);
     // Which tickers still need fetching? Check cache first.
     const missing: string[] = [];
-    const { data: cached } = await service
-      .from("backtest_bars_cache")
-      .select("ticker")
-      .in("ticker", job.universe)
-      .eq("bars_version", "v1");
-    const have = new Set((cached ?? []).map((r: any) => r.ticker));
+    const have = new Set<string>();
+    const CHK = 100;
+    for (let i = 0; i < job.universe.length; i += CHK) {
+      const chunk = job.universe.slice(i, i + CHK);
+      const { data: cached } = await service
+        .from("backtest_bars_cache")
+        .select("ticker")
+        .in("ticker", chunk)
+        .eq("bars_version", "v1");
+      for (const r of cached ?? []) have.add(r.ticker);
+    }
     for (const t of job.universe) if (!have.has(t)) missing.push(t);
+
 
     if (missing.length === 0) {
       // All bars available → move to simulate stage
@@ -152,7 +188,16 @@ async function tickJob(service: any, job: any) {
     const state: SimState = (job.state && job.state.cash != null) ? job.state : initState(params);
     const cursor = { dayIdx: job.cursor?.dayIdx ?? 0, totalDays: dates.length };
 
-    const out = simulateChunk(state, barsMap, dates, params, cursor, CPU_BUDGET_MS);
+    // Time-accurate universe: pull constituent windows if the job was created
+    // with an index_name (unlimited-mode / index-based runs). Free custom lists
+    // pass no index and skip the filter, remaining always-active.
+    const indexName = job.params?.index_name || null;
+    const activeWindows = indexName
+      ? await loadActiveWindows(service, indexName, job.universe)
+      : undefined;
+
+    const out = simulateChunk(state, barsMap, dates, params, cursor, CPU_BUDGET_MS, activeWindows);
+
 
     const simPct = Math.min(99, 20 + Math.round((out.cursor.dayIdx / dates.length) * 79));
     if (out.done) {

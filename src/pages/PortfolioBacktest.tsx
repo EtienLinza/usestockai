@@ -58,6 +58,7 @@ export default function PortfolioBacktest() {
   const [endDate, setEndDate] = useState<string>(new Date().toISOString().slice(0, 10));
   const [startingNav, setStartingNav] = useState<number>(100_000);
   const [runName, setRunName] = useState<string>("");
+  const [unlimited, setUnlimited] = useState<boolean>(false);
   const [jobId, setJobId] = useState<string | null>(null);
   const [job, setJob] = useState<JobRow | null>(null);
   const [history, setHistory] = useState<JobRow[]>([]);
@@ -125,26 +126,32 @@ export default function PortfolioBacktest() {
   }, [jobId]);
 
   async function startBacktest() {
-    if (parsedUniverse.length === 0) return toast.error("Add at least one ticker");
-    if (invalid.length > 0) return toast.error(`Invalid tickers: ${invalid.slice(0, 5).join(", ")}`);
-    if (parsedUniverse.length > 250) return toast.error("Universe capped at 250 tickers");
+    if (!unlimited) {
+      if (parsedUniverse.length === 0) return toast.error("Add at least one ticker");
+      if (invalid.length > 0) return toast.error(`Invalid tickers: ${invalid.slice(0, 5).join(", ")}`);
+      if (parsedUniverse.length > 250) return toast.error("Universe capped at 250 tickers — enable Unlimited mode for the full index");
+    }
     if (startDate >= endDate) return toast.error("Start must be before end");
     setLoading(true);
     try {
-      const { data, error } = await supabase.functions.invoke("backtest-portfolio-start", {
-        body: {
-          name: runName || `${parsedUniverse.length} tickers · ${startDate} → ${endDate}`,
-          universe: parsedUniverse,
-          start_date: startDate,
-          end_date: endDate,
-          starting_nav: startingNav,
-        },
-      });
+      const payload: Record<string, unknown> = {
+        name: runName || (unlimited
+          ? `S&P 500 (Unlimited) · ${startDate} → ${endDate}`
+          : `${parsedUniverse.length} tickers · ${startDate} → ${endDate}`),
+        start_date: startDate,
+        end_date: endDate,
+        starting_nav: startingNav,
+      };
+      if (unlimited) { payload.unlimited = true; payload.index_name = "SP500"; }
+      else payload.universe = parsedUniverse;
+      const { data, error } = await supabase.functions.invoke("backtest-portfolio-start", { body: payload });
       if (error) throw error;
       if (data?.error) throw new Error(data.error);
       setJobId(data.job_id);
       setJob(null);
-      toast.success("Backtest queued — this may take a while. You can safely close this tab.");
+      toast.success(unlimited
+        ? "Unlimited backtest queued — first run fetches ~500 tickers, then cached forever."
+        : "Backtest queued — this may take a while. You can safely close this tab.");
     } catch (e: any) {
       toast.error(e?.message || "Failed to start backtest");
     } finally {
@@ -206,28 +213,48 @@ export default function PortfolioBacktest() {
 
         {/* Setup card */}
         <Card className="p-6 space-y-5">
-          <div className="space-y-2">
-            <Label>Universe (comma or newline separated tickers)</Label>
-            <Textarea
-              value={universeText}
-              onChange={(e) => setUniverseText(e.target.value)}
-              rows={4}
-              className="font-mono text-xs"
-              placeholder="AAPL, MSFT, NVDA…"
+          <label className="flex items-start gap-3 p-3 rounded-md border bg-primary/5 border-primary/20 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={unlimited}
+              onChange={(e) => setUnlimited(e.target.checked)}
+              className="mt-1"
             />
-            <div className="flex flex-wrap gap-2 items-center text-xs">
-              <span className="text-muted-foreground">Presets:</span>
-              {Object.keys(PRESETS).map(k => (
-                <Button key={k} type="button" size="sm" variant="ghost" onClick={() => setUniverseText(PRESETS[k].join(", "))}>
-                  {k}
-                </Button>
-              ))}
+            <div className="flex-1">
+              <div className="text-sm font-medium">Unlimited mode — full S&amp;P 500, time-accurate</div>
+              <div className="text-xs text-muted-foreground mt-1">
+                Runs the live engine against every S&amp;P 500 constituent that existed inside your date range. No 250-ticker cap.
+                A ticker is only tradeable on days it was actually in the index (e.g. no TSLA in 2005, no META in 2000).
+                First run fetches ~500 tickers of history — bars are cached globally so every subsequent run skips fetch entirely.
+                Expect the first run to take significantly longer.
+              </div>
             </div>
-            <div className="flex items-center gap-3 text-xs">
-              <span className="text-muted-foreground">{parsedUniverse.length} valid ticker{parsedUniverse.length === 1 ? "" : "s"}</span>
-              {invalid.length > 0 && <span className="text-destructive">Invalid: {invalid.slice(0, 5).join(", ")}</span>}
+          </label>
+
+          {!unlimited && (
+            <div className="space-y-2">
+              <Label>Universe (comma or newline separated tickers)</Label>
+              <Textarea
+                value={universeText}
+                onChange={(e) => setUniverseText(e.target.value)}
+                rows={4}
+                className="font-mono text-xs"
+                placeholder="AAPL, MSFT, NVDA…"
+              />
+              <div className="flex flex-wrap gap-2 items-center text-xs">
+                <span className="text-muted-foreground">Presets:</span>
+                {Object.keys(PRESETS).map(k => (
+                  <Button key={k} type="button" size="sm" variant="ghost" onClick={() => setUniverseText(PRESETS[k].join(", "))}>
+                    {k}
+                  </Button>
+                ))}
+              </div>
+              <div className="flex items-center gap-3 text-xs">
+                <span className="text-muted-foreground">{parsedUniverse.length} valid ticker{parsedUniverse.length === 1 ? "" : "s"}</span>
+                {invalid.length > 0 && <span className="text-destructive">Invalid: {invalid.slice(0, 5).join(", ")}</span>}
+              </div>
             </div>
-          </div>
+          )}
 
           <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
             <div className="space-y-2">
