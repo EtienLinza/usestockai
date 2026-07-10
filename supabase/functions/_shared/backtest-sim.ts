@@ -14,7 +14,22 @@
 import {
   evaluateSignal,
   type DataSet,
+  type MacroContext,
 } from "./signal-engine-v2.ts";
+import {
+  computeEffectiveSettings,
+  vixRegimeOf,
+  spyTrendOf,
+  volTargetScalar,
+  adaptiveCorrThreshold,
+  computeRollingDrawdown,
+  ROLLING_DD_HARD_BLOCK_PCT,
+  CDAR_HARD_BLOCK_PCT,
+  CORR_LOOKBACK_BARS,
+  type AdaptiveSettings,
+  type AdaptiveContext,
+  type RiskProfileName,
+} from "./adaptive-context.ts";
 
 export interface SimParams {
   starting_nav: number;
@@ -26,9 +41,16 @@ export interface SimParams {
   stop_atr_mult: number;                  // e.g. 2.5
   trail_atr_mult: number;                 // e.g. 2.0
   time_stop_bars: number;                 // e.g. 20
-  correlation_cutoff: number;             // e.g. 0.75
+  correlation_cutoff: number;             // e.g. 0.75 (fallback when no adaptive)
   atr_ceiling: Record<string, number>;    // per profile fallback -> 0.06
   allow_shorts: boolean;
+  // Adaptive-mode toggle. When true, per-day min_conviction / max_positions /
+  // max_nav_exposure / max_single_name / correlation cutoff are computed from
+  // the live-shared adaptive engine (VIX/SPY/drawdown/CDaR/profile).
+  adaptive_mode: boolean;
+  advanced_mode: boolean;
+  risk_profile: RiskProfileName;
+  daily_loss_limit_pct: number;
 }
 
 export const DEFAULT_PARAMS: SimParams = {
@@ -44,7 +66,26 @@ export const DEFAULT_PARAMS: SimParams = {
   correlation_cutoff: 0.80,
   atr_ceiling: { momentum: 0.06, trend: 0.07, value: 0.05, volatile: 0.10, index: 0.04 },
   allow_shorts: true,
+  adaptive_mode: true,
+  advanced_mode: false,
+  risk_profile: "balanced",
+  daily_loss_limit_pct: 3,
 };
+
+// Optional inputs to make the sim match live behavior exactly.
+export interface AdaptiveInputs {
+  // Full SPY history covering the sim window PLUS 200-bar warmup before.
+  spyBars: DataSet | null;
+  // Full ^VIX history aligned to trading days.
+  vixBars: DataSet | null;
+  // Active nightly calibration row (strategy_weights.regime_floors etc.).
+  regimeFloors: Record<string, number> | null;
+  // Optional per-strategy tilts and calibration curve (reserved for future use).
+  strategyTilts?: Record<string, { multiplier: number }> | null;
+  calibrationCurve?: Record<string, { adjust: number }> | null;
+  tickerCalibration?: Record<string, { adjust: number }> | null;
+}
+
 
 export interface Position {
   ticker: string;
