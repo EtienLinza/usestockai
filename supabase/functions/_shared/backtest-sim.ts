@@ -375,7 +375,39 @@ function computeNav(state: SimState, bars: Map<string, DataSet>, endIdx: Map<str
   return equity;
 }
 
-// One trading day: manage first, then evaluate candidates, then open new positions.
+// Build a MacroContext from SPY bars sliced up to `date` inclusive.
+function macroAt(spy: DataSet | null, date: string): MacroContext | null {
+  if (!spy) return null;
+  const idx = spy.timestamps.findIndex(t => t > date);
+  const end = idx === -1 ? spy.timestamps.length : idx;
+  if (end < 50) return null;
+  return { spyClose: spy.close.slice(0, end) };
+}
+
+// VIX value at `date` (last known bar on or before date).
+function vixAt(vix: DataSet | null, date: string): number | null {
+  if (!vix) return null;
+  let val: number | null = null;
+  for (let i = 0; i < vix.timestamps.length; i++) {
+    if (vix.timestamps[i] <= date) val = vix.close[i];
+    else break;
+  }
+  return val;
+}
+
+// Rolling 7-day realized P&L % vs starting NAV (from navHistory tail).
+function recentPnl7d(state: SimState, startingNav: number): number {
+  const n = state.navHistory.length;
+  if (n < 2) return 0;
+  const cur = state.navHistory[n - 1].nav;
+  const lookback = Math.min(n - 1, 5); // ~5 trading days ≈ 7 cal days
+  const past = state.navHistory[n - 1 - lookback].nav;
+  return past > 0 ? ((cur - past) / startingNav) * 100 : 0;
+}
+
+// One trading day: manage first, then evaluate candidates, then open new
+// positions. Uses per-day adaptive settings and per-day vol-target scalar
+// so behavior matches the live autotrader exactly.
 function stepDay(
   state: SimState,
   bars: Map<string, DataSet>,
@@ -383,89 +415,135 @@ function stepDay(
   date: string,
   tickers: string[],
   params: SimParams,
+  adaptive?: AdaptiveInputs,
 ): void {
-  // Manage existing
+  // 1. Manage existing positions (stops / R-ladder)
   const { open, closed, cashDelta } = managePositions(state.positions, bars, endIdx, date, params);
   state.positions = open;
   state.closedTrades.push(...closed);
   state.cash += cashDelta;
 
-  // Candidate scan
+  // 2. Per-day adaptive tuning (live parity)
+  const macro = adaptive ? macroAt(adaptive.spyBars, date) : null;
+  const vix = adaptive ? vixAt(adaptive.vixBars, date) : null;
+  const vixRegime = vixRegimeOf(vix);
+  const spyTrend = spyTrendOf(macro);
+  const { scalar: volScalar } = volTargetScalar(macro);
+
+  // Rolling drawdown + CDaR over last ~30 NAV points
+  const navSeries = state.navHistory.map(n => n.nav);
+  const { drawdownPct, cdarPct } = computeRollingDrawdown(navSeries, 30);
+  const recentPnlPct = recentPnl7d(state, params.starting_nav);
+
+  const ctx: AdaptiveContext = {
+    vix,
+    vixRegime,
+    spyTrend,
+    recentPnlPct,
+    windowDays: 7,
+    rollingDrawdownPct: drawdownPct,
+    rollingCdarPct: cdarPct,
+    adjustments: [],
+  };
+
+  const baseSettings: AdaptiveSettings = {
+    adaptive_mode: params.adaptive_mode,
+    advanced_mode: params.advanced_mode,
+    risk_profile: params.risk_profile,
+    starting_nav: params.starting_nav,
+    min_conviction: params.min_conviction,
+    max_positions: params.max_positions,
+    max_nav_exposure_pct: params.max_nav_exposure_pct,
+    max_single_name_pct: params.max_single_name_pct,
+    daily_loss_limit_pct: params.daily_loss_limit_pct,
+  };
+  const eff = computeEffectiveSettings(baseSettings, ctx, adaptive?.regimeFloors ?? null);
+
+  // 3. Circuit breakers (live parity): hard-block new entries under rolling
+  // drawdown or CDaR breaches — exits already fired above.
+  const entryBlocked = drawdownPct >= ROLLING_DD_HARD_BLOCK_PCT
+    || cdarPct >= CDAR_HARD_BLOCK_PCT;
+
+  // 4. Candidate scan
   const nav = computeNav(state, bars, endIdx);
   const heatCapDollars = nav * (params.portfolio_heat_pct / 100);
   let heatUsed = openRiskDollars(state.positions);
+  const corrCutoff = adaptive ? adaptiveCorrThreshold(null, vixRegime) : params.correlation_cutoff;
 
-  for (const ticker of tickers) {
-    if (state.positions.length >= params.max_positions) break;
-    if (state.positions.some(p => p.ticker === ticker)) continue;
-    const d = bars.get(ticker);
-    const i = endIdx.get(ticker);
-    if (!d || i == null || i < 200) continue;
+  if (!entryBlocked) {
+    for (const ticker of tickers) {
+      if (state.positions.length >= eff.max_positions) break;
+      if (state.positions.some(p => p.ticker === ticker)) continue;
+      const d = bars.get(ticker);
+      const i = endIdx.get(ticker);
+      if (!d || i == null || i < 200) continue;
 
-    const slice = sliceDataUpTo(d, i);
-    if (!slice) continue;
+      const slice = sliceDataUpTo(d, i);
+      if (!slice) continue;
 
-    let sig: any;
-    try { sig = evaluateSignal(slice, ticker, undefined, null); }
-    catch { continue; }
-    if (!sig || sig.decision === "HOLD") continue;
-    if (!params.allow_shorts && sig.decision === "SHORT") continue;
-    if (sig.conviction < params.min_conviction) continue;
+      let sig: any;
+      try { sig = evaluateSignal(slice, ticker, macro ?? undefined, null); }
+      catch { continue; }
+      if (!sig || sig.decision === "HOLD") continue;
+      if (!params.allow_shorts && sig.decision === "SHORT") continue;
+      if (sig.conviction < eff.min_conviction) continue;
 
-    // ATR ceiling
-    const ceiling = params.atr_ceiling[sig.profile] ?? 0.06;
-    if (sig.atrPct > ceiling) continue;
+      // ATR ceiling
+      const ceiling = params.atr_ceiling[sig.profile] ?? 0.06;
+      if (sig.atrPct > ceiling) continue;
 
-    // Correlation gate
-    const corr = maxAbsCorrToBook(ticker, state.positions, bars, endIdx);
-    if (corr >= params.correlation_cutoff) continue;
+      // Correlation gate (adaptive cutoff)
+      const corr = maxAbsCorrToBook(ticker, state.positions, bars, endIdx);
+      if (corr >= corrCutoff) continue;
 
-    // Sizing (fractional Kelly clipped)
-    const currentPrice = d.close[i];
-    const fracRaw = Math.max(0.02, Math.min(params.max_single_name_pct / 100, (sig.kellyFraction ?? 0.05)));
-    const targetDollars = nav * fracRaw;
-    if (targetDollars < currentPrice) continue;
+      // Sizing — LIVE PARITY: kellyFraction × volScalar, then cap by
+      // effective single-name and remaining NAV headroom.
+      const currentPrice = d.close[i];
+      let curExposure = 0;
+      for (const p of state.positions) curExposure += p.entryPrice * p.shares;
+      const totalNavExposurePct = (curExposure / Math.max(1, nav)) * 100;
+      const headroom = Math.max(0, (eff.max_nav_exposure_pct - totalNavExposurePct) / 100);
+      const baseFrac = (sig.kellyFraction ?? 0.05) * volScalar;
+      const cappedFrac = Math.max(0, Math.min(baseFrac, eff.max_single_name_pct / 100, headroom));
+      if (cappedFrac <= 0) continue;
+      const targetDollars = nav * cappedFrac;
+      if (targetDollars < currentPrice) continue;
 
-    // Hard stop = stop_atr_mult * ATR from entry
-    const dir = sig.decision === "BUY" ? 1 : -1;
-    const stopDist = params.stop_atr_mult * sig.atr;
-    const hardStop = currentPrice - dir * stopDist;
-    const shares = Math.floor(targetDollars / currentPrice);
-    if (shares <= 0) continue;
+      // Hard stop = stop_atr_mult * ATR from entry
+      const dir = sig.decision === "BUY" ? 1 : -1;
+      const stopDist = params.stop_atr_mult * sig.atr;
+      const hardStop = currentPrice - dir * stopDist;
+      const shares = Math.floor(targetDollars / currentPrice);
+      if (shares <= 0) continue;
 
-    // Portfolio heat check
-    const candidateRisk = stopDist * shares;
-    if (heatUsed + candidateRisk > heatCapDollars) continue;
+      // Portfolio heat check
+      const candidateRisk = stopDist * shares;
+      if (heatUsed + candidateRisk > heatCapDollars) continue;
 
-    // NAV exposure check
-    let curExposure = 0;
-    for (const p of state.positions) curExposure += p.entryPrice * p.shares;
-    if ((curExposure + targetDollars) / Math.max(1, nav) * 100 > params.max_nav_exposure_pct) continue;
+      // Cash check for longs
+      const cost = shares * currentPrice;
+      if (sig.decision === "BUY" && cost > state.cash) continue;
 
-    // Cash check for longs
-    const cost = shares * currentPrice;
-    if (sig.decision === "BUY" && cost > state.cash) continue;
-
-    // Open the position
-    state.positions.push({
-      ticker,
-      side: sig.decision === "BUY" ? "long" : "short",
-      shares,
-      entryPrice: currentPrice,
-      entryDate: date,
-      entryConviction: sig.conviction,
-      hardStop,
-      trail: 0,
-      rung: 0,
-      atr: sig.atr,
-      strategy: sig.strategy,
-      profile: sig.profile,
-      peakR: 0,
-      barsHeld: 0,
-    });
-    if (sig.decision === "BUY") state.cash -= cost;
-    else state.cash += cost; // short sale credit
-    heatUsed += candidateRisk;
+      state.positions.push({
+        ticker,
+        side: sig.decision === "BUY" ? "long" : "short",
+        shares,
+        entryPrice: currentPrice,
+        entryDate: date,
+        entryConviction: sig.conviction,
+        hardStop,
+        trail: 0,
+        rung: 0,
+        atr: sig.atr,
+        strategy: sig.strategy,
+        profile: sig.profile,
+        peakR: 0,
+        barsHeld: 0,
+      });
+      if (sig.decision === "BUY") state.cash -= cost;
+      else state.cash += cost;
+      heatUsed += candidateRisk;
+    }
   }
 
   state.navHistory.push({ date, nav: computeNav(state, bars, endIdx) });
@@ -475,6 +553,8 @@ function stepDay(
 // activeWindows: per-ticker inclusive [from, to] date window during which the
 // ticker was a member of the target index. Tickers with no window are treated
 // as always-active (back-compat for small custom universes).
+// adaptive: optional inputs (SPY/VIX/weights) to enable live-parity per-day
+// adaptive tuning. Without them the sim uses fixed params (legacy behavior).
 export function simulateChunk(
   state: SimState,
   bars: Map<string, DataSet>,
@@ -483,6 +563,7 @@ export function simulateChunk(
   cursor: SimCursor,
   cpuBudgetMs: number,
   activeWindows?: Map<string, { from: string; to: string | null }[]>,
+  adaptive?: AdaptiveInputs,
 ): { state: SimState; cursor: SimCursor; done: boolean } {
   const start = Date.now();
   const endIdxMap = new Map<string, Map<string, number>>();
@@ -496,7 +577,7 @@ export function simulateChunk(
   const isActive = (tk: string, date: string): boolean => {
     if (!activeWindows || activeWindows.size === 0) return true;
     const wins = activeWindows.get(tk);
-    if (!wins || wins.length === 0) return true; // no window => treat as always active
+    if (!wins || wins.length === 0) return true;
     for (const w of wins) {
       if (date >= w.from && (w.to == null || date < w.to)) return true;
     }
@@ -514,7 +595,7 @@ export function simulateChunk(
       if (isActive(tk, date)) activeTickers.push(tk);
     }
     if (perTickerIdx.size === 0) continue;
-    stepDay(state, bars, perTickerIdx, date, activeTickers, params);
+    stepDay(state, bars, perTickerIdx, date, activeTickers, params, adaptive);
 
     if (cursor.dayIdx % 5 === 0 && Date.now() - start > cpuBudgetMs) {
       cursor.dayIdx += 1;
@@ -523,6 +604,7 @@ export function simulateChunk(
   }
   return { state, cursor, done: true };
 }
+
 
 
 // Close everything at the last available price → for finalize stage
