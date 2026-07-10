@@ -52,6 +52,20 @@ const PRESETS: Record<string, string[]> = {
   "Small basket (5)": ["AAPL","MSFT","NVDA","TSLA","AMD"],
 };
 
+const STATUS_LABEL: Record<string, string> = {
+  queued: "Queued",
+  fetching_bars: "Fetching bars",
+  simulating: "Simulating",
+  finalizing: "Finalizing",
+  done: "Complete",
+  failed: "Failed",
+  cancelled: "Cancelled",
+};
+const statusVariant = (s: string): "default" | "secondary" | "destructive" | "outline" =>
+  s === "done" ? "default"
+  : s === "failed" || s === "cancelled" ? "destructive"
+  : "secondary";
+
 export default function PortfolioBacktest() {
   const navigate = useNavigate();
   const { user } = useAuth();
