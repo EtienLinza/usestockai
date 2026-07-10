@@ -1224,6 +1224,7 @@ function computeMetrics(
           stratRets.push(sr);
           benchRets.push((spyCurr - spyPrev) / spyPrev);
         }
+      }
     }
 
     if (stratRets.length > 5) {
