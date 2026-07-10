@@ -48,7 +48,7 @@ const App = () => (
           <Toaster />
           <Sonner />
           <BrowserRouter>
-            <PaymentTestModeBanner />
+            {/* Banner removed — was rendering under fixed navbar app-wide. Pricing/tier pages carry the waitlist message themselves. */}
             <RequireOnboarding>
               <Suspense fallback={<PageSkeleton />}>
                 <Routes>
