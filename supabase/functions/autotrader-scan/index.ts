@@ -1001,6 +1001,37 @@ function runLossExit(
   const entry = Number(pos.entry_price);
   const pnlPct = isLong ? (currentPrice - entry) / entry : (entry - currentPrice) / entry;
 
+  // ── T0.5: Overnight-gap trim for un-proven high-ATR longs (Phase 3) ────
+  // High-ATR longs held overnight without proving themselves (peak < +0.5R)
+  // carry outsized gap risk (BEAM 07/2026: entered $36.89 w/ 7% ATR, gapped
+  // through $33.18 stop overnight → -10.5% instead of the -6-7% intended).
+  // Trim 33% into the close only when the position is flat/slightly green —
+  // never chase a losing position out on this rule (that's the hard stop's
+  // job) and only when no R-ladder rung has fired yet.
+  {
+    const entryAtr = pos.entry_atr ? Number(pos.entry_atr) : 0;
+    const atrPctEntry = entry > 0 ? entryAtr / entry : 0;
+    if (
+      isLong &&
+      atrPctEntry > 0.05 &&
+      pnlPct >= -0.01 &&
+      (pos.partial_exits_taken ?? 0) === 0 &&
+      isNearMarketClose()
+    ) {
+      const barsHeldForTrim = businessDaysSince(pos.created_at);
+      const peak = pos.peak_price != null ? Number(pos.peak_price) : entry;
+      const peakR = entryAtr > 0 ? (peak - entry) / entryAtr : 0;
+      if (barsHeldForTrim >= 1 && peakR < 0.5) {
+        return {
+          kind: "PARTIAL_EXIT",
+          reason: `Overnight-gap trim: high-ATR (${(atrPctEntry * 100).toFixed(1)}%) unproven after ${barsHeldForTrim} bar${barsHeldForTrim === 1 ? "" : "s"} (peak +${peakR.toFixed(2)}R) — reduce gap exposure`,
+          pct: 0.33,
+          price: currentPrice,
+        };
+      }
+    }
+  }
+
   // T1: Hard stop — non-negotiable. For legacy positions without an explicit
   // hard_stop_price, synthesize one from entry_atr (H-7) so the safety net
   // still fires.
