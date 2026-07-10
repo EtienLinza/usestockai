@@ -1217,10 +1217,13 @@ function computeMetrics(
         const eqCurr = sortedEqCurve[i].value;
 
         if (spyPrev && spyCurr && spyPrev > 0 && eqPrev > 0) {
-          stratRets.push((eqCurr - eqPrev) / eqPrev);
+          const sr = (eqCurr - eqPrev) / eqPrev;
+          // Skip flat cash days: they don't reflect strategy exposure and drag cov→0,
+          // producing the artificial beta collapse the health-check flagged.
+          if (Math.abs(sr) < 1e-6) continue;
+          stratRets.push(sr);
           benchRets.push((spyCurr - spyPrev) / spyPrev);
         }
-      }
     }
 
     if (stratRets.length > 5) {
