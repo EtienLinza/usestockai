@@ -366,7 +366,13 @@ export default function PortfolioBacktest() {
             </div>
             <div>
               <Progress value={Number(job.progress_pct) || 0} className="h-2" />
-              <div className="mt-2 text-xs text-muted-foreground">{job.current_step_note || "Waiting…"}</div>
+              <div className="mt-2 text-xs text-muted-foreground">
+                {job.status === "queued"
+                  ? (queueAhead > 0
+                      ? `Waiting in queue — ${queueAhead} job${queueAhead === 1 ? "" : "s"} ahead of you.`
+                      : "Queued — starting shortly…")
+                  : (job.current_step_note || "Waiting…")}
+              </div>
             </div>
             {job.error && <div className="p-3 text-xs rounded-md bg-destructive/10 text-destructive border border-destructive/30">{job.error}</div>}
           </Card>
