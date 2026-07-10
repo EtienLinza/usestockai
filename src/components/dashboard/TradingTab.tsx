@@ -528,6 +528,10 @@ export function TradingTab({
                   {scanning ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
                   Scan
                 </Button>
+                <Button variant="outline" size="sm" onClick={() => setExportOpen(true)} disabled={!user} className="gap-1.5 text-xs h-7 px-2">
+                  <Download className="w-3 h-3" />
+                  <span className="hidden sm:inline">Export</span>
+                </Button>
                 {signals.length > 0 && (
                   <Button variant="ghost" size="sm" onClick={onClearSignals} disabled={!user} className="gap-1.5 text-xs h-7 px-2 text-destructive hover:text-destructive">
                     <Trash2 className="w-3 h-3" />
@@ -536,6 +540,23 @@ export function TradingTab({
                 )}
               </div>
             </div>
+
+            {user && (
+              <ExportDialog
+                open={exportOpen}
+                onOpenChange={setExportOpen}
+                title="Export Trading Data"
+                description="Positions, portfolio history, live signals, and triggered sell alerts within a date range."
+                userId={user.id}
+                datasets={[
+                  { key: "virtual_positions", label: "Virtual Positions (open + closed, full trade lifecycle)", table: "virtual_positions", dateColumn: "created_at" },
+                  { key: "virtual_portfolio_log", label: "Portfolio Equity Log (daily equity, P&L, exposure)", table: "virtual_portfolio_log", dateColumn: "date" },
+                  { key: "live_signals", label: "Live Signals feed (all signals in window)", table: "live_signals", dateColumn: "created_at" },
+                  { key: "sell_alerts", label: "Sell Alerts (triggered exit warnings)", table: "sell_alerts", dateColumn: "created_at" },
+                ]}
+              />
+            )}
+
 
             {filteredSignals.length === 0 ? (
               <div className="p-8 text-center">
