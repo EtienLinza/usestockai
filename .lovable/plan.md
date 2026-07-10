@@ -1,76 +1,99 @@
-## What actually happened on BEAM
+# Portfolio-Mode Backtest — Brainstorm
 
-From `autotrade_log` + `virtual_positions`:
+Goal: let users backtest the same way we trade live — scan a universe every "day", run the full autotrader gate stack (conviction, reversal-risk, ATR envelope, sector/beta caps, portfolio heat, CVaR, correlation), open/manage/exit positions with the R-ladder — over multi-year windows. Long runtimes are OK; **completion** is the requirement.
 
-- Entry 2026-07-08 @ **$36.89**, 75 sh, conviction 72, `trend` strategy / `momentum` profile
-- **entry_atr = $2.595 → ATR% = 7.03%** of price (extremely high for a `momentum` bucket)
-- `hard_stop_price = $33.18` → **10.07% risk** (≈1.43×ATR, clamped by structural swing/EMA anchor from a much wider 3.0×ATR = 21%)
-- Peak only $37.50 (+1.65%) → trailing stop never left the hard stop
-- 2026-07-10 exit @ **$33.00** — price gapped *through* $33.18 → realized **-10.54% / -$291.75**
+The current single-ticker `backtest` function already dies on 5y × 2 tickers. A portfolio sim over 500 tickers × 5y in one edge call is not physically possible under the 400 s / worker-memory limits. So the whole design has to be about **splitting the work** so no single invocation exceeds the limit, and **caching** so we don't recompute the expensive parts.
 
-Three gaps in the current logic allowed this:
+## The real cost drivers (what actually blows up)
 
-1. **No ATR%-of-price ceiling at entry.** A 7% ATR name entered the `momentum` bucket where `hardStopATRMult = 3.0`. Sizing was risk-parity-capped in dollars, but the *stop distance* was allowed to be huge in percent.
-2. **No absolute cap on stop-distance-as-% of price.** `stopDist = min(atr*mult, structural)` — but both can be 8–15% on high-vol names. When price gaps through, the realized loss ≈ stopDist + slippage.
-3. **No overnight-gap protection for high-ATR longs that haven't proven themselves.** BEAM held overnight with unrealized ≈ 0, then gapped. Nothing in the pipeline trims or tightens for that state.
+1. **Bar fetches** — Yahoo history for N tickers × Y years. Network-bound, not CPU. Solve once, reuse forever.
+2. **Per-bar signal evaluation** — `evaluateSignal` over the whole universe per day. This is the CPU killer: ~500 tickers × 1260 days × ~2 ms = ~20 min pure compute.
+3. **Portfolio gates per candidate day** — CVaR base rebuild, correlation matrix, sector/heat math. Cheap per-call, but multiplied by open-book churn.
+4. **Trade-management ticks** — R-ladder / trailing stop / gap-trim per open position per bar. Small but non-trivial across long windows.
 
-Portfolio-heat cap (6% NAV) and risk-parity sizing did their jobs (only $291 of a $2,767 position) — but the *entry itself* shouldn't have been sized full given the volatility profile.
+Wall-clock isn't the enemy — **per-invocation CPU** and **memory ceiling** are.
 
-## Fix — three layered guards in `supabase/functions/autotrader-scan/index.ts`
+## Four architecture options
 
-All changes are inside the entry pipeline / exit pipeline of the autotrader; no schema, no UI.
+### Option A — Job queue with a coordinator + day-shard workers (recommended)
 
-### 1. ATR% entry ceiling (profile-scoped)
-
-Before computing shares, reject entries where `atrPct` exceeds a profile ceiling:
+Split the backtest into three tiers, mirroring the live scan pipeline:
 
 ```text
-momentum : atrPct ≤ 5.0%    (BEAM at 7.03% → REJECT)
-trend    : atrPct ≤ 6.0%
-value    : atrPct ≤ 4.0%
-volatile : atrPct ≤ 9.0%
-index    : atrPct ≤ 3.0%
+[client] → backtest-portfolio-start (create job row, seed universe, return job_id)
+              │
+              ├── prefetch-bars-batch (chunked; writes ticker_bars_cache_backtest)
+              ├── precompute-signals (day-shard: N days per invocation, writes signal_shard rows)
+              └── simulate-portfolio (walks days in order, reads pre-computed signals,
+                                     runs gates + trade mgmt, persists state after each chunk)
+
+[client] polls backtest-status(job_id) → progress %, partial metrics, final report
 ```
 
-Override: allow entry if `conviction ≥ 85` **and** `atrPct ≤ ceiling × 1.4` (rare high-conviction volatile setups still pass, with reduced sizing from guard #2).
+Each stage checkpoints to a `backtest_jobs` / `backtest_state` table. Any invocation that runs out of CPU just returns "chunk done", the coordinator (pg_cron or a lightweight self-invoking edge function) picks up the next chunk. No single call exceeds its budget; the *job* takes as long as it needs.
 
-Logged as `BLOCKED` with reason `ATR% X.X% exceeds <profile> ceiling Y.Y%`.
+Key properties:
+- **Resumable.** Kill an invocation mid-shard → next tick continues from checkpoint.
+- **Cacheable.** Bars + pre-computed signals for date D and ticker T are deterministic given the engine version. Hash the engine version; reuse across users.
+- **Observable.** User sees a real progress bar, ETA, "currently simulating 2023-04-11", cancel button.
+- **Cost-scoped.** Elite tier gets unlimited window; free/pro capped by shard budget.
 
-### 2. Absolute hard-stop distance cap (profile-scoped)
+### Option B — Client-driven chunked simulation (no long server calls)
 
-After the existing structural/ATR stop calc, clamp:
+The browser is the coordinator. It calls a stateless `backtest-chunk` edge function with `{state, dateRangeStart, dateRangeEnd}` where the chunk is small enough (say 20 trading days) to always fit in the CPU budget. The function returns the updated portfolio state; the client loops until done and renders the final report.
 
-```text
-maxStopPct = { momentum: 0.06, trend: 0.07, value: 0.05, volatile: 0.10, index: 0.04 }
-stopDist   = min(stopDist, currentPrice * maxStopPct)
-```
+Pros: dead simple, no new tables, works today. Zero server orchestration.
+Cons: user must keep the tab open; state blobs get big; harder to share/persist a completed run.
 
-Then require `stopDist ≥ 0.6 × ATR` (existing `minDist` stays as lower bound). If the ceiling forces `stopDist < minDist`, reject the entry (`Stop-cap collision: ATR too wide for profile`). This is the direct BEAM prevention — its 10.07% stop would have been capped to 6% (or the entry rejected as stop-cap collision).
+### Option C — Vectorized offline pre-compute + fast sim
 
-Because risk-parity sizing divides by `stopDist`, a tighter cap automatically shrinks shares — worst-case gap loss stays bounded.
+One-time (per engine version) job: pre-compute every signal for every ticker for every day into `historical_signals_cache(ticker, date, conviction, decision, atr_pct, ...)`. Then the actual "backtest" is just a small function that reads pre-computed signals for the date range and simulates portfolio gates + trade management — cheap enough to fit in one invocation for reasonable universes.
 
-### 3. Overnight-gap trim for un-proven high-ATR longs
+Pros: near-instant repeat backtests (great UX for parameter sweeps).
+Cons: big upfront batch (needs the queue from Option A to build it); cache invalidates on any engine change.
 
-New exit rule evaluated in `processUser` before the existing T1 hard-stop check, only during the last ~15 min of RTH:
+### Option D — External compute
 
-```text
-IF position.entry_atr / entry_price > 0.05
-AND bars_held ≥ 1                            (has held ≥ one session already)
-AND peak_price / entry_price < 1 + 0.5*R_pct (never reached +0.5R)
-AND unrealized_pnl_pct ≥ -0.01               (not already in trouble)
-THEN partial-exit 33% of remaining shares, reason "Overnight-gap trim: high-ATR sliver, unproven"
-```
+Run the sim in a Cloud Run / Fly.io / self-hosted container triggered by an edge function. No CPU limit at all. But: new infra, new secrets, new billing surface, and we lose the "everything in Lovable Cloud" property.
 
-Uses the existing partial-exit plumbing (same code path as R1/R2 rungs) so accounting, logs, and cooldowns stay consistent.
+## Recommendation
 
-## Verification
+**Ship Option A, and use its infrastructure to enable Option C later.**
 
-- `bunx tsgo --noEmit` after edits
-- Manual dry-run: simulate the BEAM setup (`atrPct = 0.0703`, profile=momentum) and confirm guard #1 rejects it; simulate a `volatile` profile with same numbers and confirm guard #2 caps stopDist to 10%
-- Query `autotrade_log` after next scan window: expect zero `Hard stop hit` exits > 7% for `momentum`/`trend`
+Option A gives us:
+- Real portfolio backtests today (long-running but reliable).
+- The `historical_signals_cache` table falls out naturally from the "precompute-signals" stage — that's Option C for free the next day.
+- Clean progress/cancel UX for the disclaimer flow you mentioned.
 
-## Not doing (out of scope)
+## Rough shape (technical section)
 
-- No biotech/sector-specific catalyst filter (would need a sector-classification table); the ATR%-ceiling captures most of that risk indirectly
-- No changes to `signal-engine-v2.ts` PROFILE_PARAMS constants — the caps are enforced at the autotrader entry layer so backtest/scan math stays untouched
-- No UI changes
+Data model:
+- `backtest_jobs(id, user_id, params_json, universe[], status, progress_pct, current_date, cpu_ms_spent, created_at, finished_at, error)`
+- `backtest_state(job_id, positions_json, cash, nav_history_json, open_risk, cvar_base_json, checkpoint_date)`
+- `historical_signals_cache(ticker, engine_version, date, conviction, decision, atr_pct, strategy, profile, regime, extras_json)` — global (unique on ticker+engine_version+date), so cache hits across users.
+- Reuse existing `ticker_bars_cache` for bars.
+
+Functions:
+- `backtest-portfolio-start` — validate params, create job, enqueue first chunk.
+- `backtest-portfolio-tick` — the workhorse; picks the next unfinished stage/chunk for one job and runs until ~200 s of CPU, then checkpoints and returns. Re-invoked by pg_cron every N seconds while jobs are `running`.
+- `backtest-portfolio-status` — read-only, returns progress + partial equity curve for the UI.
+- `backtest-portfolio-cancel` — flip status.
+
+Simulation loop reuses the existing engine directly:
+- Bar loop uses `evaluateSignal` from `_shared/signal-engine-v2.ts` (same code path as live).
+- Gate stack imports the exact helpers from `autotrader-scan` (extract `computeEntryGuardEnvelope`, `assessReversalRisk`, sector/beta/heat/CVaR/correlation checks into `_shared/portfolio-gates.ts` — a refactor step so live and backtest share one implementation).
+- Trade management: same R-ladder + gap-trim + trailing stop code, again lifted to `_shared/trade-manager.ts`.
+
+That refactor is the meat of the work — the backtest becomes "loop through days, call the same functions live uses" instead of a parallel implementation that drifts.
+
+UI:
+- New "Portfolio Backtest" tab on `Backtest.tsx` with universe picker (S&P 500 / Nasdaq 100 / custom watchlist), date range, disclaimer "This may take X-Y minutes", start button.
+- Progress card polls status every 3 s, shows current date + partial equity curve.
+- Report reuses existing Recharts components once done.
+
+## Open questions
+
+1. **Universe scope** — should the default be S&P 500, Nasdaq 100, current watchlist, or user-defined?
+2. **Cache reuse** — happy for pre-computed signals to be shared across all users (same engine version), or keep per-user?
+3. **Cancel/replay** — do you want completed backtests archived (viewable later) or ephemeral?
+4. **Trigger cadence** — pg_cron every 10 s for the tick function, or self-invoke chain (function re-invokes itself when a chunk finishes)?
