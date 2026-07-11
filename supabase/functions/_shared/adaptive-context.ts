@@ -6,7 +6,8 @@
 // VIX, vol-target, drawdown, or profile logic MUST live in this file — never
 // duplicate in a call site. Divergence between live and backtest is a bug.
 // ============================================================================
-import { calculateSMA, type MacroContext } from "./signal-engine-v2.ts";
+import { type MacroContext } from "./signal-engine-v2.ts";
+import { calculateSMA } from "./indicators.ts";
 
 // ── Rolling drawdown circuit breaker ────────────────────────────────────────
 export const ROLLING_DD_HARD_BLOCK_PCT = 10;
