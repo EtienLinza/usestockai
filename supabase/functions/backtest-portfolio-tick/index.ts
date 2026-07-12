@@ -64,13 +64,17 @@ function isFreshThroughEnd(lastDate: string | null, endDate: string): boolean {
   return lastDate >= dateMinusDays(endDate, Math.ceil(NON_TRADING_DAY_TOLERANCE_MS / (24 * 3600 * 1000)));
 }
 
+function isFreshlyWidened(fetchedAt: string | null, jobCreatedAt: string): boolean {
+  return !!fetchedAt && fetchedAt >= jobCreatedAt;
+}
+
 function hasEnoughWarmup(firstDate: string | null, warmupStart: string, fetchedAt: string | null, jobCreatedAt: string): boolean {
   if (!firstDate) return false;
   if (firstDate <= warmupStart) return true;
   // If this job (or a newer long-range job) already re-fetched the ticker with
   // Yahoo's widest available range, a later first_date is the listing date / data
   // availability limit, not a cache miss. Accept it to avoid refetch loops.
-  return !!fetchedAt && fetchedAt >= jobCreatedAt;
+  return isFreshlyWidened(fetchedAt, jobCreatedAt);
 }
 
 async function loadBars(service: any, tickers: string[]): Promise<Map<string, DataSet>> {
@@ -151,8 +155,9 @@ async function tickJob(service: any, job: any) {
         .in("ticker", chunk)
         .eq("bars_version", "v1");
       for (const r of cached ?? []) {
+        const widenedThisJob = isFreshlyWidened(r.fetched_at, job.created_at);
         const covers = hasEnoughWarmup(r.first_date, warmupStart, r.fetched_at, job.created_at)
-                    && isFreshThroughEnd(r.last_date, job.end_date);
+                    && (isFreshThroughEnd(r.last_date, job.end_date) || widenedThisJob);
         if (covers) have.add(r.ticker);
       }
     }
