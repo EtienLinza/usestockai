@@ -410,11 +410,12 @@ serve(async (req) => {
     // up by cron/client nudges so large portfolio runs don't create costly
     // overlapping worker bursts.
     if (result.advance && job.stage === "fetch_bars") {
-      fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/backtest-portfolio-tick`, {
+      const continuation = fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/backtest-portfolio-tick`, {
         method: "POST",
         headers: { "Content-Type": "application/json", apikey: Deno.env.get("SUPABASE_ANON_KEY")! },
         body: JSON.stringify({ job_id: job.id }),
       }).catch(() => {});
+      (globalThis as any).EdgeRuntime?.waitUntil?.(continuation);
     }
 
     return new Response(JSON.stringify({ ok: true, elapsed_ms: elapsed }), {
