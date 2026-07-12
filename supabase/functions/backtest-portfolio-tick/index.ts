@@ -19,6 +19,7 @@ const corsHeaders = {
 const CPU_BUDGET_MS = 55_000;    // per invocation
 const FETCH_BATCH = 15;          // tickers fetched per tick during fetch_bars stage
 const YAHOO_RANGE_YEARS = 10;    // capped range fed to yahoo (10y is max stable)
+const NON_TRADING_DAY_TOLERANCE_MS = 4 * 24 * 3600 * 1000;
 
 function pickYahooRange(startDate: string, endDate: string): string {
   const start = new Date(startDate).getTime();
@@ -47,6 +48,29 @@ function sliceBarsByDate(d: DataSet, startDate: string, endDate: string): DataSe
     }
   }
   return out;
+}
+
+function dateMinusDays(date: string, days: number): string {
+  const d = new Date(`${date}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - days);
+  return d.toISOString().slice(0, 10);
+}
+
+function isFreshThroughEnd(lastDate: string | null, endDate: string): boolean {
+  if (!lastDate) return false;
+  // Backtests often end on weekends/holidays or today's date before the next
+  // market close exists. Accept the latest trading bar when it is close enough
+  // to the requested end date; the simulator still slices by actual bar dates.
+  return lastDate >= dateMinusDays(endDate, Math.ceil(NON_TRADING_DAY_TOLERANCE_MS / (24 * 3600 * 1000)));
+}
+
+function hasEnoughWarmup(firstDate: string | null, warmupStart: string, fetchedAt: string | null, jobCreatedAt: string): boolean {
+  if (!firstDate) return false;
+  if (firstDate <= warmupStart) return true;
+  // If this job (or a newer long-range job) already re-fetched the ticker with
+  // Yahoo's widest available range, a later first_date is the listing date / data
+  // availability limit, not a cache miss. Accept it to avoid refetch loops.
+  return !!fetchedAt && fetchedAt >= jobCreatedAt;
 }
 
 async function loadBars(service: any, tickers: string[]): Promise<Map<string, DataSet>> {
@@ -101,6 +125,7 @@ async function tickJob(service: any, job: any) {
   // ── Stage: fetch_bars ──────────────────────────────────────────────────
   if (job.stage === "fetch_bars") {
     const cursor = job.cursor || { tickerIdx: 0 };
+    const unavailable = new Set<string>(Array.isArray(cursor.unavailable) ? cursor.unavailable : []);
     const total = universeWithBench.length;
     const range = pickYahooRange(job.start_date, job.end_date);
     // Which tickers still need fetching? Cache is global & shared across jobs,
@@ -122,16 +147,16 @@ async function tickJob(service: any, job: any) {
       const chunk = universeWithBench.slice(i, i + CHK);
       const { data: cached } = await service
         .from("backtest_bars_cache")
-        .select("ticker,first_date,last_date")
+        .select("ticker,first_date,last_date,fetched_at")
         .in("ticker", chunk)
         .eq("bars_version", "v1");
       for (const r of cached ?? []) {
-        const covers = (r.first_date ?? "9999") <= warmupStart
-                    && (r.last_date  ?? "0000") >= job.end_date;
+        const covers = hasEnoughWarmup(r.first_date, warmupStart, r.fetched_at, job.created_at)
+                    && isFreshThroughEnd(r.last_date, job.end_date);
         if (covers) have.add(r.ticker);
       }
     }
-    for (const t of universeWithBench) if (!have.has(t)) missing.push(t);
+    for (const t of universeWithBench) if (!have.has(t) && !unavailable.has(t)) missing.push(t);
 
 
 
@@ -155,7 +180,10 @@ async function tickJob(service: any, job: any) {
     const rows: any[] = [];
     for (let i = 0; i < batch.length; i++) {
       const d = results[i];
-      if (!d || d.close.length < 50) continue;
+      if (!d || d.close.length < 50) {
+        unavailable.add(batch[i]);
+        continue;
+      }
       rows.push({
         ticker: batch[i],
         bars_version: "v1",
@@ -168,13 +196,16 @@ async function tickJob(service: any, job: any) {
     if (rows.length > 0) {
       await service.from("backtest_bars_cache").upsert(rows, { onConflict: "ticker,bars_version" });
     }
-    const fetchedNow = have.size + rows.length;
+    const nextCursor = { ...cursor, unavailable: Array.from(unavailable).sort() };
+    const fetchedNow = have.size + rows.length + unavailable.size;
     const pct = Math.min(19, Math.round(fetchedNow / total * 20));
     await service.from("backtest_portfolio_jobs").update({
       status: "fetching_bars",
-      cursor,
+      cursor: nextCursor,
       progress_pct: pct,
-      current_step_note: `Fetched ${fetchedNow}/${total} tickers…`,
+      current_step_note: unavailable.size > 0
+        ? `Fetched ${Math.min(fetchedNow, total)}/${total} tickers (${unavailable.size} unavailable)…`
+        : `Fetched ${Math.min(fetchedNow, total)}/${total} tickers…`,
       last_tick_at: new Date().toISOString(),
     }).eq("id", job.id);
     return { advance: true };
