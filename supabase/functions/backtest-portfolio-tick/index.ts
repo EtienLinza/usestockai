@@ -17,7 +17,7 @@ const corsHeaders = {
 };
 
 const CPU_BUDGET_MS = 20_000;    // per invocation; smaller chunks avoid edge worker resource spikes
-const FETCH_BATCH = 15;          // tickers fetched per tick during fetch_bars stage
+const FETCH_BATCH = 5;           // tickers fetched per tick; keeps each request under gateway limits
 const SIM_DAYS_PER_TICK = 10;    // bound bars loaded per simulation invocation
 const NON_TRADING_DAY_TOLERANCE_MS = 4 * 24 * 3600 * 1000;
 
