@@ -406,17 +406,8 @@ serve(async (req) => {
       cpu_ms_spent: Number(job.cpu_ms_spent || 0) + elapsed,
     }).eq("id", job.id);
 
-    // Self-invoke only during the lightweight fetch phase. Simulation is picked
-    // up by cron/client nudges so large portfolio runs don't create costly
-    // overlapping worker bursts.
-    if (result.advance && job.stage === "fetch_bars") {
-      const continuation = fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/backtest-portfolio-tick`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", apikey: Deno.env.get("SUPABASE_ANON_KEY")! },
-        body: JSON.stringify({ job_id: job.id }),
-      }).catch(() => {});
-      (globalThis as any).EdgeRuntime?.waitUntil?.(continuation);
-    }
+    // Do not recursively self-invoke. Cron/client nudges advance the job in
+    // bounded chunks, avoiding overlapping workers and runaway server cost.
 
     return new Response(JSON.stringify({ ok: true, elapsed_ms: elapsed }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
