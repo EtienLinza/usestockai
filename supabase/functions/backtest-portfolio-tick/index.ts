@@ -8,7 +8,7 @@ import { fetchDailyHistory } from "../_shared/yahoo-history.ts";
 import type { DataSet } from "../_shared/signal-engine-v2.ts";
 import {
   simulateChunk, forceCloseAll, computeReport, initState,
-  DEFAULT_PARAMS, type SimParams, type SimState, type AdaptiveInputs,
+  DEFAULT_PARAMS, type SimParams, type SimState, type AdaptiveInputs, type Position,
 } from "../_shared/backtest-sim.ts";
 
 const corsHeaders = {
