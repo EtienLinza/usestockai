@@ -18,6 +18,7 @@ const corsHeaders = {
 
 const CPU_BUDGET_MS = 20_000;    // per invocation; smaller chunks avoid edge worker resource spikes
 const FETCH_BATCH = 15;          // tickers fetched per tick during fetch_bars stage
+const SIM_DAYS_PER_TICK = 10;    // bound bars loaded per simulation invocation
 const YAHOO_RANGE_YEARS = 10;    // capped range fed to yahoo (10y is max stable)
 const NON_TRADING_DAY_TOLERANCE_MS = 4 * 24 * 3600 * 1000;
 
@@ -115,6 +116,41 @@ async function loadActiveWindows(
     }
   }
   return out;
+}
+
+function isActiveInWindow(wins: { from: string; to: string | null }[] | undefined, date: string): boolean {
+  if (!wins || wins.length === 0) return true;
+  for (const w of wins) {
+    if (date >= w.from && (w.to == null || date < w.to)) return true;
+  }
+  return false;
+}
+
+function pickSimulationTickers(
+  universe: string[],
+  dates: string[],
+  activeWindows: Map<string, { from: string; to: string | null }[]> | undefined,
+  state: SimState,
+): string[] {
+  const selected = new Set<string>();
+  for (const p of state.positions) selected.add(p.ticker);
+
+  if (!activeWindows || activeWindows.size === 0) {
+    for (const t of universe) selected.add(t);
+    return Array.from(selected);
+  }
+
+  for (const t of universe) {
+    const wins = activeWindows.get(t);
+    if (!wins || wins.length === 0) continue;
+    for (const d of dates) {
+      if (isActiveInWindow(wins, d)) {
+        selected.add(t);
+        break;
+      }
+    }
+  }
+  return Array.from(selected);
 }
 
 
@@ -218,46 +254,38 @@ async function tickJob(service: any, job: any) {
 
   // ── Stage: simulate ────────────────────────────────────────────────────
   if (job.stage === "simulate") {
-    // Load ticker bars + benchmark bars (SPY / ^VIX) in one shot.
-    const barsMap = await loadBars(service, universeWithBench);
-    if (barsMap.size === 0) {
-      await service.from("backtest_portfolio_jobs").update({
-        status: "failed", error: "No bars available in cache.", finished_at: new Date().toISOString(),
-      }).eq("id", job.id);
-      return { advance: false };
-    }
-    // Pull out benchmarks before slicing (they need full history, incl. warmup).
-    const spyBars = barsMap.get("SPY") ?? null;
-    const vixBars = barsMap.get("^VIX") ?? null;
-    barsMap.delete("SPY");
-    barsMap.delete("^VIX");
-
-    // Slice each series to the requested end date (keep pre-start bars for warmup).
-    for (const [k, v] of barsMap) barsMap.set(k, sliceBarsByDate(v, job.start_date, job.end_date));
-
-    // Build the union of trading dates that fall within [start_date, end_date].
-    const dateSet = new Set<string>();
-    for (const d of barsMap.values()) {
-      for (const ts of d.timestamps) {
-        if (ts >= job.start_date && ts <= job.end_date) dateSet.add(ts);
-      }
-    }
-    const dates = Array.from(dateSet).sort();
-    if (dates.length === 0) {
-      await service.from("backtest_portfolio_jobs").update({
-        status: "failed", error: "No trading days in range.", finished_at: new Date().toISOString(),
-      }).eq("id", job.id);
-      return { advance: false };
-    }
-
     const state: SimState = (job.state && job.state.cash != null) ? job.state : initState(params);
-    const cursor = { dayIdx: job.cursor?.dayIdx ?? 0, totalDays: dates.length };
-
-    // Time-accurate universe: pull constituent windows for index-based runs.
     const indexName = job.params?.index_name || null;
     const activeWindows = indexName
       ? await loadActiveWindows(service, indexName, job.universe)
       : undefined;
+
+    // Load benchmarks first and use SPY as the trading calendar. This avoids
+    // parsing every ticker's full JSON history just to build the date union.
+    const benchmarkBars = await loadBars(service, BENCHMARKS);
+    const spyBars = benchmarkBars.get("SPY") ?? null;
+    const vixBars = benchmarkBars.get("^VIX") ?? null;
+    const dates = (spyBars?.timestamps ?? []).filter((ts) => ts >= job.start_date && ts <= job.end_date);
+    if (dates.length === 0) {
+      await service.from("backtest_portfolio_jobs").update({
+        status: "failed", error: "No benchmark trading calendar available in cache.", finished_at: new Date().toISOString(),
+      }).eq("id", job.id);
+      return { advance: false };
+    }
+
+    const cursor = { dayIdx: job.cursor?.dayIdx ?? 0, totalDays: dates.length };
+    const simDates = dates.slice(cursor.dayIdx, Math.min(dates.length, cursor.dayIdx + SIM_DAYS_PER_TICK));
+    const simTickers = pickSimulationTickers(job.universe, simDates, activeWindows, state);
+    const barsMap = await loadBars(service, simTickers);
+    if (barsMap.size === 0 && state.positions.length > 0) {
+      await service.from("backtest_portfolio_jobs").update({
+        status: "failed", error: "No bars available for active simulation tickers.", finished_at: new Date().toISOString(),
+      }).eq("id", job.id);
+      return { advance: false };
+    }
+
+    // Slice each loaded series to the requested end date (keep pre-start bars for warmup).
+    for (const [k, v] of barsMap) barsMap.set(k, sliceBarsByDate(v, job.start_date, job.end_date));
 
     // Load active nightly calibration weights (same source live uses).
     const { data: weightsRow } = await service
@@ -277,25 +305,27 @@ async function tickJob(service: any, job: any) {
       tickerCalibration: (weightsRow?.ticker_calibration as any) ?? null,
     };
 
-    const out = simulateChunk(state, barsMap, dates, params, cursor, CPU_BUDGET_MS, activeWindows, adaptive);
+    const localCursor = { dayIdx: 0, totalDays: simDates.length };
+    const out = simulateChunk(state, barsMap, simDates, params, localCursor, CPU_BUDGET_MS, activeWindows, adaptive);
+    const nextDayIdx = Math.min(dates.length, cursor.dayIdx + out.cursor.dayIdx);
 
 
 
-    const simPct = Math.min(99, 20 + Math.round((out.cursor.dayIdx / dates.length) * 79));
-    if (out.done) {
+    const simPct = Math.min(99, 20 + Math.round((nextDayIdx / dates.length) * 79));
+    if (nextDayIdx >= dates.length) {
       await service.from("backtest_portfolio_jobs").update({
         stage: "finalize", status: "finalizing",
-        state: out.state, cursor: out.cursor,
+        state: out.state, cursor: { dayIdx: nextDayIdx, totalDays: dates.length },
         progress_pct: 99, current_step_note: "Closing open positions and computing metrics…",
         last_tick_at: new Date().toISOString(),
       }).eq("id", job.id);
     } else {
-      const currentDate = dates[Math.min(out.cursor.dayIdx, dates.length - 1)];
+      const currentDate = dates[Math.min(nextDayIdx, dates.length - 1)];
       await service.from("backtest_portfolio_jobs").update({
         status: "simulating",
-        state: out.state, cursor: out.cursor,
+        state: out.state, cursor: { dayIdx: nextDayIdx, totalDays: dates.length },
         progress_pct: simPct,
-        current_step_note: `Simulating… ${currentDate} (${out.cursor.dayIdx}/${dates.length} days)`,
+        current_step_note: `Simulating… ${currentDate} (${nextDayIdx}/${dates.length} days)`,
         last_tick_at: new Date().toISOString(),
       }).eq("id", job.id);
     }
@@ -304,9 +334,10 @@ async function tickJob(service: any, job: any) {
 
   // ── Stage: finalize ────────────────────────────────────────────────────
   if (job.stage === "finalize") {
-    const barsMap = await loadBars(service, job.universe);
-    for (const [k, v] of barsMap) barsMap.set(k, sliceBarsByDate(v, job.start_date, job.end_date));
     const state: SimState = job.state;
+    const openTickers = Array.from(new Set((state.positions ?? []).map((p: Position) => p.ticker)));
+    const barsMap = await loadBars(service, openTickers);
+    for (const [k, v] of barsMap) barsMap.set(k, sliceBarsByDate(v, job.start_date, job.end_date));
     forceCloseAll(state, barsMap);
     const report = computeReport(state, Number(job.starting_nav));
     await service.from("backtest_portfolio_jobs").update({
