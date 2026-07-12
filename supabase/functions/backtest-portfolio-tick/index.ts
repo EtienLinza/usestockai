@@ -4,7 +4,7 @@
 // in > 90s and gives it a nudge.
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
-import { fetchDailyHistory } from "../_shared/yahoo-history.ts";
+import { fetchDailyHistory, fetchDailyHistoryWindow } from "../_shared/yahoo-history.ts";
 import type { DataSet } from "../_shared/signal-engine-v2.ts";
 import {
   simulateChunk, forceCloseAll, computeReport, initState,
@@ -19,20 +19,7 @@ const corsHeaders = {
 const CPU_BUDGET_MS = 20_000;    // per invocation; smaller chunks avoid edge worker resource spikes
 const FETCH_BATCH = 15;          // tickers fetched per tick during fetch_bars stage
 const SIM_DAYS_PER_TICK = 10;    // bound bars loaded per simulation invocation
-const YAHOO_RANGE_YEARS = 10;    // capped range fed to yahoo (10y is max stable)
 const NON_TRADING_DAY_TOLERANCE_MS = 4 * 24 * 3600 * 1000;
-
-function pickYahooRange(startDate: string, endDate: string): string {
-  const start = new Date(startDate).getTime();
-  const now = Date.now();
-  const yrs = (now - start) / (365.25 * 24 * 3600 * 1000);
-  if (yrs > 10) return "max";
-  if (yrs > 5) return "10y";
-  if (yrs > 2) return "5y";
-  if (yrs > 1) return "2y";
-  return "1y";
-  void endDate;
-}
 
 function sliceBarsByDate(d: DataSet, startDate: string, endDate: string): DataSet {
   // We need a 200-bar warmup BEFORE startDate for indicators. So keep all
@@ -167,7 +154,6 @@ async function tickJob(service: any, job: any) {
     const cursor = job.cursor || { tickerIdx: 0 };
     const unavailable = new Set<string>(Array.isArray(cursor.unavailable) ? cursor.unavailable : []);
     const total = universeWithBench.length;
-    const range = pickYahooRange(job.start_date, job.end_date);
     // Which tickers still need fetching? Cache is global & shared across jobs,
     // so a ticker is only reusable when its cached range actually covers this
     // job's required window (start_date minus ~1yr warmup → end_date). A
@@ -217,7 +203,11 @@ async function tickJob(service: any, job: any) {
 
     // Fetch next batch
     const batch = missing.slice(0, FETCH_BATCH);
-    const results = await Promise.all(batch.map(t => fetchDailyHistory(t, range).catch(() => null)));
+    const results = await Promise.all(batch.map(t =>
+      fetchDailyHistoryWindow(t, warmupStart, job.end_date, 10_000)
+        .then((d) => (d && d.close.length > 0 ? d : fetchDailyHistory(t, "max", 10_000)))
+        .catch(() => null)
+    ));
     const rows: any[] = [];
     for (let i = 0; i < batch.length; i++) {
       const d = results[i];
