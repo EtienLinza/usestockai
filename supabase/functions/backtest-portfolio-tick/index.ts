@@ -4,11 +4,11 @@
 // in > 90s and gives it a nudge.
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
-import { fetchDailyHistory } from "../_shared/yahoo-history.ts";
+import { fetchDailyHistory, fetchDailyHistoryWindow } from "../_shared/yahoo-history.ts";
 import type { DataSet } from "../_shared/signal-engine-v2.ts";
 import {
   simulateChunk, forceCloseAll, computeReport, initState,
-  DEFAULT_PARAMS, type SimParams, type SimState, type AdaptiveInputs,
+  DEFAULT_PARAMS, type SimParams, type SimState, type AdaptiveInputs, type Position,
 } from "../_shared/backtest-sim.ts";
 
 const corsHeaders = {
@@ -16,21 +16,10 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-const CPU_BUDGET_MS = 55_000;    // per invocation
-const FETCH_BATCH = 15;          // tickers fetched per tick during fetch_bars stage
-const YAHOO_RANGE_YEARS = 10;    // capped range fed to yahoo (10y is max stable)
-
-function pickYahooRange(startDate: string, endDate: string): string {
-  const start = new Date(startDate).getTime();
-  const now = Date.now();
-  const yrs = (now - start) / (365.25 * 24 * 3600 * 1000);
-  if (yrs > 10) return "max";
-  if (yrs > 5) return "10y";
-  if (yrs > 2) return "5y";
-  if (yrs > 1) return "2y";
-  return "1y";
-  void endDate;
-}
+const CPU_BUDGET_MS = 20_000;    // per invocation; smaller chunks avoid edge worker resource spikes
+const FETCH_BATCH = 5;           // tickers fetched per tick; keeps each request under gateway limits
+const SIM_DAYS_PER_TICK = 10;    // bound bars loaded per simulation invocation
+const NON_TRADING_DAY_TOLERANCE_MS = 4 * 24 * 3600 * 1000;
 
 function sliceBarsByDate(d: DataSet, startDate: string, endDate: string): DataSet {
   // We need a 200-bar warmup BEFORE startDate for indicators. So keep all
@@ -47,6 +36,33 @@ function sliceBarsByDate(d: DataSet, startDate: string, endDate: string): DataSe
     }
   }
   return out;
+}
+
+function dateMinusDays(date: string, days: number): string {
+  const d = new Date(`${date}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - days);
+  return d.toISOString().slice(0, 10);
+}
+
+function isFreshThroughEnd(lastDate: string | null, endDate: string): boolean {
+  if (!lastDate) return false;
+  // Backtests often end on weekends/holidays or today's date before the next
+  // market close exists. Accept the latest trading bar when it is close enough
+  // to the requested end date; the simulator still slices by actual bar dates.
+  return lastDate >= dateMinusDays(endDate, Math.ceil(NON_TRADING_DAY_TOLERANCE_MS / (24 * 3600 * 1000)));
+}
+
+function isFreshlyWidened(fetchedAt: string | null, jobCreatedAt: string): boolean {
+  return !!fetchedAt && fetchedAt >= jobCreatedAt;
+}
+
+function hasEnoughWarmup(firstDate: string | null, warmupStart: string, fetchedAt: string | null, jobCreatedAt: string): boolean {
+  if (!firstDate) return false;
+  if (firstDate <= warmupStart) return true;
+  // If this job (or a newer long-range job) already re-fetched the ticker with
+  // Yahoo's widest available range, a later first_date is the listing date / data
+  // availability limit, not a cache miss. Accept it to avoid refetch loops.
+  return isFreshlyWidened(fetchedAt, jobCreatedAt);
 }
 
 async function loadBars(service: any, tickers: string[]): Promise<Map<string, DataSet>> {
@@ -89,6 +105,41 @@ async function loadActiveWindows(
   return out;
 }
 
+function isActiveInWindow(wins: { from: string; to: string | null }[] | undefined, date: string): boolean {
+  if (!wins || wins.length === 0) return true;
+  for (const w of wins) {
+    if (date >= w.from && (w.to == null || date < w.to)) return true;
+  }
+  return false;
+}
+
+function pickSimulationTickers(
+  universe: string[],
+  dates: string[],
+  activeWindows: Map<string, { from: string; to: string | null }[]> | undefined,
+  state: SimState,
+): string[] {
+  const selected = new Set<string>();
+  for (const p of state.positions) selected.add(p.ticker);
+
+  if (!activeWindows || activeWindows.size === 0) {
+    for (const t of universe) selected.add(t);
+    return Array.from(selected);
+  }
+
+  for (const t of universe) {
+    const wins = activeWindows.get(t);
+    if (!wins || wins.length === 0) continue;
+    for (const d of dates) {
+      if (isActiveInWindow(wins, d)) {
+        selected.add(t);
+        break;
+      }
+    }
+  }
+  return Array.from(selected);
+}
+
 
 async function tickJob(service: any, job: any) {
   const params: SimParams = { ...DEFAULT_PARAMS, ...(job.params || {}), starting_nav: Number(job.starting_nav) };
@@ -101,8 +152,8 @@ async function tickJob(service: any, job: any) {
   // ── Stage: fetch_bars ──────────────────────────────────────────────────
   if (job.stage === "fetch_bars") {
     const cursor = job.cursor || { tickerIdx: 0 };
+    const unavailable = new Set<string>(Array.isArray(cursor.unavailable) ? cursor.unavailable : []);
     const total = universeWithBench.length;
-    const range = pickYahooRange(job.start_date, job.end_date);
     // Which tickers still need fetching? Cache is global & shared across jobs,
     // so a ticker is only reusable when its cached range actually covers this
     // job's required window (start_date minus ~1yr warmup → end_date). A
@@ -122,16 +173,17 @@ async function tickJob(service: any, job: any) {
       const chunk = universeWithBench.slice(i, i + CHK);
       const { data: cached } = await service
         .from("backtest_bars_cache")
-        .select("ticker,first_date,last_date")
+        .select("ticker,first_date,last_date,fetched_at")
         .in("ticker", chunk)
         .eq("bars_version", "v1");
       for (const r of cached ?? []) {
-        const covers = (r.first_date ?? "9999") <= warmupStart
-                    && (r.last_date  ?? "0000") >= job.end_date;
+        const widenedThisJob = isFreshlyWidened(r.fetched_at, job.created_at);
+        const covers = hasEnoughWarmup(r.first_date, warmupStart, r.fetched_at, job.created_at)
+                    && (isFreshThroughEnd(r.last_date, job.end_date) || widenedThisJob);
         if (covers) have.add(r.ticker);
       }
     }
-    for (const t of universeWithBench) if (!have.has(t)) missing.push(t);
+    for (const t of universeWithBench) if (!have.has(t) && !unavailable.has(t)) missing.push(t);
 
 
 
@@ -151,11 +203,18 @@ async function tickJob(service: any, job: any) {
 
     // Fetch next batch
     const batch = missing.slice(0, FETCH_BATCH);
-    const results = await Promise.all(batch.map(t => fetchDailyHistory(t, range).catch(() => null)));
+    const results = await Promise.all(batch.map(t =>
+      fetchDailyHistoryWindow(t, warmupStart, job.end_date, 10_000)
+        .then((d) => (d && d.close.length > 0 ? d : fetchDailyHistory(t, "max", 10_000)))
+        .catch(() => null)
+    ));
     const rows: any[] = [];
     for (let i = 0; i < batch.length; i++) {
       const d = results[i];
-      if (!d || d.close.length < 50) continue;
+      if (!d || d.close.length < 50) {
+        unavailable.add(batch[i]);
+        continue;
+      }
       rows.push({
         ticker: batch[i],
         bars_version: "v1",
@@ -168,13 +227,16 @@ async function tickJob(service: any, job: any) {
     if (rows.length > 0) {
       await service.from("backtest_bars_cache").upsert(rows, { onConflict: "ticker,bars_version" });
     }
-    const fetchedNow = have.size + rows.length;
+    const nextCursor = { ...cursor, unavailable: Array.from(unavailable).sort() };
+    const fetchedNow = have.size + rows.length + unavailable.size;
     const pct = Math.min(19, Math.round(fetchedNow / total * 20));
     await service.from("backtest_portfolio_jobs").update({
       status: "fetching_bars",
-      cursor,
+      cursor: nextCursor,
       progress_pct: pct,
-      current_step_note: `Fetched ${fetchedNow}/${total} tickers…`,
+      current_step_note: unavailable.size > 0
+        ? `Fetched ${Math.min(fetchedNow, total)}/${total} tickers (${unavailable.size} unavailable)…`
+        : `Fetched ${Math.min(fetchedNow, total)}/${total} tickers…`,
       last_tick_at: new Date().toISOString(),
     }).eq("id", job.id);
     return { advance: true };
@@ -182,46 +244,38 @@ async function tickJob(service: any, job: any) {
 
   // ── Stage: simulate ────────────────────────────────────────────────────
   if (job.stage === "simulate") {
-    // Load ticker bars + benchmark bars (SPY / ^VIX) in one shot.
-    const barsMap = await loadBars(service, universeWithBench);
-    if (barsMap.size === 0) {
-      await service.from("backtest_portfolio_jobs").update({
-        status: "failed", error: "No bars available in cache.", finished_at: new Date().toISOString(),
-      }).eq("id", job.id);
-      return { advance: false };
-    }
-    // Pull out benchmarks before slicing (they need full history, incl. warmup).
-    const spyBars = barsMap.get("SPY") ?? null;
-    const vixBars = barsMap.get("^VIX") ?? null;
-    barsMap.delete("SPY");
-    barsMap.delete("^VIX");
-
-    // Slice each series to the requested end date (keep pre-start bars for warmup).
-    for (const [k, v] of barsMap) barsMap.set(k, sliceBarsByDate(v, job.start_date, job.end_date));
-
-    // Build the union of trading dates that fall within [start_date, end_date].
-    const dateSet = new Set<string>();
-    for (const d of barsMap.values()) {
-      for (const ts of d.timestamps) {
-        if (ts >= job.start_date && ts <= job.end_date) dateSet.add(ts);
-      }
-    }
-    const dates = Array.from(dateSet).sort();
-    if (dates.length === 0) {
-      await service.from("backtest_portfolio_jobs").update({
-        status: "failed", error: "No trading days in range.", finished_at: new Date().toISOString(),
-      }).eq("id", job.id);
-      return { advance: false };
-    }
-
     const state: SimState = (job.state && job.state.cash != null) ? job.state : initState(params);
-    const cursor = { dayIdx: job.cursor?.dayIdx ?? 0, totalDays: dates.length };
-
-    // Time-accurate universe: pull constituent windows for index-based runs.
     const indexName = job.params?.index_name || null;
     const activeWindows = indexName
       ? await loadActiveWindows(service, indexName, job.universe)
       : undefined;
+
+    // Load benchmarks first and use SPY as the trading calendar. This avoids
+    // parsing every ticker's full JSON history just to build the date union.
+    const benchmarkBars = await loadBars(service, BENCHMARKS);
+    const spyBars = benchmarkBars.get("SPY") ?? null;
+    const vixBars = benchmarkBars.get("^VIX") ?? null;
+    const dates = (spyBars?.timestamps ?? []).filter((ts) => ts >= job.start_date && ts <= job.end_date);
+    if (dates.length === 0) {
+      await service.from("backtest_portfolio_jobs").update({
+        status: "failed", error: "No benchmark trading calendar available in cache.", finished_at: new Date().toISOString(),
+      }).eq("id", job.id);
+      return { advance: false };
+    }
+
+    const cursor = { dayIdx: job.cursor?.dayIdx ?? 0, totalDays: dates.length };
+    const simDates = dates.slice(cursor.dayIdx, Math.min(dates.length, cursor.dayIdx + SIM_DAYS_PER_TICK));
+    const simTickers = pickSimulationTickers(job.universe, simDates, activeWindows, state);
+    const barsMap = await loadBars(service, simTickers);
+    if (barsMap.size === 0 && state.positions.length > 0) {
+      await service.from("backtest_portfolio_jobs").update({
+        status: "failed", error: "No bars available for active simulation tickers.", finished_at: new Date().toISOString(),
+      }).eq("id", job.id);
+      return { advance: false };
+    }
+
+    // Slice each loaded series to the requested end date (keep pre-start bars for warmup).
+    for (const [k, v] of barsMap) barsMap.set(k, sliceBarsByDate(v, job.start_date, job.end_date));
 
     // Load active nightly calibration weights (same source live uses).
     const { data: weightsRow } = await service
@@ -241,25 +295,27 @@ async function tickJob(service: any, job: any) {
       tickerCalibration: (weightsRow?.ticker_calibration as any) ?? null,
     };
 
-    const out = simulateChunk(state, barsMap, dates, params, cursor, CPU_BUDGET_MS, activeWindows, adaptive);
+    const localCursor = { dayIdx: 0, totalDays: simDates.length };
+    const out = simulateChunk(state, barsMap, simDates, params, localCursor, CPU_BUDGET_MS, activeWindows, adaptive);
+    const nextDayIdx = Math.min(dates.length, cursor.dayIdx + out.cursor.dayIdx);
 
 
 
-    const simPct = Math.min(99, 20 + Math.round((out.cursor.dayIdx / dates.length) * 79));
-    if (out.done) {
+    const simPct = Math.min(99, 20 + Math.round((nextDayIdx / dates.length) * 79));
+    if (nextDayIdx >= dates.length) {
       await service.from("backtest_portfolio_jobs").update({
         stage: "finalize", status: "finalizing",
-        state: out.state, cursor: out.cursor,
+        state: out.state, cursor: { dayIdx: nextDayIdx, totalDays: dates.length },
         progress_pct: 99, current_step_note: "Closing open positions and computing metrics…",
         last_tick_at: new Date().toISOString(),
       }).eq("id", job.id);
     } else {
-      const currentDate = dates[Math.min(out.cursor.dayIdx, dates.length - 1)];
+      const currentDate = dates[Math.min(nextDayIdx, dates.length - 1)];
       await service.from("backtest_portfolio_jobs").update({
         status: "simulating",
-        state: out.state, cursor: out.cursor,
+        state: out.state, cursor: { dayIdx: nextDayIdx, totalDays: dates.length },
         progress_pct: simPct,
-        current_step_note: `Simulating… ${currentDate} (${out.cursor.dayIdx}/${dates.length} days)`,
+        current_step_note: `Simulating… ${currentDate} (${nextDayIdx}/${dates.length} days)`,
         last_tick_at: new Date().toISOString(),
       }).eq("id", job.id);
     }
@@ -268,9 +324,10 @@ async function tickJob(service: any, job: any) {
 
   // ── Stage: finalize ────────────────────────────────────────────────────
   if (job.stage === "finalize") {
-    const barsMap = await loadBars(service, job.universe);
-    for (const [k, v] of barsMap) barsMap.set(k, sliceBarsByDate(v, job.start_date, job.end_date));
     const state: SimState = job.state;
+    const openTickers = Array.from(new Set((state.positions ?? []).map((p: Position) => p.ticker)));
+    const barsMap = await loadBars(service, openTickers);
+    for (const [k, v] of barsMap) barsMap.set(k, sliceBarsByDate(v, job.start_date, job.end_date));
     forceCloseAll(state, barsMap);
     const report = computeReport(state, Number(job.starting_nav));
     await service.from("backtest_portfolio_jobs").update({
@@ -349,14 +406,8 @@ serve(async (req) => {
       cpu_ms_spent: Number(job.cpu_ms_spent || 0) + elapsed,
     }).eq("id", job.id);
 
-    // Self-invoke to keep going.
-    if (result.advance) {
-      fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/backtest-portfolio-tick`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", apikey: Deno.env.get("SUPABASE_ANON_KEY")! },
-        body: JSON.stringify({ job_id: job.id }),
-      }).catch(() => {});
-    }
+    // Do not recursively self-invoke. Cron/client nudges advance the job in
+    // bounded chunks, avoiding overlapping workers and runaway server cost.
 
     return new Response(JSON.stringify({ ok: true, elapsed_ms: elapsed }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
