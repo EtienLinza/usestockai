@@ -16,7 +16,7 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-const CPU_BUDGET_MS = 55_000;    // per invocation
+const CPU_BUDGET_MS = 20_000;    // per invocation; smaller chunks avoid edge worker resource spikes
 const FETCH_BATCH = 15;          // tickers fetched per tick during fetch_bars stage
 const YAHOO_RANGE_YEARS = 10;    // capped range fed to yahoo (10y is max stable)
 const NON_TRADING_DAY_TOLERANCE_MS = 4 * 24 * 3600 * 1000;
@@ -385,8 +385,10 @@ serve(async (req) => {
       cpu_ms_spent: Number(job.cpu_ms_spent || 0) + elapsed,
     }).eq("id", job.id);
 
-    // Self-invoke to keep going.
-    if (result.advance) {
+    // Self-invoke only during the lightweight fetch phase. Simulation is picked
+    // up by cron/client nudges so large portfolio runs don't create costly
+    // overlapping worker bursts.
+    if (result.advance && job.stage === "fetch_bars") {
       fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/backtest-portfolio-tick`, {
         method: "POST",
         headers: { "Content-Type": "application/json", apikey: Deno.env.get("SUPABASE_ANON_KEY")! },
