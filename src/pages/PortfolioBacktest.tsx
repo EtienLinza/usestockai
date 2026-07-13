@@ -157,7 +157,7 @@ export default function PortfolioBacktest() {
         .maybeSingle();
       if (error) throw error;
       if (data) {
-        setJob(data);
+        setJob(data as unknown as JobRow);
         if (["done", "failed", "cancelled"].includes(data.status)) {
           if (pollRef.current) { window.clearInterval(pollRef.current); pollRef.current = null; }
           loadHistory();
