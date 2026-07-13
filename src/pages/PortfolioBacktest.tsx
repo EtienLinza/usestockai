@@ -532,3 +532,112 @@ function Metric({ icon, label, value }: { icon?: React.ReactNode; label: string;
     </Card>
   );
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Stage-by-stage progress: fetch bars → simulate → finalize → complete.
+// Uses `cursor` + `progress_pct` from the backend job row so counts are live.
+// ─────────────────────────────────────────────────────────────────────────────
+const STAGES: Array<{ key: "fetch" | "simulate" | "finalize" | "done"; label: string }> = [
+  { key: "fetch", label: "Fetch bars" },
+  { key: "simulate", label: "Simulate" },
+  { key: "finalize", label: "Finalize" },
+  { key: "done", label: "Complete" },
+];
+
+function activeStageOf(job: JobRow): "fetch" | "simulate" | "finalize" | "done" {
+  if (job.status === "done") return "done";
+  if (job.status === "finalizing" || job.stage === "finalize") return "finalize";
+  if (job.status === "simulating" || job.stage === "simulate") return "simulate";
+  return "fetch";
+}
+
+function StageProgress({ job, queueAhead }: { job: JobRow; queueAhead: number }) {
+  const active = activeStageOf(job);
+  const total = job.universe.length;
+  const cursor = job.cursor ?? {};
+  const fetchedIdx = Math.min(total, Number(cursor.tickerIdx ?? 0));
+  const unavailable = Array.isArray(cursor.unavailable) ? cursor.unavailable.length : 0;
+  const totalDays = Number(cursor.totalDays ?? 0);
+  const dayIdx = Math.min(totalDays || 0, Number(cursor.dayIdx ?? 0));
+
+  const stageCounts: Record<string, string | null> = {
+    fetch: total > 0
+      ? `${active === "fetch" ? fetchedIdx : total}/${total} tickers${unavailable > 0 ? ` · ${unavailable} unavailable` : ""}`
+      : null,
+    simulate: totalDays > 0
+      ? `${active === "simulate" ? dayIdx : (active === "fetch" ? 0 : totalDays)}/${totalDays} trading days`
+      : null,
+    finalize: active === "finalize" ? "Closing positions, computing metrics" : null,
+    done: job.status === "done" ? "Report ready" : null,
+  };
+
+  // Sub-progress for active stage
+  let subPct = 0;
+  if (active === "fetch" && total > 0) subPct = Math.round((fetchedIdx / total) * 100);
+  else if (active === "simulate" && totalDays > 0) subPct = Math.round((dayIdx / totalDays) * 100);
+  else if (active === "finalize") subPct = Math.min(100, Math.max(0, Number(job.progress_pct) || 99));
+  else if (active === "done") subPct = 100;
+
+  const queuedNote = job.status === "queued"
+    ? (queueAhead > 0
+        ? `Waiting in queue — ${queueAhead} job${queueAhead === 1 ? "" : "s"} ahead of you.`
+        : "Queued — starting shortly…")
+    : null;
+
+  return (
+    <div className="space-y-4">
+      {/* Overall bar */}
+      <div>
+        <div className="flex items-center justify-between text-[11px] uppercase tracking-wider text-muted-foreground mb-1.5">
+          <span>Overall</span>
+          <span className="tabular-nums text-foreground">{Math.round(Number(job.progress_pct) || 0)}%</span>
+        </div>
+        <Progress value={Number(job.progress_pct) || 0} className="h-2" />
+      </div>
+
+      {/* Stage stepper */}
+      <ol className="grid grid-cols-4 gap-2">
+        {STAGES.map((s, i) => {
+          const idxActive = STAGES.findIndex(x => x.key === active);
+          const state: "pending" | "active" | "done" =
+            i < idxActive ? "done" : i === idxActive ? "active" : "pending";
+          const dotClass =
+            state === "done" ? "bg-primary border-primary"
+            : state === "active" ? "bg-primary/20 border-primary animate-pulse"
+            : "bg-muted border-border";
+          const textClass =
+            state === "pending" ? "text-muted-foreground/60"
+            : state === "active" ? "text-foreground"
+            : "text-muted-foreground";
+          return (
+            <li key={s.key} className="flex flex-col gap-1.5">
+              <div className="flex items-center gap-2">
+                <span className={`h-2 w-2 rounded-full border ${dotClass}`} />
+                <span className={`text-[11px] uppercase tracking-wider ${textClass}`}>{s.label}</span>
+              </div>
+              <div className="text-xs text-muted-foreground tabular-nums min-h-[1rem]">
+                {stageCounts[s.key] ?? (state === "done" ? "Done" : "—")}
+              </div>
+            </li>
+          );
+        })}
+      </ol>
+
+      {/* Active-stage detail */}
+      {job.status !== "queued" && active !== "done" && (
+        <div>
+          <div className="flex items-center justify-between text-[11px] uppercase tracking-wider text-muted-foreground mb-1.5">
+            <span>{STAGES.find(s => s.key === active)?.label}</span>
+            <span className="tabular-nums text-foreground">{subPct}%</span>
+          </div>
+          <Progress value={subPct} className="h-1.5 opacity-70" />
+        </div>
+      )}
+
+      <div className="text-xs text-muted-foreground">
+        {queuedNote ?? job.current_step_note ?? "Waiting…"}
+      </div>
+    </div>
+  );
+}
+
