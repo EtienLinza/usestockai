@@ -29,6 +29,14 @@ import { UpgradeRequiredModal } from "@/components/UpgradeRequiredModal";
 import { supabase } from "@/integrations/supabase/client";
 
 type JobStatus = "queued" | "fetching_bars" | "simulating" | "finalizing" | "done" | "failed" | "cancelled";
+type JobStage = "fetch_bars" | "simulate" | "finalize" | "done" | string;
+
+interface JobCursor {
+  tickerIdx?: number;
+  unavailable?: string[];
+  dayIdx?: number;
+  totalDays?: number;
+}
 
 interface JobRow {
   id: string;
@@ -38,15 +46,17 @@ interface JobRow {
   end_date: string;
   starting_nav: number;
   status: JobStatus;
-  stage: string;
+  stage: JobStage;
   progress_pct: number;
   current_step_note: string | null;
   cpu_ms_spent: number;
+  cursor: JobCursor | null;
   created_at: string;
   finished_at: string | null;
   error: string | null;
   report?: any;
 }
+
 
 const PRESETS: Record<string, string[]> = {
   "S&P 30 (Blue chip)": ["AAPL","MSFT","GOOGL","AMZN","META","NVDA","TSLA","JPM","V","JNJ","WMT","PG","XOM","UNH","MA","HD","CVX","BAC","ABBV","PFE","KO","AVGO","LLY","COST","MRK","PEP","TMO","DIS","MCD","CSCO"],
