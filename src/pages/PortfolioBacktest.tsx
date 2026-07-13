@@ -396,16 +396,8 @@ export default function PortfolioBacktest() {
                 {jobId && <Button size="sm" variant="ghost" onClick={() => pollJob(jobId)} className="gap-2"><RefreshCw className="h-4 w-4" />Refresh</Button>}
               </div>
             </div>
-            <div>
-              <Progress value={Number(job.progress_pct) || 0} className="h-2" />
-              <div className="mt-2 text-xs text-muted-foreground">
-                {job.status === "queued"
-                  ? (queueAhead > 0
-                      ? `Waiting in queue — ${queueAhead} job${queueAhead === 1 ? "" : "s"} ahead of you.`
-                      : "Queued — starting shortly…")
-                  : (job.current_step_note || "Waiting…")}
-              </div>
-            </div>
+            <StageProgress job={job} queueAhead={queueAhead} />
+
             {job.error && <div className="p-3 text-xs rounded-md bg-destructive/10 text-destructive border border-destructive/30">{job.error}</div>}
           </Card>
         )}
