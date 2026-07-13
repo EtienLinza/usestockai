@@ -138,7 +138,7 @@ export default function PortfolioBacktest() {
     try {
       const { data, error } = await supabase
         .from("backtest_portfolio_jobs")
-        .select("id,name,universe,start_date,end_date,starting_nav,status,stage,progress_pct,current_step_note,cpu_ms_spent,created_at,finished_at,error")
+        .select("id,name,universe,start_date,end_date,starting_nav,status,stage,progress_pct,current_step_note,cursor,cpu_ms_spent,created_at,finished_at,error")
         .order("created_at", { ascending: false })
         .limit(50);
       if (error) throw error;
@@ -152,7 +152,7 @@ export default function PortfolioBacktest() {
       // omit the large `state` blob during polling — only pull it when needed
       const { data, error } = await supabase
         .from("backtest_portfolio_jobs")
-        .select("id,name,universe,start_date,end_date,starting_nav,status,stage,progress_pct,current_step_note,cpu_ms_spent,created_at,finished_at,error,report")
+        .select("id,name,universe,start_date,end_date,starting_nav,status,stage,progress_pct,current_step_note,cursor,cpu_ms_spent,created_at,finished_at,error,report")
         .eq("id", id)
         .maybeSingle();
       if (error) throw error;
@@ -261,7 +261,7 @@ export default function PortfolioBacktest() {
     try {
       const { data, error } = await supabase
         .from("backtest_portfolio_jobs")
-        .select("id,name,universe,start_date,end_date,starting_nav,status,stage,progress_pct,current_step_note,cpu_ms_spent,created_at,finished_at,error,report")
+        .select("id,name,universe,start_date,end_date,starting_nav,status,stage,progress_pct,current_step_note,cursor,cpu_ms_spent,created_at,finished_at,error,report")
         .eq("id", id)
         .maybeSingle();
       if (error) throw error;
