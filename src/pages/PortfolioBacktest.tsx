@@ -142,7 +142,7 @@ export default function PortfolioBacktest() {
         .order("created_at", { ascending: false })
         .limit(50);
       if (error) throw error;
-      setHistory(data ?? []);
+      setHistory((data ?? []) as unknown as JobRow[]);
     } catch (e) { console.error(e); }
   }
   useEffect(() => { if (user) loadHistory(); }, [user]);
@@ -265,7 +265,7 @@ export default function PortfolioBacktest() {
         .eq("id", id)
         .maybeSingle();
       if (error) throw error;
-      if (data) setJob(data);
+      if (data) setJob(data as unknown as JobRow);
     } catch (e) { console.error(e); }
   }
 
