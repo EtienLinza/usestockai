@@ -29,6 +29,14 @@ import { UpgradeRequiredModal } from "@/components/UpgradeRequiredModal";
 import { supabase } from "@/integrations/supabase/client";
 
 type JobStatus = "queued" | "fetching_bars" | "simulating" | "finalizing" | "done" | "failed" | "cancelled";
+type JobStage = "fetch_bars" | "simulate" | "finalize" | "done" | string;
+
+interface JobCursor {
+  tickerIdx?: number;
+  unavailable?: string[];
+  dayIdx?: number;
+  totalDays?: number;
+}
 
 interface JobRow {
   id: string;
@@ -38,15 +46,17 @@ interface JobRow {
   end_date: string;
   starting_nav: number;
   status: JobStatus;
-  stage: string;
+  stage: JobStage;
   progress_pct: number;
   current_step_note: string | null;
   cpu_ms_spent: number;
+  cursor: JobCursor | null;
   created_at: string;
   finished_at: string | null;
   error: string | null;
   report?: any;
 }
+
 
 const PRESETS: Record<string, string[]> = {
   "S&P 30 (Blue chip)": ["AAPL","MSFT","GOOGL","AMZN","META","NVDA","TSLA","JPM","V","JNJ","WMT","PG","XOM","UNH","MA","HD","CVX","BAC","ABBV","PFE","KO","AVGO","LLY","COST","MRK","PEP","TMO","DIS","MCD","CSCO"],
@@ -128,11 +138,11 @@ export default function PortfolioBacktest() {
     try {
       const { data, error } = await supabase
         .from("backtest_portfolio_jobs")
-        .select("id,name,universe,start_date,end_date,starting_nav,status,stage,progress_pct,current_step_note,cpu_ms_spent,created_at,finished_at,error")
+        .select("id,name,universe,start_date,end_date,starting_nav,status,stage,progress_pct,current_step_note,cursor,cpu_ms_spent,created_at,finished_at,error")
         .order("created_at", { ascending: false })
         .limit(50);
       if (error) throw error;
-      setHistory(data ?? []);
+      setHistory((data ?? []) as unknown as JobRow[]);
     } catch (e) { console.error(e); }
   }
   useEffect(() => { if (user) loadHistory(); }, [user]);
@@ -142,12 +152,12 @@ export default function PortfolioBacktest() {
       // omit the large `state` blob during polling — only pull it when needed
       const { data, error } = await supabase
         .from("backtest_portfolio_jobs")
-        .select("id,name,universe,start_date,end_date,starting_nav,status,stage,progress_pct,current_step_note,cpu_ms_spent,created_at,finished_at,error,report")
+        .select("id,name,universe,start_date,end_date,starting_nav,status,stage,progress_pct,current_step_note,cursor,cpu_ms_spent,created_at,finished_at,error,report")
         .eq("id", id)
         .maybeSingle();
       if (error) throw error;
       if (data) {
-        setJob(data);
+        setJob(data as unknown as JobRow);
         if (["done", "failed", "cancelled"].includes(data.status)) {
           if (pollRef.current) { window.clearInterval(pollRef.current); pollRef.current = null; }
           loadHistory();
@@ -251,11 +261,11 @@ export default function PortfolioBacktest() {
     try {
       const { data, error } = await supabase
         .from("backtest_portfolio_jobs")
-        .select("id,name,universe,start_date,end_date,starting_nav,status,stage,progress_pct,current_step_note,cpu_ms_spent,created_at,finished_at,error,report")
+        .select("id,name,universe,start_date,end_date,starting_nav,status,stage,progress_pct,current_step_note,cursor,cpu_ms_spent,created_at,finished_at,error,report")
         .eq("id", id)
         .maybeSingle();
       if (error) throw error;
-      if (data) setJob(data);
+      if (data) setJob(data as unknown as JobRow);
     } catch (e) { console.error(e); }
   }
 
@@ -386,16 +396,8 @@ export default function PortfolioBacktest() {
                 {jobId && <Button size="sm" variant="ghost" onClick={() => pollJob(jobId)} className="gap-2"><RefreshCw className="h-4 w-4" />Refresh</Button>}
               </div>
             </div>
-            <div>
-              <Progress value={Number(job.progress_pct) || 0} className="h-2" />
-              <div className="mt-2 text-xs text-muted-foreground">
-                {job.status === "queued"
-                  ? (queueAhead > 0
-                      ? `Waiting in queue — ${queueAhead} job${queueAhead === 1 ? "" : "s"} ahead of you.`
-                      : "Queued — starting shortly…")
-                  : (job.current_step_note || "Waiting…")}
-              </div>
-            </div>
+            <StageProgress job={job} queueAhead={queueAhead} />
+
             {job.error && <div className="p-3 text-xs rounded-md bg-destructive/10 text-destructive border border-destructive/30">{job.error}</div>}
           </Card>
         )}
@@ -530,3 +532,112 @@ function Metric({ icon, label, value }: { icon?: React.ReactNode; label: string;
     </Card>
   );
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Stage-by-stage progress: fetch bars → simulate → finalize → complete.
+// Uses `cursor` + `progress_pct` from the backend job row so counts are live.
+// ─────────────────────────────────────────────────────────────────────────────
+const STAGES: Array<{ key: "fetch" | "simulate" | "finalize" | "done"; label: string }> = [
+  { key: "fetch", label: "Fetch bars" },
+  { key: "simulate", label: "Simulate" },
+  { key: "finalize", label: "Finalize" },
+  { key: "done", label: "Complete" },
+];
+
+function activeStageOf(job: JobRow): "fetch" | "simulate" | "finalize" | "done" {
+  if (job.status === "done") return "done";
+  if (job.status === "finalizing" || job.stage === "finalize") return "finalize";
+  if (job.status === "simulating" || job.stage === "simulate") return "simulate";
+  return "fetch";
+}
+
+function StageProgress({ job, queueAhead }: { job: JobRow; queueAhead: number }) {
+  const active = activeStageOf(job);
+  const total = job.universe.length;
+  const cursor = job.cursor ?? {};
+  const fetchedIdx = Math.min(total, Number(cursor.tickerIdx ?? 0));
+  const unavailable = Array.isArray(cursor.unavailable) ? cursor.unavailable.length : 0;
+  const totalDays = Number(cursor.totalDays ?? 0);
+  const dayIdx = Math.min(totalDays || 0, Number(cursor.dayIdx ?? 0));
+
+  const stageCounts: Record<string, string | null> = {
+    fetch: total > 0
+      ? `${active === "fetch" ? fetchedIdx : total}/${total} tickers${unavailable > 0 ? ` · ${unavailable} unavailable` : ""}`
+      : null,
+    simulate: totalDays > 0
+      ? `${active === "simulate" ? dayIdx : (active === "fetch" ? 0 : totalDays)}/${totalDays} trading days`
+      : null,
+    finalize: active === "finalize" ? "Closing positions, computing metrics" : null,
+    done: job.status === "done" ? "Report ready" : null,
+  };
+
+  // Sub-progress for active stage
+  let subPct = 0;
+  if (active === "fetch" && total > 0) subPct = Math.round((fetchedIdx / total) * 100);
+  else if (active === "simulate" && totalDays > 0) subPct = Math.round((dayIdx / totalDays) * 100);
+  else if (active === "finalize") subPct = Math.min(100, Math.max(0, Number(job.progress_pct) || 99));
+  else if (active === "done") subPct = 100;
+
+  const queuedNote = job.status === "queued"
+    ? (queueAhead > 0
+        ? `Waiting in queue — ${queueAhead} job${queueAhead === 1 ? "" : "s"} ahead of you.`
+        : "Queued — starting shortly…")
+    : null;
+
+  return (
+    <div className="space-y-4">
+      {/* Overall bar */}
+      <div>
+        <div className="flex items-center justify-between text-[11px] uppercase tracking-wider text-muted-foreground mb-1.5">
+          <span>Overall</span>
+          <span className="tabular-nums text-foreground">{Math.round(Number(job.progress_pct) || 0)}%</span>
+        </div>
+        <Progress value={Number(job.progress_pct) || 0} className="h-2" />
+      </div>
+
+      {/* Stage stepper */}
+      <ol className="grid grid-cols-4 gap-2">
+        {STAGES.map((s, i) => {
+          const idxActive = STAGES.findIndex(x => x.key === active);
+          const state: "pending" | "active" | "done" =
+            i < idxActive ? "done" : i === idxActive ? "active" : "pending";
+          const dotClass =
+            state === "done" ? "bg-primary border-primary"
+            : state === "active" ? "bg-primary/20 border-primary animate-pulse"
+            : "bg-muted border-border";
+          const textClass =
+            state === "pending" ? "text-muted-foreground/60"
+            : state === "active" ? "text-foreground"
+            : "text-muted-foreground";
+          return (
+            <li key={s.key} className="flex flex-col gap-1.5">
+              <div className="flex items-center gap-2">
+                <span className={`h-2 w-2 rounded-full border ${dotClass}`} />
+                <span className={`text-[11px] uppercase tracking-wider ${textClass}`}>{s.label}</span>
+              </div>
+              <div className="text-xs text-muted-foreground tabular-nums min-h-[1rem]">
+                {stageCounts[s.key] ?? (state === "done" ? "Done" : "—")}
+              </div>
+            </li>
+          );
+        })}
+      </ol>
+
+      {/* Active-stage detail */}
+      {job.status !== "queued" && active !== "done" && (
+        <div>
+          <div className="flex items-center justify-between text-[11px] uppercase tracking-wider text-muted-foreground mb-1.5">
+            <span>{STAGES.find(s => s.key === active)?.label}</span>
+            <span className="tabular-nums text-foreground">{subPct}%</span>
+          </div>
+          <Progress value={subPct} className="h-1.5 opacity-70" />
+        </div>
+      )}
+
+      <div className="text-xs text-muted-foreground">
+        {queuedNote ?? job.current_step_note ?? "Waiting…"}
+      </div>
+    </div>
+  );
+}
+
