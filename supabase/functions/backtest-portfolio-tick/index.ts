@@ -71,12 +71,21 @@ async function loadBars(service: any, tickers: string[]): Promise<Map<string, Da
   const BATCH = 100;
   for (let i = 0; i < tickers.length; i += BATCH) {
     const chunk = tickers.slice(i, i + BATCH);
-    const { data } = await service
-      .from("backtest_bars_cache")
-      .select("ticker,bars")
-      .in("ticker", chunk)
-      .eq("bars_version", "v1");
-    for (const row of data ?? []) map.set(row.ticker, row.bars as DataSet);
+    // Retry transient errors — a single failed read must not fail the whole job.
+    let lastErr: any = null;
+    let data: any[] | null = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const res = await service
+        .from("backtest_bars_cache")
+        .select("ticker,bars")
+        .in("ticker", chunk)
+        .eq("bars_version", "v1");
+      if (!res.error) { data = res.data ?? []; break; }
+      lastErr = res.error;
+      await new Promise((r) => setTimeout(r, 300 * (attempt + 1)));
+    }
+    if (data == null) throw new Error(`loadBars failed: ${lastErr?.message ?? "unknown"}`);
+    for (const row of data) map.set(row.ticker, row.bars as DataSet);
   }
   return map;
 }
@@ -257,6 +266,17 @@ async function tickJob(service: any, job: any) {
     const vixBars = benchmarkBars.get("^VIX") ?? null;
     const dates = (spyBars?.timestamps ?? []).filter((ts) => ts >= job.start_date && ts <= job.end_date);
     if (dates.length === 0) {
+      // Only hard-fail if we've never made progress. Otherwise treat as
+      // transient (cache read blip, benchmark row briefly missing) and let
+      // cron retry on the next tick.
+      const hasProgress = (job.cursor?.dayIdx ?? 0) > 0;
+      if (hasProgress) {
+        await service.from("backtest_portfolio_jobs").update({
+          current_step_note: "Transient benchmark read miss — retrying next tick…",
+          last_tick_at: new Date().toISOString(),
+        }).eq("id", job.id);
+        return { advance: false };
+      }
       await service.from("backtest_portfolio_jobs").update({
         status: "failed", error: "No benchmark trading calendar available in cache.", finished_at: new Date().toISOString(),
       }).eq("id", job.id);
@@ -268,8 +288,10 @@ async function tickJob(service: any, job: any) {
     const simTickers = pickSimulationTickers(job.universe, simDates, activeWindows, state);
     const barsMap = await loadBars(service, simTickers);
     if (barsMap.size === 0 && state.positions.length > 0) {
+      // Transient — don't kill an in-flight job. Retry next tick.
       await service.from("backtest_portfolio_jobs").update({
-        status: "failed", error: "No bars available for active simulation tickers.", finished_at: new Date().toISOString(),
+        current_step_note: "Transient bars read miss — retrying next tick…",
+        last_tick_at: new Date().toISOString(),
       }).eq("id", job.id);
       return { advance: false };
     }
