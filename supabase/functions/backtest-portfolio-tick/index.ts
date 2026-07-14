@@ -71,12 +71,21 @@ async function loadBars(service: any, tickers: string[]): Promise<Map<string, Da
   const BATCH = 100;
   for (let i = 0; i < tickers.length; i += BATCH) {
     const chunk = tickers.slice(i, i + BATCH);
-    const { data } = await service
-      .from("backtest_bars_cache")
-      .select("ticker,bars")
-      .in("ticker", chunk)
-      .eq("bars_version", "v1");
-    for (const row of data ?? []) map.set(row.ticker, row.bars as DataSet);
+    // Retry transient errors — a single failed read must not fail the whole job.
+    let lastErr: any = null;
+    let data: any[] | null = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const res = await service
+        .from("backtest_bars_cache")
+        .select("ticker,bars")
+        .in("ticker", chunk)
+        .eq("bars_version", "v1");
+      if (!res.error) { data = res.data ?? []; break; }
+      lastErr = res.error;
+      await new Promise((r) => setTimeout(r, 300 * (attempt + 1)));
+    }
+    if (data == null) throw new Error(`loadBars failed: ${lastErr?.message ?? "unknown"}`);
+    for (const row of data) map.set(row.ticker, row.bars as DataSet);
   }
   return map;
 }
