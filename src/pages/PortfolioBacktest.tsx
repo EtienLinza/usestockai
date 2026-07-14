@@ -328,6 +328,9 @@ export default function PortfolioBacktest() {
         .maybeSingle();
       if (error) throw error;
       if (data) setJob(data as unknown as JobRow);
+      requestAnimationFrame(() => {
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      });
     } catch (e) { console.error(e); }
   }
 
