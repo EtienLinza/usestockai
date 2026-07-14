@@ -246,6 +246,34 @@ export default function PortfolioBacktest() {
     } catch (e: any) { toast.error(e?.message || "Cancel failed"); }
   }
 
+  async function retryJob(id: string, stage: JobStage) {
+    const stageToStatus: Record<string, JobStatus> = {
+      fetch_bars: "fetching_bars",
+      simulate: "simulating",
+      finalize: "finalizing",
+    };
+    const nextStatus: JobStatus = stageToStatus[stage] ?? "queued";
+    try {
+      const { error } = await supabase
+        .from("backtest_portfolio_jobs")
+        .update({
+          status: nextStatus,
+          error: null,
+          finished_at: null,
+          current_step_note: "Retrying from last checkpoint…",
+          last_tick_at: null,
+        })
+        .eq("id", id)
+        .eq("status", "failed");
+      if (error) throw error;
+      toast.success("Retrying from last checkpoint");
+      setJobId(id);
+      await pollJob(id);
+      nudgeTick(id);
+      loadHistory();
+    } catch (e: any) { toast.error(e?.message || "Retry failed"); }
+  }
+
   async function deleteRun(id: string) {
     if (!confirm("Delete this backtest run?")) return;
     try {
@@ -393,6 +421,11 @@ export default function PortfolioBacktest() {
               </div>
               <div className="flex gap-2">
                 {isActive && <Button size="sm" variant="outline" onClick={cancelJob} className="gap-2"><XCircle className="h-4 w-4" />Cancel</Button>}
+                {job.status === "failed" && (
+                  <Button size="sm" variant="outline" onClick={() => retryJob(job.id, job.stage)} className="gap-2">
+                    <RefreshCw className="h-4 w-4" />Retry from last progress
+                  </Button>
+                )}
                 {jobId && <Button size="sm" variant="ghost" onClick={() => pollJob(jobId)} className="gap-2"><RefreshCw className="h-4 w-4" />Refresh</Button>}
               </div>
             </div>
