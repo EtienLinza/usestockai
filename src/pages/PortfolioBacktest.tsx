@@ -147,6 +147,40 @@ export default function PortfolioBacktest() {
   }
   useEffect(() => { if (user) loadHistory(); }, [user]);
 
+  // On mount / after refresh: auto-restore the most recent job into the live
+  // view so an in-flight run keeps showing its progress (instead of only
+  // appearing in History). Prefers active jobs; otherwise loads the latest so
+  // finished reports remain visible until dismissed.
+  useEffect(() => {
+    if (!user || jobId) return;
+    let cancelled = false;
+    (async () => {
+      const active = await supabase
+        .from("backtest_portfolio_jobs")
+        .select("id")
+        .in("status", ["queued", "fetching_bars", "simulating", "finalizing"])
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      let restoreId = active.data?.id ?? null;
+      if (!restoreId) {
+        const latest = await supabase
+          .from("backtest_portfolio_jobs")
+          .select("id")
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        restoreId = latest.data?.id ?? null;
+      }
+      if (!cancelled && restoreId) {
+        setJobId(restoreId);
+        await pollJob(restoreId);
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user]);
+
   async function pollJob(id: string) {
     try {
       // omit the large `state` blob during polling — only pull it when needed
