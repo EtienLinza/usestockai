@@ -63,8 +63,6 @@ verify_jwt = false
 
 
 
-[functions.backtest-portfolio-tick]
-verify_jwt = false
 
 [functions.create-checkout]
 verify_jwt = false
