@@ -320,6 +320,45 @@ export type Database = {
         }
         Relationships: []
       }
+      drift_detections: {
+        Row: {
+          details: Json
+          detected_at: string
+          drift_kind: string
+          feature_name: string | null
+          id: string
+          metric: string
+          severity: string
+          threshold: number
+          value: number
+          window_days: number | null
+        }
+        Insert: {
+          details?: Json
+          detected_at?: string
+          drift_kind: string
+          feature_name?: string | null
+          id?: string
+          metric: string
+          severity?: string
+          threshold: number
+          value: number
+          window_days?: number | null
+        }
+        Update: {
+          details?: Json
+          detected_at?: string
+          drift_kind?: string
+          feature_name?: string | null
+          id?: string
+          metric?: string
+          severity?: string
+          threshold?: number
+          value?: number
+          window_days?: number | null
+        }
+        Relationships: []
+      }
       drift_events: {
         Row: {
           detected_at: string
@@ -497,6 +536,48 @@ export type Database = {
         }
         Relationships: []
       }
+      market_memory: {
+        Row: {
+          created_at: string
+          features: Json
+          horizon_bars: number | null
+          id: string
+          macro: Json
+          outcome_return_pct: number | null
+          outcome_win: boolean | null
+          regime_probs: Json
+          snapshot_date: string
+          strategy: string | null
+          ticker: string
+        }
+        Insert: {
+          created_at?: string
+          features?: Json
+          horizon_bars?: number | null
+          id?: string
+          macro?: Json
+          outcome_return_pct?: number | null
+          outcome_win?: boolean | null
+          regime_probs?: Json
+          snapshot_date: string
+          strategy?: string | null
+          ticker: string
+        }
+        Update: {
+          created_at?: string
+          features?: Json
+          horizon_bars?: number | null
+          id?: string
+          macro?: Json
+          outcome_return_pct?: number | null
+          outcome_win?: boolean | null
+          regime_probs?: Json
+          snapshot_date?: string
+          strategy?: string | null
+          ticker?: string
+        }
+        Relationships: []
+      }
       market_regime: {
         Row: {
           atr_pct: number | null
@@ -553,6 +634,128 @@ export type Database = {
           trained_at?: string
         }
         Relationships: []
+      }
+      model_health_reports: {
+        Row: {
+          anomalies_rejected: number
+          bottom_features: Json
+          brier_score: number | null
+          calibration_error: number | null
+          concept_drift: Json
+          created_at: string
+          deployments: Json
+          feature_drift: Json
+          id: string
+          log_loss: number | null
+          notes: string | null
+          report_date: string
+          retired_strategies: Json
+          rollbacks: Json
+          top_features: Json
+          training_time_ms: number | null
+        }
+        Insert: {
+          anomalies_rejected?: number
+          bottom_features?: Json
+          brier_score?: number | null
+          calibration_error?: number | null
+          concept_drift?: Json
+          created_at?: string
+          deployments?: Json
+          feature_drift?: Json
+          id?: string
+          log_loss?: number | null
+          notes?: string | null
+          report_date: string
+          retired_strategies?: Json
+          rollbacks?: Json
+          top_features?: Json
+          training_time_ms?: number | null
+        }
+        Update: {
+          anomalies_rejected?: number
+          bottom_features?: Json
+          brier_score?: number | null
+          calibration_error?: number | null
+          concept_drift?: Json
+          created_at?: string
+          deployments?: Json
+          feature_drift?: Json
+          id?: string
+          log_loss?: number | null
+          notes?: string | null
+          report_date?: string
+          retired_strategies?: Json
+          rollbacks?: Json
+          top_features?: Json
+          training_time_ms?: number | null
+        }
+        Relationships: []
+      }
+      model_versions: {
+        Row: {
+          coefficients: Json
+          created_at: string
+          deployed_at: string | null
+          feature_list: Json
+          hyperparams: Json
+          id: string
+          model_kind: string
+          notes: string | null
+          parent_version_id: string | null
+          retired_at: string | null
+          shadow_metrics: Json
+          status: string
+          stress_test_results: Json
+          training_window_end: string | null
+          training_window_start: string | null
+          validation_metrics: Json
+        }
+        Insert: {
+          coefficients?: Json
+          created_at?: string
+          deployed_at?: string | null
+          feature_list?: Json
+          hyperparams?: Json
+          id?: string
+          model_kind: string
+          notes?: string | null
+          parent_version_id?: string | null
+          retired_at?: string | null
+          shadow_metrics?: Json
+          status?: string
+          stress_test_results?: Json
+          training_window_end?: string | null
+          training_window_start?: string | null
+          validation_metrics?: Json
+        }
+        Update: {
+          coefficients?: Json
+          created_at?: string
+          deployed_at?: string | null
+          feature_list?: Json
+          hyperparams?: Json
+          id?: string
+          model_kind?: string
+          notes?: string | null
+          parent_version_id?: string | null
+          retired_at?: string | null
+          shadow_metrics?: Json
+          status?: string
+          stress_test_results?: Json
+          training_window_end?: string | null
+          training_window_start?: string | null
+          validation_metrics?: Json
+        }
+        Relationships: [
+          {
+            foreignKeyName: "model_versions_parent_version_id_fkey"
+            columns: ["parent_version_id"]
+            isOneToOne: false
+            referencedRelation: "model_versions"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       news_sentiment_cache: {
         Row: {
@@ -796,6 +999,66 @@ export type Database = {
         }
         Relationships: []
       }
+      rejected_signals: {
+        Row: {
+          calibrated_conviction: number | null
+          counterfactual_hit_stop: boolean | null
+          counterfactual_hit_target: boolean | null
+          counterfactual_return_pct: number | null
+          created_at: string
+          entry_price: number | null
+          feature_snapshot: Json
+          horizon_bars: number | null
+          id: string
+          labeled_at: string | null
+          raw_conviction: number | null
+          regime: string | null
+          regime_probs: Json | null
+          rejection_reason: string
+          scan_run_id: string | null
+          strategy: string | null
+          ticker: string
+        }
+        Insert: {
+          calibrated_conviction?: number | null
+          counterfactual_hit_stop?: boolean | null
+          counterfactual_hit_target?: boolean | null
+          counterfactual_return_pct?: number | null
+          created_at?: string
+          entry_price?: number | null
+          feature_snapshot: Json
+          horizon_bars?: number | null
+          id?: string
+          labeled_at?: string | null
+          raw_conviction?: number | null
+          regime?: string | null
+          regime_probs?: Json | null
+          rejection_reason: string
+          scan_run_id?: string | null
+          strategy?: string | null
+          ticker: string
+        }
+        Update: {
+          calibrated_conviction?: number | null
+          counterfactual_hit_stop?: boolean | null
+          counterfactual_hit_target?: boolean | null
+          counterfactual_return_pct?: number | null
+          created_at?: string
+          entry_price?: number | null
+          feature_snapshot?: Json
+          horizon_bars?: number | null
+          id?: string
+          labeled_at?: string | null
+          raw_conviction?: number | null
+          regime?: string | null
+          regime_probs?: Json | null
+          rejection_reason?: string
+          scan_run_id?: string | null
+          strategy?: string | null
+          ticker?: string
+        }
+        Relationships: []
+      }
       scan_runs: {
         Row: {
           error: string | null
@@ -976,17 +1239,24 @@ export type Database = {
           entry_price: number
           entry_thesis: string | null
           exit_date: string | null
+          exit_efficiency: number | null
           exit_price: number | null
           exit_reason: string | null
           explanation: string | null
+          feature_snapshot: Json | null
           id: string
           macro_label: string | null
           macro_score: number | null
+          mae_pct: number | null
           max_adverse_excursion_pct: number | null
           max_favorable_excursion_pct: number | null
           meta_score: number | null
+          mfe_pct: number | null
+          model_version_id: string | null
           realized_pnl_pct: number | null
+          realized_rr: number | null
           regime: string | null
+          regime_probs: Json | null
           si_velocity: number | null
           signal_id: string | null
           signal_type: string
@@ -1010,17 +1280,24 @@ export type Database = {
           entry_price: number
           entry_thesis?: string | null
           exit_date?: string | null
+          exit_efficiency?: number | null
           exit_price?: number | null
           exit_reason?: string | null
           explanation?: string | null
+          feature_snapshot?: Json | null
           id?: string
           macro_label?: string | null
           macro_score?: number | null
+          mae_pct?: number | null
           max_adverse_excursion_pct?: number | null
           max_favorable_excursion_pct?: number | null
           meta_score?: number | null
+          mfe_pct?: number | null
+          model_version_id?: string | null
           realized_pnl_pct?: number | null
+          realized_rr?: number | null
           regime?: string | null
+          regime_probs?: Json | null
           si_velocity?: number | null
           signal_id?: string | null
           signal_type: string
@@ -1044,17 +1321,24 @@ export type Database = {
           entry_price?: number
           entry_thesis?: string | null
           exit_date?: string | null
+          exit_efficiency?: number | null
           exit_price?: number | null
           exit_reason?: string | null
           explanation?: string | null
+          feature_snapshot?: Json | null
           id?: string
           macro_label?: string | null
           macro_score?: number | null
+          mae_pct?: number | null
           max_adverse_excursion_pct?: number | null
           max_favorable_excursion_pct?: number | null
           meta_score?: number | null
+          mfe_pct?: number | null
+          model_version_id?: string | null
           realized_pnl_pct?: number | null
+          realized_rr?: number | null
           regime?: string | null
+          regime_probs?: Json | null
           si_velocity?: number | null
           signal_id?: string | null
           signal_type?: string
@@ -1249,6 +1533,116 @@ export type Database = {
           user_id?: string
         }
         Relationships: []
+      }
+      user_archetypes: {
+        Row: {
+          archetype_key: string
+          centroid: Json
+          created_at: string
+          default_feature_bias: Json
+          default_filter_threshold: number
+          default_regime_bias: Json
+          default_sizing_scalar: number
+          default_strategy_bias: Json
+          description: string | null
+          display_name: string
+          id: string
+          sample_size: number
+          updated_at: string
+        }
+        Insert: {
+          archetype_key: string
+          centroid?: Json
+          created_at?: string
+          default_feature_bias?: Json
+          default_filter_threshold?: number
+          default_regime_bias?: Json
+          default_sizing_scalar?: number
+          default_strategy_bias?: Json
+          description?: string | null
+          display_name: string
+          id?: string
+          sample_size?: number
+          updated_at?: string
+        }
+        Update: {
+          archetype_key?: string
+          centroid?: Json
+          created_at?: string
+          default_feature_bias?: Json
+          default_filter_threshold?: number
+          default_regime_bias?: Json
+          default_sizing_scalar?: number
+          default_strategy_bias?: Json
+          description?: string | null
+          display_name?: string
+          id?: string
+          sample_size?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      user_model_state: {
+        Row: {
+          archetype_key: string | null
+          beta_binomial_priors: Json
+          consistency_score: number | null
+          created_at: string
+          feature_bias: Json
+          filter_threshold: number
+          last_online_update_at: string | null
+          last_trained_at: string | null
+          regime_bias: Json
+          sample_size: number
+          shrinkage_k: number
+          sizing_scalar: number
+          strategy_bias: Json
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          archetype_key?: string | null
+          beta_binomial_priors?: Json
+          consistency_score?: number | null
+          created_at?: string
+          feature_bias?: Json
+          filter_threshold?: number
+          last_online_update_at?: string | null
+          last_trained_at?: string | null
+          regime_bias?: Json
+          sample_size?: number
+          shrinkage_k?: number
+          sizing_scalar?: number
+          strategy_bias?: Json
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          archetype_key?: string | null
+          beta_binomial_priors?: Json
+          consistency_score?: number | null
+          created_at?: string
+          feature_bias?: Json
+          filter_threshold?: number
+          last_online_update_at?: string | null
+          last_trained_at?: string | null
+          regime_bias?: Json
+          sample_size?: number
+          shrinkage_k?: number
+          sizing_scalar?: number
+          strategy_bias?: Json
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "user_model_state_archetype_key_fkey"
+            columns: ["archetype_key"]
+            isOneToOne: false
+            referencedRelation: "user_archetypes"
+            referencedColumns: ["archetype_key"]
+          },
+        ]
       }
       virtual_portfolio_log: {
         Row: {
