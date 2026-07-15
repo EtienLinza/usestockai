@@ -321,13 +321,6 @@ const Backtest = () => {
             <p className="text-xs sm:text-sm text-muted-foreground mb-4">
               Institutional-grade walk-forward backtesting with anti-bias protection
             </p>
-            <div className="mb-4 p-3 rounded-md border bg-primary/5 flex items-center justify-between gap-3 flex-wrap">
-              <div className="text-xs">
-                <div className="font-medium">New: Portfolio Backtest</div>
-                <div className="text-muted-foreground">Run the live autotrader — scan → gates → open → manage — over history across a whole universe.</div>
-              </div>
-              <Button size="sm" variant="outline" onClick={() => navigate("/portfolio-backtest")}>Open portfolio mode →</Button>
-            </div>
             <BacktestUsageBanner />
           </motion.div>
 
