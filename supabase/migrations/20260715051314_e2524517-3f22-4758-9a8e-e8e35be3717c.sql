@@ -1,0 +1,1 @@
+DROP TABLE IF EXISTS public.backtest_portfolio_jobs CASCADE; DROP TABLE IF EXISTS public.backtest_bars_cache CASCADE;
