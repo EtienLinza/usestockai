@@ -101,7 +101,7 @@ serve(async (req) => {
 
     const { data: closed, error } = await supabase
       .from("signal_outcomes")
-      .select("conviction, realized_pnl_pct, strategy, regime, signal_type, ticker, entry_date, max_favorable_excursion_pct, max_adverse_excursion_pct")
+      .select("conviction, realized_pnl_pct, strategy, regime, signal_type, ticker, entry_date, max_favorable_excursion_pct, max_adverse_excursion_pct, feature_snapshot, regime_probs")
       .eq("status", "closed")
       .gte("entry_date", sinceISO)
       .limit(10000);
