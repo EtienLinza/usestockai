@@ -3,6 +3,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import { recordHeartbeat } from "../_shared/heartbeat.ts";
 import { requireCronOrUser } from "../_shared/cron-auth.ts";
 import { pav, type IsotonicAnchor } from "../_shared/calibration.ts";
+import { trainEnsemble, type EnsembleInputRow } from "../_shared/ensemble.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
