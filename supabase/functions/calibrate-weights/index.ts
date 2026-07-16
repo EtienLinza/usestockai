@@ -3,6 +3,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import { recordHeartbeat } from "../_shared/heartbeat.ts";
 import { requireCronOrUser } from "../_shared/cron-auth.ts";
 import { pav, type IsotonicAnchor } from "../_shared/calibration.ts";
+import { trainEnsemble, type EnsembleInputRow } from "../_shared/ensemble.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -41,6 +42,8 @@ interface OutcomeRow {
   entry_date: string | null;
   max_favorable_excursion_pct: number | null;
   max_adverse_excursion_pct: number | null;
+  feature_snapshot: Record<string, unknown> | null;
+  regime_probs: Record<string, number> | null;
 }
 
 // Per-(strategy × regime) tilt requires fewer samples since the cell is narrower
@@ -98,7 +101,7 @@ serve(async (req) => {
 
     const { data: closed, error } = await supabase
       .from("signal_outcomes")
-      .select("conviction, realized_pnl_pct, strategy, regime, signal_type, ticker, entry_date, max_favorable_excursion_pct, max_adverse_excursion_pct")
+      .select("conviction, realized_pnl_pct, strategy, regime, signal_type, ticker, entry_date, max_favorable_excursion_pct, max_adverse_excursion_pct, feature_snapshot, regime_probs")
       .eq("status", "closed")
       .gte("entry_date", sinceISO)
       .limit(10000);
@@ -374,6 +377,68 @@ serve(async (req) => {
       };
     }
 
+    // ─── 4) ENSEMBLE (M2 — 4-model stack + iso/Platt + regime-aware meta) ──
+    // Trained only on rows with a non-null feature_snapshot AND a resolved
+    // outcome. Fails soft: if there aren't enough labelled feature vectors
+    // yet (bootstrap phase), we skip the ensemble entirely and the scanner
+    // continues consuming the legacy calibration_curve.
+    function flattenFeatures(obj: Record<string, unknown>, prefix = ""): Record<string, number> {
+      const out: Record<string, number> = {};
+      for (const [k, v] of Object.entries(obj ?? {})) {
+        const key = prefix ? `${prefix}.${k}` : k;
+        if (v == null) continue;
+        if (typeof v === "number" && Number.isFinite(v)) out[key] = v;
+        else if (typeof v === "boolean") out[key] = v ? 1 : 0;
+        else if (typeof v === "object" && !Array.isArray(v)) {
+          Object.assign(out, flattenFeatures(v as Record<string, unknown>, key));
+        }
+      }
+      return out;
+    }
+    const ensembleInput: EnsembleInputRow[] = rows
+      .filter((r) => r.feature_snapshot && typeof r.feature_snapshot === "object")
+      .map((r) => ({
+        features: {
+          conviction: Number(r.conviction) || 0,
+          ...flattenFeatures(r.feature_snapshot as Record<string, unknown>),
+        },
+        y: (Number(r.realized_pnl_pct ?? 0) > 0 ? 1 : 0) as 0 | 1,
+        regime: r.regime ?? null,
+      }));
+
+    const ensemble = trainEnsemble(ensembleInput, { seed: 20260715, holdoutFrac: 0.2 });
+
+    // ─── 4b) EMPIRICAL SOFT REGIME PRIOR ───────────────────────────────────
+    // Average `regime_probs` across all rows to build a global prior over
+    // regimes. Consumers can use this as a fallback when a fresh bar hasn't
+    // produced regime_probs yet. Also emits per-regime win-rate for context.
+    const regimeProbAgg: Record<string, { sum: number; count: number }> = {};
+    let regimeProbRowCount = 0;
+    for (const r of rows) {
+      if (r.regime_probs && typeof r.regime_probs === "object") {
+        regimeProbRowCount++;
+        for (const [k, v] of Object.entries(r.regime_probs)) {
+          if (typeof v !== "number" || !Number.isFinite(v)) continue;
+          regimeProbAgg[k] ??= { sum: 0, count: 0 };
+          regimeProbAgg[k].sum += v;
+          regimeProbAgg[k].count++;
+        }
+      }
+    }
+    const regime_probabilities: Record<string, { prior: number; empiricalWinRate: number; sample: number }> = {};
+    const totalProbMass = Object.values(regimeProbAgg).reduce((s, v) => s + v.sum, 0);
+    for (const [k, v] of Object.entries(regimeProbAgg)) {
+      const regRows = rows.filter((r) => (r.regime ?? "unknown") === k);
+      const wins = regRows.filter((r) => Number(r.realized_pnl_pct ?? 0) > 0).length;
+      regime_probabilities[k] = {
+        prior: totalProbMass > 0 ? v.sum / totalProbMass : 0,
+        empiricalWinRate: regRows.length ? (wins / regRows.length) * 100 : 0,
+        sample: regRows.length,
+      };
+    }
+
+
+
     // ─── PERSIST ───────────────────────────────────────────────────────────
     // Deactivate previous active row, insert new active row.
     const { error: deactErr } = await supabase
@@ -396,6 +461,18 @@ serve(async (req) => {
         strategy_regime_tilts,
         walkForwardWeights: { "0-30d": 2.0, "30-60d": 1.5, "60-90d": 1.0 },
         tickerCalibrationCount: Object.keys(ticker_calibration).length,
+        ensemble: ensemble
+          ? {
+              trainedAt: ensemble.training.trainedAt,
+              sampleSize: ensemble.training.sampleSize,
+              featureNames: ensemble.featureNames,
+              holdoutReport: ensemble.training.holdoutReport,
+              perModel: ensemble.training.perModel,
+              regimeMetaCount: Object.keys(ensemble.regimeMetaWeights ?? {}).length,
+            }
+          : { skipped: true, reason: `insufficient labelled feature snapshots (${ensembleInput.length})` },
+        regime_probabilities,
+        regime_prob_row_count: regimeProbRowCount,
         thresholds: {
           MIN_SAMPLES_BUCKET, MIN_SAMPLES_STRATEGY, MIN_SAMPLES_REGIME,
           MIN_SAMPLES_STRATEGY_REGIME, MIN_SAMPLES_EXIT, MIN_SAMPLES_TICKER,
@@ -412,11 +489,60 @@ serve(async (req) => {
       .single();
     if (insErr) throw insErr;
 
+    // Register the ensemble as a challenger in model_versions. The
+    // champion/challenger promotion logic lands in M5; for now every
+    // successful train drops a new challenger row that shadow-mode
+    // consumers can pick up. The full coefficient blob lives here so we
+    // never need to re-train to roll forward or back.
+    let modelVersionId: string | null = null;
+    if (ensemble) {
+      const { data: mv, error: mvErr } = await supabase
+        .from("model_versions")
+        .insert({
+          model_kind: "ensemble",
+          status: "challenger",
+          training_window: `${WINDOW_DAYS}d`,
+          feature_list: ensemble.featureNames,
+          hyperparams: {
+            baseModels: ["logistic", "naive_bayes", "ridge", "tree_d3"],
+            meta: "logistic_stacked",
+            calibrator: "isotonic_then_platt",
+            seed: 20260715,
+            holdoutFrac: 0.2,
+          },
+          coefficients: {
+            featureMeans: ensemble.featureMeans,
+            featureStds: ensemble.featureStds,
+            logistic: ensemble.logistic,
+            nb: ensemble.nb,
+            ridge: ensemble.ridge,
+            tree: ensemble.tree,
+            meta: ensemble.meta,
+            isotonic: ensemble.isotonic,
+            platt: ensemble.platt,
+            regimeMetaWeights: ensemble.regimeMetaWeights,
+          },
+          validation_metrics: {
+            holdout: ensemble.training.holdoutReport,
+            perModel: ensemble.training.perModel,
+            featureSampleSize: ensemble.training.featureSampleSize,
+          },
+          notes: {
+            strategy_weights_id: inserted?.id,
+            regime_probabilities,
+          },
+        })
+        .select("id")
+        .single();
+      if (mvErr) console.error("model_versions insert err:", mvErr);
+      else modelVersionId = mv?.id ?? null;
+    }
+
     await recordHeartbeat(
       "calibrate-weights",
       startedAt,
       "ok",
-      `samples=${sampleSize} window=${WINDOW_DAYS}d`,
+      `samples=${sampleSize} window=${WINDOW_DAYS}d ensemble=${ensemble ? "ok" : "skip"}`,
     );
 
     return new Response(JSON.stringify({
@@ -430,6 +556,16 @@ serve(async (req) => {
       regime_floors: regimeFloors,
       exit_calibration,
       ticker_calibration_count: Object.keys(ticker_calibration).length,
+      ensemble: ensemble
+        ? {
+            modelVersionId,
+            sampleSize: ensemble.training.sampleSize,
+            holdoutReport: ensemble.training.holdoutReport,
+            featureCount: ensemble.featureNames.length,
+            regimeMetaCount: Object.keys(ensemble.regimeMetaWeights ?? {}).length,
+          }
+        : { skipped: true },
+      regime_probabilities,
     }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
   } catch (e: any) {
