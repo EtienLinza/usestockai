@@ -449,6 +449,22 @@ export function trainEnsemble(
   }
   const meta = fitLogistic(oof, { l2: 0.2, iters: 300 }) ?? { w: [0.25, 0.25, 0.25, 0.25], b: 0 };
 
+  // Per-regime meta refits: momentum regimes may lean on the tree, mean-reverting on NB.
+  const regimeMinSamples = opts.regimeMinSamples ?? 60;
+  const trainOrigIdx: number[] = [];
+  for (let i = 0; i < idx.length; i++) if (!holdIdx.has(idx[i])) trainOrigIdx.push(idx[i]);
+  const regimeMetaWeights: Record<string, number[]> = {};
+  const regimeGroups: Record<string, Row[]> = {};
+  for (let i = 0; i < oof.length; i++) {
+    const reg = regimes[trainOrigIdx[i]] ?? "unknown";
+    (regimeGroups[reg] ??= []).push(oof[i]);
+  }
+  for (const [reg, rs] of Object.entries(regimeGroups)) {
+    if (rs.length < regimeMinSamples) continue;
+    const rm = fitLogistic(rs, { l2: 0.3, iters: 250 });
+    if (rm) regimeMetaWeights[reg] = [...rm.w, rm.b];
+  }
+
   // Score holdout via base models + meta
   const holdScores: number[] = Zhold.map((r) => {
     const bx = [
