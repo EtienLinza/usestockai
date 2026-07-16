@@ -501,6 +501,7 @@ export function trainEnsemble(
     featureStds: std.std,
     logistic, nb, ridge, tree, meta,
     isotonic, platt,
+    regimeMetaWeights,
     training: {
       trainedAt: new Date().toISOString(),
       sampleSize: rows.length,
@@ -514,8 +515,14 @@ export function trainEnsemble(
 /**
  * Consumer-side prediction. Returns the calibrated ensemble probability in [0,1].
  * Missing features fall back to the training mean (i.e. standardized 0).
+ * If `regime` is provided and a per-regime meta was learned, use it.
+ * If `regimeProbs` is provided, blend meta outputs by regime probability.
  */
-export function predictEnsemble(m: EnsembleModel, features: Record<string, number>): number {
+export function predictEnsemble(
+  m: EnsembleModel,
+  features: Record<string, number>,
+  ctx: { regime?: string | null; regimeProbs?: Record<string, number> | null } = {},
+): number {
   const x = m.featureNames.map((k, j) => {
     const v = features[k];
     if (typeof v === "number" && Number.isFinite(v)) {
@@ -529,7 +536,31 @@ export function predictEnsemble(m: EnsembleModel, features: Record<string, numbe
     m.ridge ? predictRidge(m.ridge, x) : 0.5,
     m.tree ? predictTree(m.tree, x) : 0.5,
   ];
-  const raw = predictLogistic(m.meta, bx);
+  const applyMeta = (weights: number[]) => {
+    // weights layout matches [w0,w1,w2,w3,b]
+    let z = weights[weights.length - 1];
+    for (let j = 0; j < bx.length; j++) z += weights[j] * bx[j];
+    return sigmoid(z);
+  };
+  const globalMetaW = [...m.meta.w, m.meta.b];
+
+  let raw: number;
+  const rMW = m.regimeMetaWeights ?? {};
+  if (ctx.regimeProbs && Object.keys(ctx.regimeProbs).length) {
+    let num = 0, den = 0;
+    for (const [reg, p] of Object.entries(ctx.regimeProbs)) {
+      if (!(p > 0)) continue;
+      const w = rMW[reg] ?? globalMetaW;
+      num += p * applyMeta(w);
+      den += p;
+    }
+    raw = den > 0 ? num / den : applyMeta(globalMetaW);
+  } else if (ctx.regime && rMW[ctx.regime]) {
+    raw = applyMeta(rMW[ctx.regime]);
+  } else {
+    raw = applyMeta(globalMetaW);
+  }
   const iso = applyIso(m.isotonic, raw);
   return applyPlatt(m.platt, iso);
 }
+
