@@ -42,6 +42,8 @@ interface OutcomeRow {
   entry_date: string | null;
   max_favorable_excursion_pct: number | null;
   max_adverse_excursion_pct: number | null;
+  feature_snapshot: Record<string, unknown> | null;
+  regime_probs: Record<string, number> | null;
 }
 
 // Per-(strategy × regime) tilt requires fewer samples since the cell is narrower
