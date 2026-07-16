@@ -397,12 +397,13 @@ function buildFeatureMatrix(input: EnsembleInputRow[], minSupport = 30) {
  */
 export function trainEnsemble(
   input: EnsembleInputRow[],
-  opts: { seed?: number; holdoutFrac?: number } = {},
+  opts: { seed?: number; holdoutFrac?: number; regimeMinSamples?: number } = {},
 ): EnsembleModel | null {
   if (input.length < 60) return null;
   const built = buildFeatureMatrix(input);
   if (!built || built.featureNames.length < 3) return null;
   const { rows, featureNames, featureSampleSize } = built;
+  const regimes = input.map((r) => (r.regime ?? "unknown"));
 
   // Deterministic shuffle + holdout split
   const rand = mulberry32(opts.seed ?? 1337);
