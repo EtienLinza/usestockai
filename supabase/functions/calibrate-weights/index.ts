@@ -461,6 +461,18 @@ serve(async (req) => {
         strategy_regime_tilts,
         walkForwardWeights: { "0-30d": 2.0, "30-60d": 1.5, "60-90d": 1.0 },
         tickerCalibrationCount: Object.keys(ticker_calibration).length,
+        ensemble: ensemble
+          ? {
+              trainedAt: ensemble.training.trainedAt,
+              sampleSize: ensemble.training.sampleSize,
+              featureNames: ensemble.featureNames,
+              holdoutReport: ensemble.training.holdoutReport,
+              perModel: ensemble.training.perModel,
+              regimeMetaCount: Object.keys(ensemble.regimeMetaWeights ?? {}).length,
+            }
+          : { skipped: true, reason: `insufficient labelled feature snapshots (${ensembleInput.length})` },
+        regime_probabilities,
+        regime_prob_row_count: regimeProbRowCount,
         thresholds: {
           MIN_SAMPLES_BUCKET, MIN_SAMPLES_STRATEGY, MIN_SAMPLES_REGIME,
           MIN_SAMPLES_STRATEGY_REGIME, MIN_SAMPLES_EXIT, MIN_SAMPLES_TICKER,
@@ -477,11 +489,60 @@ serve(async (req) => {
       .single();
     if (insErr) throw insErr;
 
+    // Register the ensemble as a challenger in model_versions. The
+    // champion/challenger promotion logic lands in M5; for now every
+    // successful train drops a new challenger row that shadow-mode
+    // consumers can pick up. The full coefficient blob lives here so we
+    // never need to re-train to roll forward or back.
+    let modelVersionId: string | null = null;
+    if (ensemble) {
+      const { data: mv, error: mvErr } = await supabase
+        .from("model_versions")
+        .insert({
+          model_kind: "ensemble",
+          status: "challenger",
+          training_window: `${WINDOW_DAYS}d`,
+          feature_list: ensemble.featureNames,
+          hyperparams: {
+            baseModels: ["logistic", "naive_bayes", "ridge", "tree_d3"],
+            meta: "logistic_stacked",
+            calibrator: "isotonic_then_platt",
+            seed: 20260715,
+            holdoutFrac: 0.2,
+          },
+          coefficients: {
+            featureMeans: ensemble.featureMeans,
+            featureStds: ensemble.featureStds,
+            logistic: ensemble.logistic,
+            nb: ensemble.nb,
+            ridge: ensemble.ridge,
+            tree: ensemble.tree,
+            meta: ensemble.meta,
+            isotonic: ensemble.isotonic,
+            platt: ensemble.platt,
+            regimeMetaWeights: ensemble.regimeMetaWeights,
+          },
+          validation_metrics: {
+            holdout: ensemble.training.holdoutReport,
+            perModel: ensemble.training.perModel,
+            featureSampleSize: ensemble.training.featureSampleSize,
+          },
+          notes: {
+            strategy_weights_id: inserted?.id,
+            regime_probabilities,
+          },
+        })
+        .select("id")
+        .single();
+      if (mvErr) console.error("model_versions insert err:", mvErr);
+      else modelVersionId = mv?.id ?? null;
+    }
+
     await recordHeartbeat(
       "calibrate-weights",
       startedAt,
       "ok",
-      `samples=${sampleSize} window=${WINDOW_DAYS}d`,
+      `samples=${sampleSize} window=${WINDOW_DAYS}d ensemble=${ensemble ? "ok" : "skip"}`,
     );
 
     return new Response(JSON.stringify({
@@ -495,6 +556,16 @@ serve(async (req) => {
       regime_floors: regimeFloors,
       exit_calibration,
       ticker_calibration_count: Object.keys(ticker_calibration).length,
+      ensemble: ensemble
+        ? {
+            modelVersionId,
+            sampleSize: ensemble.training.sampleSize,
+            holdoutReport: ensemble.training.holdoutReport,
+            featureCount: ensemble.featureNames.length,
+            regimeMetaCount: Object.keys(ensemble.regimeMetaWeights ?? {}).length,
+          }
+        : { skipped: true },
+      regime_probabilities,
     }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
   } catch (e: any) {
