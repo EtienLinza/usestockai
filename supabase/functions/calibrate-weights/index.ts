@@ -377,6 +377,68 @@ serve(async (req) => {
       };
     }
 
+    // ─── 4) ENSEMBLE (M2 — 4-model stack + iso/Platt + regime-aware meta) ──
+    // Trained only on rows with a non-null feature_snapshot AND a resolved
+    // outcome. Fails soft: if there aren't enough labelled feature vectors
+    // yet (bootstrap phase), we skip the ensemble entirely and the scanner
+    // continues consuming the legacy calibration_curve.
+    function flattenFeatures(obj: Record<string, unknown>, prefix = ""): Record<string, number> {
+      const out: Record<string, number> = {};
+      for (const [k, v] of Object.entries(obj ?? {})) {
+        const key = prefix ? `${prefix}.${k}` : k;
+        if (v == null) continue;
+        if (typeof v === "number" && Number.isFinite(v)) out[key] = v;
+        else if (typeof v === "boolean") out[key] = v ? 1 : 0;
+        else if (typeof v === "object" && !Array.isArray(v)) {
+          Object.assign(out, flattenFeatures(v as Record<string, unknown>, key));
+        }
+      }
+      return out;
+    }
+    const ensembleInput: EnsembleInputRow[] = rows
+      .filter((r) => r.feature_snapshot && typeof r.feature_snapshot === "object")
+      .map((r) => ({
+        features: {
+          conviction: Number(r.conviction) || 0,
+          ...flattenFeatures(r.feature_snapshot as Record<string, unknown>),
+        },
+        y: (Number(r.realized_pnl_pct ?? 0) > 0 ? 1 : 0) as 0 | 1,
+        regime: r.regime ?? null,
+      }));
+
+    const ensemble = trainEnsemble(ensembleInput, { seed: 20260715, holdoutFrac: 0.2 });
+
+    // ─── 4b) EMPIRICAL SOFT REGIME PRIOR ───────────────────────────────────
+    // Average `regime_probs` across all rows to build a global prior over
+    // regimes. Consumers can use this as a fallback when a fresh bar hasn't
+    // produced regime_probs yet. Also emits per-regime win-rate for context.
+    const regimeProbAgg: Record<string, { sum: number; count: number }> = {};
+    let regimeProbRowCount = 0;
+    for (const r of rows) {
+      if (r.regime_probs && typeof r.regime_probs === "object") {
+        regimeProbRowCount++;
+        for (const [k, v] of Object.entries(r.regime_probs)) {
+          if (typeof v !== "number" || !Number.isFinite(v)) continue;
+          regimeProbAgg[k] ??= { sum: 0, count: 0 };
+          regimeProbAgg[k].sum += v;
+          regimeProbAgg[k].count++;
+        }
+      }
+    }
+    const regime_probabilities: Record<string, { prior: number; empiricalWinRate: number; sample: number }> = {};
+    const totalProbMass = Object.values(regimeProbAgg).reduce((s, v) => s + v.sum, 0);
+    for (const [k, v] of Object.entries(regimeProbAgg)) {
+      const regRows = rows.filter((r) => (r.regime ?? "unknown") === k);
+      const wins = regRows.filter((r) => Number(r.realized_pnl_pct ?? 0) > 0).length;
+      regime_probabilities[k] = {
+        prior: totalProbMass > 0 ? v.sum / totalProbMass : 0,
+        empiricalWinRate: regRows.length ? (wins / regRows.length) * 100 : 0,
+        sample: regRows.length,
+      };
+    }
+
+
+
     // ─── PERSIST ───────────────────────────────────────────────────────────
     // Deactivate previous active row, insert new active row.
     const { error: deactErr } = await supabase
