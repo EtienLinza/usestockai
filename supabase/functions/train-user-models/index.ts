@@ -128,7 +128,7 @@ serve(async (req) => {
       const userId = s.user_id as string;
       const { data: trades } = await supabase
         .from("virtual_positions")
-        .select("entry_strategy, entry_conviction, entry_profile, entry_price, exit_price, pnl, closed_at")
+        .select("entry_strategy, entry_conviction, entry_profile, entry_price, exit_price, pnl, created_at, closed_at")
         .eq("user_id", userId)
         .eq("status", "closed")
         .gte("closed_at", sinceIso)
@@ -147,9 +147,15 @@ serve(async (req) => {
       })).filter((t) => Number.isFinite(t.pnl_pct));
 
       const wins = converted.filter((t) => t.pnl_pct > 0).length;
+
+      // Real hold days from created_at → closed_at when both present, else fallback.
       const holdDays = closedForUser
-        .filter((r) => r.closed_at)
-        .map(() => 5); // hold days not tracked precisely on this table; use nominal 5
+        .filter((r) => r.closed_at && r.created_at)
+        .map((r) => {
+          const dt = (new Date(r.closed_at).getTime() - new Date(r.created_at).getTime()) / (24 * 3600 * 1000);
+          return Number.isFinite(dt) && dt > 0 ? dt : 0;
+        })
+        .filter((d) => d > 0 && d < 365);
 
       const ctx: UserContextFeatures = {
         starting_nav: Number(s.starting_nav ?? 10000),
@@ -205,7 +211,8 @@ serve(async (req) => {
     }
 
     const ms = Date.now() - started;
-    await recordHeartbeat(supabase, "train-user-models", { fitted, cold_start: coldStart, skipped, ms });
+    await recordHeartbeat("train-user-models", started, "ok",
+      `fitted=${fitted} cold=${coldStart} skipped=${skipped}`);
     return new Response(JSON.stringify({
       ok: true,
       global_win_rate: Math.round(globalWinRate * 1000) / 10,
@@ -216,6 +223,7 @@ serve(async (req) => {
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error("[train-user-models] fatal:", msg);
+    await recordHeartbeat("train-user-models", started, "error", msg);
     return new Response(JSON.stringify({ error: msg }), {
       status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
