@@ -109,7 +109,7 @@ export function featureVector(f: UserContextFeatures): number[] {
   return FEATURE_ORDER.map((k) => Number(f[k]) || 0);
 }
 
-/** Nearest-archetype by squared distance in a log-scaled feature space. */
+/** Nearest-archetype by squared distance in the normalized feature space. */
 export function assignArchetype(
   f: UserContextFeatures,
   archetypes: ArchetypeRow[],
@@ -119,10 +119,25 @@ export function assignArchetype(
   let best: ArchetypeRow | null = null;
   let bestDist = Infinity;
   for (const a of archetypes) {
-    const c = a.centroid as Record<string, number>;
+    // Centroids are stored as raw UserContextFeatures; normalize to the
+    // same [0,1]-ish space before computing distance so the metric is
+    // consistent with the input vector.
+    const c = a.centroid as Record<string, unknown>;
+    const asCtx: UserContextFeatures = {
+      starting_nav: Number(c.starting_nav) || 0,
+      risk_profile_ord: Number(c.risk_profile_ord) || 0,
+      max_positions: Number(c.max_positions) || 0,
+      max_single_name_pct: Number(c.max_single_name_pct) || 0,
+      min_conviction: Number(c.min_conviction) || 0,
+      avg_hold_days: Number(c.avg_hold_days) || 0,
+      trade_frequency: Number(c.trade_frequency) || 0,
+      win_rate: Number(c.win_rate) || 0,
+      avg_return_pct: Number(c.avg_return_pct) || 0,
+    };
+    const cn = normalizeFeatures(asCtx);
     let d = 0;
-    for (const k of FEATURE_ORDER) {
-      const diff = (v[FEATURE_ORDER.indexOf(k)]) - (Number(c[k]) || 0);
+    for (let i = 0; i < v.length; i++) {
+      const diff = v[i] - cn[i];
       d += diff * diff;
     }
     if (d < bestDist) { bestDist = d; best = a; }
