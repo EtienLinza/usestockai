@@ -55,6 +55,9 @@ verify_jwt = false
 [functions.train-meta-labeler]
 verify_jwt = false
 
+[functions.train-user-models]
+verify_jwt = false
+
 [functions.refresh-short-interest]
 verify_jwt = false
 
