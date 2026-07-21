@@ -190,10 +190,23 @@ serve(async (req) => {
     }
 
     const signals: any[] = [];
+    const rejected: any[] = [];
+    const pushReject = (ticker: string, reason: string, snap: Record<string, unknown>, extras: Record<string, unknown> = {}) => {
+      rejected.push({
+        ticker,
+        rejection_reason: reason,
+        feature_snapshot: snap,
+        regime: marketRegime ?? null,
+        ...extras,
+      });
+    };
     for (const ticker of tickers) {
       const data = cache.get(ticker);
       if (!data || data.close.length < 200) continue;
-      if (blackoutSet.has(ticker)) continue;
+      if (blackoutSet.has(ticker)) {
+        pushReject(ticker, "earnings_blackout", { last_close: data.close[data.close.length - 1] });
+        continue;
+      }
       try {
         const danelfin = danelfinScores[ticker.toUpperCase()] ?? null;
         const epsRev = epsRevisionScores[ticker.toUpperCase()] ?? null;
@@ -239,14 +252,22 @@ serve(async (req) => {
 
         // Volume z-score adj is applied inside evaluateSignal (Phase 1 #2,
         // moved into the unified engine so backtest matches live exactly).
+        const entryPx = data.close[data.close.length - 1];
+        const snapBase = {
+          strategy, regime, profile, atr_pct: atrPct, annualized_vol: annualizedVol,
+          entry_price: entryPx, macro_score: macro?.score ?? null,
+          sector_bonus: sectorMod.bonus, danelfin_score: sig.danelfinScore ?? null,
+          eps_revision_score: sig.epsRevisionScore ?? null,
+          side: sig.decision === "BUY" ? "long" : "short",
+        };
 
         // Pre-market overnight-gap gating + bonus.
         if (mode === "premarket" && gapMap.has(ticker)) {
           const gap = gapMap.get(ticker)!;            // signed fraction (e.g. 0.025 = +2.5%)
           const dir = sig.decision === "BUY" ? 1 : -1;
           const sameDir = gap * dir;                  // positive when gap aligns with thesis
-          if (sameDir > 0.04) continue;               // skip — already extended
-          if (sameDir < -0.01) continue;              // skip — thesis invalidated
+          if (sameDir > 0.04) { pushReject(ticker, "gap_extended", { ...snapBase, gap }, { strategy, raw_conviction: sig.conviction, calibrated_conviction: conviction, entry_price: entryPx }); continue; }
+          if (sameDir < -0.01) { pushReject(ticker, "gap_invalidated", { ...snapBase, gap }, { strategy, raw_conviction: sig.conviction, calibrated_conviction: conviction, entry_price: entryPx }); continue; }
           if (sameDir >= 0.015) {
             conviction = Math.max(0, Math.min(100, Math.round(conviction + 3)));
           }
@@ -256,7 +277,12 @@ serve(async (req) => {
         const adaptiveFloor = weights.regimeFloors[regime]?.floor ?? baselineFloor;
         const macroAdj = macro ? macroFloorAdjust(macro.score) : 0;
         const minConviction = Math.max(50, Math.min(90, adaptiveFloor + macroAdj));
-        if (conviction < minConviction) continue;
+        if (conviction < minConviction) {
+          pushReject(ticker, "below_conviction_floor",
+            { ...snapBase, floor: minConviction },
+            { strategy, raw_conviction: sig.conviction, calibrated_conviction: conviction, entry_price: entryPx, horizon_bars: 10 });
+          continue;
+        }
 
         const qualityScore = annualizedVol > 0 ? conviction / annualizedVol : conviction;
 
@@ -327,7 +353,7 @@ serve(async (req) => {
     // C-2 FIX: persist updated cooldown state before responding.
     await persistTrackerCacheToDB(supabase);
 
-    return new Response(JSON.stringify({ signals }), {
+    return new Response(JSON.stringify({ signals, rejected }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (e) {
