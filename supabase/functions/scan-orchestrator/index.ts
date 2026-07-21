@@ -285,6 +285,7 @@ serve(async (req) => {
     };
 
     const allSignals: any[] = [];
+    const allRejected: any[] = [];
     let processed = 0;
     for (let i = 0; i < chunks.length; i += WORKER_PARALLELISM) {
       const wave = chunks.slice(i, i + WORKER_PARALLELISM);
@@ -293,13 +294,37 @@ serve(async (req) => {
           body: { ...workerPayloadBase, tickers: chunk },
           headers: cronSecretHeader(),
         });
-        if (error) { console.error("worker err", error); return []; }
-        return (data?.signals ?? []) as any[];
+        if (error) { console.error("worker err", error); return { signals: [], rejected: [] }; }
+        return { signals: (data?.signals ?? []) as any[], rejected: (data?.rejected ?? []) as any[] };
       }));
-      for (const sigs of results) allSignals.push(...sigs);
+      for (const r of results) { allSignals.push(...r.signals); allRejected.push(...r.rejected); }
       processed += wave.reduce((a, c) => a + c.length, 0);
       await setProgress({ processed, signals_found: allSignals.length });
     }
+
+    // Persist rejected candidates for counterfactual learning (M4). Sampled
+    // when volume is large so we don't overload the table on 500-ticker scans.
+    try {
+      const MAX_REJECTS = 400;
+      const sample = allRejected.length > MAX_REJECTS
+        ? allRejected.sort(() => Math.random() - 0.5).slice(0, MAX_REJECTS)
+        : allRejected;
+      if (sample.length > 0) {
+        const rejRows = sample.map((r: any) => ({
+          scan_run_id: runId, ticker: r.ticker, strategy: r.strategy ?? null,
+          regime: r.regime ?? null,
+          raw_conviction: r.raw_conviction ?? null,
+          calibrated_conviction: r.calibrated_conviction ?? null,
+          rejection_reason: r.rejection_reason,
+          feature_snapshot: r.feature_snapshot ?? {},
+          entry_price: r.entry_price ?? null,
+          horizon_bars: r.horizon_bars ?? 10,
+        }));
+        const { error: re } = await supabase.from("rejected_signals").insert(rejRows);
+        if (re) console.error("rejected_signals insert err:", re.message);
+        else console.log(`rejected_signals: logged ${rejRows.length} candidates`);
+      }
+    } catch (e) { console.error("reject logging:", e); }
 
     // ─── 5. Persist signals + outcomes ────────────────────────────────────
     allSignals.sort((a, b) => (b.qualityScore ?? 0) - (a.qualityScore ?? 0));
