@@ -151,119 +151,150 @@ const AutotraderLog = () => {
               </p>
             </Card>
           ) : (
-            <Card className="glass-card overflow-hidden">
-              <div className="divide-y divide-border/50">
-                {rows.map((r) => {
-                  const isScanRollup = r.ticker === "SCAN" && r.action === "HOLD";
-                  const m = isScanRollup
-                    ? { label: "Scan", cls: "text-muted-foreground border-muted-foreground/20 bg-muted/30", Icon: Radar }
-                    : actionMeta[r.action];
-                  const t = new Date(r.created_at);
-                  const hasSentiment = r.sentiment_score != null;
-                  const headlines = Array.isArray(r.sentiment_headlines) ? r.sentiment_headlines : [];
-                  const isExpanded = expanded.has(r.id);
-                  const tone = hasSentiment ? sentimentTone(Number(r.sentiment_score)) : null;
+            <div className="space-y-6">
+              {Object.entries(
+                rows.reduce<Record<string, LogRow[]>>((acc, r) => {
+                  const d = new Date(r.created_at);
+                  const key = d.toISOString().slice(0, 10);
+                  (acc[key] ||= []).push(r);
+                  return acc;
+                }, {}),
+              )
+                .sort(([a], [b]) => (a < b ? 1 : -1))
+                .map(([dateKey, dayRows]) => {
+                  const dateLabel = new Date(dateKey + "T00:00:00").toLocaleDateString(undefined, {
+                    weekday: "long",
+                    month: "long",
+                    day: "numeric",
+                    year: "numeric",
+                  });
                   return (
-                    <div key={r.id} className="px-5 py-4 hover:bg-muted/20 transition-colors">
-                      <div className="flex items-start gap-4">
-                        <div className={cn("rounded-md border w-9 h-9 flex items-center justify-center flex-shrink-0", m.cls)}>
-                          <m.Icon className="w-4 h-4" />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className="font-mono text-sm font-medium">{isScanRollup ? "AutoTrader" : <TickerLink ticker={r.ticker} />}</span>
-                            <Badge variant="outline" className={cn("text-[10px] uppercase tracking-wide", m.cls)}>
-                              {m.label}
-                            </Badge>
-                            {r.strategy && (
-                              <Badge variant="outline" className="text-[10px] capitalize">
-                                {r.strategy.replace("_", " ")}
-                              </Badge>
-                            )}
-                            {r.conviction != null && (
-                              <span className="text-[10px] font-mono text-muted-foreground">conv {r.conviction}</span>
-                            )}
-                            {hasSentiment && tone && (
-                              <button
-                                type="button"
-                                onClick={() => toggleExpanded(r.id)}
-                                className={cn(
-                                  "inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-mono transition-colors hover:opacity-80",
-                                  tone.cls,
-                                )}
-                                title={`News sentiment: ${tone.label}${r.sentiment_confidence != null ? ` · confidence ${Number(r.sentiment_confidence).toFixed(2)}` : ""}`}
-                              >
-                                <Newspaper className="w-3 h-3" />
-                                <span>
-                                  {Number(r.sentiment_score) > 0 ? "+" : ""}
-                                  {r.sentiment_score}
-                                </span>
-                                {headlines.length > 0 && (
-                                  <ChevronDown
-                                    className={cn(
-                                      "w-3 h-3 transition-transform",
-                                      isExpanded && "rotate-180",
-                                    )}
-                                  />
-                                )}
-                              </button>
-                            )}
-                          </div>
-                          <p className="text-sm text-muted-foreground mt-1 leading-snug">{r.reason ?? "—"}</p>
-                        </div>
-                        <div className="text-right flex-shrink-0">
-                          {r.price != null && (
-                            <div className="font-mono text-sm">${Number(r.price).toFixed(2)}</div>
-                          )}
-                          {r.pnl_pct != null && (
-                            <div className={cn("font-mono text-xs", Number(r.pnl_pct) >= 0 ? "text-success" : "text-destructive")}>
-                              {Number(r.pnl_pct) >= 0 ? "+" : ""}{Number(r.pnl_pct).toFixed(2)}%
-                            </div>
-                          )}
-                          <div className="text-[10px] text-muted-foreground mt-0.5">
-                            {t.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
-                          </div>
-                        </div>
+                    <div key={dateKey} className="space-y-2">
+                      <div className="flex items-center justify-between px-1">
+                        <h2 className="text-xs uppercase tracking-wider text-muted-foreground font-medium">
+                          {dateLabel}
+                        </h2>
+                        <span className="text-[10px] font-mono text-muted-foreground/70">
+                          {dayRows.length} {dayRows.length === 1 ? "event" : "events"}
+                        </span>
                       </div>
-                      <AnimatePresence initial={false}>
-                        {isExpanded && headlines.length > 0 && (
-                          <motion.div
-                            initial={{ opacity: 0, height: 0 }}
-                            animate={{ opacity: 1, height: "auto" }}
-                            exit={{ opacity: 0, height: 0 }}
-                            transition={{ duration: 0.2 }}
-                            className="overflow-hidden"
-                          >
-                            <div className="mt-3 ml-13 pl-4 border-l border-border/60 space-y-1.5">
-                              <div className="text-[10px] uppercase tracking-wider text-muted-foreground/70 mb-1">
-                                Headlines that influenced this decision
-                              </div>
-                              {headlines.slice(0, 6).map((h, i) => (
-                                <a
-                                  key={i}
-                                  href={h.url}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="group flex items-start gap-2 text-xs text-foreground/80 hover:text-primary transition-colors"
-                                >
-                                  <ExternalLink className="w-3 h-3 mt-0.5 flex-shrink-0 opacity-50 group-hover:opacity-100" />
-                                  <span className="flex-1 leading-snug">
-                                    <span>{h.title}</span>
-                                    {h.source && (
-                                      <span className="text-muted-foreground/70 ml-1.5">· {h.source}</span>
+                      <Card className="glass-card overflow-hidden">
+                        <div className="divide-y divide-border/50">
+                          {dayRows.map((r) => {
+                            const isScanRollup = r.ticker === "SCAN" && r.action === "HOLD";
+                            const m = isScanRollup
+                              ? { label: "Scan", cls: "text-muted-foreground border-muted-foreground/20 bg-muted/30", Icon: Radar }
+                              : actionMeta[r.action];
+                            const t = new Date(r.created_at);
+                            const hasSentiment = r.sentiment_score != null;
+                            const headlines = Array.isArray(r.sentiment_headlines) ? r.sentiment_headlines : [];
+                            const isExpanded = expanded.has(r.id);
+                            const tone = hasSentiment ? sentimentTone(Number(r.sentiment_score)) : null;
+                            return (
+                              <div key={r.id} className="px-5 py-4 hover:bg-muted/20 transition-colors">
+                                <div className="flex items-start gap-4">
+                                  <div className={cn("rounded-md border w-9 h-9 flex items-center justify-center flex-shrink-0", m.cls)}>
+                                    <m.Icon className="w-4 h-4" />
+                                  </div>
+                                  <div className="flex-1 min-w-0">
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                      <span className="font-mono text-sm font-medium">{isScanRollup ? "AutoTrader" : <TickerLink ticker={r.ticker} />}</span>
+                                      <Badge variant="outline" className={cn("text-[10px] uppercase tracking-wide", m.cls)}>
+                                        {m.label}
+                                      </Badge>
+                                      {r.strategy && (
+                                        <Badge variant="outline" className="text-[10px] capitalize">
+                                          {r.strategy.replace("_", " ")}
+                                        </Badge>
+                                      )}
+                                      {r.conviction != null && (
+                                        <span className="text-[10px] font-mono text-muted-foreground">conv {r.conviction}</span>
+                                      )}
+                                      {hasSentiment && tone && (
+                                        <button
+                                          type="button"
+                                          onClick={() => toggleExpanded(r.id)}
+                                          className={cn(
+                                            "inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-mono transition-colors hover:opacity-80",
+                                            tone.cls,
+                                          )}
+                                          title={`News sentiment: ${tone.label}${r.sentiment_confidence != null ? ` · confidence ${Number(r.sentiment_confidence).toFixed(2)}` : ""}`}
+                                        >
+                                          <Newspaper className="w-3 h-3" />
+                                          <span>
+                                            {Number(r.sentiment_score) > 0 ? "+" : ""}
+                                            {r.sentiment_score}
+                                          </span>
+                                          {headlines.length > 0 && (
+                                            <ChevronDown
+                                              className={cn(
+                                                "w-3 h-3 transition-transform",
+                                                isExpanded && "rotate-180",
+                                              )}
+                                            />
+                                          )}
+                                        </button>
+                                      )}
+                                    </div>
+                                    <p className="text-sm text-muted-foreground mt-1 leading-snug">{r.reason ?? "—"}</p>
+                                  </div>
+                                  <div className="text-right flex-shrink-0">
+                                    {r.price != null && (
+                                      <div className="font-mono text-sm">${Number(r.price).toFixed(2)}</div>
                                     )}
-                                  </span>
-                                </a>
-                              ))}
-                            </div>
-                          </motion.div>
-                        )}
-                      </AnimatePresence>
+                                    {r.pnl_pct != null && (
+                                      <div className={cn("font-mono text-xs", Number(r.pnl_pct) >= 0 ? "text-success" : "text-destructive")}>
+                                        {Number(r.pnl_pct) >= 0 ? "+" : ""}{Number(r.pnl_pct).toFixed(2)}%
+                                      </div>
+                                    )}
+                                    <div className="text-[10px] font-mono text-muted-foreground mt-0.5">
+                                      {t.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false })}
+                                    </div>
+                                  </div>
+                                </div>
+                                <AnimatePresence initial={false}>
+                                  {isExpanded && headlines.length > 0 && (
+                                    <motion.div
+                                      initial={{ opacity: 0, height: 0 }}
+                                      animate={{ opacity: 1, height: "auto" }}
+                                      exit={{ opacity: 0, height: 0 }}
+                                      transition={{ duration: 0.2 }}
+                                      className="overflow-hidden"
+                                    >
+                                      <div className="mt-3 ml-13 pl-4 border-l border-border/60 space-y-1.5">
+                                        <div className="text-[10px] uppercase tracking-wider text-muted-foreground/70 mb-1">
+                                          Headlines that influenced this decision
+                                        </div>
+                                        {headlines.slice(0, 6).map((h, i) => (
+                                          <a
+                                            key={i}
+                                            href={h.url}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="group flex items-start gap-2 text-xs text-foreground/80 hover:text-primary transition-colors"
+                                          >
+                                            <ExternalLink className="w-3 h-3 mt-0.5 flex-shrink-0 opacity-50 group-hover:opacity-100" />
+                                            <span className="flex-1 leading-snug">
+                                              <span>{h.title}</span>
+                                              {h.source && (
+                                                <span className="text-muted-foreground/70 ml-1.5">· {h.source}</span>
+                                              )}
+                                            </span>
+                                          </a>
+                                        ))}
+                                      </div>
+                                    </motion.div>
+                                  )}
+                                </AnimatePresence>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </Card>
                     </div>
                   );
                 })}
-              </div>
-            </Card>
+            </div>
           )}
         </motion.div>
         </LockedFeature>
