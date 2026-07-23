@@ -501,7 +501,8 @@ serve(async (req) => {
         .insert({
           model_kind: "ensemble",
           status: "challenger",
-          training_window: `${WINDOW_DAYS}d`,
+          training_window_start: sinceISO,
+          training_window_end: new Date().toISOString(),
           feature_list: ensemble.featureNames,
           hyperparams: {
             baseModels: ["logistic", "naive_bayes", "ridge", "tree_d3"],
@@ -509,6 +510,7 @@ serve(async (req) => {
             calibrator: "isotonic_then_platt",
             seed: 20260715,
             holdoutFrac: 0.2,
+            window_days: WINDOW_DAYS,
           },
           coefficients: {
             featureMeans: ensemble.featureMeans,
@@ -527,10 +529,7 @@ serve(async (req) => {
             perModel: ensemble.training.perModel,
             featureSampleSize: ensemble.training.featureSampleSize,
           },
-          notes: {
-            strategy_weights_id: inserted?.id,
-            regime_probabilities,
-          },
+          notes: `strategy_weights_id=${inserted?.id ?? "n/a"}`,
         })
         .select("id")
         .single();

@@ -1178,6 +1178,72 @@ export type Database = {
           },
         ]
       }
+      shadow_predictions: {
+        Row: {
+          calibrated_conviction: number | null
+          created_at: string
+          id: string
+          model_version_id: string
+          outcome_win: boolean | null
+          raw_conviction: number | null
+          realized_pnl_pct: number | null
+          regime: string | null
+          resolved_at: string | null
+          scored_at: string
+          signal_outcome_id: string | null
+          strategy: string | null
+          ticker: string | null
+          would_enter: boolean | null
+        }
+        Insert: {
+          calibrated_conviction?: number | null
+          created_at?: string
+          id?: string
+          model_version_id: string
+          outcome_win?: boolean | null
+          raw_conviction?: number | null
+          realized_pnl_pct?: number | null
+          regime?: string | null
+          resolved_at?: string | null
+          scored_at?: string
+          signal_outcome_id?: string | null
+          strategy?: string | null
+          ticker?: string | null
+          would_enter?: boolean | null
+        }
+        Update: {
+          calibrated_conviction?: number | null
+          created_at?: string
+          id?: string
+          model_version_id?: string
+          outcome_win?: boolean | null
+          raw_conviction?: number | null
+          realized_pnl_pct?: number | null
+          regime?: string | null
+          resolved_at?: string | null
+          scored_at?: string
+          signal_outcome_id?: string | null
+          strategy?: string | null
+          ticker?: string | null
+          would_enter?: boolean | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "shadow_predictions_model_version_id_fkey"
+            columns: ["model_version_id"]
+            isOneToOne: false
+            referencedRelation: "model_versions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "shadow_predictions_signal_outcome_id_fkey"
+            columns: ["signal_outcome_id"]
+            isOneToOne: false
+            referencedRelation: "signal_outcomes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       short_interest_history: {
         Row: {
           created_at: string
