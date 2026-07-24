@@ -155,14 +155,17 @@ const AutotraderLog = () => {
               {Object.entries(
                 rows.reduce<Record<string, LogRow[]>>((acc, r) => {
                   const d = new Date(r.created_at);
-                  const key = d.toISOString().slice(0, 10);
+                  // Group by LOCAL calendar date, not UTC — otherwise late-evening
+                  // trades in the user's timezone get bucketed into the next day.
+                  const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
                   (acc[key] ||= []).push(r);
                   return acc;
                 }, {}),
               )
                 .sort(([a], [b]) => (a < b ? 1 : -1))
                 .map(([dateKey, dayRows]) => {
-                  const dateLabel = new Date(dateKey + "T00:00:00").toLocaleDateString(undefined, {
+                  const [yy, mm, dd] = dateKey.split("-").map(Number);
+                  const dateLabel = new Date(yy, mm - 1, dd).toLocaleDateString(undefined, {
                     weekday: "long",
                     month: "long",
                     day: "numeric",
