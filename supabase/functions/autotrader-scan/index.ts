@@ -404,6 +404,28 @@ function runWinExit(
     }
   }
 
+  // ── +0.5R early trailing arm (CHRW fix) ────────────────────────────────
+  // Even before any partial fires, once unrealized PnL crosses +0.5R we
+  // ratchet the trailing stop up to entry (breakeven). Prevents trades that
+  // stall out mid-move from round-tripping all the way to the hard stop —
+  // e.g. CHRW peaked at +1.8% then walked back to -7.7% because the trail
+  // was dormant until a partial-exit rung was hit. Pure stop ratchet, no
+  // shares closed. Independent of `breakevenRungATR` (ATR-based) so it
+  // fires on any position with a valid initial risk.
+  {
+    const rung = pos.partial_exits_taken ?? 0;
+    if (rung === 0) {
+      const initRisk = inferInitRiskPerShare(pos);
+      if (entry > 0 && initRisk > 0) {
+        const rMult = (isLong ? currentPrice - entry : entry - currentPrice) / initRisk;
+        if (rMult >= 0.5) {
+          const newTrail = isLong ? Math.max(trailing, entry) : Math.min(trailing, entry);
+          if (newTrail !== trailing) trailing = newTrail;
+        }
+      }
+    }
+  }
+
   // ── R-multiple partial-exit ladder (Phase 2 #7) ────────────────────────
   // Scale out `partialScaleOutPct` at +1R, then half of the remainder at +2R,
   // let runner/peak handle the rest. Tightens trailing to breakeven after
