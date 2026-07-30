@@ -1444,7 +1444,30 @@ async function runEntryDecision(
     }
   }
 
-  const effectiveConviction = conviction;
+  // ── Effective conviction (continuous, not binary) ───────────────────────
+  // The meta-label score and the reversal-risk score were pure pass/fail
+  // gates: a 0.31 meta score and a 0.79 meta score sized identically. They
+  // now bend conviction continuously, so marginal setups get real money
+  // behind them only when everything agrees. Both terms stay adaptive —
+  // meta is centred on the live gate.pass threshold, reversal on the
+  // regime-scaled ceiling.
+  let effectiveConviction = conviction;
+  if (metaScore !== null && Number.isFinite(metaScore)) {
+    const metaDelta = Math.max(-8, Math.min(8, (metaScore - gate.pass) * 40));
+    effectiveConviction += metaDelta;
+  }
+  {
+    const rev = reversalRisk.score / Math.max(0.01, envelope.reversalRiskCeiling);
+    effectiveConviction -= Math.max(0, Math.min(6, rev * 6));
+  }
+  effectiveConviction = Math.max(0, Math.min(100, Math.round(effectiveConviction)));
+  if (effectiveConviction < settings.min_conviction) {
+    return {
+      kind: "HOLD",
+      reason: `Effective conviction ${effectiveConviction} (calibrated ${conviction}${metaScore !== null ? `, meta ${metaScore.toFixed(2)}` : ""}, reversal ${reversalRisk.score.toFixed(2)}) < min ${settings.min_conviction}`,
+    };
+  }
+
 
   // Size — apply portfolio-level vol-target scalar (improvement #7) BEFORE
   // single-name and headroom caps so the user-facing caps remain absolute
