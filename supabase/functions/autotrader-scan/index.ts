@@ -933,13 +933,18 @@ interface EntryGuardEnvelope {
   highConvFloor: number;       // conviction threshold for "runner" mode
 }
 
+// Base hard-stop caps tightened (loss autopsy: every losing exit in the last
+// 90d was a hard stop walking 7–13% against entry). Caps stay fully adaptive —
+// regime, conviction and liquidity still widen/narrow around these bases, and
+// an absolute regime-scaled ceiling is applied on top (see stopCapPct below).
 const BASE_ENVELOPE: Record<string, { atr: number; stop: number }> = {
-  momentum: { atr: 0.050, stop: 0.06 },
-  trend:    { atr: 0.060, stop: 0.07 },
-  value:    { atr: 0.040, stop: 0.05 },
-  volatile: { atr: 0.090, stop: 0.10 },
-  index:    { atr: 0.030, stop: 0.04 },
+  momentum: { atr: 0.050, stop: 0.050 },
+  trend:    { atr: 0.060, stop: 0.055 },
+  value:    { atr: 0.040, stop: 0.042 },
+  volatile: { atr: 0.090, stop: 0.075 },
+  index:    { atr: 0.030, stop: 0.030 },
 };
+
 
 function computeEntryGuardEnvelope(args: {
   profile: string;
