@@ -1340,6 +1340,19 @@ async function runEntryDecision(
   }
   const tickAdj = tickerCalibration[ticker.toUpperCase()]?.adjust ?? 0;
   conviction = Math.max(0, Math.min(100, Math.round(conviction + tickAdj)));
+  // ── Uplift cap (asymmetric) ─────────────────────────────────────────────
+  // Calibration may downgrade a signal without limit, but may only *raise* it
+  // a few points. Without this, a favourable strategy tilt × isotonic lift
+  // could manufacture a 94-conviction print from a mediocre 82 setup — which
+  // is exactly how oversized losers got through. Cap adapts to sample depth:
+  // the more trades behind the ticker's calibration, the more lift we allow.
+  {
+    const tickN = Number(tickerCalibration[ticker.toUpperCase()]?.n ?? 0);
+    const maxUplift = tickN >= 30 ? 8 : tickN >= 12 ? 6 : 4;
+    const ceiling = Math.min(100, sig.conviction + maxUplift);
+    if (conviction > ceiling) conviction = ceiling;
+  }
+
 
   if (conviction < settings.min_conviction) {
     return { kind: "HOLD", reason: `Calibrated conviction ${conviction} (raw ${sig.conviction}) < min ${settings.min_conviction}` };
