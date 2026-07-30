@@ -1545,20 +1545,28 @@ async function runEntryDecision(
   }
   // ── Guard #2 (adaptive): Absolute stop-distance cap ────────────────────
   // Clamps hard-stop distance to a regime/conviction/liquidity-adjusted %
-  // of price so an overnight gap through the stop can't blow the risk
-  // budget. envelope.stopCapPct = base 6-10% scaled by envelope. Risk-parity
-  // sizing below raises shares to hold dollar-risk constant when clamped.
+  // of price, now with an absolute ceiling (~3–8%) layered on top so a wide
+  // ATR can't produce a double-digit loss. Risk-parity sizing below raises
+  // shares to hold dollar-risk constant when clamped. A small tolerance band
+  // lets a name whose 0.8·ATR floor sits just above the cap still trade at
+  // that floor (sized down accordingly) instead of being dropped outright.
   const stopCapPct = envelope.stopCapPct;
   const capDist = currentPrice * stopCapPct;
   if (stopDist > capDist) {
     if (capDist < minDist) {
-      return {
-        kind: "HOLD",
-        reason: `Stop-cap collision: 0.8·ATR (${(minDist / currentPrice * 100).toFixed(2)}%) exceeds adaptive ${sig.profile} stop cap ${(stopCapPct * 100).toFixed(2)}% — ATR too wide for regime/liquidity`,
-      };
+      if (minDist <= capDist * 1.25) {
+        stopDist = minDist;
+      } else {
+        return {
+          kind: "HOLD",
+          reason: `Stop-cap collision: 0.8·ATR (${(minDist / currentPrice * 100).toFixed(2)}%) exceeds adaptive ${sig.profile} stop cap ${(stopCapPct * 100).toFixed(2)}% — ATR too wide for regime/liquidity`,
+        };
+      }
+    } else {
+      stopDist = capDist;
     }
-    stopDist = capDist;
   }
+
   const hardStop = isLong ? currentPrice - stopDist : currentPrice + stopDist;
 
   // ── FAT-TAIL GUARD: Risk-parity sizing (ADAPTIVE — Phase 1 sweep) ─────
