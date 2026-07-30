@@ -996,7 +996,16 @@ function computeEntryGuardEnvelope(args: {
   // still can't wave through a 12% ATR name.
   const atrOverrideCeiling = Math.max(base.atr, atrCeiling * 1.35);
 
-  const stopCapPct = base.stop * regimeMult * (0.90 + 0.20 * convBlend) * liqMult;
+  // Adaptive stop cap + an absolute regime/conviction-scaled ceiling. The
+  // ceiling breathes (4.5% in bear_volatile → ~8% for a 95-conv name in
+  // bull_quiet) but no single trade can ever risk a double-digit % move.
+  const rawStopCap = base.stop * regimeMult * (0.90 + 0.20 * convBlend) * liqMult;
+  const absCeiling = Math.max(
+    0.030,
+    Math.min(0.080, 0.065 * regimeMult * (0.90 + 0.25 * convBlend) * liqMult),
+  );
+  const stopCapPct = Math.max(0.018, Math.min(rawStopCap, absCeiling));
+
   const minStopPct = args.currentPrice > 0
     ? (args.atrValue * 0.8) / args.currentPrice
     : 0.005;
