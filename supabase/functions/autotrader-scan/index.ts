@@ -1347,7 +1347,7 @@ async function runEntryDecision(
   // is exactly how oversized losers got through. Cap adapts to sample depth:
   // the more trades behind the ticker's calibration, the more lift we allow.
   {
-    const tickN = Number(tickerCalibration[ticker.toUpperCase()]?.n ?? 0);
+    const tickN = Number((tickerCalibration[ticker.toUpperCase()] as { n?: number } | undefined)?.n ?? 0);
     const maxUplift = tickN >= 30 ? 8 : tickN >= 12 ? 6 : 4;
     const ceiling = Math.min(100, sig.conviction + maxUplift);
     if (conviction > ceiling) conviction = ceiling;
