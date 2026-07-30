@@ -933,13 +933,18 @@ interface EntryGuardEnvelope {
   highConvFloor: number;       // conviction threshold for "runner" mode
 }
 
+// Base hard-stop caps tightened (loss autopsy: every losing exit in the last
+// 90d was a hard stop walking 7–13% against entry). Caps stay fully adaptive —
+// regime, conviction and liquidity still widen/narrow around these bases, and
+// an absolute regime-scaled ceiling is applied on top (see stopCapPct below).
 const BASE_ENVELOPE: Record<string, { atr: number; stop: number }> = {
-  momentum: { atr: 0.050, stop: 0.06 },
-  trend:    { atr: 0.060, stop: 0.07 },
-  value:    { atr: 0.040, stop: 0.05 },
-  volatile: { atr: 0.090, stop: 0.10 },
-  index:    { atr: 0.030, stop: 0.04 },
+  momentum: { atr: 0.050, stop: 0.050 },
+  trend:    { atr: 0.060, stop: 0.055 },
+  value:    { atr: 0.040, stop: 0.042 },
+  volatile: { atr: 0.090, stop: 0.075 },
+  index:    { atr: 0.030, stop: 0.030 },
 };
+
 
 function computeEntryGuardEnvelope(args: {
   profile: string;
@@ -991,7 +996,16 @@ function computeEntryGuardEnvelope(args: {
   // still can't wave through a 12% ATR name.
   const atrOverrideCeiling = Math.max(base.atr, atrCeiling * 1.35);
 
-  const stopCapPct = base.stop * regimeMult * (0.90 + 0.20 * convBlend) * liqMult;
+  // Adaptive stop cap + an absolute regime/conviction-scaled ceiling. The
+  // ceiling breathes (4.5% in bear_volatile → ~8% for a 95-conv name in
+  // bull_quiet) but no single trade can ever risk a double-digit % move.
+  const rawStopCap = base.stop * regimeMult * (0.90 + 0.20 * convBlend) * liqMult;
+  const absCeiling = Math.max(
+    0.030,
+    Math.min(0.080, 0.065 * regimeMult * (0.90 + 0.25 * convBlend) * liqMult),
+  );
+  const stopCapPct = Math.max(0.018, Math.min(rawStopCap, absCeiling));
+
   const minStopPct = args.currentPrice > 0
     ? (args.atrValue * 0.8) / args.currentPrice
     : 0.005;
@@ -1326,6 +1340,19 @@ async function runEntryDecision(
   }
   const tickAdj = tickerCalibration[ticker.toUpperCase()]?.adjust ?? 0;
   conviction = Math.max(0, Math.min(100, Math.round(conviction + tickAdj)));
+  // ── Uplift cap (asymmetric) ─────────────────────────────────────────────
+  // Calibration may downgrade a signal without limit, but may only *raise* it
+  // a few points. Without this, a favourable strategy tilt × isotonic lift
+  // could manufacture a 94-conviction print from a mediocre 82 setup — which
+  // is exactly how oversized losers got through. Cap adapts to sample depth:
+  // the more trades behind the ticker's calibration, the more lift we allow.
+  {
+    const tickN = Number((tickerCalibration[ticker.toUpperCase()] as { count?: number } | undefined)?.count ?? 0);
+    const maxUplift = tickN >= 30 ? 8 : tickN >= 12 ? 6 : 4;
+    const ceiling = Math.min(100, sig.conviction + maxUplift);
+    if (conviction > ceiling) conviction = ceiling;
+  }
+
 
   if (conviction < settings.min_conviction) {
     return { kind: "HOLD", reason: `Calibrated conviction ${conviction} (raw ${sig.conviction}) < min ${settings.min_conviction}` };
@@ -1417,7 +1444,30 @@ async function runEntryDecision(
     }
   }
 
-  const effectiveConviction = conviction;
+  // ── Effective conviction (continuous, not binary) ───────────────────────
+  // The meta-label score and the reversal-risk score were pure pass/fail
+  // gates: a 0.31 meta score and a 0.79 meta score sized identically. They
+  // now bend conviction continuously, so marginal setups get real money
+  // behind them only when everything agrees. Both terms stay adaptive —
+  // meta is centred on the live gate.pass threshold, reversal on the
+  // regime-scaled ceiling.
+  let effectiveConviction = conviction;
+  if (metaScore !== null && Number.isFinite(metaScore)) {
+    const metaDelta = Math.max(-8, Math.min(8, (metaScore - gate.pass) * 40));
+    effectiveConviction += metaDelta;
+  }
+  {
+    const rev = reversalRisk.score / Math.max(0.01, envelope.reversalRiskCeiling);
+    effectiveConviction -= Math.max(0, Math.min(6, rev * 6));
+  }
+  effectiveConviction = Math.max(0, Math.min(100, Math.round(effectiveConviction)));
+  if (effectiveConviction < settings.min_conviction) {
+    return {
+      kind: "HOLD",
+      reason: `Effective conviction ${effectiveConviction} (calibrated ${conviction}${metaScore !== null ? `, meta ${metaScore.toFixed(2)}` : ""}, reversal ${reversalRisk.score.toFixed(2)}) < min ${settings.min_conviction}`,
+    };
+  }
+
 
   // Size — apply portfolio-level vol-target scalar (improvement #7) BEFORE
   // single-name and headroom caps so the user-facing caps remain absolute
@@ -1495,20 +1545,28 @@ async function runEntryDecision(
   }
   // ── Guard #2 (adaptive): Absolute stop-distance cap ────────────────────
   // Clamps hard-stop distance to a regime/conviction/liquidity-adjusted %
-  // of price so an overnight gap through the stop can't blow the risk
-  // budget. envelope.stopCapPct = base 6-10% scaled by envelope. Risk-parity
-  // sizing below raises shares to hold dollar-risk constant when clamped.
+  // of price, now with an absolute ceiling (~3–8%) layered on top so a wide
+  // ATR can't produce a double-digit loss. Risk-parity sizing below raises
+  // shares to hold dollar-risk constant when clamped. A small tolerance band
+  // lets a name whose 0.8·ATR floor sits just above the cap still trade at
+  // that floor (sized down accordingly) instead of being dropped outright.
   const stopCapPct = envelope.stopCapPct;
   const capDist = currentPrice * stopCapPct;
   if (stopDist > capDist) {
     if (capDist < minDist) {
-      return {
-        kind: "HOLD",
-        reason: `Stop-cap collision: 0.8·ATR (${(minDist / currentPrice * 100).toFixed(2)}%) exceeds adaptive ${sig.profile} stop cap ${(stopCapPct * 100).toFixed(2)}% — ATR too wide for regime/liquidity`,
-      };
+      if (minDist <= capDist * 1.25) {
+        stopDist = minDist;
+      } else {
+        return {
+          kind: "HOLD",
+          reason: `Stop-cap collision: 0.8·ATR (${(minDist / currentPrice * 100).toFixed(2)}%) exceeds adaptive ${sig.profile} stop cap ${(stopCapPct * 100).toFixed(2)}% — ATR too wide for regime/liquidity`,
+        };
+      }
+    } else {
+      stopDist = capDist;
     }
-    stopDist = capDist;
   }
+
   const hardStop = isLong ? currentPrice - stopDist : currentPrice + stopDist;
 
   // ── FAT-TAIL GUARD: Risk-parity sizing (ADAPTIVE — Phase 1 sweep) ─────
