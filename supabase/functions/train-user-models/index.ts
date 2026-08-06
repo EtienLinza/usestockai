@@ -49,13 +49,8 @@ function riskOrd(profile: string | null | undefined): number {
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
-  try {
-    await requireCronOrUser(req);
-  } catch (e) {
-    return new Response(JSON.stringify({ error: (e as Error).message }), {
-      status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
-  }
+  const denied = await requireCronOrUser(req);
+  if (denied) return denied;
 
   const started = Date.now();
   const supabase = createClient(

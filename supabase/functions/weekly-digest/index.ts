@@ -9,6 +9,14 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-cron-secret",
 };
 
+const escapeHtml = (value: unknown): string =>
+  String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -89,7 +97,7 @@ serve(async (req) => {
               const change = ((p.predicted_price - p.current_price) / p.current_price) * 100;
               return `
                 <tr>
-                  <td style="padding: 8px 0; font-family: monospace; color: #4a9d6e;">${p.ticker}</td>
+                  <td style="padding: 8px 0; font-family: monospace; color: #4a9d6e;">${escapeHtml(p.ticker)}</td>
                   <td style="padding: 8px 0; font-family: monospace;">$${p.current_price?.toFixed(2) || "—"}</td>
                   <td style="padding: 8px 0; font-family: monospace;">$${p.predicted_price.toFixed(2)}</td>
                   <td style="padding: 8px 0; color: ${change >= 0 ? "#22c55e" : "#ef4444"};">${change >= 0 ? "+" : ""}${change.toFixed(1)}%</td>
@@ -101,8 +109,8 @@ serve(async (req) => {
         const alertsHtml = triggeredAlerts && triggeredAlerts.length > 0
           ? triggeredAlerts.map(a => `
               <li style="margin: 8px 0;">
-                <span style="font-family: monospace; color: #4a9d6e;">${a.ticker}</span> hit 
-                $${a.target_price.toFixed(2)} (${a.direction})
+                <span style="font-family: monospace; color: #4a9d6e;">${escapeHtml(a.ticker)}</span> hit 
+                $${a.target_price.toFixed(2)} (${escapeHtml(a.direction)})
               </li>
             `).join("")
           : `<p style="color: #666;">No alerts triggered this week</p>`;
@@ -118,7 +126,7 @@ serve(async (req) => {
                 <p style="color: #666; margin: 8px 0 0 0;">Weekly Digest</p>
               </div>
               
-              <p>Hi ${profile.full_name || "there"},</p>
+              <p>Hi ${escapeHtml(profile.full_name) || "there"},</p>
               <p>Here's your weekly summary from StockAI:</p>
               
               <div style="background: #f8f9fa; border-radius: 8px; padding: 20px; margin: 24px 0;">

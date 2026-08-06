@@ -32,6 +32,8 @@ async function requireAuth(req: Request): Promise<Response | { userId: string }>
   return { userId: data.user.id };
 }
 
+const TICKER_RE = /^[A-Z]{1,10}(-[A-Z]{2,4})?$/;
+
 type Tier = "free" | "pro" | "elite";
 const TIER_LIMITS: Record<Tier, { backtests: number; maxTickers: number; maxYears: number; allowMonteCarlo: boolean; allowWalkForward: boolean; allowRobustness: boolean }> = {
   // Elite is uncapped on time range. The engine auto-degrades heavy analyses
@@ -136,7 +138,7 @@ async function fetchYahooData(ticker: string, startDate: number, endDate: number
   open: number[];
   volume: number[];
 } | null> {
-  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?period1=${startDate}&period2=${endDate}&interval=1d`;
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?period1=${startDate}&period2=${endDate}&interval=1d`;
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 10000);
@@ -1891,7 +1893,17 @@ serve(async (req) => {
     // Survivorship-aware universe resolution. When universe='sp500', resolve
     // tickers to S&P 500 constituents as-of startYear-01-01 (point-in-time)
     // rather than today's members — removes survivorship bias.
-    let tickers: string[] = tickersInput;
+    if (!Array.isArray(tickersInput) || tickersInput.length === 0) {
+      return new Response(JSON.stringify({ error: "tickers must be a non-empty array" }), {
+        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    let tickers: string[] = tickersInput.map((t: unknown) => String(t).trim().toUpperCase());
+    if (!tickers.every((t) => TICKER_RE.test(t))) {
+      return new Response(JSON.stringify({ error: "Invalid ticker symbol" }), {
+        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
     let survivorshipAdjusted = false;
     if (universe === "sp500") {
       const asOf = `${startYear}-01-01`;
