@@ -1,12 +1,8 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { adminClient } from "../_shared/supabase-client.ts";
 import { Resend } from "https://esm.sh/resend@2.0.0";
 import { requireCronOrUser } from "../_shared/cron-auth.ts";
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-cron-secret",
-};
+import { handleCors, jsonResponse } from "../_shared/http.ts";
 
 interface AlertEmailRequest {
   userId: string;
@@ -17,9 +13,8 @@ interface AlertEmailRequest {
 }
 
 serve(async (req) => {
-  if (req.method === "OPTIONS") {
-    return new Response(null, { headers: corsHeaders });
-  }
+  const preflight = handleCors(req);
+  if (preflight) return preflight;
 
   const denied = await requireCronOrUser(req, { allowAuthenticatedUser: true });
   if (denied) return denied;
@@ -29,26 +24,18 @@ serve(async (req) => {
 
     if (!resendApiKey) {
       console.log("RESEND_API_KEY not configured, skipping email");
-      return new Response(
-        JSON.stringify({ success: false, reason: "Email not configured" }),
-        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      return jsonResponse({ success: false, reason: "Email not configured" });
     }
 
     const body: Partial<AlertEmailRequest> = await req.json().catch(() => ({}));
     const { ticker, targetPrice, currentPrice, direction } = body;
 
     if (!ticker || typeof targetPrice !== "number" || typeof currentPrice !== "number" || (direction !== "above" && direction !== "below")) {
-      return new Response(
-        JSON.stringify({ error: "Invalid payload" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      return jsonResponse({ error: "Invalid payload" }, 400);
     }
 
     // Get user email from Supabase
-    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+    const supabase = adminClient();
 
     // Resolve userId: cron callers (system) trust body.userId. End-user JWT
     // callers can only ever email themselves — userId is taken from the JWT,
@@ -60,27 +47,18 @@ serve(async (req) => {
     if (isCron) {
       userId = body.userId;
       if (!userId) {
-        return new Response(
-          JSON.stringify({ error: "userId required for cron callers" }),
-          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
+        return jsonResponse({ error: "userId required for cron callers" }, 400);
       }
     } else {
       const authHeader = req.headers.get("Authorization");
       const token = authHeader?.replace("Bearer ", "");
       if (!token) {
-        return new Response(
-          JSON.stringify({ error: "Unauthorized" }),
-          { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
+        return jsonResponse({ error: "Unauthorized" }, 401);
       }
       const { data: userRes } = await supabase.auth.getUser(token);
       userId = userRes?.user?.id;
       if (!userId) {
-        return new Response(
-          JSON.stringify({ error: "Unauthorized" }),
-          { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
+        return jsonResponse({ error: "Unauthorized" }, 401);
       }
     }
 
@@ -93,26 +71,17 @@ serve(async (req) => {
 
     if (profileError || !profile) {
       console.error("Profile fetch error:", profileError);
-      return new Response(
-        JSON.stringify({ success: false, reason: "User profile not found" }),
-        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      return jsonResponse({ success: false, reason: "User profile not found" });
     }
 
     if (!profile.alert_email_enabled) {
       console.log("Email alerts disabled for user");
-      return new Response(
-        JSON.stringify({ success: false, reason: "Email alerts disabled" }),
-        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      return jsonResponse({ success: false, reason: "Email alerts disabled" });
     }
 
     if (!profile.email) {
       console.log("No email address for user");
-      return new Response(
-        JSON.stringify({ success: false, reason: "No email address" }),
-        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      return jsonResponse({ success: false, reason: "No email address" });
     }
 
     // Send email via Resend
@@ -173,15 +142,9 @@ serve(async (req) => {
 
     console.log("Email sent successfully:", emailResponse);
 
-    return new Response(
-      JSON.stringify({ success: true, emailId: (emailResponse as any).data?.id || "sent" }),
-      { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
+    return jsonResponse({ success: true, emailId: (emailResponse as any).data?.id || "sent" });
   } catch (error) {
     console.error("Send alert email error:", error);
-    return new Response(
-      JSON.stringify({ error: error instanceof Error ? error.message : "Unknown error" }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
+    return jsonResponse({ error: error instanceof Error ? error.message : "Unknown error" }, 500);
   }
 });

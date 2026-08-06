@@ -1,11 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { fetchDailyCloses } from "../_shared/yahoo-history.ts";
 import { requireCronOrUser } from "../_shared/cron-auth.ts";
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-cron-secret",
-};
+import { handleCors, jsonResponse } from "../_shared/http.ts";
 
 const SECTOR_ETFS = [
   { sector: "Technology", etfTicker: "XLK" },
@@ -43,9 +39,8 @@ async function fetchETFData(ticker: string): Promise<{
 }
 
 serve(async (req) => {
-  if (req.method === "OPTIONS") {
-    return new Response(null, { headers: corsHeaders });
-  }
+  const preflight = handleCors(req);
+  if (preflight) return preflight;
 
   // Gate to authenticated users + cron so anon traffic can't drain Yahoo quota.
   const denied = await requireCronOrUser(req, { allowAuthenticatedUser: true });
@@ -77,20 +72,12 @@ serve(async (req) => {
 
     console.log(`Fetched data for ${sectors.length} sectors`);
 
-    return new Response(
-      JSON.stringify({
-        sectors,
-        updatedAt: new Date().toISOString(),
-      }),
-      {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      }
-    );
+    return jsonResponse({
+      sectors,
+      updatedAt: new Date().toISOString(),
+    });
   } catch (error) {
     console.error("Sector analysis error:", error);
-    return new Response(
-      JSON.stringify({ error: error instanceof Error ? error.message : "Unknown error" }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
+    return jsonResponse({ error: error instanceof Error ? error.message : "Unknown error" }, 500);
   }
 });

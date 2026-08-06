@@ -1,28 +1,11 @@
 // Backtest export helpers — multiple formats including the full trade log.
 // Kept UI-agnostic so it can be reused elsewhere.
 
+import { csvEscape, dateStamp as stamp, download, exportFilename } from "./file-download";
+
 type AnyReport = any;
 
-function download(filename: string, content: BlobPart, mime: string) {
-  const blob = new Blob([content], { type: mime });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-}
-
-const stamp = () => new Date().toISOString().split("T")[0];
-const fname = (label: string, ext: string) => `backtest-${label}-${stamp()}.${ext}`;
-
-function csvEscape(v: unknown): string {
-  if (v === null || v === undefined) return "";
-  const s = String(v);
-  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-}
+const fname = (label: string, ext: string) => exportFilename(`backtest-${label}`, ext);
 
 function toCSV(rows: (string | number | null | undefined)[][]): string {
   return rows.map(r => r.map(csvEscape).join(",")).join("\n");

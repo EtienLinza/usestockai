@@ -15,15 +15,11 @@
 // ============================================================================
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import { requireCronOrUser } from "../_shared/cron-auth.ts";
 import { recordHeartbeat } from "../_shared/heartbeat.ts";
 import { predictEnsemble, type EnsembleModel } from "../_shared/ensemble.ts";
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-cron-secret",
-};
+import { errorMessage, handleCors, jsonResponse } from "../_shared/http.ts";
+import { adminClient } from "../_shared/supabase-client.ts";
 
 const SHADOW_WINDOW_DAYS = 3;           // paper-trade at least 3 days before promotion
 const STRESS_MIN_LOGLOSS_MARGIN = 1.10; // challenger regime logLoss ≤ champion * 1.10 required
@@ -102,18 +98,14 @@ function flattenSnap(snap: Record<string, unknown> | null | undefined): Record<s
 }
 
 serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+  const preflight = handleCors(req);
+  if (preflight) return preflight;
   try { await requireCronOrUser(req); } catch (e) {
-    return new Response(JSON.stringify({ error: (e as Error).message }), {
-      status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return jsonResponse({ error: (e as Error).message }, 401);
   }
 
   const startedAt = Date.now();
-  const supabase = createClient(
-    Deno.env.get("SUPABASE_URL")!,
-    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
-  );
+  const supabase = adminClient();
 
   const report: Record<string, unknown> = { steps: {} };
 
@@ -360,7 +352,7 @@ serve(async (req) => {
     await recordHeartbeat("manage-models", startedAt, "ok",
       `challengers=${challengers.length} promoted=${promotions.filter((p) => p.decision === "promoted").length} rollbacks=${rollbacks.length}`);
 
-    return new Response(JSON.stringify({
+    return jsonResponse({
       ok: true,
       challengers: challengers.length,
       champions: Object.keys(champions).length,
@@ -368,13 +360,11 @@ serve(async (req) => {
       rollbacks,
       health,
       ms: Date.now() - startedAt,
-    }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg = errorMessage(err);
     console.error("[manage-models] fatal:", msg);
     await recordHeartbeat("manage-models", startedAt, "error", msg);
-    return new Response(JSON.stringify({ error: msg }), {
-      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return jsonResponse({ error: msg }, 500);
   }
 });

@@ -1,13 +1,9 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { adminClient } from "../_shared/supabase-client.ts";
 import { getQuoteWithFallback } from "../_shared/finnhub.ts";
 import { recordHeartbeat } from "../_shared/heartbeat.ts";
 import { requireCronOrUser, cronSecretHeader } from "../_shared/cron-auth.ts";
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-cron-secret",
-};
+import { handleCors, jsonResponse } from "../_shared/http.ts";
 
 interface PriceAlert {
   id: string;
@@ -27,9 +23,8 @@ async function fetchCurrentPrice(ticker: string): Promise<{ price: number; sourc
 
 serve(async (req) => {
   // Handle CORS preflight
-  if (req.method === "OPTIONS") {
-    return new Response(null, { headers: corsHeaders });
-  }
+  const preflight = handleCors(req);
+  if (preflight) return preflight;
 
   const denied = await requireCronOrUser(req, { allowAuthenticatedUser: true });
   if (denied) return denied;
@@ -38,7 +33,7 @@ serve(async (req) => {
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+    const supabase = adminClient();
 
     // Determine scope: cron callers (valid x-cron-secret) may scan all users;
     // authenticated user callers can only ever check their own alerts. We
@@ -56,10 +51,7 @@ serve(async (req) => {
         userId = data?.user?.id ?? null;
       }
       if (!userId) {
-        return new Response(
-          JSON.stringify({ error: "Unauthorized" }),
-          { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
+        return jsonResponse({ error: "Unauthorized" }, 401);
       }
     }
 
@@ -82,10 +74,7 @@ serve(async (req) => {
 
     if (!alerts || alerts.length === 0) {
       console.log("No active alerts to check");
-      return new Response(
-        JSON.stringify({ message: "No active alerts", triggered: [] }),
-        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      return jsonResponse({ message: "No active alerts", triggered: [] });
     }
 
     console.log(`Checking ${alerts.length} active alerts`);
@@ -180,13 +169,10 @@ serve(async (req) => {
       `checked=${alerts.length} triggered=${triggeredAlerts.length}`,
     );
 
-    return new Response(
-      JSON.stringify({
-        message: `Checked ${alerts.length} alerts, triggered ${triggeredAlerts.length}`,
-        triggered: triggeredAlerts,
-      }),
-      { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
+    return jsonResponse({
+      message: `Checked ${alerts.length} alerts, triggered ${triggeredAlerts.length}`,
+      triggered: triggeredAlerts,
+    });
   } catch (error) {
     console.error("check-price-alerts error:", error);
     await recordHeartbeat(
@@ -195,9 +181,6 @@ serve(async (req) => {
       "error",
       error instanceof Error ? error.message : "Unknown error",
     );
-    return new Response(
-      JSON.stringify({ error: error instanceof Error ? error.message : "Unknown error" }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
+    return jsonResponse({ error: error instanceof Error ? error.message : "Unknown error" }, 500);
   }
 });

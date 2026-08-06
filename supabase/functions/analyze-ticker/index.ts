@@ -11,11 +11,7 @@ import {
   calculateRSI, calculateMACD, calculateSMA, calculateATR, calculateADX,
 } from "../_shared/indicators.ts";
 import { requireCronOrUser } from "../_shared/cron-auth.ts";
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-cron-secret",
-};
+import { handleCors, jsonResponse } from "../_shared/http.ts";
 
 const TICKER_RE = /^[A-Z]{1,10}(-[A-Z]{2,4})?$/;
 
@@ -38,7 +34,8 @@ const lastFinite = (arr: number[]): number | null => {
 };
 
 serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+  const preflight = handleCors(req);
+  if (preflight) return preflight;
 
   const denied = await requireCronOrUser(req, { allowAuthenticatedUser: true });
   if (denied) return denied;
@@ -47,18 +44,16 @@ serve(async (req) => {
     const body = await req.json().catch(() => ({}));
     const ticker = String(body?.ticker ?? "").trim().toUpperCase();
     if (!ticker || !TICKER_RE.test(ticker)) {
-      return new Response(JSON.stringify({ error: "Invalid ticker" }), {
-        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return jsonResponse({ error: "Invalid ticker" }, 400);
     }
 
     const data = await fetchDailyHistory(ticker, "1y");
     if (!data || data.close.length < 30) {
-      return new Response(JSON.stringify({
+      return jsonResponse({
         ticker, decision: "HOLD", confidence: 0,
         reasoning: "Unable to fetch enough price history for this ticker",
         insufficientData: true,
-      }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      });
     }
 
     // ---- Derived technical stats (always populated when we have bars) ------
@@ -123,11 +118,11 @@ serve(async (req) => {
 
     // ---- Engine signal (requires ≥200 bars) -------------------------------
     if (close.length < 200) {
-      return new Response(JSON.stringify({
+      return jsonResponse({
         ticker, decision: "HOLD", confidence: 0, currentPrice: last,
         reasoning: `Only ${close.length} daily bars available — full signal engine needs ≥200.`,
         stats,
-      }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      });
     }
 
     const spyCtx = await fetchSpyContext();
@@ -135,11 +130,11 @@ serve(async (req) => {
     const sig = evaluateSignal(data, ticker, spyCtx, macro);
 
     if (!sig) {
-      return new Response(JSON.stringify({
+      return jsonResponse({
         ticker, decision: "HOLD", confidence: 0, currentPrice: last,
         reasoning: "Signal engine could not evaluate this ticker.",
         stats,
-      }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      });
     }
 
     const atrMult = sig.blendedParams?.hardStopATRMult ?? 2.5;
@@ -178,7 +173,7 @@ serve(async (req) => {
 
     const finalConfidence = sig.conviction > 0 ? sig.conviction : techConfidence;
 
-    return new Response(JSON.stringify({
+    return jsonResponse({
       ticker,
       decision,
       confidence: finalConfidence,
@@ -197,11 +192,9 @@ serve(async (req) => {
       kellyFraction: sig.kellyFraction,
       reasoning: sig.reasoning,
       stats,
-    }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    });
   } catch (e) {
     console.error("analyze-ticker error:", e);
-    return new Response(JSON.stringify({ error: e instanceof Error ? e.message : "Internal error" }), {
-      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return jsonResponse({ error: e instanceof Error ? e.message : "Internal error" }, 500);
   }
 });

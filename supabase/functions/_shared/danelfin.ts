@@ -131,15 +131,13 @@ export async function getAiScore(ticker: string): Promise<DanelfinScore | null> 
 // Returns a Map<ticker, aiScore>. Tickers without a fresh row (≤7 days old)
 // are simply omitted; callers treat missing as neutral (0 conviction delta).
 
-import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+import { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+import { adminClient } from "./supabase-client.ts";
 
 let _client: SupabaseClient | null = null;
 function client(): SupabaseClient {
   if (_client) return _client;
-  _client = createClient(
-    Deno.env.get("SUPABASE_URL")!,
-    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
-  );
+  _client = adminClient();
   return _client;
 }
 

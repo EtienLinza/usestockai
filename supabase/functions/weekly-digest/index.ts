@@ -1,18 +1,13 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { adminClient } from "../_shared/supabase-client.ts";
 import { Resend } from "https://esm.sh/resend@2.0.0";
 import { recordHeartbeat } from "../_shared/heartbeat.ts";
 import { requireCronOrUser } from "../_shared/cron-auth.ts";
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-cron-secret",
-};
+import { handleCors, jsonResponse } from "../_shared/http.ts";
 
 serve(async (req) => {
-  if (req.method === "OPTIONS") {
-    return new Response(null, { headers: corsHeaders });
-  }
+  const preflight = handleCors(req);
+  if (preflight) return preflight;
 
   const denied = await requireCronOrUser(req);
   if (denied) return denied;
@@ -23,15 +18,10 @@ serve(async (req) => {
     
     if (!resendApiKey) {
       console.log("RESEND_API_KEY not configured, skipping digest");
-      return new Response(
-        JSON.stringify({ success: false, reason: "Email not configured" }),
-        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      return jsonResponse({ success: false, reason: "Email not configured" });
     }
 
-    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+    const supabase = adminClient();
 
     // Get users with weekly digest enabled
     const { data: profiles, error: profilesError } = await supabase
@@ -46,10 +36,7 @@ serve(async (req) => {
 
     if (!profiles || profiles.length === 0) {
       console.log("No users have weekly digest enabled");
-      return new Response(
-        JSON.stringify({ success: true, sent: 0 }),
-        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      return jsonResponse({ success: true, sent: 0 });
     }
 
     const resend = new Resend(resendApiKey);
@@ -179,10 +166,7 @@ serve(async (req) => {
 
     await recordHeartbeat("weekly-digest", startedAt, "ok", `sent=${sentCount}`);
 
-    return new Response(
-      JSON.stringify({ success: true, sent: sentCount }),
-      { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
+    return jsonResponse({ success: true, sent: sentCount });
   } catch (error) {
     console.error("Weekly digest error:", error);
     await recordHeartbeat(
@@ -191,9 +175,6 @@ serve(async (req) => {
       "error",
       error instanceof Error ? error.message : "Unknown error",
     );
-    return new Response(
-      JSON.stringify({ error: error instanceof Error ? error.message : "Unknown error" }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
+    return jsonResponse({ error: error instanceof Error ? error.message : "Unknown error" }, 500);
   }
 });

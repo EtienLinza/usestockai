@@ -1,33 +1,19 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
-};
+import { handleCors, jsonResponse } from "../_shared/http.ts";
+import { adminClient, anonClient } from "../_shared/supabase-client.ts";
 
 // Verify the caller is an authenticated user. Backtests are CPU-heavy and
 // hit Yahoo Finance — leaving this open would let anyone DoS the function.
 async function requireAuth(req: Request): Promise<Response | { userId: string }> {
   const authHeader = req.headers.get("Authorization");
   if (!authHeader?.startsWith("Bearer ")) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), {
-      status: 401,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return jsonResponse({ error: "Unauthorized" }, 401);
   }
-  const supabase = createClient(
-    Deno.env.get("SUPABASE_URL")!,
-    Deno.env.get("SUPABASE_ANON_KEY")!,
-    { global: { headers: { Authorization: authHeader } } },
-  );
+  const supabase = anonClient(authHeader);
   const token = authHeader.replace("Bearer ", "");
   const { data, error } = await supabase.auth.getUser(token);
   if (error || !data?.user) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), {
-      status: 401,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return jsonResponse({ error: "Unauthorized" }, 401);
   }
   return { userId: data.user.id };
 }
@@ -1841,9 +1827,8 @@ function runRobustnessTests(
 // MAIN HANDLER
 // ============================================================================
 serve(async (req) => {
-  if (req.method === "OPTIONS") {
-    return new Response(null, { headers: corsHeaders });
-  }
+  const preflight = handleCors(req);
+  if (preflight) return preflight;
 
   // Require authenticated caller before doing any expensive work.
   const authResult = await requireAuth(req);
@@ -1851,11 +1836,8 @@ serve(async (req) => {
   const { userId } = authResult;
 
   // Tier gating
-  const adminClient = createClient(
-    Deno.env.get("SUPABASE_URL")!,
-    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
-  );
-  const tier = await getUserTier(adminClient, userId);
+  const admin = adminClient();
+  const tier = await getUserTier(admin, userId);
   const tierLimits = TIER_LIMITS[tier];
 
   try {
@@ -1895,7 +1877,7 @@ serve(async (req) => {
     let survivorshipAdjusted = false;
     if (universe === "sp500") {
       const asOf = `${startYear}-01-01`;
-      const { data: rows, error: uErr } = await adminClient
+      const { data: rows, error: uErr } = await admin
         .rpc("constituents_as_of", { _index_name: "SP500", _as_of: asOf });
       if (uErr) {
         console.error("constituents_as_of failed:", uErr);
@@ -1910,54 +1892,54 @@ serve(async (req) => {
 
     // Tier feature gates
     if (tickers.length > tierLimits.maxTickers) {
-      return new Response(JSON.stringify({
+      return jsonResponse({
         error: "tier_required",
         required: tickers.length <= 3 ? "pro" : "elite",
         feature: `Multi-ticker backtests (up to ${tickers.length} tickers)`,
         message: `Your ${tier} plan supports up to ${tierLimits.maxTickers} ticker(s) per backtest.`,
-      }), { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }, 403);
     }
     if (Number.isFinite(tierLimits.maxYears) && (endYear - startYear) > tierLimits.maxYears) {
-      return new Response(JSON.stringify({
+      return jsonResponse({
         error: "tier_required",
         required: tier === "free" ? "pro" : "elite",
         feature: "Extended backtest window",
         message: `Your ${tier} plan supports up to ${tierLimits.maxYears}-year windows.`,
-      }), { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }, 403);
     }
     if (includeMonteCarlo && !tierLimits.allowMonteCarlo) {
-      return new Response(JSON.stringify({
+      return jsonResponse({
         error: "tier_required", required: "pro", feature: "Monte Carlo simulation",
-      }), { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }, 403);
     }
     if (walkForward && !tierLimits.allowWalkForward) {
-      return new Response(JSON.stringify({
+      return jsonResponse({
         error: "tier_required", required: "pro", feature: "Walk-forward analysis",
-      }), { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }, 403);
     }
     if (includeRobustness && !tierLimits.allowRobustness) {
-      return new Response(JSON.stringify({
+      return jsonResponse({
         error: "tier_required", required: "elite", feature: "Robustness & stress tests",
-      }), { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }, 403);
     }
 
     // Validate years
     if (startYear < 2000 || startYear > 2026) {
-      return new Response(JSON.stringify({ error: "Invalid start year. Please use a 4-digit year between 2000 and 2026." }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      return jsonResponse({ error: "Invalid start year. Please use a 4-digit year between 2000 and 2026." }, 400);
     }
     if (endYear <= startYear) {
-      return new Response(JSON.stringify({ error: "End year must be after start year." }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      return jsonResponse({ error: "End year must be after start year." }, 400);
     }
 
     // Monthly usage gate (per tier)
-    const usage = await checkAndIncrementBacktests(adminClient, userId, tier);
+    const usage = await checkAndIncrementBacktests(admin, userId, tier);
     if (!usage.ok) {
-      return new Response(JSON.stringify({
+      return jsonResponse({
         error: "tier_required",
         required: tier === "free" ? "pro" : "elite",
         feature: "Monthly backtest quota",
         message: `You've used ${usage.used}/${usage.limit} backtests this month on the ${tier} plan.`,
-      }), { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }, 403);
     }
 
     const config: BacktestConfig & { strategyMode: string; explicitOverride: boolean } = {
@@ -2021,7 +2003,7 @@ serve(async (req) => {
     });
 
     if (validTickerIndices.length === 0) {
-      return new Response(JSON.stringify({ error: "No valid market data found for the given tickers and date range. Ensure tickers are correct and the date range has enough trading days." }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      return jsonResponse({ error: "No valid market data found for the given tickers and date range. Ensure tickers are correct and the date range has enough trading days." }, 400);
     }
 
     const numTickers = validTickerIndices.length;
@@ -2235,15 +2217,10 @@ serve(async (req) => {
     const profileSummary = Object.entries(stockProfiles).map(([t, p]) => `${t}:${p.classification}`).join(', ');
     console.log(`Backtest complete: ${allTrades.length} trades, Win Rate: ${metrics.winRate}%, Sharpe: ${metrics.sharpeRatio}, Profiles: [${profileSummary}], elapsed: ${Date.now() - startTime}ms`);
 
-    return new Response(JSON.stringify(report), {
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return jsonResponse(report);
   } catch (error) {
     console.error("Backtest error:", error);
     const message = error instanceof Error ? error.message : "Backtest failed";
-    return new Response(
-      JSON.stringify({ error: message }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
+    return jsonResponse({ error: message }, 500);
   }
 });

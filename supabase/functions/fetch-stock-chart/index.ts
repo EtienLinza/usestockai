@@ -10,11 +10,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { getQuoteWithFallback, getFundamentals, getCompanyNews } from "../_shared/finnhub.ts";
 import { requireCronOrUser } from "../_shared/cron-auth.ts";
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-cron-secret",
-};
+import { handleCors, jsonResponse } from "../_shared/http.ts";
 
 const YAHOO_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36";
 
@@ -86,7 +82,8 @@ async function fetchYahooName(ticker: string): Promise<string | null> {
 }
 
 serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+  const preflight = handleCors(req);
+  if (preflight) return preflight;
 
   const denied = await requireCronOrUser(req, { allowAuthenticatedUser: true });
   if (denied) return denied;
@@ -98,16 +95,10 @@ serve(async (req) => {
     const wantOverview = body?.overview !== false;
 
     if (!ticker || !/^[A-Z]{1,10}(-[A-Z]{2,4})?$/.test(ticker)) {
-      return new Response(
-        JSON.stringify({ error: "Invalid ticker" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-      );
+      return jsonResponse({ error: "Invalid ticker" }, 400);
     }
     if (!(range in RANGE_MAP)) {
-      return new Response(
-        JSON.stringify({ error: "Invalid range" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-      );
+      return jsonResponse({ error: "Invalid range" }, 400);
     }
 
     const tasks: Promise<unknown>[] = [fetchCandles(ticker, range)];
@@ -121,25 +112,19 @@ serve(async (req) => {
     }
     const [candles, quote, fundamentals, news, name] = await Promise.all(tasks) as any;
 
-    return new Response(
-      JSON.stringify({
-        ticker,
-        range,
-        candles,
-        ...(wantOverview ? {
-          name: name ?? null,
-          quote: quote ?? null,
-          fundamentals: fundamentals ?? null,
-          news: Array.isArray(news) ? news.slice(0, 10) : [],
-        } : {}),
-      }),
-      { headers: { ...corsHeaders, "Content-Type": "application/json" } },
-    );
+    return jsonResponse({
+      ticker,
+      range,
+      candles,
+      ...(wantOverview ? {
+        name: name ?? null,
+        quote: quote ?? null,
+        fundamentals: fundamentals ?? null,
+        news: Array.isArray(news) ? news.slice(0, 10) : [],
+      } : {}),
+    });
   } catch (e) {
     console.error("fetch-stock-chart error:", e);
-    return new Response(
-      JSON.stringify({ error: "Internal server error" }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-    );
+    return jsonResponse({ error: "Internal server error" }, 500);
   }
 });

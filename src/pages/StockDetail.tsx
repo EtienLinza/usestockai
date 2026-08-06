@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { MetricCard } from "@/components/MetricCard";
 import { StockChart, type Candle } from "@/components/StockChart";
+import { formatCompactCurrency } from "@/lib/format";
 import { AddToWatchlistButton } from "@/components/AddToWatchlistButton";
 import { PriceAlertModal } from "@/components/PriceAlertModal";
 import {
@@ -60,13 +61,7 @@ interface LatestSignal {
   created_at: string;
 }
 
-const formatMarketCap = (v: number | null): string => {
-  if (v == null) return "—";
-  if (v >= 1e12) return `$${(v / 1e12).toFixed(2)}T`;
-  if (v >= 1e9)  return `$${(v / 1e9).toFixed(2)}B`;
-  if (v >= 1e6)  return `$${(v / 1e6).toFixed(2)}M`;
-  return `$${v.toFixed(0)}`;
-};
+const formatMarketCap = formatCompactCurrency;
 
 const StockDetail = () => {
   const { ticker: rawTicker } = useParams<{ ticker: string }>();

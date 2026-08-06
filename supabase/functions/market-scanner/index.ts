@@ -1,12 +1,8 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import { recordHeartbeat } from "../_shared/heartbeat.ts";
 import { requireCronOrUser } from "../_shared/cron-auth.ts";
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
-};
+import { handleCors, jsonResponse } from "../_shared/http.ts";
+import { adminClient, createClient } from "../_shared/supabase-client.ts";
 
 // ============================================================================
 // TECHNICAL INDICATORS — imported from canonical shared module
@@ -787,9 +783,8 @@ async function discoverTickers(): Promise<DiscoveryResult> {
 // ============================================================================
 
 serve(async (req) => {
-  if (req.method === "OPTIONS") {
-    return new Response(null, { headers: corsHeaders });
-  }
+  const preflight = handleCors(req);
+  if (preflight) return preflight;
 
   const denied = await requireCronOrUser(req);
   if (denied) return denied;
@@ -816,10 +811,7 @@ serve(async (req) => {
     // Log universe breakdown on batch 0 (fire-and-forget)
     if (discoveryBreakdown && batch === 0) {
       try {
-        const logClient = createClient(
-          Deno.env.get("SUPABASE_URL")!,
-          Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
-        );
+        const logClient = adminClient();
         await logClient.from("scan_universe_log").insert({
           total_tickers: allTickers.length,
           index_count: discoveryBreakdown.indexCount,
@@ -840,19 +832,16 @@ serve(async (req) => {
     const tickersToScan = allTickers.slice(start, end);
 
     if (tickersToScan.length === 0) {
-      return new Response(JSON.stringify({
+      return jsonResponse({
         signals: [], batch,
         totalBatches: Math.ceil(allTickers.length / batchSize),
         tickerList: allTickers, totalTickers: allTickers.length, done: true,
-      }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      });
     }
 
     // C-2 FIX: hydrate per-ticker cooldown tracker from DB so cooldown
     // actually carries across scanner invocations.
-    const cooldownSupabase = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
-    );
+    const cooldownSupabase = adminClient();
     clearTrackerCache();
     await primeTrackerCacheFromDB(cooldownSupabase, tickersToScan);
 
@@ -894,10 +883,7 @@ serve(async (req) => {
     // PHASE B — Load adaptive weights (calibration / tilts / floors).
     // Falls back to neutral defaults if nothing has been computed yet.
     // ─────────────────────────────────────────────────────────────────────
-    const supabasePre = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
-    );
+    const supabasePre = adminClient();
     let calibrationCurve: Record<string, { adjust: number }> = {};
     let strategyTilts: Record<string, { multiplier: number }> = {};
     let strategyRegimeTilts: Record<string, { multiplier: number; count: number }> = {};
@@ -1106,9 +1092,7 @@ serve(async (req) => {
     signals.sort((a, b) => b.qualityScore - a.qualityScore);
 
     // Write signals to DB
-    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const supabase = createClient(supabaseUrl, supabaseKey);
+    const supabase = adminClient();
 
     if (signals.length > 0) {
       const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
@@ -1214,7 +1198,7 @@ serve(async (req) => {
     // C-2 FIX: flush updated cooldown state back to DB before responding.
     await persistTrackerCacheToDB(cooldownSupabase);
 
-    return new Response(JSON.stringify({
+    return jsonResponse({
       signals,
       batch,
       totalBatches: Math.ceil(allTickers.length / batchSize),
@@ -1240,17 +1224,12 @@ serve(async (req) => {
         macro: spyContext.macro ? { ...spyContext.macro, spyClose: spyContext.macro.spyClose } : undefined,
       } : null,
       sectorMomentum,
-    }), {
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
 
   } catch (error) {
     console.error("Scanner error:", error);
     const message = error instanceof Error ? error.message : "Scanner failed";
     await recordHeartbeat("market-scanner", heartbeatStart, "error", message);
-    return new Response(
-      JSON.stringify({ error: message }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
+    return jsonResponse({ error: message }, 500);
   }
 });

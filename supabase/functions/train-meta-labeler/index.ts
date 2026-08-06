@@ -10,13 +10,10 @@
 // the loader returns null and the runtime treats meta-labeling as a no-op.
 // ============================================================================
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-cron-secret",
-};
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import { META_FEATURE_NAMES, type MetaFeatures } from "../_shared/meta-labeler.ts";
 import { requireCronOrUser } from "../_shared/cron-auth.ts";
+import { errorMessage, handleCors, jsonResponse } from "../_shared/http.ts";
+import { adminClient } from "../_shared/supabase-client.ts";
 
 interface OutcomeRow {
   conviction: number | null;
@@ -161,16 +158,14 @@ function computeAUC(scores: number[], labels: number[]): number {
 }
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+  const preflight = handleCors(req);
+  if (preflight) return preflight;
 
   const denied = await requireCronOrUser(req);
   if (denied) return denied;
 
   try {
-    const supabase = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
-    );
+    const supabase = adminClient();
     const cutoff = new Date(Date.now() - 180 * 86400000).toISOString();
 
     const { data, error } = await supabase
@@ -182,9 +177,7 @@ Deno.serve(async (req) => {
 
     if (error) {
       console.error("[train-meta] fetch err", error.message);
-      return new Response(JSON.stringify({ error: error.message }), {
-        status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return jsonResponse({ error: error.message }, 500);
     }
     const rows = (data ?? []) as OutcomeRow[];
 
@@ -206,17 +199,13 @@ Deno.serve(async (req) => {
 
     if (X.length < 40) {
       console.log(`[train-meta] not enough samples (${X.length} < 40) — skipping fit`);
-      return new Response(JSON.stringify({ skipped: true, samples: X.length }), {
-        status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return jsonResponse({ skipped: true, samples: X.length });
     }
 
     const posCount = y.reduce((a, b) => a + b, 0);
     if (posCount < 5 || posCount > y.length - 5) {
       console.log(`[train-meta] degenerate labels (pos=${posCount}/${y.length}) — skipping fit`);
-      return new Response(JSON.stringify({ skipped: true, reason: "degenerate_labels" }), {
-        status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return jsonResponse({ skipped: true, reason: "degenerate_labels" });
     }
 
     // ── Drift-aware sample weighting ─────────────────────────────────────
@@ -259,9 +248,7 @@ Deno.serve(async (req) => {
       .insert(payload);
     if (insErr) {
       console.error("[train-meta] insert err", insErr.message);
-      return new Response(JSON.stringify({ error: insErr.message }), {
-        status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return jsonResponse({ error: insErr.message }, 500);
     }
 
     // Prune older models (keep last 10).
@@ -276,13 +263,9 @@ Deno.serve(async (req) => {
     }
 
     console.log(`[train-meta] trained on ${X.length} samples, AUC=${payload.auc}`);
-    return new Response(JSON.stringify({ ok: true, samples: X.length, auc: payload.auc }), {
-      status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return jsonResponse({ ok: true, samples: X.length, auc: payload.auc });
   } catch (e) {
     console.error("[train-meta] fatal", e);
-    return new Response(JSON.stringify({ error: e instanceof Error ? e.message : String(e) }), {
-      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return jsonResponse({ error: errorMessage(e) }, 500);
   }
 });

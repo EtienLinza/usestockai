@@ -1,11 +1,6 @@
-import { createClient } from "npm:@supabase/supabase-js@2";
 import { createStripeClient, type StripeEnv } from "../_shared/stripe.ts";
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-};
+import { corsHeaders, handleCors, jsonResponse } from "../_shared/http.ts";
+import { anonClient } from "../_shared/supabase-client.ts";
 
 const ALLOWED_RETURN_ORIGINS = [
   "https://usestockai.lovable.app",
@@ -28,10 +23,7 @@ function isAllowedReturnUrl(url: string): boolean {
   }
 }
 
-const supabase = createClient(
-  Deno.env.get("SUPABASE_URL")!,
-  Deno.env.get("SUPABASE_ANON_KEY")!,
-);
+const supabase = anonClient();
 
 async function resolveOrCreateCustomer(
   stripe: ReturnType<typeof createStripeClient>,
@@ -66,7 +58,8 @@ async function resolveOrCreateCustomer(
 }
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+  const preflight = handleCors(req);
+  if (preflight) return preflight;
   if (req.method !== "POST") {
     return new Response("Method not allowed", { status: 405, headers: corsHeaders });
   }
@@ -74,10 +67,7 @@ Deno.serve(async (req) => {
   // EMERGENCY KILL-SWITCH: payments are paused while billing is finalized.
   // Never create a checkout session — return 503 so any stray frontend
   // caller fails closed instead of charging a test card.
-  return new Response(
-    JSON.stringify({ error: "Payments are temporarily disabled. Please join the waitlist." }),
-    { status: 503, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-  );
+  return jsonResponse({ error: "Payments are temporarily disabled. Please join the waitlist." }, 503);
 });
 
 // Legacy handler retained below for reference only — kept intact so we can
@@ -88,17 +78,11 @@ async function _disabled_handler(req: Request) {
     const authHeader = req.headers.get("Authorization");
     const token = authHeader?.replace("Bearer ", "");
     if (!token) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
-        status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return jsonResponse({ error: "Unauthorized" }, 401);
     }
     const { data: { user }, error: authError } = await supabase.auth.getUser(token);
     if (authError || !user) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
-        status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return jsonResponse({ error: "Unauthorized" }, 401);
     }
 
     const body = await req.json();
@@ -141,17 +125,11 @@ async function _disabled_handler(req: Request) {
       ...(isRecurring && { subscription_data: { metadata: { userId } } }),
     } as any);
 
-    return new Response(JSON.stringify({ clientSecret: session.client_secret }), {
-      status: 200,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return jsonResponse({ clientSecret: session.client_secret });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";
     console.error("create-checkout error:", message);
-    return new Response(JSON.stringify({ error: message }), {
-      status: 400,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return jsonResponse({ error: message }, 400);
   }
 }
 // eslint-disable-next-line @typescript-eslint/no-unused-vars

@@ -6,11 +6,7 @@
 // ============================================================================
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { etDayOfWeek, etMinuteOfDay } from "../_shared/market-calendar.ts";
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-};
+import { errorMessage, handleCors, jsonResponse } from "../_shared/http.ts";
 
 interface JobConfig {
   name: string;
@@ -39,7 +35,8 @@ function isMarketHours(d: Date): boolean {
 }
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+  const preflight = handleCors(req);
+  if (preflight) return preflight;
 
   try {
     const url = Deno.env.get("SUPABASE_URL");
@@ -49,10 +46,7 @@ Deno.serve(async (req) => {
     // we can re-introduce it, but only for the specific call.
     const key = Deno.env.get("SUPABASE_ANON_KEY");
     if (!url || !key) {
-      return new Response(JSON.stringify({ error: "Backend not configured" }), {
-        status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return jsonResponse({ error: "Backend not configured" }, 500);
     }
     const supabase = createClient(url, key);
     const { data: rows, error } = await supabase
@@ -100,20 +94,14 @@ Deno.serve(async (req) => {
       ? "warn"
       : "healthy";
 
-    return new Response(
-      JSON.stringify({
-        overall,
-        marketOpen,
-        checkedAt: now.toISOString(),
-        jobs,
-      }),
-      { headers: { ...corsHeaders, "Content-Type": "application/json" } },
-    );
+    return jsonResponse({
+      overall,
+      marketOpen,
+      checkedAt: now.toISOString(),
+      jobs,
+    });
   } catch (e) {
     console.error("health-check failed:", e);
-    return new Response(
-      JSON.stringify({ error: e instanceof Error ? e.message : String(e) }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-    );
+    return jsonResponse({ error: errorMessage(e) }, 500);
   }
 });

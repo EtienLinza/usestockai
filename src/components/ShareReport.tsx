@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { download } from "@/lib/file-download";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -56,16 +57,7 @@ export const ShareReport = ({ data }: ShareReportProps) => {
   const handleExportCSV = async () => {
     setIsExporting("csv");
     try {
-      const csv = generateCSV();
-      const blob = new Blob([csv], { type: "text/csv" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `${data.ticker}_stockai_${data.targetDate}.csv`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      download(`${data.ticker}_stockai_${data.targetDate}.csv`, generateCSV(), "text/csv");
       toast.success("CSV exported");
     } catch (error) {
       toast.error("Export failed");

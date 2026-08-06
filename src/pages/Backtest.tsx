@@ -36,6 +36,7 @@ import {
   exportJSON, exportMarkdown, exportHTML, exportExcel,
 } from "@/lib/backtest-export";
 import { FileText, FileSpreadsheet, FileJson, FileCode2, Printer, Table as TableIcon } from "lucide-react";
+import { download, exportFilename } from "@/lib/file-download";
 
 interface BacktestReport {
   periods: { start: string; end: string; accuracy: number; returnPct: number; trades: number }[];
@@ -144,13 +145,7 @@ function exportCSV(report: BacktestReport) {
     csv += `${t.date},${t.exitDate},${t.ticker},${t.action},${t.strategy || ""},${t.entryPrice.toFixed(2)},${t.exitPrice.toFixed(2)},${t.returnPct.toFixed(2)},${t.pnl.toFixed(2)},${t.duration},${t.mae},${t.mfe},${t.regime},${t.confidence}\n`;
   }
 
-  const blob = new Blob([csv], { type: "text/csv" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `backtest-report-${new Date().toISOString().split("T")[0]}.csv`;
-  a.click();
-  URL.revokeObjectURL(url);
+  download(exportFilename("backtest-report", "csv"), csv, "text/csv");
 }
 
 const Backtest = () => {

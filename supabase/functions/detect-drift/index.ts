@@ -13,15 +13,11 @@
 // ============================================================================
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import { requireCronOrUser } from "../_shared/cron-auth.ts";
 import { recordHeartbeat } from "../_shared/heartbeat.ts";
 import { detectAdwinDrift } from "../_shared/adwin.ts";
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-cron-secret",
-};
+import { errorMessage, handleCors, jsonResponse } from "../_shared/http.ts";
+import { adminClient } from "../_shared/supabase-client.ts";
 
 const RECENT_DAYS = 30;
 const BASELINE_DAYS = 180;
@@ -56,15 +52,13 @@ function psi(recent: number[], baseline: number[], bins = PSI_BINS): number {
 }
 
 serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+  const preflight = handleCors(req);
+  if (preflight) return preflight;
   const denied = await requireCronOrUser(req);
   if (denied) return denied;
 
   const started = Date.now();
-  const supabase = createClient(
-    Deno.env.get("SUPABASE_URL")!,
-    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
-  );
+  const supabase = adminClient();
 
   try {
     const baselineIso = new Date(Date.now() - BASELINE_DAYS * 24 * 3600 * 1000).toISOString();
@@ -133,15 +127,11 @@ serve(async (req) => {
     const ms = Date.now() - started;
     await recordHeartbeat("detect-drift", started, "ok",
       `detections=${detections.length} rows=${all.length}`);
-    return new Response(JSON.stringify({ ok: true, detections: detections.length, rows: all.length, ms }), {
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return jsonResponse({ ok: true, detections: detections.length, rows: all.length, ms });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg = errorMessage(err);
     console.error("[detect-drift] fatal:", msg);
     await recordHeartbeat("detect-drift", started, "error", msg);
-    return new Response(JSON.stringify({ error: msg }), {
-      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return jsonResponse({ error: msg }, 500);
   }
 });

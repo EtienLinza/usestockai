@@ -11,7 +11,6 @@
 // Reuses the canonical evaluateSignal() engine — same code path the backtest validates.
 // ============================================================================
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import {
   calculateATR,
   calculateRSI,
@@ -77,6 +76,8 @@ import {
   type CvarPosition,
 } from "../_shared/portfolio-cvar.ts";
 import { detectAdwinDrift, adwinGateAdjust } from "../_shared/adwin.ts";
+import { handleCors, jsonResponse } from "../_shared/http.ts";
+import { adminClient } from "../_shared/supabase-client.ts";
 
 /** Thrown by the circuit breaker to abort the entire scan immediately. */
 class CircuitBreakerTrippedError extends Error {
@@ -86,10 +87,6 @@ class CircuitBreakerTrippedError extends Error {
   }
 }
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-};
 
 // ── Daily candle fetch with caching (per invocation) ─────────────────────
 // Historical bars come from Yahoo (Finnhub free tier blocks /stock/candle).
@@ -1849,7 +1846,8 @@ async function executeAddOn(
 // ============================================================================
 
 serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+  const preflight = handleCors(req);
+  if (preflight) return preflight;
 
   const { requireCronOrUser } = await import("../_shared/cron-auth.ts");
   const denied = await requireCronOrUser(req);
@@ -1864,10 +1862,7 @@ serve(async (req) => {
     : "all";
   const entryShardCount = Math.max(1, Math.min(12, Number(body?.shards ?? 1) || 1));
   const entryShard = Math.max(0, Math.min(entryShardCount - 1, Number(body?.shard ?? 0) || 0));
-  const supabase = createClient(
-    Deno.env.get("SUPABASE_URL")!,
-    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
-  );
+  const supabase = adminClient();
 
   const summary = { users: 0, entries: 0, exits: 0, partials: 0, holds: 0, blocked: 0, errors: 0 };
 
@@ -1908,7 +1903,7 @@ serve(async (req) => {
 
     if (!settingsRows || settingsRows.length === 0) {
       await recordHeartbeat("autotrader-scan", startedAt, "ok", "no-active-users");
-      return json({ status: "no-active-users", summary });
+      return jsonResponse({ status: "no-active-users", summary });
     }
     summary.users = settingsRows.length;
 
@@ -1940,7 +1935,7 @@ serve(async (req) => {
 
     if (scanMode !== "exits" && !isMarketOpen()) {
       await recordHeartbeat("autotrader-scan", startedAt, "ok", `entries skipped: market closed mode=${scanMode}`);
-      return json({ status: "skipped-market-closed", mode: scanMode, summary });
+      return jsonResponse({ status: "skipped-market-closed", mode: scanMode, summary });
     }
 
     // 3. Per-user processing — gated by per-user next_scan_at
@@ -2166,7 +2161,7 @@ serve(async (req) => {
           (summary as Record<string, unknown>).circuit_breaker_tripped = true;
           (summary as Record<string, unknown>).reason = err.verdictReason;
           await recordHeartbeat("autotrader-scan", startedAt, "error", `circuit-breaker: ${err.verdictReason}`);
-          return json({ status: "circuit-breaker-tripped", reason: err.verdictReason, summary });
+          return jsonResponse({ status: "circuit-breaker-tripped", reason: err.verdictReason, summary });
         }
         console.error(`User ${rawSettings.user_id} failed:`, err);
         summary.errors++;
@@ -2186,11 +2181,11 @@ serve(async (req) => {
       "ok",
       `users=${summary.users} entries=${summary.entries} exits=${summary.exits} errors=${summary.errors}`,
     );
-    return json({ status: "ok", mode: scanMode, shard: entryShard, shards: entryShardCount, summary });
+    return jsonResponse({ status: "ok", mode: scanMode, shard: entryShard, shards: entryShardCount, summary });
   } catch (err) {
     console.error("AutoTrader top-level error:", err);
     await recordHeartbeat("autotrader-scan", startedAt, "error", (err as Error).message ?? "unknown");
-    return json({ status: "error", error: (err as Error).message, summary }, 500);
+    return jsonResponse({ status: "error", error: (err as Error).message, summary }, 500);
   }
 });
 
@@ -3655,11 +3650,5 @@ async function executeEntry(
     price: fillPrice, shares,
     conviction: e.conviction, strategy: e.strategy, profile: e.profile,
     position_id: ins.id,
-  });
-}
-
-function json(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status, headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
 }

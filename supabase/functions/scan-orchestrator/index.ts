@@ -9,7 +9,6 @@
 // Live progress is written to scan_runs so the dashboard can poll/realtime.
 // ============================================================================
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import { recordHeartbeat } from "../_shared/heartbeat.ts";
 import {
   discoverTickers, computeMacroRegime, fetchSectorMomentum, preScreen,
@@ -22,28 +21,22 @@ import { classifyRegime, upsertRegimeSnapshot } from "../_shared/regime-detector
 import { loadLatestMetaModel } from "../_shared/meta-labeler.ts";
 import { requireCronOrUser, cronSecretHeader } from "../_shared/cron-auth.ts";
 import { isMarketHoliday, etMinuteOfDay, etDayOfWeek } from "../_shared/market-calendar.ts";
-
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-cron-secret",
-};
+import { errorMessage, handleCors, jsonResponse } from "../_shared/http.ts";
+import { adminClient } from "../_shared/supabase-client.ts";
 
 const WORKER_CHUNK = 80;        // tickers per worker call
 const WORKER_PARALLELISM = 10;  // concurrent worker invocations
 const DISCOVERY_TTL_MS = 24 * 60 * 60 * 1000;
 
 serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+  const preflight = handleCors(req);
+  if (preflight) return preflight;
 
   const denied = await requireCronOrUser(req, { allowAuthenticatedUser: true });
   if (denied) return denied;
 
   const heartbeatStart = Date.now();
-  const supabase = createClient(
-    Deno.env.get("SUPABASE_URL")!,
-    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
-  );
+  const supabase = adminClient();
 
   // Create a scan_runs row up front for live progress
   const { data: runRow } = await supabase
@@ -78,9 +71,7 @@ serve(async (req) => {
         await setProgress({ phase: "skipped", finished_at: new Date().toISOString() });
         await recordHeartbeat("scan-orchestrator", heartbeatStart, "ok",
           `live skip dow=${dow} etMin=${min}`);
-        return new Response(JSON.stringify({ ok: true, skipped: true, runId, mode }), {
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
+        return jsonResponse({ ok: true, skipped: true, runId, mode });
       }
     }
 
@@ -99,9 +90,7 @@ serve(async (req) => {
         await setProgress({ phase: "skipped", finished_at: new Date().toISOString() });
         await recordHeartbeat("scan-orchestrator", heartbeatStart, "ok",
           `premarket skip dow=${dow} etMin=${min}`);
-        return new Response(JSON.stringify({ ok: true, skipped: true, runId, mode }), {
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
+        return jsonResponse({ ok: true, skipped: true, runId, mode });
       }
     }
 
@@ -405,7 +394,7 @@ serve(async (req) => {
     await recordHeartbeat("scan-orchestrator", heartbeatStart, "ok",
       `signals=${allSignals.length} survivors=${survivors.length}/${allTickers.length} ${elapsed}ms`);
 
-    return new Response(JSON.stringify({
+    return jsonResponse({
       ok: true, runId,
       signals: allSignals.length,
       survivors: survivors.length,
@@ -418,15 +407,13 @@ serve(async (req) => {
         breadth: macro.breadth, credit: macro.credit,
         vixLevel: macro.vixLevel, notes: macro.notes,
       },
-    }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    });
 
   } catch (e) {
-    const m = e instanceof Error ? e.message : String(e);
+    const m = errorMessage(e);
     console.error("orchestrator error:", e);
     await setProgress({ phase: "error", error: m, finished_at: new Date().toISOString() });
     await recordHeartbeat("scan-orchestrator", heartbeatStart, "error", m);
-    return new Response(JSON.stringify({ error: m, runId }), {
-      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return jsonResponse({ error: m, runId }, 500);
   }
 });

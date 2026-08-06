@@ -1,12 +1,7 @@
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { fetchDailyCloses } from "../_shared/yahoo-history.ts";
 import { getQuoteWithFallback } from "../_shared/finnhub.ts";
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
-};
+import { handleCors, jsonResponse } from "../_shared/http.ts";
+import { anonClient } from "../_shared/supabase-client.ts";
 
 // ── Sector mapping (mirrors market-scanner) ──────────────────────────────────
 const TICKER_TO_SECTOR_ETF: Record<string, string> = {
@@ -86,27 +81,20 @@ interface GateRequest {
 }
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+  const preflight = handleCors(req);
+  if (preflight) return preflight;
 
   try {
     const authHeader = req.headers.get("Authorization");
     if (!authHeader) {
-      return new Response(JSON.stringify({ error: "Missing authorization" }), {
-        status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return jsonResponse({ error: "Missing authorization" }, 401);
     }
 
-    const supabase = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_ANON_KEY")!,
-      { global: { headers: { Authorization: authHeader } } }
-    );
+    const supabase = anonClient(authHeader);
 
     const { data: userData, error: userErr } = await supabase.auth.getUser();
     if (userErr || !userData?.user) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
-        status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return jsonResponse({ error: "Unauthorized" }, 401);
     }
     const userId = userData.user.id;
 
@@ -116,9 +104,7 @@ Deno.serve(async (req) => {
     const entryPrice = Number(body.entry_price);
 
     if (!ticker || !/^[A-Z]{1,10}(-[A-Z]{2,4})?$/.test(ticker) || shares <= 0 || entryPrice <= 0) {
-      return new Response(JSON.stringify({ error: "Invalid input" }), {
-        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return jsonResponse({ error: "Invalid input" }, 400);
     }
 
     // Load caps + open positions in parallel
@@ -138,9 +124,9 @@ Deno.serve(async (req) => {
     const openPositions = positionsRes.data ?? [];
 
     if (!caps.enabled) {
-      return new Response(JSON.stringify({
+      return jsonResponse({
         ok: true, decision: "allow", caps, violations: [], metrics: { skipped: true }
-      }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      });
     }
 
     // ── Fetch historical closes (for beta) AND live prices (for valuation) ────
@@ -242,7 +228,7 @@ Deno.serve(async (req) => {
         ? "block"
         : "warn";
 
-    return new Response(JSON.stringify({
+    return jsonResponse({
       ok: true,
       decision,
       caps,
@@ -257,11 +243,9 @@ Deno.serve(async (req) => {
         ),
         new_total_value: Number(newTotalValue.toFixed(2)),
       },
-    }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    });
   } catch (e) {
     console.error("portfolio-gate error", e);
-    return new Response(JSON.stringify({ error: (e as Error).message }), {
-      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return jsonResponse({ error: (e as Error).message }, 500);
   }
 });
