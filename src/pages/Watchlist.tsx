@@ -111,6 +111,7 @@ const Watchlist = () => {
       setAlerts((data as PriceAlert[]) || []);
     } catch (error) {
       console.error("Fetch alerts error:", error);
+      toast.error("Failed to load price alerts");
     }
   };
 

@@ -183,11 +183,13 @@ const Dashboard = () => {
   const loadSignalData = useCallback(async () => {
     setSignalsLoading(true);
     try {
-      const { data: signalData } = await supabase
+      const { data: signalData, error: signalError } = await supabase
         .from("live_signals")
         .select("*")
         .gte("expires_at", new Date().toISOString())
         .order("confidence", { ascending: false });
+
+      if (signalError) throw signalError;
 
       if (signalData) {
         setSignals(signalData as Signal[]);
@@ -195,17 +197,23 @@ const Dashboard = () => {
       }
 
       if (user) {
-        const [{ data: posData }, { data: histData }, { data: alertData }] = await Promise.all([
+        const [posRes, histRes, alertRes] = await Promise.all([
           supabase.from("virtual_positions").select("*").eq("user_id", user.id).order("created_at", { ascending: false }),
           supabase.from("virtual_portfolio_log").select("*").eq("user_id", user.id).order("date", { ascending: true }),
           supabase.from("sell_alerts").select("*").eq("user_id", user.id).eq("is_dismissed", false).order("created_at", { ascending: false }),
         ]);
+        const firstError = posRes.error ?? histRes.error ?? alertRes.error;
+        if (firstError) throw firstError;
+        const { data: posData } = posRes;
+        const { data: histData } = histRes;
+        const { data: alertData } = alertRes;
         if (posData) setPositions(posData as Position[]);
         if (histData) setPortfolioHistory(histData as PortfolioSnapshot[]);
         if (alertData) setSellAlerts(alertData.map((a: any) => ({ ...a, currentPrice: Number(a.current_price) })) as SellAlert[]);
       }
     } catch (err) {
       console.error("Failed to load signal data:", err);
+      toast.error("Failed to load signals and portfolio data");
     }
     setSignalsLoading(false);
   }, [user]);
@@ -234,12 +242,16 @@ const Dashboard = () => {
     if (!user) return;
     let cancelled = false;
     const loadKillSwitch = async () => {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("autotrade_settings")
         .select("kill_switch")
         .eq("user_id", user.id)
         .maybeSingle();
       if (cancelled) return;
+      if (error) {
+        console.error("Failed to load kill switch state:", error);
+        return;
+      }
       setKillSwitchActive(Boolean(data?.kill_switch));
     };
     loadKillSwitch();
@@ -311,12 +323,13 @@ const Dashboard = () => {
 
       // Poll the most recent scan_runs row for live progress
       pollTimer = setInterval(async () => {
-        const { data } = await supabase
+        const { data, error } = await supabase
           .from("scan_runs")
           .select("phase, processed, total, signals_found, universe_size, survivors")
           .order("started_at", { ascending: false })
           .limit(1)
           .maybeSingle();
+        if (error) console.warn("Scan progress poll failed:", error);
         if (!data) return;
         const phase = (data as any).phase as string;
         setScanProgress(p => ({
@@ -426,7 +439,9 @@ const Dashboard = () => {
       setSellPrice("");
       const alertsForPos = sellAlerts.filter(a => a.ticker === selectedPosition.ticker);
       for (const alert of alertsForPos) {
-        if (alert.id) await supabase.from("sell_alerts").update({ is_dismissed: true }).eq("id", alert.id);
+        if (!alert.id) continue;
+        const { error: dismissError } = await supabase.from("sell_alerts").update({ is_dismissed: true }).eq("id", alert.id);
+        if (dismissError) console.error(`Failed to dismiss sell alert ${alert.id}:`, dismissError);
       }
       await loadSignalData();
     }
@@ -442,7 +457,12 @@ const Dashboard = () => {
 
   const handleDismissAlert = async (alert: SellAlert) => {
     if (alert.id) {
-      await supabase.from("sell_alerts").update({ is_dismissed: true }).eq("id", alert.id);
+      const { error } = await supabase.from("sell_alerts").update({ is_dismissed: true }).eq("id", alert.id);
+      if (error) {
+        console.error("Failed to dismiss alert:", error);
+        toast.error(`Could not dismiss alert for ${alert.ticker}`);
+        return;
+      }
       setSellAlerts(prev => prev.filter(a => a.id !== alert.id));
       toast.success(`Dismissed alert for ${alert.ticker}`);
     }
@@ -710,7 +730,8 @@ const Dashboard = () => {
                         if (error) throw error;
                         setSignals([]);
                         toast.success("All signals cleared");
-                      } catch {
+                      } catch (err) {
+                        console.error("Failed to clear signals:", err);
                         toast.error("Failed to clear signals");
                       }
                     }}

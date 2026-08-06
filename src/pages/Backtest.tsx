@@ -256,7 +256,7 @@ const Backtest = () => {
               setIsLoading(false);
               return;
             }
-          } catch {}
+          } catch { /* not a tier-gate payload — fall through to the generic handler */ }
         }
         if (resp.status === 400) {
           try {
@@ -266,7 +266,7 @@ const Backtest = () => {
               setIsLoading(false);
               return;
             }
-          } catch {}
+          } catch { /* no JSON body — fall through to the generic handler */ }
         }
         await handleResponseError(resp, navigate);
       }

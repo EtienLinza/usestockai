@@ -62,11 +62,15 @@ export function AccountSection() {
     if (!user) return;
     (async () => {
       setLoading(true);
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("profiles")
         .select("full_name, avatar_url, weekly_digest_enabled, alert_email_enabled")
         .eq("user_id", user.id)
         .maybeSingle();
+      if (error) {
+        console.error("Failed to load profile:", error);
+        toast.error("Could not load your profile");
+      }
       if (data) {
         setProfile({
           full_name: data.full_name ?? "",
