@@ -74,6 +74,23 @@ Run lint checks:
 npm run lint
 ```
 
+## Tests
+
+Frontend unit tests run on Vitest (jsdom):
+
+```bash
+npm test              # run once
+npm run test:watch    # watch mode
+npm run test:coverage # coverage report for src/lib and src/hooks
+```
+
+Edge Function tests in `supabase/functions/_shared` run on Deno (requires the
+[Deno CLI](https://deno.land)):
+
+```bash
+npm run test:functions
+```
+
 ## Core workflows (high level)
 
 - **Signal generation:** `supabase/functions/market-scanner`
