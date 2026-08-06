@@ -1,14 +1,10 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import { recordHeartbeat } from "../_shared/heartbeat.ts";
 import { requireCronOrUser } from "../_shared/cron-auth.ts";
 import { pav, type IsotonicAnchor } from "../_shared/calibration.ts";
 import { trainEnsemble, type EnsembleInputRow } from "../_shared/ensemble.ts";
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-cron-secret",
-};
+import { handleCors, jsonResponse } from "../_shared/http.ts";
+import { adminClient } from "../_shared/supabase-client.ts";
 
 // PHASE B — Nightly adaptive weighting job.
 // Reads `signal_outcomes` (closed) over a rolling window and produces
@@ -85,17 +81,15 @@ function bucketCenter(label: string): number {
 }
 
 serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+  const preflight = handleCors(req);
+  if (preflight) return preflight;
 
   const denied = await requireCronOrUser(req);
   if (denied) return denied;
 
   const startedAt = Date.now();
   try {
-    const supabase = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
-    );
+    const supabase = adminClient();
 
     const sinceISO = new Date(Date.now() - WINDOW_DAYS * 24 * 3600 * 1000).toISOString();
 
@@ -544,7 +538,7 @@ serve(async (req) => {
       `samples=${sampleSize} window=${WINDOW_DAYS}d ensemble=${ensemble ? "ok" : "skip"}`,
     );
 
-    return new Response(JSON.stringify({
+    return jsonResponse({
       ok: true,
       sampleSize,
       windowDays: WINDOW_DAYS,
@@ -565,14 +559,11 @@ serve(async (req) => {
           }
         : { skipped: true },
       regime_probabilities,
-    }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    });
 
   } catch (e: any) {
     console.error("calibrate-weights error:", e);
     await recordHeartbeat("calibrate-weights", startedAt, "error", e?.message ?? "failed");
-    return new Response(JSON.stringify({ error: e.message ?? "failed" }), {
-      status: 500,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return jsonResponse({ error: e.message ?? "failed" }, 500);
   }
 });

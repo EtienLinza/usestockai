@@ -19,7 +19,6 @@
 // ============================================================================
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import { requireCronOrUser } from "../_shared/cron-auth.ts";
 import { recordHeartbeat } from "../_shared/heartbeat.ts";
 import {
@@ -30,11 +29,8 @@ import {
   type ClosedTrade,
   type UserContextFeatures,
 } from "../_shared/user-models.ts";
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-cron-secret",
-};
+import { errorMessage, handleCors, jsonResponse } from "../_shared/http.ts";
+import { adminClient } from "../_shared/supabase-client.ts";
 
 const WINDOW_DAYS = 180;
 
@@ -47,21 +43,17 @@ function riskOrd(profile: string | null | undefined): number {
 }
 
 serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+  const preflight = handleCors(req);
+  if (preflight) return preflight;
 
   try {
     await requireCronOrUser(req);
   } catch (e) {
-    return new Response(JSON.stringify({ error: (e as Error).message }), {
-      status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return jsonResponse({ error: (e as Error).message }, 401);
   }
 
   const started = Date.now();
-  const supabase = createClient(
-    Deno.env.get("SUPABASE_URL")!,
-    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
-  );
+  const supabase = adminClient();
 
   try {
     // 1. Ensure archetypes exist.
@@ -213,19 +205,17 @@ serve(async (req) => {
     const ms = Date.now() - started;
     await recordHeartbeat("train-user-models", started, "ok",
       `fitted=${fitted} cold=${coldStart} skipped=${skipped}`);
-    return new Response(JSON.stringify({
+    return jsonResponse({
       ok: true,
       global_win_rate: Math.round(globalWinRate * 1000) / 10,
       archetypes: archetypes.length,
       users_processed: (settings ?? []).length,
       fitted, cold_start: coldStart, skipped, ms,
-    }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg = errorMessage(err);
     console.error("[train-user-models] fatal:", msg);
     await recordHeartbeat("train-user-models", started, "error", msg);
-    return new Response(JSON.stringify({ error: msg }), {
-      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return jsonResponse({ error: msg }, 500);
   }
 });

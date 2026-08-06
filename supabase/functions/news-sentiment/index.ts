@@ -20,14 +20,10 @@
 // keep working without changes.
 // ============================================================================
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import { getCompanyNews, isFinnhubConfigured } from "../_shared/finnhub.ts";
 import { requireCronOrUser } from "../_shared/cron-auth.ts";
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-cron-secret",
-};
+import { handleCors, jsonResponse } from "../_shared/http.ts";
+import { adminClient } from "../_shared/supabase-client.ts";
 
 const CACHE_TTL_MIN = 30;
 const MAX_HEADLINES = 10;
@@ -427,7 +423,8 @@ function aggregate(ticker: string, headlines: Headline[]): SentimentResult {
 
 // ── Main ──────────────────────────────────────────────────────────────────
 serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+  const preflight = handleCors(req);
+  if (preflight) return preflight;
 
   // Auth gate: authenticated users or cron callers only — keeps anon traffic
   // from draining Finnhub/NewsAPI free-tier quota.
@@ -439,13 +436,10 @@ serve(async (req) => {
     const { ticker: rawTicker } = await req.json().catch(() => ({}));
     const ticker = String(rawTicker ?? "").trim().toUpperCase();
     if (!ticker || !/^[A-Z]{1,10}(-[A-Z]{2,4})?$/.test(ticker)) {
-      return json({ error: "Invalid ticker" }, 400);
+      return jsonResponse({ error: "Invalid ticker" }, 400);
     }
 
-    const supabase = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
-    );
+    const supabase = adminClient();
 
     // 1. Cache hit?
     const { data: cached } = await supabase
@@ -457,7 +451,7 @@ serve(async (req) => {
     if (cached) {
       const ageMin = (Date.now() - new Date(cached.fetched_at as string).getTime()) / 60000;
       if (ageMin < CACHE_TTL_MIN) {
-        return json({
+        return jsonResponse({
           ticker,
           score: cached.score,
           confidence: Number(cached.confidence),
@@ -495,11 +489,11 @@ serve(async (req) => {
       .delete()
       .lt("fetched_at", new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString());
 
-    return json(result);
+    return jsonResponse(result);
   } catch (err) {
     console.error("news-sentiment top-level error:", err);
     const message = err instanceof Error ? err.message : "Unknown error";
-    return json({ error: message }, 500);
+    return jsonResponse({ error: message }, 500);
   }
 });
 
@@ -515,10 +509,4 @@ async function upsertCache(
     reasoning: r.reasoning,
     fetched_at: new Date().toISOString(),
   }, { onConflict: "ticker" });
-}
-
-function json(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status, headers: { ...corsHeaders, "Content-Type": "application/json" },
-  });
 }

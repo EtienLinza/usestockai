@@ -14,7 +14,8 @@
 //     backtest stays deterministic.
 // ============================================================================
 
-import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+import { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+import { adminClient } from "./supabase-client.ts";
 
 export const META_FEATURE_NAMES = [
   "conviction",
@@ -107,10 +108,7 @@ export function scoreMetaLabel(
 let _client: SupabaseClient | null = null;
 function client(): SupabaseClient {
   if (_client) return _client;
-  _client = createClient(
-    Deno.env.get("SUPABASE_URL")!,
-    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
-  );
+  _client = adminClient();
   return _client;
 }
 

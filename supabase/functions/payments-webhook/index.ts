@@ -1,13 +1,10 @@
-import { createClient } from "npm:@supabase/supabase-js@2";
 import { verifyWebhook, type StripeEnv } from "../_shared/stripe.ts";
+import { adminClient } from "../_shared/supabase-client.ts";
 
-let _supabase: ReturnType<typeof createClient> | null = null;
+let _supabase: ReturnType<typeof adminClient> | null = null;
 function getSupabase() {
   if (!_supabase) {
-    _supabase = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
-    );
+    _supabase = adminClient();
   }
   return _supabase;
 }

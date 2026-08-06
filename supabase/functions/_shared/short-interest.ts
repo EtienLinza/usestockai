@@ -16,7 +16,8 @@
 // treat missing as "neutral" (no conviction adjustment).
 // ============================================================================
 
-import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+import { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+import { adminClient } from "./supabase-client.ts";
 
 const FINNHUB_BASE = "https://finnhub.io/api/v1";
 const DEFAULT_TIMEOUT_MS = 6000;
@@ -112,10 +113,7 @@ export async function getShortInterest(ticker: string): Promise<ShortInterestSna
 let _client: SupabaseClient | null = null;
 function client(): SupabaseClient {
   if (_client) return _client;
-  _client = createClient(
-    Deno.env.get("SUPABASE_URL")!,
-    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
-  );
+  _client = adminClient();
   return _client;
 }
 

@@ -3,17 +3,15 @@
 // Falls back to a live Yahoo fetch on miss/stale. Identical DataSet shape as
 // fetchDailyHistory so callers are interchangeable.
 // ============================================================================
-import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+import { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import { fetchDailyHistory } from "./yahoo-history.ts";
 import type { DataSet } from "./signal-engine-v2.ts";
+import { adminClient } from "./supabase-client.ts";
 
 let _client: SupabaseClient | null = null;
 function client(): SupabaseClient {
   if (_client) return _client;
-  _client = createClient(
-    Deno.env.get("SUPABASE_URL")!,
-    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
-  );
+  _client = adminClient();
   return _client;
 }
 

@@ -8,16 +8,13 @@ import { discoverTickers } from "../_shared/scan-pipeline.ts";
 import { upsertBars } from "../_shared/bars-cache.ts";
 import { recordHeartbeat } from "../_shared/heartbeat.ts";
 import { requireCronOrUser } from "../_shared/cron-auth.ts";
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-cron-secret",
-};
+import { errorMessage, handleCors, jsonResponse } from "../_shared/http.ts";
 
 const PARALLELISM = 30;
 
 serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+  const preflight = handleCors(req);
+  if (preflight) return preflight;
   const denied = await requireCronOrUser(req);
   if (denied) return denied;
   const startedAt = Date.now();
@@ -42,14 +39,10 @@ serve(async (req) => {
     const msg = `wrote=${written} failed=${failed} universe=${tickers.length} ${elapsed}ms`;
     console.log("prefetch-bars done:", msg);
     await recordHeartbeat("prefetch-bars", startedAt, "ok", msg);
-    return new Response(JSON.stringify({ ok: true, written, failed, universe: tickers.length, elapsed }), {
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return jsonResponse({ ok: true, written, failed, universe: tickers.length, elapsed });
   } catch (e) {
-    const m = e instanceof Error ? e.message : String(e);
+    const m = errorMessage(e);
     await recordHeartbeat("prefetch-bars", startedAt, "error", m);
-    return new Response(JSON.stringify({ error: m }), {
-      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return jsonResponse({ error: m }, 500);
   }
 });

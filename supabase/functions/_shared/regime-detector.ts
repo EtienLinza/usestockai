@@ -13,7 +13,8 @@
 // ============================================================================
 
 import { calculateSMA, calculateATR } from "./indicators.ts";
-import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+import { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+import { adminClient } from "./supabase-client.ts";
 
 export type MarketRegime =
   | "bull_quiet"
@@ -110,10 +111,7 @@ export function regimeConvictionMultiplier(
 let _client: SupabaseClient | null = null;
 function client(): SupabaseClient {
   if (_client) return _client;
-  _client = createClient(
-    Deno.env.get("SUPABASE_URL")!,
-    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
-  );
+  _client = adminClient();
   return _client;
 }
 

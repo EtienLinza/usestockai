@@ -1,11 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { getQuoteWithFallback } from "../_shared/finnhub.ts";
 import { requireCronOrUser } from "../_shared/cron-auth.ts";
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-cron-secret",
-};
+import { handleCors, jsonResponse } from "../_shared/http.ts";
 
 // Live index quote — Finnhub primary, Yahoo fallback.
 // NOTE: Finnhub uses different ticker codes for indices than Yahoo
@@ -140,9 +136,8 @@ async function fetchVixFromStooq(): Promise<number | null> {
 }
 
 serve(async (req) => {
-  if (req.method === "OPTIONS") {
-    return new Response(null, { headers: corsHeaders });
-  }
+  const preflight = handleCors(req);
+  if (preflight) return preflight;
 
   // Gate to authenticated users + cron — stops anonymous hammering of CNN/Yahoo/Stooq.
   const denied = await requireCronOrUser(req, { allowAuthenticatedUser: true });
@@ -227,14 +222,9 @@ serve(async (req) => {
       source: result.fearGreedSource,
     });
 
-    return new Response(JSON.stringify(result), {
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return jsonResponse(result);
   } catch (error) {
     console.error("Market sentiment error:", error);
-    return new Response(
-      JSON.stringify({ error: error instanceof Error ? error.message : "Unknown error" }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
+    return jsonResponse({ error: error instanceof Error ? error.message : "Unknown error" }, 500);
   }
 });

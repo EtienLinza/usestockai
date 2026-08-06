@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
+import { formatCurrency } from "@/lib/format";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -41,15 +42,6 @@ export const InvestmentCalculator = ({
   const bestCaseReturn = bestCaseValue - amount;
   const worstCaseReturn = worstCaseValue - amount;
   const isPositive = expectedReturn >= 0;
-
-  const formatCurrency = (value: number) => {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD',
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }).format(value);
-  };
 
   return (
     <Card className="glass-card overflow-hidden">

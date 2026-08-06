@@ -12,29 +12,23 @@
 // ============================================================================
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import { requireCronOrUser } from "../_shared/cron-auth.ts";
 import { recordHeartbeat } from "../_shared/heartbeat.ts";
 import { fetchDailyHistory } from "../_shared/yahoo-history.ts";
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-cron-secret",
-};
+import { errorMessage, handleCors, jsonResponse } from "../_shared/http.ts";
+import { adminClient } from "../_shared/supabase-client.ts";
 
 const MAX_ROWS = 2000;
 const MIN_AGE_DAYS = 8; // give the market time to play out (>= horizon)
 
 serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+  const preflight = handleCors(req);
+  if (preflight) return preflight;
   const denied = await requireCronOrUser(req);
   if (denied) return denied;
 
   const started = Date.now();
-  const supabase = createClient(
-    Deno.env.get("SUPABASE_URL")!,
-    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
-  );
+  const supabase = adminClient();
 
   try {
     const cutoffIso = new Date(Date.now() - MIN_AGE_DAYS * 24 * 3600 * 1000).toISOString();
@@ -51,9 +45,7 @@ serve(async (req) => {
     const pending = rows ?? [];
     if (pending.length === 0) {
       await recordHeartbeat("label-rejected-signals", started, "ok", "nothing to label");
-      return new Response(JSON.stringify({ ok: true, labeled: 0 }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return jsonResponse({ ok: true, labeled: 0 });
     }
 
     // Group by ticker so each symbol is fetched once.
@@ -130,15 +122,11 @@ serve(async (req) => {
     const ms = Date.now() - started;
     await recordHeartbeat("label-rejected-signals", started, "ok",
       `labeled=${labeled} skipped=${skipped} tickers=${tickers.length}`);
-    return new Response(JSON.stringify({ ok: true, labeled, skipped, tickers: tickers.length, ms }), {
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return jsonResponse({ ok: true, labeled, skipped, tickers: tickers.length, ms });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg = errorMessage(err);
     console.error("[label-rejected-signals] fatal:", msg);
     await recordHeartbeat("label-rejected-signals", started, "error", msg);
-    return new Response(JSON.stringify({ error: msg }), {
-      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return jsonResponse({ error: msg }, 500);
   }
 });

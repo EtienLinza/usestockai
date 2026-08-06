@@ -7,13 +7,9 @@
 // Mirrors refresh-danelfin-scores. Trigger: pg_cron at 02:45 UTC weekdays.
 // ============================================================================
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import { getEpsRevision, isEpsRevisionsConfigured, upsertEpsRevisions, type EpsRevision } from "../_shared/eps-revisions.ts";
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-cron-secret",
-};
+import { handleCors, jsonResponse } from "../_shared/http.ts";
+import { adminClient } from "../_shared/supabase-client.ts";
 
 const HARD_CAP = 300;
 const REQUEST_DELAY_MS = 1100;
@@ -35,27 +31,21 @@ async function writeHeartbeat(supabase: any, status: string, notes: string, dura
 }
 
 serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+  const preflight = handleCors(req);
+  if (preflight) return preflight;
   const started = Date.now();
 
   const cronSecret = Deno.env.get("CRON_SECRET");
   const provided = req.headers.get("x-cron-secret");
   if (!cronSecret || !provided || provided !== cronSecret) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), {
-      status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return jsonResponse({ error: "Unauthorized" }, 401);
   }
 
-  const supabase = createClient(
-    Deno.env.get("SUPABASE_URL")!,
-    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
-  );
+  const supabase = adminClient();
 
   if (!isEpsRevisionsConfigured()) {
     await writeHeartbeat(supabase, "skipped", "FINNHUB_API_KEY not configured", Date.now() - started);
-    return new Response(JSON.stringify({ ok: false, reason: "no api key" }), {
-      status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return jsonResponse({ ok: false, reason: "no api key" });
   }
 
   const universe = new Set<string>();
@@ -118,7 +108,7 @@ serve(async (req) => {
   const notes = `attempted=${tickers.length} fetched=${fetched.length} upserted=${upserted}${degraded ? " (early exit)" : ""}`;
   await writeHeartbeat(supabase, status, notes, durationMs);
 
-  return new Response(JSON.stringify({
+  return jsonResponse({
     ok: true, attempted: tickers.length, fetched: fetched.length, upserted, degraded, duration_ms: durationMs,
-  }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+  });
 });

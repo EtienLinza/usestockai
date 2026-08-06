@@ -1,25 +1,19 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+import { adminClient } from "../_shared/supabase-client.ts";
 import { requireCronOrUser, cronSecretHeader } from "../_shared/cron-auth.ts";
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-cron-secret, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
-};
+import { handleCors, jsonResponse } from "../_shared/http.ts";
 
 serve(async (req) => {
-  if (req.method === "OPTIONS") {
-    return new Response(null, { headers: corsHeaders });
-  }
+  const preflight = handleCors(req);
+  if (preflight) return preflight;
 
   const denied = await requireCronOrUser(req);
   if (denied) return denied;
 
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
-    const supabase = createClient(supabaseUrl, serviceRoleKey);
+    const supabase = adminClient();
 
     let body: any = {};
     try { body = await req.json(); } catch { /* empty body is fine */ }
@@ -36,10 +30,7 @@ serve(async (req) => {
 
     if (deleteError) {
       console.error("Failed to clear signals:", deleteError);
-      return new Response(
-        JSON.stringify({ error: "Failed to clear signals", details: deleteError.message }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      return jsonResponse({ error: "Failed to clear signals", details: deleteError.message }, 500);
     }
 
     // Clear old prediction_runs (older than 24h)
@@ -87,22 +78,13 @@ serve(async (req) => {
       }
 
       console.log(`Auto-rescan complete: ${totalSignals} signals across ${batch} batches`);
-      return new Response(
-        JSON.stringify({ success: true, cleared: true, rescanned: true, totalSignals, batches: batch }),
-        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      return jsonResponse({ success: true, cleared: true, rescanned: true, totalSignals, batches: batch });
     }
 
-    return new Response(
-      JSON.stringify({ success: true, message: "All signals and old predictions cleared" }),
-      { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
+    return jsonResponse({ success: true, message: "All signals and old predictions cleared" });
   } catch (error) {
     console.error("Error:", error);
     const message = error instanceof Error ? error.message : "Failed";
-    return new Response(
-      JSON.stringify({ error: message }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
+    return jsonResponse({ error: message }, 500);
   }
 });

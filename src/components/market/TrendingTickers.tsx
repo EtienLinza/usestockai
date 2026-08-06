@@ -2,6 +2,7 @@ import { useNavigate } from "react-router-dom";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { TrendingUp, TrendingDown, ChevronRight } from "lucide-react";
+import { formatCompactNumber } from "@/lib/format";
 
 interface TrendingTicker {
   ticker: string;
@@ -18,11 +19,7 @@ interface TrendingTickersProps {
 export function TrendingTickers({ gainers, losers }: TrendingTickersProps) {
   const navigate = useNavigate();
 
-  const formatVolume = (vol: number) => {
-    if (vol >= 1e9) return `${(vol / 1e9).toFixed(1)}B`;
-    if (vol >= 1e6) return `${(vol / 1e6).toFixed(1)}M`;
-    return `${(vol / 1e3).toFixed(0)}K`;
-  };
+  const formatVolume = formatCompactNumber;
 
   const TickerRow = ({ ticker }: { ticker: TrendingTicker }) => {
     const isPositive = ticker.change >= 0;

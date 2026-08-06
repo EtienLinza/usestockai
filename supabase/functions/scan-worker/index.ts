@@ -5,7 +5,6 @@
 // orchestrator merges and persists.
 // ============================================================================
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import {
   evaluateSignal,
   primeTrackerCacheFromDB,
@@ -21,12 +20,8 @@ import { getEarningsBlackoutDays } from "../_shared/finnhub.ts";
 import { applyIsotonicCalibration, type IsotonicAnchor } from "../_shared/calibration.ts";
 import { requireCronOrUser } from "../_shared/cron-auth.ts";
 import { explainSignal } from "../_shared/signal-explainer.ts";
-
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-};
+import { errorMessage, handleCors, jsonResponse } from "../_shared/http.ts";
+import { adminClient } from "../_shared/supabase-client.ts";
 
 interface Body {
   tickers: string[];
@@ -108,7 +103,8 @@ function scoreMetaInline(model: MetaModelLite, f: {
 }
 
 serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+  const preflight = handleCors(req);
+  if (preflight) return preflight;
   const denied = await requireCronOrUser(req);
   if (denied) return denied;
   try {
@@ -120,17 +116,12 @@ serve(async (req) => {
     const metaModel = body.metaModel ?? null;
     const mode: "premarket" | "live" = body.mode === "premarket" ? "premarket" : "live";
     if (!Array.isArray(tickers) || tickers.length === 0) {
-      return new Response(JSON.stringify({ signals: [] }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return jsonResponse({ signals: [] });
     }
 
     // C-2 FIX: hydrate cooldown tracker from DB so cooldownBarsRemaining
     // persists across worker invocations (each cold start otherwise resets it).
-    const supabase = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
-    );
+    const supabase = adminClient();
     clearTrackerCache();
     await primeTrackerCacheFromDB(supabase, tickers);
 
@@ -353,13 +344,9 @@ serve(async (req) => {
     // C-2 FIX: persist updated cooldown state before responding.
     await persistTrackerCacheToDB(supabase);
 
-    return new Response(JSON.stringify({ signals, rejected }), {
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return jsonResponse({ signals, rejected });
   } catch (e) {
-    const m = e instanceof Error ? e.message : String(e);
-    return new Response(JSON.stringify({ error: m }), {
-      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    const m = errorMessage(e);
+    return jsonResponse({ error: m }, 500);
   }
 });

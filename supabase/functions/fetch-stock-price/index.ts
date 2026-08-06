@@ -15,18 +15,13 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { getQuote, getFundamentals, isFinnhubConfigured } from "../_shared/finnhub.ts";
 import { requireCronOrUser } from "../_shared/cron-auth.ts";
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-cron-secret",
-};
+import { handleCors, jsonResponse } from "../_shared/http.ts";
 
 const YAHOO_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36";
 
 serve(async (req) => {
-  if (req.method === "OPTIONS") {
-    return new Response(null, { headers: corsHeaders });
-  }
+  const preflight = handleCors(req);
+  if (preflight) return preflight;
 
   const denied = await requireCronOrUser(req, { allowAuthenticatedUser: true });
   if (denied) return denied;
@@ -37,10 +32,7 @@ serve(async (req) => {
     const includeFundamentals = body?.includeFundamentals === true;
 
     if (!ticker || !/^[A-Z]{1,10}(-[A-Z]{2,4})?$/.test(ticker)) {
-      return new Response(
-        JSON.stringify({ error: "Ticker is required and must be valid" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      return jsonResponse({ error: "Ticker is required and must be valid" }, 400);
     }
 
     console.log(`fetch-stock-price ${ticker} (finnhub=${isFinnhubConfigured()}, fundamentals=${includeFundamentals})`);
@@ -68,44 +60,32 @@ serve(async (req) => {
       console.error(`Yahoo chart API error: ${status}`);
       // If Finnhub gave us a quote, we can still return a degraded payload
       if (finnhubQuote) {
-        return new Response(
-          JSON.stringify({
-            ticker,
-            priceHistory: [],
-            latestPrice: finnhubQuote.current,
-            latestTimestamp: finnhubQuote.timestamp,
-            liveQuote: finnhubQuote.current,
-            previousClose: finnhubQuote.previousClose || null,
-            marketState: null,
-            quoteSource: "finnhub",
-            fundamentals: fundamentals ?? null,
-            degraded: true,
-          }),
-          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
+        return jsonResponse({
+          ticker,
+          priceHistory: [],
+          latestPrice: finnhubQuote.current,
+          latestTimestamp: finnhubQuote.timestamp,
+          liveQuote: finnhubQuote.current,
+          previousClose: finnhubQuote.previousClose || null,
+          marketState: null,
+          quoteSource: "finnhub",
+          fundamentals: fundamentals ?? null,
+          degraded: true,
+        });
       }
-      return new Response(
-        JSON.stringify({ error: "Failed to fetch stock data", status }),
-        { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      return jsonResponse({ error: "Failed to fetch stock data", status }, 502);
     }
 
     const data = await chartRes.json();
     const result = data?.chart?.result?.[0];
     if (!result) {
-      return new Response(
-        JSON.stringify({ error: "No data available for ticker" }),
-        { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      return jsonResponse({ error: "No data available for ticker" }, 404);
     }
 
     const closes = result?.indicators?.quote?.[0]?.close;
     const timestamps = result?.timestamp;
     if (!closes || !timestamps) {
-      return new Response(
-        JSON.stringify({ error: "Incomplete data from provider" }),
-        { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      return jsonResponse({ error: "Incomplete data from provider" }, 502);
     }
 
     const priceHistory = timestamps.map((ts: number, i: number) => ({
@@ -152,25 +132,19 @@ serve(async (req) => {
       `${ticker}: bars=${priceHistory.length} liveQuote=${liveQuote} (src=${quoteSource}) prevClose=${previousClose}`
     );
 
-    return new Response(
-      JSON.stringify({
-        ticker,
-        priceHistory,
-        latestPrice: closes[closes.length - 1],
-        latestTimestamp: timestamps[timestamps.length - 1],
-        liveQuote,
-        previousClose,
-        marketState,
-        quoteSource,
-        fundamentals: fundamentals ?? null,
-      }),
-      { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
+    return jsonResponse({
+      ticker,
+      priceHistory,
+      latestPrice: closes[closes.length - 1],
+      latestTimestamp: timestamps[timestamps.length - 1],
+      liveQuote,
+      previousClose,
+      marketState,
+      quoteSource,
+      fundamentals: fundamentals ?? null,
+    });
   } catch (error) {
     console.error("fetch-stock-price error:", error);
-    return new Response(
-      JSON.stringify({ error: "Internal server error" }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
+    return jsonResponse({ error: "Internal server error" }, 500);
   }
 });

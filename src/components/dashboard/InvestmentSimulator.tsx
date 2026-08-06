@@ -8,6 +8,7 @@ import {
   DollarSign, TrendingUp, TrendingDown, Sparkles, AlertCircle, Minus,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { formatCurrency, formatSignedPercent } from "@/lib/format";
 
 interface Props {
   ticker: string;
@@ -37,17 +38,8 @@ const HORIZONS: { key: HorizonKey; short: string; long: string; months: number }
 const AMOUNT_PRESETS = [100, 500, 1000, 5000, 10000];
 const MIN_CONFIDENCE = 60;
 
-const fmtMoney = (v: number, compact = false) => {
-  const useCompact = compact && Math.abs(v) >= 10000;
-  return new Intl.NumberFormat("en-US", {
-    style: "currency", currency: "USD",
-    notation: useCompact ? "compact" : "standard",
-    maximumFractionDigits: 2,
-    minimumFractionDigits: useCompact ? 0 : 2,
-  }).format(v);
-};
-
-const fmtPct = (v: number) => `${v >= 0 ? "+" : ""}${(v * 100).toFixed(1)}%`;
+const fmtMoney = (v: number, compact = false) => formatCurrency(v, { compact });
+const fmtPct = formatSignedPercent;
 
 export const InvestmentSimulator = ({
   ticker, confidence, currentPrice, suggestedEntry, suggestedTarget,

@@ -4,13 +4,9 @@
 //   2. (when allowAuthenticatedUser=true) Authorization: Bearer <jwt> is a valid user JWT
 //
 // Returns null if allowed, or a Response (401) if rejected.
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+import { jsonResponse } from "./http.ts";
+import { anonClient } from "./supabase-client.ts";
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type, x-cron-secret",
-};
 
 export async function requireCronOrUser(
   req: Request,
@@ -24,10 +20,7 @@ export async function requireCronOrUser(
     const authHeader = req.headers.get("Authorization");
     if (authHeader?.startsWith("Bearer ")) {
       try {
-        const supabase = createClient(
-          Deno.env.get("SUPABASE_URL")!,
-          Deno.env.get("SUPABASE_ANON_KEY")!,
-        );
+        const supabase = anonClient();
         const token = authHeader.replace("Bearer ", "");
         const { data, error } = await supabase.auth.getUser(token);
         if (!error && data?.user?.id) return null;
@@ -35,10 +28,7 @@ export async function requireCronOrUser(
     }
   }
 
-  return new Response(
-    JSON.stringify({ error: "Unauthorized" }),
-    { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-  );
+  return jsonResponse({ error: "Unauthorized" }, 401);
 }
 
 export const cronSecretHeader = (): Record<string, string> => {
