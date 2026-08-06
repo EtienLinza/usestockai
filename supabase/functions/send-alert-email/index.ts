@@ -8,6 +8,8 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-cron-secret",
 };
 
+const TICKER_RE = /^[A-Z]{1,10}(-[A-Z]{2,4})?$/;
+
 interface AlertEmailRequest {
   userId: string;
   ticker: string;
@@ -38,7 +40,12 @@ serve(async (req) => {
     const body: Partial<AlertEmailRequest> = await req.json().catch(() => ({}));
     const { ticker, targetPrice, currentPrice, direction } = body;
 
-    if (!ticker || typeof targetPrice !== "number" || typeof currentPrice !== "number" || (direction !== "above" && direction !== "below")) {
+    if (
+      !ticker || typeof ticker !== "string" || !TICKER_RE.test(ticker.toUpperCase()) ||
+      typeof targetPrice !== "number" || !Number.isFinite(targetPrice) ||
+      typeof currentPrice !== "number" || !Number.isFinite(currentPrice) ||
+      (direction !== "above" && direction !== "below")
+    ) {
       return new Response(
         JSON.stringify({ error: "Invalid payload" }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
