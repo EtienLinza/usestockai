@@ -52,7 +52,7 @@ export default function Onboarding() {
   const finishOnboarding = async (chosenTier?: Tier) => {
     if (!user) return;
     setSaving(true);
-    const { error } = await supabase
+    const { error: profileError } = await supabase
       .from("profiles")
       .update({
         full_name: fullName || null,
@@ -69,24 +69,36 @@ export default function Onboarding() {
     try {
       const stashed = localStorage.getItem("pending_waitlist_tier") as Tier | null;
       if (stashed === "pro" || stashed === "elite") pendingTier = stashed;
-    } catch {}
+    } catch (err) {
+      console.warn("Could not read pending waitlist tier:", err);
+    }
     const waitlistTier = chosenTier && chosenTier !== "free" ? chosenTier : pendingTier;
+    let waitlistError: unknown = null;
     if (waitlistTier) {
-      await supabase.from("upgrade_waitlist").insert({
+      const { error } = await supabase.from("upgrade_waitlist").insert({
         user_id: user.id,
         requested_tier: waitlistTier,
         billing_cycle: "monthly",
       });
-      try { localStorage.removeItem("pending_waitlist_tier"); } catch {}
+      waitlistError = error;
+      if (error) console.error("Waitlist insert failed:", error);
+      else {
+        try { localStorage.removeItem("pending_waitlist_tier"); } catch (err) {
+          console.warn("Could not clear pending waitlist tier:", err);
+        }
+      }
     }
 
     setSaving(false);
-    if (error) {
+    if (profileError) {
+      console.error("Profile update failed:", profileError);
       toast.error("Could not save. Please try again.");
       return;
     }
     invalidate();
-    if (waitlistTier) {
+    if (waitlistError) {
+      toast.error("Your profile is saved, but we couldn't add you to the waitlist. Please try again from the pricing page.");
+    } else if (waitlistTier) {
       toast.success(`You're on the ${waitlistTier === "elite" ? "Elite" : "Pro"} waitlist. Free preview unlocked.`);
     } else {
       toast.success("Welcome to StockAI");

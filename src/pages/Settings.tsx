@@ -126,6 +126,7 @@ const Settings = () => {
   const [nextScanAt, setNextScanAt] = useState<string | null>(null);
   const [adaptiveState, setAdaptiveState] = useState<AutotraderState | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [saving, setSaving] = useState(false);
   const [tourOpen, setTourOpen] = useState(false);
   const [activeSection, setActiveSection] = useState<TourSectionKey>("account");
@@ -156,6 +157,17 @@ const Settings = () => {
           .select("effective_min_conviction, effective_max_positions, effective_max_nav_exposure_pct, effective_max_single_name_pct, vix_value, vix_regime, spy_trend, recent_pnl_pct, adjustments, reason, computed_at")
           .eq("user_id", user.id).maybeSingle(),
       ]);
+      const loadError = capsRes.error ?? botRes.error ?? stateRes.error;
+      if (loadError) {
+        // Saving now would persist the in-memory defaults over the user's real
+        // settings, so keep the form locked until a reload succeeds.
+        console.error("Failed to load settings:", loadError);
+        toast.error("Failed to load your settings. Reload before making changes.");
+        setLoadFailed(true);
+        setLoading(false);
+        return;
+      }
+      setLoadFailed(false);
       if (capsRes.data) {
         setCaps({
           sector_max_pct: Number(capsRes.data.sector_max_pct),
@@ -245,14 +257,20 @@ const Settings = () => {
 
   const save = async () => {
     if (!user) return;
+    if (loadFailed) {
+      toast.error("Settings couldn't be loaded. Reload the page before saving.");
+      return;
+    }
     setSaving(true);
     const [capsRes, botRes] = await Promise.all([
       supabase.from("portfolio_caps").upsert({ user_id: user.id, ...caps }, { onConflict: "user_id" }),
       supabase.from("autotrade_settings").upsert({ user_id: user.id, ...bot }, { onConflict: "user_id" }),
     ]);
     setSaving(false);
-    if (capsRes.error || botRes.error) toast.error("Failed to save settings");
-    else toast.success("Settings updated");
+    if (capsRes.error || botRes.error) {
+      console.error("Failed to save settings:", capsRes.error ?? botRes.error);
+      toast.error("Failed to save settings");
+    } else toast.success("Settings updated");
   };
 
   if (authLoading || !user) {
@@ -325,7 +343,7 @@ const Settings = () => {
             <div className="sticky bottom-20 md:bottom-4 z-10 flex justify-end pt-2">
               <Button
                 onClick={save}
-                disabled={saving}
+                disabled={saving || loadFailed}
                 variant="success"
                 className="shadow-lg shadow-primary/20 w-full sm:w-auto"
               >

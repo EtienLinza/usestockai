@@ -31,7 +31,8 @@ export function TwoFactorSection() {
     setLoading(true);
     const { data, error } = await supabase.auth.mfa.listFactors();
     if (error) {
-      console.warn("[mfa] list failed", error);
+      console.error("[mfa] list failed", error);
+      toast.error("Could not load two-factor settings");
     } else {
       const totp = (data?.totp ?? []) as Factor[];
       setFactors(totp);
@@ -60,7 +61,13 @@ export function TwoFactorSection() {
 
   const cancelEnroll = async () => {
     if (enrollData) {
-      await supabase.auth.mfa.unenroll({ factorId: enrollData.id }).catch(() => {});
+      const { error } = await supabase.auth.mfa.unenroll({ factorId: enrollData.id });
+      if (error) {
+        // The unverified factor stays on the account; surface it so the user
+        // knows why a stale entry may appear next time they enroll.
+        console.error("[mfa] cancel enrollment failed", error);
+        toast.error("Could not cancel 2FA setup. Please try again.");
+      }
     }
     setEnrollData(null);
     setCode("");
