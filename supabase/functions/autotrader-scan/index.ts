@@ -3471,6 +3471,62 @@ async function executeExit(
       profile: pos.entry_profile, position_id: pos.id,
     });
 
+    // Close the learning loop. Historically AutoTrader exits only updated
+    // virtual_positions, while every nightly calibrator trains exclusively on
+    // signal_outcomes. That left calibration at zero samples and disabled the
+    // meta-label filter regardless of how many real paper trades completed.
+    // Record one outcome per full exit (partials remain accounting slices).
+    const entryAtr = Number(pos.entry_atr ?? 0);
+    const initialRisk = inferInitRiskPerShare(pos);
+    const peak = Number(pos.peak_price ?? entry);
+    const mfePct = entry > 0
+      ? (isLong ? (peak - entry) / entry : (entry - peak) / entry) * 100
+      : null;
+    const realizedR = initialRisk > 0
+      ? (isLong ? action.price - entry : entry - action.price) / initialRisk
+      : null;
+    const entryAt = new Date(pos.created_at).getTime();
+    const barsHeld = Number.isFinite(entryAt)
+      ? Math.max(0, Math.round((Date.now() - entryAt) / 86400000))
+      : null;
+    const { error: outcomeErr } = await supabase.from("signal_outcomes").insert({
+      ticker: pos.ticker,
+      signal_type: isLong ? "BUY" : "SELL",
+      regime: null,
+      stock_profile: pos.entry_profile,
+      weekly_bias: pos.entry_weekly_alloc != null
+        ? (Number(pos.entry_weekly_alloc) >= 0 ? "bullish" : "bearish")
+        : null,
+      conviction: Number(pos.entry_conviction ?? 0),
+      strategy: pos.entry_strategy,
+      entry_thesis: `AutoTrader ${pos.entry_strategy ?? "signal"} entry`,
+      contributing_rules: {
+        atr_pct: entry > 0 && entryAtr > 0 ? entryAtr / entry : 0.02,
+        market_regime: "neutral",
+        source: "autotrader",
+      },
+      feature_snapshot: {
+        atr_pct: entry > 0 && entryAtr > 0 ? entryAtr / entry : 0.02,
+        initial_stop_pct: entry > 0 ? initialRisk / entry : null,
+        entry_profile: pos.entry_profile,
+        source: "autotrader",
+      },
+      entry_price: entry,
+      entry_date: pos.created_at,
+      status: "closed",
+      exit_price: action.price,
+      exit_date: new Date().toISOString(),
+      exit_reason: action.reason,
+      bars_held: barsHeld,
+      realized_pnl_pct: pnlPct,
+      max_favorable_excursion_pct: mfePct,
+      mfe_pct: mfePct,
+      realized_rr: realizedR,
+    });
+    if (outcomeErr) {
+      console.error(`[learning] outcome insert failed for ${pos.ticker}`, outcomeErr);
+    }
+
     // Notify via sell_alerts (existing notification center reads this)
     await supabase.from("sell_alerts").insert({
       user_id: pos.user_id, ticker: pos.ticker,
