@@ -3687,9 +3687,11 @@ async function executeExit(
         source: "autotrader",
       },
       feature_snapshot: {
+        // WS1: carry forward the entry-observable feature dict so the nightly
+        // ensemble trainer learns from what the engine actually saw at entry.
+        ...(pos.entry_feature_snapshot ?? {}),
         atr_pct: entry > 0 && entryAtr > 0 ? entryAtr / entry : 0.02,
         initial_stop_pct: entry > 0 ? initialRisk / entry : null,
-        entry_profile: pos.entry_profile,
         gap_through_stop_bps: gapSlipBps,
         source: "autotrader",
       },
