@@ -36,6 +36,15 @@ export const VOL_SCALAR_MAX = 1.25;
 // ── Correlation gate ────────────────────────────────────────────────────────
 export const CORR_LOOKBACK_BARS = 60;
 
+// ── Adaptive position-slot budget ───────────────────────────────────────────
+// The max-positions cap breathes like everything else: continuous regime
+// scaling (rides the same regimeScore as NAV exposure) plus hot/cold streak
+// feedback from the user's own trailing closed-trade record.
+export const POS_STREAK_LOOKBACK_DAYS = 30; // trailing window for streak stats
+export const POS_STREAK_MIN_SAMPLES = 8;    // min closed trades to trust streak
+export const POS_HOT_WIN_RATE = 0.55;       // win rate gate for slot expansion
+export const POS_FLOOR_ADAPTIVE = 2;        // adaptive cap never drops below this
+
 // ── Gap-risk position cap ───────────────────────────────────────────────────
 // Stops cannot protect against overnight gaps — the fill happens at the open,
 // not the stop. The only real defense is position size: cap entry dollars so
