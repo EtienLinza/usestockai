@@ -3122,6 +3122,7 @@ async function processUser(
       metaGate,
       strategyExpectancy,
       championEnsemble,
+      newsMap,
     );
 
 
