@@ -220,7 +220,15 @@ serve(async (req) => {
 
     // strategy_tilts now carries avgWin / avgLoss so downstream sizing can
     // engage the real fractional-Kelly path in computePositionSize.
+    //
+    // ASYMMETRIC EDGE UPGRADE: strategies with proven positive expectancy get
+    // a wider tilt band (±25%) so capital concentrates on what works; negative
+    // expectancy keeps the legacy ±15% band AND gets benched via
+    // strategy_expectancy (scanner raises its conviction floor by +10).
+    const TILT_MIN_WIDE = 0.75;
+    const TILT_MAX_WIDE = 1.25;
     const strategy_tilts: Record<string, { multiplier: number; winRate: number; avgReturn: number; avgWin: number; avgLoss: number; count: number }> = {};
+    const strategy_expectancy: Record<string, { expectancy: number; winRate: number; count: number; benched: boolean; floorBoost: number }> = {};
     for (const [k, v] of Object.entries(strats)) {
       if (v.raw < MIN_SAMPLES_STRATEGY) {
         strategy_tilts[k] = { multiplier: 1.0, winRate: 0, avgReturn: 0, avgWin: 0, avgLoss: 0, count: v.raw };
@@ -235,8 +243,19 @@ serve(async (req) => {
         ? Math.max(-1, Math.min(1, (avgRet - universeAvgRet) / Math.max(0.5, Math.abs(universeAvgRet))))
         : Math.max(-1, Math.min(1, avgRet / 2));
       const score = (winRateZ + retZ) / 2;
-      const multiplier = Math.max(TILT_MIN, Math.min(TILT_MAX, 1 + score * 0.15));
+      const benched = avgRet < 0;
+      const tMin = benched ? TILT_MIN : TILT_MIN_WIDE;
+      const tMax = benched ? TILT_MAX : TILT_MAX_WIDE;
+      const scale = benched ? 0.15 : 0.25;
+      const multiplier = Math.max(tMin, Math.min(tMax, 1 + score * scale));
       strategy_tilts[k] = { multiplier, winRate, avgReturn: avgRet, avgWin, avgLoss, count: v.raw };
+      strategy_expectancy[k] = {
+        expectancy: Number(avgRet.toFixed(3)),
+        winRate: Number(winRate.toFixed(1)),
+        count: v.raw,
+        benched,
+        floorBoost: benched ? 10 : 0,
+      };
     }
 
     // ─── 2b) STRATEGY × REGIME TILTS (walk-forward weighted) ───────────────
