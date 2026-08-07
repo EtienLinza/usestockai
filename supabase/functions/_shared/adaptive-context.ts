@@ -290,16 +290,44 @@ export function computeEffectiveSettings<S extends AdaptiveSettings>(
     maxNav = Math.max(30, Math.min(baselineMaxNav, baselineMaxNav * (0.4 + 0.6 * regimeScore)));
     adjustments.push(`continuous regime NAV: vix=${vixVal.toFixed(1)} spy=${ctx.spyTrend} score=${regimeScore.toFixed(2)} → ${maxNav.toFixed(0)}% (base ${baselineMaxNav})`);
 
+    // Continuous position-slot scaling — rides the same regimeScore as NAV
+    // exposure (replaces the old stepwise VIX ±1 slot bumps).
+    const posBase = maxPos;
+    maxPos = Math.max(POS_FLOOR_ADAPTIVE, Math.round(posBase * (0.5 + 0.5 * regimeScore)));
+    adjustments.push(`continuous regime slots: score=${regimeScore.toFixed(2)} → ${maxPos}/${posBase} slots`);
+
+    // Hot/cold streak feedback from the user's own trailing closed-trade
+    // record. Expansion is capped at the profile/NAV baseline; the safety
+    // shrinkers below (crisis VIX, drawdown, CDaR) always run after this.
+    if ((ctx.recentClosedCount ?? 0) >= POS_STREAK_MIN_SAMPLES
+        && ctx.recentWinRate != null && ctx.recentAvgPnlPct != null) {
+      if (ctx.recentWinRate >= POS_HOT_WIN_RATE && ctx.recentAvgPnlPct > 0) {
+        const bonus = ctx.recentWinRate >= 0.65 ? 2 : 1;
+        const expanded = Math.min(posBase, maxPos + bonus);
+        if (expanded > maxPos) {
+          adjustments.push(`hot streak (${(ctx.recentWinRate * 100).toFixed(0)}% WR, +${ctx.recentAvgPnlPct.toFixed(2)}%/trade, n=${ctx.recentClosedCount}): +${expanded - maxPos} slot(s)`);
+          maxPos = expanded;
+        }
+      } else if (ctx.recentAvgPnlPct < 0) {
+        const cut = ctx.recentWinRate < 0.40 ? 2 : 1;
+        const shrunk = Math.max(POS_FLOOR_ADAPTIVE, maxPos - cut);
+        if (shrunk < maxPos) {
+          adjustments.push(`cold streak (${(ctx.recentWinRate * 100).toFixed(0)}% WR, ${ctx.recentAvgPnlPct.toFixed(2)}%/trade, n=${ctx.recentClosedCount}): −${maxPos - shrunk} slot(s)`);
+          maxPos = shrunk;
+        }
+      }
+    }
+
     switch (ctx.vixRegime) {
       case "calm":
-        minConv -= 2; maxPos += 1;
-        adjustments.push(`calm VIX (${ctx.vix?.toFixed(1) ?? "?"}): −2 conv, +1 pos`);
+        minConv -= 2;
+        adjustments.push(`calm VIX (${ctx.vix?.toFixed(1) ?? "?"}): −2 conv`);
         break;
       case "normal":
         break;
       case "elevated":
-        minConv += 4; maxPos -= 1; maxSingle -= 3;
-        adjustments.push(`elevated VIX (${ctx.vix?.toFixed(1) ?? "?"}): +4 conv, −1 pos, −3 single`);
+        minConv += 4; maxSingle -= 3;
+        adjustments.push(`elevated VIX (${ctx.vix?.toFixed(1) ?? "?"}): +4 conv, −3 single`);
         break;
       case "crisis":
         minConv += 10; maxPos = Math.min(maxPos, 3); maxSingle = Math.min(maxSingle, 10);
@@ -351,6 +379,23 @@ export function computeEffectiveSettings<S extends AdaptiveSettings>(
         adjustments.push(`calibration floor (${regimeKey}): conv raised ${minConv}→${calFloor}`);
         minConv = calFloor;
       }
+    }
+  } else if (s.advanced_mode) {
+    // Manual mode: the user's setting is the CEILING — safety-only shrink,
+    // it never expands above what was set.
+    if (ctx.vixRegime === "crisis" && maxPos > 3) {
+      adjustments.push(`crisis VIX (${ctx.vix?.toFixed(1) ?? "?"}): slots capped ${maxPos}→3 (manual ceiling)`);
+      maxPos = 3;
+    }
+    if (ctx.rollingDrawdownPct >= 8 && maxPos > 2) {
+      const shrunk = Math.max(2, maxPos - 2);
+      adjustments.push(`30d drawdown ${ctx.rollingDrawdownPct.toFixed(1)}%: slots ${maxPos}→${shrunk}`);
+      maxPos = shrunk;
+    }
+    if ((ctx.recentPnlPct <= -5 || ctx.rollingCdarPct >= CDAR_HALF_EXPOSURE_PCT) && maxPos > 2) {
+      const shrunk = Math.max(2, maxPos - 1);
+      adjustments.push(`loss pressure (7d P&L ${ctx.recentPnlPct.toFixed(1)}%, CDaR ${ctx.rollingCdarPct.toFixed(1)}%): slots ${maxPos}→${shrunk}`);
+      maxPos = shrunk;
     }
   }
 
