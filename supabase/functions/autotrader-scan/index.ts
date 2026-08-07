@@ -2633,9 +2633,13 @@ async function runExitOnlyPass(
     ];
     const stratKey = pos.entry_strategy ?? "unknown";
     const trailAdj = exitCalibration?.[stratKey]?.trailMultAdjust ?? 1.0;
-    const profile: ProfileParams = trailAdj !== 1.0
-      ? { ...baseProfile, trailingStopATRMult: baseProfile.trailingStopATRMult * trailAdj }
-      : baseProfile;
+    // WS3: nightly-tuned exit geometry per profile × regime, with the legacy
+    // per-strategy capture-ratio trail adjust layered on top.
+    const profile: ProfileParams = applyExitParams(
+      baseProfile,
+      resolveExitParams(ADAPTIVE_EXITS, (pos.entry_profile as string) ?? cls.classification, CURRENT_MARKET_REGIME),
+      trailAdj,
+    );
 
     // Earnings blackout for OPEN positions (audit gap G-3): close before the
     // gap rather than blocking new entries only. Always takes priority.
