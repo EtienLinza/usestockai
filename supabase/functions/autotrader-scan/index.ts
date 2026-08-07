@@ -3063,6 +3063,7 @@ async function processUser(
       shortInterestMap,
       metaGate,
       strategyExpectancy,
+      championEnsemble,
     );
 
 
