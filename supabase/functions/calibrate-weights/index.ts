@@ -325,30 +325,38 @@ serve(async (req) => {
     // where raw_ticker_adjust = ticker_actual_WR − ticker_expected_WR (in
     // conviction points), and `expected` is the weighted-avg bucket center
     // for that ticker's trades. Capped at ±6 conviction points.
-    const tickerStats: Record<string, { wWins: number; wCount: number; wExpected: number; raw: number }> = {};
+    // Gap-through-stop feedback: exits that fill worse than the stop carry
+    // slippage_bps_est ≥ 100 (≥1% adverse gap). Tickers where that happens
+    // frequently get an extra conviction penalty on top of the win-rate
+    // adjust — chronically gappy names are structurally un-stoppable.
+    const tickerStats: Record<string, { wWins: number; wCount: number; wExpected: number; wGaps: number; raw: number }> = {};
     rows.forEach((r, i) => {
       const t = (r.ticker ?? "").toUpperCase();
       if (!t) return;
-      tickerStats[t] ??= { wWins: 0, wCount: 0, wExpected: 0, raw: 0 };
+      tickerStats[t] ??= { wWins: 0, wCount: 0, wExpected: 0, wGaps: 0, raw: 0 };
       tickerStats[t].raw++;
       tickerStats[t].wCount += tw[i];
       tickerStats[t].wExpected += bucketCenter(bucketLabel(Number(r.conviction))) * tw[i];
       if (Number(r.realized_pnl_pct ?? 0) > 0) tickerStats[t].wWins += tw[i];
+      if (Number(r.slippage_bps_est ?? 0) >= 100) tickerStats[t].wGaps += tw[i];
     });
-    const ticker_calibration: Record<string, { adjust: number; actualWinRate: number; expectedWinRate: number; count: number }> = {};
+    const ticker_calibration: Record<string, { adjust: number; actualWinRate: number; expectedWinRate: number; count: number; gapPenalty?: number }> = {};
     for (const [t, v] of Object.entries(tickerStats)) {
       if (v.raw < MIN_SAMPLES_TICKER) continue;
       const actual = (v.wWins / v.wCount) * 100;
       const expected = v.wExpected / v.wCount;
       const rawDelta = actual - expected;
       const shrink = v.raw / (v.raw + TICKER_PRIOR_STRENGTH);   // 0..1
-      const adjust = Math.max(-6, Math.min(6, Math.round(rawDelta * shrink * 0.6)));
+      const gapFreq = v.wCount > 0 ? v.wGaps / v.wCount : 0;
+      const gapPenalty = Math.round(Math.min(4, gapFreq * 8)); // ≥50% gap frequency → −4
+      const adjust = Math.max(-8, Math.min(6, Math.round(rawDelta * shrink * 0.6) - gapPenalty));
       if (adjust === 0) continue;  // omit no-op rows to keep payload lean
       ticker_calibration[t] = {
         adjust,
         actualWinRate: Number(actual.toFixed(1)),
         expectedWinRate: Number(expected.toFixed(1)),
         count: v.raw,
+        ...(gapPenalty > 0 ? { gapPenalty } : {}),
       };
     }
 
