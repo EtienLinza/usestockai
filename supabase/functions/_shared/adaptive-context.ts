@@ -135,6 +135,11 @@ export interface AdaptiveContext {
   rollingDrawdownPct: number;
   rollingCdarPct: number;
   adjustments: string[];
+  // Trailing per-user closed-trade stats (POS_STREAK_LOOKBACK_DAYS window).
+  // Optional: null/absent → streak feedback skipped (cold start, no history).
+  recentWinRate?: number | null;
+  recentAvgPnlPct?: number | null;
+  recentClosedCount?: number;
 }
 
 // ── Regime helpers ──────────────────────────────────────────────────────────
