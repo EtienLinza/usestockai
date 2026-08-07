@@ -2821,9 +2821,12 @@ async function processUser(
     //    and outputs a trailing-stop multiplier adjustment. Apply it here.
     const stratKey = pos.entry_strategy ?? "unknown";
     const trailAdj = exitCalibration?.[stratKey]?.trailMultAdjust ?? 1.0;
-    const profile: ProfileParams = trailAdj !== 1.0
-      ? { ...baseProfile, trailingStopATRMult: baseProfile.trailingStopATRMult * trailAdj }
-      : baseProfile;
+    // WS3: nightly-tuned exit geometry per profile × regime on top of it.
+    const profile: ProfileParams = applyExitParams(
+      baseProfile,
+      resolveExitParams(ADAPTIVE_EXITS, (pos.entry_profile as string) ?? cls.classification, CURRENT_MARKET_REGIME),
+      trailAdj,
+    );
 
     // Earnings blackout for OPEN positions (audit gap G-3): close 2 trading
     // days before earnings to avoid gap-through-stop risk. Takes priority
