@@ -36,6 +36,69 @@ export const VOL_SCALAR_MAX = 1.25;
 // ── Correlation gate ────────────────────────────────────────────────────────
 export const CORR_LOOKBACK_BARS = 60;
 
+// ── Gap-risk position cap ───────────────────────────────────────────────────
+// Stops cannot protect against overnight gaps — the fill happens at the open,
+// not the stop. The only real defense is position size: cap entry dollars so
+// the ticker's 95th-percentile historical overnight gap costs ≤ 1% of NAV.
+export const GAP_LOSS_CAP_NAV_PCT = 1.0;   // worst-case gap loss budget, % of NAV
+export const GAP_LOOKBACK_BARS = 252;      // 1y of daily bars
+export const GAP_MIN_SAMPLES = 60;         // minimum gap observations to trust p95
+
+/** 95th-percentile absolute overnight gap (|open / prevClose − 1|), as a fraction. */
+export function overnightGapPct95(open: number[], close: number[]): number | null {
+  const n = Math.min(open.length, close.length);
+  if (n < GAP_MIN_SAMPLES + 1) return null;
+  const start = Math.max(1, n - GAP_LOOKBACK_BARS);
+  const gaps: number[] = [];
+  for (let i = start; i < n; i++) {
+    const pc = close[i - 1], o = open[i];
+    if (pc > 0 && o > 0) gaps.push(Math.abs(o / pc - 1));
+  }
+  if (gaps.length < GAP_MIN_SAMPLES) return null;
+  gaps.sort((a, b) => a - b);
+  return gaps[Math.min(gaps.length - 1, Math.floor(gaps.length * 0.95))];
+}
+
+/**
+ * Max position dollars such that a 95th-percentile overnight gap loses at most
+ * `capPct`% of NAV. Returns null when history is insufficient (→ no gap cap).
+ */
+export function gapCappedDollars(
+  open: number[],
+  close: number[],
+  nav: number,
+  capPct: number = GAP_LOSS_CAP_NAV_PCT,
+): number | null {
+  const g = overnightGapPct95(open, close);
+  if (g == null || g <= 0 || !(nav > 0)) return null;
+  return (nav * (capPct / 100)) / g;
+}
+
+// ── Edge-scaled sizing ──────────────────────────────────────────────────────
+// Not all entries deserve the same capital. Scale size by edge quality:
+// calibrated conviction normalized against the min-conviction gate, blended
+// with the meta-label score when available. Neutral setup → 1.0×, elite → 1.5×,
+// marginal pass → 0.5×. Every absolute cap (single-name, heat, CVaR, gap)
+// still applies on top — this only moves size WITHIN the safety envelope.
+export const EDGE_SIZE_MIN = 0.5;
+export const EDGE_SIZE_MAX = 1.5;
+
+export function edgeSizeMultiplier(
+  conviction: number,
+  minConviction: number,
+  metaScore: number | null,
+): number {
+  const convNorm = Math.max(0, Math.min(1,
+    (conviction - minConviction) / Math.max(1, 95 - minConviction),
+  ));
+  let q = convNorm;
+  if (metaScore != null && Number.isFinite(metaScore)) {
+    const metaNorm = Math.max(0, Math.min(1, (metaScore - 0.3) / 0.5)); // 0.3→0, 0.8→1
+    q = 0.6 * convNorm + 0.4 * metaNorm;
+  }
+  return EDGE_SIZE_MIN + (EDGE_SIZE_MAX - EDGE_SIZE_MIN) * q;
+}
+
 // ── Types shared between live + backtest ────────────────────────────────────
 export interface AdaptiveSettings {
   adaptive_mode: boolean;

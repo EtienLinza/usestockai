@@ -44,6 +44,7 @@ interface OutcomeRow {
   max_adverse_excursion_pct: number | null;
   feature_snapshot: Record<string, unknown> | null;
   regime_probs: Record<string, number> | null;
+  slippage_bps_est: number | null;
 }
 
 // Per-(strategy × regime) tilt requires fewer samples since the cell is narrower
@@ -101,7 +102,7 @@ serve(async (req) => {
 
     const { data: closed, error } = await supabase
       .from("signal_outcomes")
-      .select("conviction, realized_pnl_pct, strategy, regime, signal_type, ticker, entry_date, max_favorable_excursion_pct, max_adverse_excursion_pct, feature_snapshot, regime_probs")
+      .select("conviction, realized_pnl_pct, strategy, regime, signal_type, ticker, entry_date, max_favorable_excursion_pct, max_adverse_excursion_pct, feature_snapshot, regime_probs, slippage_bps_est")
       .eq("status", "closed")
       .gte("entry_date", sinceISO)
       .limit(10000);
@@ -219,7 +220,15 @@ serve(async (req) => {
 
     // strategy_tilts now carries avgWin / avgLoss so downstream sizing can
     // engage the real fractional-Kelly path in computePositionSize.
+    //
+    // ASYMMETRIC EDGE UPGRADE: strategies with proven positive expectancy get
+    // a wider tilt band (±25%) so capital concentrates on what works; negative
+    // expectancy keeps the legacy ±15% band AND gets benched via
+    // strategy_expectancy (scanner raises its conviction floor by +10).
+    const TILT_MIN_WIDE = 0.75;
+    const TILT_MAX_WIDE = 1.25;
     const strategy_tilts: Record<string, { multiplier: number; winRate: number; avgReturn: number; avgWin: number; avgLoss: number; count: number }> = {};
+    const strategy_expectancy: Record<string, { expectancy: number; winRate: number; count: number; benched: boolean; floorBoost: number }> = {};
     for (const [k, v] of Object.entries(strats)) {
       if (v.raw < MIN_SAMPLES_STRATEGY) {
         strategy_tilts[k] = { multiplier: 1.0, winRate: 0, avgReturn: 0, avgWin: 0, avgLoss: 0, count: v.raw };
@@ -234,8 +243,19 @@ serve(async (req) => {
         ? Math.max(-1, Math.min(1, (avgRet - universeAvgRet) / Math.max(0.5, Math.abs(universeAvgRet))))
         : Math.max(-1, Math.min(1, avgRet / 2));
       const score = (winRateZ + retZ) / 2;
-      const multiplier = Math.max(TILT_MIN, Math.min(TILT_MAX, 1 + score * 0.15));
+      const benched = avgRet < 0;
+      const tMin = benched ? TILT_MIN : TILT_MIN_WIDE;
+      const tMax = benched ? TILT_MAX : TILT_MAX_WIDE;
+      const scale = benched ? 0.15 : 0.25;
+      const multiplier = Math.max(tMin, Math.min(tMax, 1 + score * scale));
       strategy_tilts[k] = { multiplier, winRate, avgReturn: avgRet, avgWin, avgLoss, count: v.raw };
+      strategy_expectancy[k] = {
+        expectancy: Number(avgRet.toFixed(3)),
+        winRate: Number(winRate.toFixed(1)),
+        count: v.raw,
+        benched,
+        floorBoost: benched ? 10 : 0,
+      };
     }
 
     // ─── 2b) STRATEGY × REGIME TILTS (walk-forward weighted) ───────────────
@@ -305,30 +325,38 @@ serve(async (req) => {
     // where raw_ticker_adjust = ticker_actual_WR − ticker_expected_WR (in
     // conviction points), and `expected` is the weighted-avg bucket center
     // for that ticker's trades. Capped at ±6 conviction points.
-    const tickerStats: Record<string, { wWins: number; wCount: number; wExpected: number; raw: number }> = {};
+    // Gap-through-stop feedback: exits that fill worse than the stop carry
+    // slippage_bps_est ≥ 100 (≥1% adverse gap). Tickers where that happens
+    // frequently get an extra conviction penalty on top of the win-rate
+    // adjust — chronically gappy names are structurally un-stoppable.
+    const tickerStats: Record<string, { wWins: number; wCount: number; wExpected: number; wGaps: number; raw: number }> = {};
     rows.forEach((r, i) => {
       const t = (r.ticker ?? "").toUpperCase();
       if (!t) return;
-      tickerStats[t] ??= { wWins: 0, wCount: 0, wExpected: 0, raw: 0 };
+      tickerStats[t] ??= { wWins: 0, wCount: 0, wExpected: 0, wGaps: 0, raw: 0 };
       tickerStats[t].raw++;
       tickerStats[t].wCount += tw[i];
       tickerStats[t].wExpected += bucketCenter(bucketLabel(Number(r.conviction))) * tw[i];
       if (Number(r.realized_pnl_pct ?? 0) > 0) tickerStats[t].wWins += tw[i];
+      if (Number(r.slippage_bps_est ?? 0) >= 100) tickerStats[t].wGaps += tw[i];
     });
-    const ticker_calibration: Record<string, { adjust: number; actualWinRate: number; expectedWinRate: number; count: number }> = {};
+    const ticker_calibration: Record<string, { adjust: number; actualWinRate: number; expectedWinRate: number; count: number; gapPenalty?: number }> = {};
     for (const [t, v] of Object.entries(tickerStats)) {
       if (v.raw < MIN_SAMPLES_TICKER) continue;
       const actual = (v.wWins / v.wCount) * 100;
       const expected = v.wExpected / v.wCount;
       const rawDelta = actual - expected;
       const shrink = v.raw / (v.raw + TICKER_PRIOR_STRENGTH);   // 0..1
-      const adjust = Math.max(-6, Math.min(6, Math.round(rawDelta * shrink * 0.6)));
+      const gapFreq = v.wCount > 0 ? v.wGaps / v.wCount : 0;
+      const gapPenalty = Math.round(Math.min(4, gapFreq * 8)); // ≥50% gap frequency → −4
+      const adjust = Math.max(-8, Math.min(6, Math.round(rawDelta * shrink * 0.6) - gapPenalty));
       if (adjust === 0) continue;  // omit no-op rows to keep payload lean
       ticker_calibration[t] = {
         adjust,
         actualWinRate: Number(actual.toFixed(1)),
         expectedWinRate: Number(expected.toFixed(1)),
         count: v.raw,
+        ...(gapPenalty > 0 ? { gapPenalty } : {}),
       };
     }
 
@@ -473,6 +501,7 @@ serve(async (req) => {
           : { skipped: true, reason: `insufficient labelled feature snapshots (${ensembleInput.length})` },
         regime_probabilities,
         regime_prob_row_count: regimeProbRowCount,
+        strategy_expectancy,
         thresholds: {
           MIN_SAMPLES_BUCKET, MIN_SAMPLES_STRATEGY, MIN_SAMPLES_REGIME,
           MIN_SAMPLES_STRATEGY_REGIME, MIN_SAMPLES_EXIT, MIN_SAMPLES_TICKER,
@@ -535,6 +564,34 @@ serve(async (req) => {
         .single();
       if (mvErr) console.error("model_versions insert err:", mvErr);
       else modelVersionId = mv?.id ?? null;
+    }
+
+    // ─── LEARNING-LOOP WATCHDOG ──────────────────────────────────────────
+    // The July 2026 incident: exits stopped inserting into signal_outcomes,
+    // so every nightly trainer ran on ZERO fresh samples for weeks — silently.
+    // If any autotrader is enabled but no closed outcome landed in 7 days,
+    // mark the learning-loop heartbeat degraded so SystemHealth shows red.
+    try {
+      const since7 = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString();
+      const [{ count: closed7d }, { count: enabledUsers }] = await Promise.all([
+        supabase.from("signal_outcomes").select("id", { count: "exact", head: true })
+          .eq("status", "closed").gte("exit_date", since7),
+        supabase.from("autotrade_settings").select("user_id", { count: "exact", head: true })
+          .eq("enabled", true),
+      ]);
+      if ((enabledUsers ?? 0) > 0 && (closed7d ?? 0) === 0) {
+        await recordHeartbeat(
+          "learning-loop", startedAt, "degraded",
+          `ALERT: ${enabledUsers} enabled autotrader(s) but 0 closed outcomes in 7d — learning pipeline may be starved`,
+        );
+      } else {
+        await recordHeartbeat(
+          "learning-loop", startedAt, "ok",
+          `closed7d=${closed7d ?? 0} enabledAutotraders=${enabledUsers ?? 0}`,
+        );
+      }
+    } catch (wdErr) {
+      console.warn("learning-loop watchdog failed:", wdErr);
     }
 
     await recordHeartbeat(

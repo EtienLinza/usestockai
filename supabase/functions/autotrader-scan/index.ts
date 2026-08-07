@@ -46,6 +46,10 @@ import {
   VOL_SCALAR_MIN,
   VOL_SCALAR_MAX,
   CORR_LOOKBACK_BARS,
+  GAP_LOSS_CAP_NAV_PCT,
+  gapCappedDollars,
+  overnightGapPct95,
+  edgeSizeMultiplier,
   spyTrendOf,
   isBearishMacro,
   vixRegimeOf,
@@ -1241,6 +1245,10 @@ async function runEntryDecision(
   strategyEdges?: Record<string, { winRate: number; avgWin: number; avgLoss: number; sampleSize: number }>,
   shortInterestMap?: Map<string, ShortInterestRow>,
   metaGate?: { pass: number; skip: number },
+  /** Per-strategy trailing expectancy from nightly calibration. Benched
+   *  strategies (negative expectancy over ≥15 closed trades) get their
+   *  conviction floor raised by floorBoost until their record recovers. */
+  strategyExpectancy?: Record<string, { expectancy: number; winRate: number; count: number; benched: boolean; floorBoost: number }> | null,
 ): Promise<EntryAction> {
   // Daily loss limit — block all new entries
   if (todayPnlPct <= -settings.daily_loss_limit_pct) {
@@ -1309,6 +1317,15 @@ async function runEntryDecision(
   if (!sig) return { kind: "HOLD", reason: "Insufficient data" };
   if (sig.decision === "HOLD") return { kind: "HOLD", reason: sig.reasoning };
 
+  // ── Strategy expectancy circuit breaker ─────────────────────────────────
+  // A strategy that has LOST money on average over its last ≥15 closed trades
+  // (90d window, time-decay weighted) is benched by the nightly calibrator:
+  // its conviction floor is raised by floorBoost points until the trailing
+  // record recovers. This is what stops a structurally bleeding strategy
+  // (e.g. trend at 38% WR / −45% cumulative) from re-entering daily.
+  const stratExp = strategyExpectancy?.[sig.strategy] ?? null;
+  const benchBoost = stratExp?.benched ? Math.max(0, Number(stratExp.floorBoost ?? 10)) : 0;
+
   // ── Short-interest velocity overlay (supporting factor, NEVER a gate) ──
   // Applied AFTER the engine returns so the backtest stays deterministic.
   // Persisted via si_velocity column for closed-loop calibration.
@@ -1354,8 +1371,13 @@ async function runEntryDecision(
   }
 
 
-  if (conviction < settings.min_conviction) {
-    return { kind: "HOLD", reason: `Calibrated conviction ${conviction} (raw ${sig.conviction}) < min ${settings.min_conviction}` };
+  if (conviction < settings.min_conviction + benchBoost) {
+    return {
+      kind: "HOLD",
+      reason: benchBoost > 0
+        ? `Calibrated conviction ${conviction} (raw ${sig.conviction}) < min ${settings.min_conviction}+${benchBoost} — ${sig.strategy} benched (90d expectancy ${stratExp?.expectancy?.toFixed(2)}% over ${stratExp?.count} trades)`
+        : `Calibrated conviction ${conviction} (raw ${sig.conviction}) < min ${settings.min_conviction}`,
+    };
   }
 
   // ── ADAPTIVE GUARDS — Phase 4 (post-BEAM) ───────────────────────────────
@@ -1461,10 +1483,10 @@ async function runEntryDecision(
     effectiveConviction -= Math.max(0, Math.min(6, rev * 6));
   }
   effectiveConviction = Math.max(0, Math.min(100, Math.round(effectiveConviction)));
-  if (effectiveConviction < settings.min_conviction) {
+  if (effectiveConviction < settings.min_conviction + benchBoost) {
     return {
       kind: "HOLD",
-      reason: `Effective conviction ${effectiveConviction} (calibrated ${conviction}${metaScore !== null ? `, meta ${metaScore.toFixed(2)}` : ""}, reversal ${reversalRisk.score.toFixed(2)}) < min ${settings.min_conviction}`,
+      reason: `Effective conviction ${effectiveConviction} (calibrated ${conviction}${metaScore !== null ? `, meta ${metaScore.toFixed(2)}` : ""}, reversal ${reversalRisk.score.toFixed(2)}) < min ${settings.min_conviction}${benchBoost > 0 ? `+${benchBoost} (${sig.strategy} benched)` : ""}`,
     };
   }
 
@@ -1473,7 +1495,12 @@ async function runEntryDecision(
   // single-name and headroom caps so the user-facing caps remain absolute
   // ceilings while sizing breathes with realized SPY vol.
   const headroom = (settings.max_nav_exposure_pct - totalNavExposurePct) / 100;
-  const baseFrac = sig.kellyFraction * volScalar;
+  // ── Edge-scaled sizing (asymmetric edge upgrade) ────────────────────────
+  // A+ setups (high calibrated conviction + strong meta-label agreement) get
+  // up to 1.5× the Kelly base; marginal passes get 0.5×. All absolute caps
+  // below still apply — this only moves size WITHIN the safety envelope.
+  const edgeMult = edgeSizeMultiplier(effectiveConviction, settings.min_conviction, metaScore);
+  const baseFrac = sig.kellyFraction * volScalar * edgeMult;
   let cappedFrac = Math.min(baseFrac, settings.max_single_name_pct / 100, headroom);
   const currentPrice = data.close[data.close.length - 1];
   // C-3 FIX: size off dynamic NAV when caller provides it; fall back to
@@ -1599,7 +1626,27 @@ async function runEntryDecision(
     return { kind: "HOLD", reason: `Stop too wide for risk budget — would size below 1 share at ${(riskPct * 100).toFixed(2)}% NAV cap` };
   }
 
+  // ── GAP-RISK CAP (asymmetric edge upgrade) ──────────────────────────────
+  // Hard stops cannot protect against overnight gaps — the -18.9%/-14.8%
+  // losses were fills at the OPEN, far below the stop. The only defense is
+  // size: cap dollars so the ticker's own 95th-percentile historical
+  // overnight gap costs ≤ GAP_LOSS_CAP_NAV_PCT% of NAV if it hits tomorrow.
+  let gap95: number | null = null;
+  {
+    const gapMaxDollars = gapCappedDollars(data.open, data.close, navForSizing);
+    if (gapMaxDollars !== null && targetDollars > gapMaxDollars) {
+      gap95 = overnightGapPct95(data.open, data.close);
+      cappedFrac = cappedFrac * (gapMaxDollars / targetDollars);
+      targetDollars = gapMaxDollars;
+    }
+  }
+  if (targetDollars < currentPrice) {
+    return { kind: "HOLD", reason: `Gap-risk cap: 95th-pctile overnight gap limits size below 1 share (≤${GAP_LOSS_CAP_NAV_PCT}% NAV gap-loss budget)` };
+  }
+
   const reasoningExtra: string[] = [];
+  if (edgeMult !== 1) reasoningExtra.push(`edge×${edgeMult.toFixed(2)}`);
+  if (gap95 !== null) reasoningExtra.push(`gap-cap applied (p95 gap ${(gap95 * 100).toFixed(1)}%)`);
   if (siDelta !== 0) reasoningExtra.push(`siΔ=${siDelta > 0 ? "+" : ""}${siDelta}`);
   if (slippageBpsEst !== null && slippageBpsEst > 0) reasoningExtra.push(`slip=${slippageBpsEst.toFixed(1)}bps`);
   const reasoning = reasoningExtra.length > 0
@@ -1917,7 +1964,7 @@ serve(async (req) => {
       fetchYahooData("SPY"),
       fetchYahooData("^VIX"),
       supabase.from("strategy_weights")
-        .select("regime_floors, exit_calibration, calibration_curve, strategy_tilts, ticker_calibration")
+        .select("regime_floors, exit_calibration, calibration_curve, strategy_tilts, ticker_calibration, notes")
         .eq("is_active", true)
         .order("computed_at", { ascending: false }).limit(1).maybeSingle(),
     ]);
@@ -1937,6 +1984,11 @@ serve(async (req) => {
     const calibrationCurve = (weightsRes.data?.calibration_curve as Record<string, { adjust: number }> | null) ?? {};
     const strategyTilts = (weightsRes.data?.strategy_tilts as Record<string, { multiplier: number }> | null) ?? {};
     const tickerCalibration = (weightsRes.data?.ticker_calibration as Record<string, { adjust: number }> | null) ?? {};
+    // Strategy expectancy circuit breaker (asymmetric edge upgrade): nightly
+    // calibrate-weights benches strategies with negative trailing 90d
+    // expectancy. The scanner raises their conviction floor by floorBoost.
+    const strategyExpectancy = ((weightsRes.data?.notes as Record<string, unknown> | null)?.strategy_expectancy ?? null) as
+      Record<string, { expectancy: number; winRate: number; count: number; benched: boolean; floorBoost: number }> | null;
 
     if (scanMode !== "exits" && !isMarketOpen()) {
       await recordHeartbeat("autotrader-scan", startedAt, "ok", `entries skipped: market closed mode=${scanMode}`);
@@ -2897,6 +2949,7 @@ async function processUser(
       strategyEdges,
       shortInterestMap,
       metaGate,
+      strategyExpectancy,
     );
 
 
@@ -3450,6 +3503,20 @@ async function executeExit(
     // for hard-stop exits (T1 hard_stop / regime breaker).
     const isLossExit = pnl < 0;
     const isHardStop = /hard[_ ]?stop|stop[_ ]?loss|regime[_ ]?breaker|cdar/i.test(action.reason ?? "");
+    // ── Gap-through-stop feedback ─────────────────────────────────────────
+    // When a stop exit fills WORSE than the stop (overnight gap), record the
+    // adverse slippage in bps. Nightly per-ticker calibration penalizes
+    // chronically gappy names so they get entered less, smaller, or never.
+    let gapSlipBps: number | null = null;
+    if (isHardStop && pos.hard_stop_price != null) {
+      const stopRef = Number(pos.hard_stop_price);
+      if (stopRef > 0) {
+        const adverse = isLong
+          ? (stopRef - action.price) / stopRef
+          : (action.price - stopRef) / stopRef;
+        if (adverse > 0.0005) gapSlipBps = Math.round(adverse * 10000);
+      }
+    }
     const cdMult = isHardStop ? 2.0 : isLossExit ? 1.5 : 1.0;
     const cdDays = Math.round(baseCdDays * cdMult);
     const cooldownUntil = new Date(Date.now() + cdDays * 86400000).toISOString();
@@ -3509,6 +3576,7 @@ async function executeExit(
         atr_pct: entry > 0 && entryAtr > 0 ? entryAtr / entry : 0.02,
         initial_stop_pct: entry > 0 ? initialRisk / entry : null,
         entry_profile: pos.entry_profile,
+        gap_through_stop_bps: gapSlipBps,
         source: "autotrader",
       },
       entry_price: entry,
@@ -3516,9 +3584,12 @@ async function executeExit(
       status: "closed",
       exit_price: action.price,
       exit_date: new Date().toISOString(),
-      exit_reason: action.reason,
+      exit_reason: gapSlipBps !== null
+        ? `${action.reason} [gap through stop: −${(gapSlipBps / 100).toFixed(2)}% vs stop]`
+        : action.reason,
       bars_held: barsHeld,
       realized_pnl_pct: pnlPct,
+      slippage_bps_est: gapSlipBps,
       max_favorable_excursion_pct: mfePct,
       mfe_pct: mfePct,
       realized_rr: realizedR,
