@@ -46,6 +46,7 @@ import {
   VOL_SCALAR_MIN,
   VOL_SCALAR_MAX,
   CORR_LOOKBACK_BARS,
+  POS_STREAK_LOOKBACK_DAYS,
   GAP_LOSS_CAP_NAV_PCT,
   gapCappedDollars,
   overnightGapPct95,
@@ -2073,18 +2074,32 @@ serve(async (req) => {
         continue;
       }
 
-      // Compute 7-day rolling P&L for this user
+      // Compute 7-day rolling P&L + 30-day closed-trade streak stats in one
+      // query (streak stats feed the adaptive position-slot budget).
+      const startingNav = Number(rawSettings.starting_nav || 100000);
       const sevenDaysAgo = new Date(Date.now() - 7 * 86400000).toISOString();
+      const streakDaysAgo = new Date(Date.now() - POS_STREAK_LOOKBACK_DAYS * 86400000).toISOString();
       const { data: recentClosed } = await supabase
         .from("virtual_positions")
-        .select("pnl")
+        .select("pnl, exit_date")
         .eq("user_id", rawSettings.user_id)
         .eq("status", "closed")
-        .gte("exit_date", sevenDaysAgo);
-      const recentPnlDollars = (recentClosed ?? []).reduce(
-        (s: number, p: any) => s + Number(p.pnl ?? 0), 0,
-      );
-      const recentPnlPct = (recentPnlDollars / Number(rawSettings.starting_nav || 100000)) * 100;
+        .gte("exit_date", streakDaysAgo);
+      const closedRows = (recentClosed ?? []).map((p: any) => ({
+        pnl: Number(p.pnl ?? 0),
+        exitDate: p.exit_date as string | null,
+      }));
+      const recentPnlDollars = closedRows
+        .filter((r) => r.exitDate != null && r.exitDate >= sevenDaysAgo)
+        .reduce((s, r) => s + r.pnl, 0);
+      const recentPnlPct = (recentPnlDollars / startingNav) * 100;
+      const recentClosedCount = closedRows.length;
+      const recentWinRate = recentClosedCount > 0
+        ? closedRows.filter((r) => r.pnl > 0).length / recentClosedCount
+        : null;
+      const recentAvgPnlPct = recentClosedCount > 0
+        ? (closedRows.reduce((s, r) => s + r.pnl, 0) / recentClosedCount / startingNav) * 100
+        : null;
 
       // 30-day rolling NAV drawdown — peak-to-current from virtual_portfolio_log.
       // Also compute CDaR_0.95 (mean of worst 5% daily drawdowns over the window).
@@ -2136,6 +2151,9 @@ serve(async (req) => {
         rollingDrawdownPct,
         rollingCdarPct,
         adjustments: [],
+        recentWinRate,
+        recentAvgPnlPct,
+        recentClosedCount,
       };
 
       const settings = computeEffectiveSettings(rawSettings, adaptiveCtx, regimeFloors);

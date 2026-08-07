@@ -437,6 +437,19 @@ function stepDay(
   const { drawdownPct, cdarPct } = computeRollingDrawdown(navSeries, 30);
   const recentPnlPct = recentPnl7d(state, params.starting_nav);
 
+  // Trailing 30-cal-day closed-trade streak stats (live parity: feeds the
+  // adaptive position-slot budget in computeEffectiveSettings).
+  const streakCutoff = new Date(new Date(date).getTime() - 30 * 86400000)
+    .toISOString().slice(0, 10);
+  const streakTrades = state.closedTrades.filter(t => t.exitDate >= streakCutoff);
+  const recentClosedCount = streakTrades.length;
+  const recentWinRate = recentClosedCount > 0
+    ? streakTrades.filter(t => t.pnl > 0).length / recentClosedCount
+    : null;
+  const recentAvgPnlPct = recentClosedCount > 0
+    ? (streakTrades.reduce((s, t) => s + t.pnl, 0) / recentClosedCount / params.starting_nav) * 100
+    : null;
+
   const ctx: AdaptiveContext = {
     vix,
     vixRegime,
@@ -446,6 +459,9 @@ function stepDay(
     rollingDrawdownPct: drawdownPct,
     rollingCdarPct: cdarPct,
     adjustments: [],
+    recentWinRate,
+    recentAvgPnlPct,
+    recentClosedCount,
   };
 
   const baseSettings: AdaptiveSettings = {
