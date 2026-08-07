@@ -1595,6 +1595,11 @@ async function runEntryDecision(
     const rev = reversalRisk.score / Math.max(0.01, envelope.reversalRiskCeiling);
     effectiveConviction -= Math.max(0, Math.min(6, rev * 6));
   }
+  // WS4 — headline sentiment as a supporting conviction delta (±5 max, scaled
+  // by the classifier's own confidence). Never blocks; missing news → 0.
+  const newsRow = newsMap?.get(ticker.toUpperCase()) ?? null;
+  const newsDelta = newsConvictionDelta(newsRow, sig.decision === "SHORT" ? "short" : "long");
+  effectiveConviction += newsDelta;
   effectiveConviction = Math.max(0, Math.min(100, Math.round(effectiveConviction)));
   if (effectiveConviction < settings.min_conviction + benchBoost) {
     return {
