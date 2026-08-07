@@ -48,6 +48,7 @@ import {
   CORR_LOOKBACK_BARS,
   GAP_LOSS_CAP_NAV_PCT,
   gapCappedDollars,
+  overnightGapPct95,
   edgeSizeMultiplier,
   spyTrendOf,
   isBearishMacro,
@@ -1634,9 +1635,7 @@ async function runEntryDecision(
   {
     const gapMaxDollars = gapCappedDollars(data.open, data.close, navForSizing);
     if (gapMaxDollars !== null && targetDollars > gapMaxDollars) {
-      const n = Math.min(data.open.length, data.close.length);
-      const pc = data.close[n - 2] ?? 0, o = data.open[n - 1] ?? 0;
-      gap95 = pc > 0 && o > 0 ? Math.abs(o / pc - 1) : null;
+      gap95 = overnightGapPct95(data.open, data.close);
       cappedFrac = cappedFrac * (gapMaxDollars / targetDollars);
       targetDollars = gapMaxDollars;
     }
