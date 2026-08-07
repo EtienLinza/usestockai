@@ -738,6 +738,12 @@ function runWinExit(
 // ============================================================================
 // LOSS EXIT — thesis invalidation (priority order)
 // ============================================================================
+// Grace multiple applied to a strategy's max-hold before a red position is
+// force-closed as stale. 1.5× gives the thesis a full extra half-horizon to
+// recover; past that the slot is worth more than the trade.
+const STALE_HOLD_MULT = 1.5;
+
+
 function runLossExit(
   pos: Position, _data: DataSet, currentPrice: number, profile: ProfileParams,
   liveDecision: "BUY" | "SHORT" | "HOLD" | null,
