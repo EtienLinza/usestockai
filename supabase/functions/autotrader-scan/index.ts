@@ -85,10 +85,16 @@ import {
 } from "../_shared/portfolio-cvar.ts";
 import { detectAdwinDrift, adwinGateAdjust } from "../_shared/adwin.ts";
 import { loadAdaptiveThresholds, resolveThresholds, type ThresholdMap } from "../_shared/adaptive-thresholds.ts";
+import { loadAdaptiveExits, resolveExitParams, applyExitParams, type ExitParamMap } from "../_shared/adaptive-exits.ts";
 
 // WS2: nightly-tuned indicator thresholds (profile × market regime). Loaded
 // once per scan; null/empty → engine defaults (cold-start safe).
 let ADAPTIVE_THRESHOLDS: ThresholdMap | null = null;
+
+// WS3: nightly-tuned exit geometry (trailing/hard-stop ATR multiples + TP
+// ceiling) per profile × market regime. Empty → engine defaults.
+let ADAPTIVE_EXITS: ExitParamMap | null = null;
+let CURRENT_MARKET_REGIME: string | null = null;
 
 /** Thrown by the circuit breaker to abort the entire scan immediately. */
 class CircuitBreakerTrippedError extends Error {
@@ -1647,7 +1653,12 @@ async function runEntryDecision(
   // fully adaptive to volatility — fat-tail control is enforced via
   // risk-parity sizing below, NOT a constant % cap.
   const profile = PROFILE_PARAMS[sig.profile];
-  const params = sig.blendedParams ?? profile;
+  // WS3: fold nightly-tuned exit geometry (hard-stop / trail / TP) into the
+  // params used for stop placement. Empty map → engine defaults.
+  const params = applyExitParams(
+    sig.blendedParams ?? profile,
+    resolveExitParams(ADAPTIVE_EXITS, sig.profile, sig.marketRegime ?? marketRegime),
+  );
   const atr = sig.atr;
   const isLong = sig.decision === "BUY";
   const atrStopDist = atr * params.hardStopATRMult;
@@ -2622,9 +2633,13 @@ async function runExitOnlyPass(
     ];
     const stratKey = pos.entry_strategy ?? "unknown";
     const trailAdj = exitCalibration?.[stratKey]?.trailMultAdjust ?? 1.0;
-    const profile: ProfileParams = trailAdj !== 1.0
-      ? { ...baseProfile, trailingStopATRMult: baseProfile.trailingStopATRMult * trailAdj }
-      : baseProfile;
+    // WS3: nightly-tuned exit geometry per profile × regime, with the legacy
+    // per-strategy capture-ratio trail adjust layered on top.
+    const profile: ProfileParams = applyExitParams(
+      baseProfile,
+      resolveExitParams(ADAPTIVE_EXITS, (pos.entry_profile as string) ?? cls.classification, CURRENT_MARKET_REGIME),
+      trailAdj,
+    );
 
     // Earnings blackout for OPEN positions (audit gap G-3): close before the
     // gap rather than blocking new entries only. Always takes priority.
@@ -2806,9 +2821,12 @@ async function processUser(
     //    and outputs a trailing-stop multiplier adjustment. Apply it here.
     const stratKey = pos.entry_strategy ?? "unknown";
     const trailAdj = exitCalibration?.[stratKey]?.trailMultAdjust ?? 1.0;
-    const profile: ProfileParams = trailAdj !== 1.0
-      ? { ...baseProfile, trailingStopATRMult: baseProfile.trailingStopATRMult * trailAdj }
-      : baseProfile;
+    // WS3: nightly-tuned exit geometry per profile × regime on top of it.
+    const profile: ProfileParams = applyExitParams(
+      baseProfile,
+      resolveExitParams(ADAPTIVE_EXITS, (pos.entry_profile as string) ?? cls.classification, CURRENT_MARKET_REGIME),
+      trailAdj,
+    );
 
     // Earnings blackout for OPEN positions (audit gap G-3): close 2 trading
     // days before earnings to avoid gap-through-stop risk. Takes priority
@@ -2969,7 +2987,10 @@ async function processUser(
   const metaModel = await loadLatestMetaModel();
   const championEnsemble = await loadChampionEnsemble(supabase);
   ADAPTIVE_THRESHOLDS = await loadAdaptiveThresholds(supabase);
+  ADAPTIVE_EXITS = await loadAdaptiveExits(supabase);
+  CURRENT_MARKET_REGIME = marketRegime ?? null;
   if (ADAPTIVE_THRESHOLDS.size > 0) console.log(`autotrader-scan: adaptive thresholds loaded (${ADAPTIVE_THRESHOLDS.size} buckets)`);
+  if (ADAPTIVE_EXITS.size > 0) console.log(`autotrader-scan: adaptive exits loaded (${ADAPTIVE_EXITS.size} buckets)`);
   if (marketRegime) console.log(`autotrader-scan: regime=${marketRegime}`);
   if (metaModel) console.log(`autotrader-scan: meta-model n=${metaModel.sample_size} AUC=${metaModel.auc ?? "n/a"}`);
   if (championEnsemble) console.log(`autotrader-scan: ensemble champion loaded (n=${championEnsemble.training.sampleSize})`);

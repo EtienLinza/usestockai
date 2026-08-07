@@ -14,6 +14,63 @@ export type Database = {
   }
   public: {
     Tables: {
+      adaptive_exit_params: {
+        Row: {
+          baseline_params: Json
+          baseline_valid_expectancy: number | null
+          computed_at: string
+          created_at: string
+          id: string
+          improvement: number | null
+          market_regime: string
+          notes: Json
+          params: Json
+          profile: string
+          promoted_at: string | null
+          retired_at: string | null
+          sample_size: number
+          status: string
+          train_expectancy: number | null
+          valid_expectancy: number | null
+        }
+        Insert: {
+          baseline_params?: Json
+          baseline_valid_expectancy?: number | null
+          computed_at?: string
+          created_at?: string
+          id?: string
+          improvement?: number | null
+          market_regime: string
+          notes?: Json
+          params?: Json
+          profile: string
+          promoted_at?: string | null
+          retired_at?: string | null
+          sample_size?: number
+          status?: string
+          train_expectancy?: number | null
+          valid_expectancy?: number | null
+        }
+        Update: {
+          baseline_params?: Json
+          baseline_valid_expectancy?: number | null
+          computed_at?: string
+          created_at?: string
+          id?: string
+          improvement?: number | null
+          market_regime?: string
+          notes?: Json
+          params?: Json
+          profile?: string
+          promoted_at?: string | null
+          retired_at?: string | null
+          sample_size?: number
+          status?: string
+          train_expectancy?: number | null
+          valid_expectancy?: number | null
+        }
+        Relationships: []
+      }
       adaptive_signal_params: {
         Row: {
           baseline_params: Json
