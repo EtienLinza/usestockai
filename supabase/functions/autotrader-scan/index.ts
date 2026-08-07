@@ -240,13 +240,16 @@ function maxCorrelationToBook(
   return bestTicker ? { maxAbs: bestAbs, against: bestTicker } : null;
 }
 
+type FeatureSnapshot = Record<string, number | string | null>;
+
 type EntryAction =
   | { kind: "ENTER"; conviction: number; kellyFraction: number; price: number;
       strategy: string; profile: StockProfile; atr: number; hardStop: number;
       weeklyAlloc: number; reasoning: string;
       decision: "BUY" | "SHORT";
       siVelocity?: number | null; siDelta?: number;
-      slippageBpsEst?: number | null }
+      slippageBpsEst?: number | null;
+      featureSnapshot?: FeatureSnapshot }
   | { kind: "HOLD" | "BLOCKED"; reason: string };
 
 type ScanMode = "all" | "exits" | "entries";
