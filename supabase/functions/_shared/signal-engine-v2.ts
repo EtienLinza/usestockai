@@ -1459,6 +1459,9 @@ export function evaluateSignal(
         : "Conviction below threshold",
       regimeDelta,
       marketRegime: appliedRegime,
+      adx: sig.adx,
+      rsi: sig.rsi,
+      volRatio: sig.volRatio,
     };
   }
 
@@ -1484,6 +1487,9 @@ export function evaluateSignal(
     epsRevisionScore: (epsRevisionScore !== undefined && epsRevisionScore !== null && Number.isFinite(epsRevisionScore)) ? epsRevisionScore : undefined,
     regimeDelta,
     marketRegime: appliedRegime,
+    adx: sig.adx,
+    rsi: sig.rsi,
+    volRatio: sig.volRatio,
   };
 }
 
