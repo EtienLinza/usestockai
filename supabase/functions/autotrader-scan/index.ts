@@ -71,6 +71,8 @@ import { loadDanelfinScores } from "../_shared/danelfin.ts";
 import { loadEpsRevisions } from "../_shared/eps-revisions.ts";
 import { loadLatestRegime } from "../_shared/regime-detector.ts";
 import { loadLatestMetaModel, scoreMetaLabel, type MetaLabelModel } from "../_shared/meta-labeler.ts";
+import { predictEnsemble, type EnsembleModel } from "../_shared/ensemble.ts";
+import { loadChampionEnsemble } from "../_shared/ensemble-loader.ts";
 import { loadShortInterestMap, shortInterestConvictionDelta, type ShortInterestRow } from "../_shared/short-interest.ts";
 import { slippageShrinkFactor } from "../_shared/slippage-model.ts";
 import {
