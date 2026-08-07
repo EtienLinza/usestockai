@@ -1646,7 +1646,7 @@ async function runEntryDecision(
 
   const reasoningExtra: string[] = [];
   if (edgeMult !== 1) reasoningExtra.push(`edge×${edgeMult.toFixed(2)}`);
-  if (gap95 !== null) reasoningExtra.push(`gap-cap applied (last gap ${(gap95 * 100).toFixed(1)}%)`);
+  if (gap95 !== null) reasoningExtra.push(`gap-cap applied (p95 gap ${(gap95 * 100).toFixed(1)}%)`);
   if (siDelta !== 0) reasoningExtra.push(`siΔ=${siDelta > 0 ? "+" : ""}${siDelta}`);
   if (slippageBpsEst !== null && slippageBpsEst > 0) reasoningExtra.push(`slip=${slippageBpsEst.toFixed(1)}bps`);
   const reasoning = reasoningExtra.length > 0
@@ -2949,6 +2949,7 @@ async function processUser(
       strategyEdges,
       shortInterestMap,
       metaGate,
+      strategyExpectancy,
     );
 
 
