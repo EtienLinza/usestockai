@@ -1514,8 +1514,12 @@ async function runEntryDecision(
   // Audit fix: runs AFTER calibration so the conviction feature matches the
   // value the trainer sees in `signal_outcomes.conviction` (also calibrated).
   // Thresholds tighten under detected drift (see ADWIN pre-scan pass).
+  //
+  // WS1: the simple meta-labeler is blended 0.3 with the ensemble champion
+  // (0.7) when a promoted champion exists. Cold start (no champion) → simple
+  // only. No simple model → champion only. Both null → pass-through.
   const gate = metaGate ?? { pass: 0.45, skip: 0.30 };
-  const metaScore = scoreMetaLabel(metaModel ?? null, {
+  const simpleMeta = scoreMetaLabel(metaModel ?? null, {
     conviction,
     atrPct: sig.atrPct,
     relStrength: 0,
@@ -1525,12 +1529,32 @@ async function runEntryDecision(
     hourOfDay: (new Date().getUTCHours() + 19) % 24,
     dayOfWeek: new Date().getUTCDay(),
   });
+  let championScore: number | null = null;
+  if (championEnsemble) {
+    try {
+      const snap = buildEntryFeatureSnapshot(conviction, sig, marketRegime);
+      // predictEnsemble consumes numeric keys; conviction is prepended to match
+      // the trainer (which adds the `conviction` column on top of the snapshot).
+      const features: Record<string, number> = { conviction };
+      for (const [k, v] of Object.entries(snap)) {
+        if (typeof v === "number" && Number.isFinite(v)) features[k] = v;
+      }
+      championScore = predictEnsemble(championEnsemble, features, {
+        regime: (sig.marketRegime ?? marketRegime ?? null) as string | null,
+      });
+      if (!Number.isFinite(championScore)) championScore = null;
+    } catch (e) {
+      console.warn(`[ensemble] champion predict failed for ${ticker}`, e);
+      championScore = null;
+    }
+  }
+  const metaScore = blendMetaScore(championEnsemble, championScore, simpleMeta);
   if (metaScore !== null && Number.isFinite(metaScore)) {
     if (metaScore < gate.skip) {
-      return { kind: "HOLD", reason: `Meta-label skip: score=${metaScore.toFixed(3)} < ${gate.skip.toFixed(2)}` };
+      return { kind: "HOLD", reason: `Meta-label skip: score=${metaScore.toFixed(3)} < ${gate.skip.toFixed(2)}${championScore != null ? " (ensemble)" : ""}` };
     }
     if (metaScore < gate.pass && conviction < 80) {
-      return { kind: "HOLD", reason: `Meta-label demote: score=${metaScore.toFixed(3)} < ${gate.pass.toFixed(2)} (conv ${conviction} < 80) — consensus-only` };
+      return { kind: "HOLD", reason: `Meta-label demote: score=${metaScore.toFixed(3)} < ${gate.pass.toFixed(2)} (conv ${conviction} < 80) — consensus-only${championScore != null ? " (ensemble)" : ""}` };
     }
   }
 
