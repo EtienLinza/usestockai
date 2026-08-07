@@ -71,6 +71,8 @@ import { loadDanelfinScores } from "../_shared/danelfin.ts";
 import { loadEpsRevisions } from "../_shared/eps-revisions.ts";
 import { loadLatestRegime } from "../_shared/regime-detector.ts";
 import { loadLatestMetaModel, scoreMetaLabel, type MetaLabelModel } from "../_shared/meta-labeler.ts";
+import { predictEnsemble, type EnsembleModel } from "../_shared/ensemble.ts";
+import { loadChampionEnsemble } from "../_shared/ensemble-loader.ts";
 import { loadShortInterestMap, shortInterestConvictionDelta, type ShortInterestRow } from "../_shared/short-interest.ts";
 import { slippageShrinkFactor } from "../_shared/slippage-model.ts";
 import {
@@ -238,13 +240,16 @@ function maxCorrelationToBook(
   return bestTicker ? { maxAbs: bestAbs, against: bestTicker } : null;
 }
 
+type FeatureSnapshot = Record<string, number | string | null>;
+
 type EntryAction =
   | { kind: "ENTER"; conviction: number; kellyFraction: number; price: number;
       strategy: string; profile: StockProfile; atr: number; hardStop: number;
       weeklyAlloc: number; reasoning: string;
       decision: "BUY" | "SHORT";
       siVelocity?: number | null; siDelta?: number;
-      slippageBpsEst?: number | null }
+      slippageBpsEst?: number | null;
+      featureSnapshot?: FeatureSnapshot }
   | { kind: "HOLD" | "BLOCKED"; reason: string };
 
 type ScanMode = "all" | "exits" | "entries";
@@ -1219,7 +1224,66 @@ function assessReversalRisk(
   return { score: Number(score.toFixed(3)), tags, details };
 }
 
+// ── Ensemble champion feature builder (WS1) ─────────────────────────────────
+// Produces the entry-observable feature dict the nightly trainer learns from
+// (stored on virtual_positions at entry → copied to signal_outcomes at exit →
+// fed to trainEnsemble). The trainer prepends the `conviction` column, so this
+// snapshot deliberately EXCLUDES conviction. Numeric keys become ensemble
+// features; the leading-underscore string keys (`_market_regime`, etc.) are
+// consumed only at exit to populate signal_outcomes columns and are dropped by
+// the trainer's flattenFeatures (string → skipped).
+function buildEntryFeatureSnapshot(
+  conviction: number,
+  sig: ReturnType<typeof evaluateSignal>,
+  marketRegime: string | null | undefined,
+): FeatureSnapshot {
+  const mr = (marketRegime ?? sig?.marketRegime ?? "neutral") as string;
+  const snap: FeatureSnapshot = {
+    // numeric ensemble features (entry-observable)
+    atr_pct: sig?.atrPct ?? 0,
+    weekly_alloc: sig?.weeklyBias?.targetAllocation ?? 0,
+    kelly_fraction: sig?.kellyFraction ?? 0,
+    danelfin_score: typeof sig?.danelfinScore === "number" ? sig.danelfinScore : 0,
+    danelfin_delta: sig?.danelfinDelta ?? 0,
+    eps_revision_score: typeof sig?.epsRevisionScore === "number" ? sig.epsRevisionScore : 0,
+    eps_revision_delta: sig?.epsRevisionDelta ?? 0,
+    regime_delta: sig?.regimeDelta ?? 0,
+    is_buy: sig?.decision === "BUY" ? 1 : 0,
+    is_short: sig?.decision === "SHORT" ? 1 : 0,
+    mr_bull_quiet: mr === "bull_quiet" ? 1 : 0,
+    mr_bull_volatile: mr === "bull_volatile" ? 1 : 0,
+    mr_bear_quiet: mr === "bear_quiet" ? 1 : 0,
+    mr_bear_volatile: mr === "bear_volatile" ? 1 : 0,
+    hour_of_day: (new Date().getUTCHours() + 19) % 24,
+    day_of_week: new Date().getUTCDay(),
+    conviction_at_entry: conviction,
+    // exit-time metadata (strings — skipped by the trainer, used to populate
+    // signal_outcomes columns when the position closes).
+    _market_regime: mr,
+    _signal_regime: sig?.regime ?? null,
+    _strategy: sig?.strategy ?? null,
+    _profile: sig?.profile ?? null,
+  };
+  return snap;
+}
 
+/** Blend the ensemble champion score with the simple meta-labeler score. */
+function blendMetaScore(
+  champion: EnsembleModel | null | undefined,
+  championScore: number | null,
+  simpleScore: number | null,
+): number | null {
+  // champion-only when no simple model (simple removed / cold)
+  if (championScore != null && Number.isFinite(championScore) && (simpleScore == null || !Number.isFinite(simpleScore))) {
+    return championScore;
+  }
+  // simple-only when no champion (cold start — most common today)
+  if ((championScore == null || !Number.isFinite(championScore)) && simpleScore != null && Number.isFinite(simpleScore)) {
+    return simpleScore;
+  }
+  if (championScore == null || simpleScore == null) return null;
+  return 0.7 * championScore + 0.3 * simpleScore;
+}
 
 async function runEntryDecision(
   ticker: string,
@@ -1250,6 +1314,9 @@ async function runEntryDecision(
    *  strategies (negative expectancy over ≥15 closed trades) get their
    *  conviction floor raised by floorBoost until their record recovers. */
   strategyExpectancy?: Record<string, { expectancy: number; winRate: number; count: number; benched: boolean; floorBoost: number }> | null,
+  /** WS1: promoted 4-model ensemble champion for live meta-filtering. Null
+   *  during cold start → falls back to the simple meta-labeler only. */
+  championEnsemble?: EnsembleModel | null,
 ): Promise<EntryAction> {
   // Daily loss limit — block all new entries
   if (todayPnlPct <= -settings.daily_loss_limit_pct) {
@@ -1447,8 +1514,12 @@ async function runEntryDecision(
   // Audit fix: runs AFTER calibration so the conviction feature matches the
   // value the trainer sees in `signal_outcomes.conviction` (also calibrated).
   // Thresholds tighten under detected drift (see ADWIN pre-scan pass).
+  //
+  // WS1: the simple meta-labeler is blended 0.3 with the ensemble champion
+  // (0.7) when a promoted champion exists. Cold start (no champion) → simple
+  // only. No simple model → champion only. Both null → pass-through.
   const gate = metaGate ?? { pass: 0.45, skip: 0.30 };
-  const metaScore = scoreMetaLabel(metaModel ?? null, {
+  const simpleMeta = scoreMetaLabel(metaModel ?? null, {
     conviction,
     atrPct: sig.atrPct,
     relStrength: 0,
@@ -1458,12 +1529,32 @@ async function runEntryDecision(
     hourOfDay: (new Date().getUTCHours() + 19) % 24,
     dayOfWeek: new Date().getUTCDay(),
   });
+  let championScore: number | null = null;
+  if (championEnsemble) {
+    try {
+      const snap = buildEntryFeatureSnapshot(conviction, sig, marketRegime);
+      // predictEnsemble consumes numeric keys; conviction is prepended to match
+      // the trainer (which adds the `conviction` column on top of the snapshot).
+      const features: Record<string, number> = { conviction };
+      for (const [k, v] of Object.entries(snap)) {
+        if (typeof v === "number" && Number.isFinite(v)) features[k] = v;
+      }
+      championScore = predictEnsemble(championEnsemble, features, {
+        regime: (sig.marketRegime ?? marketRegime ?? null) as string | null,
+      });
+      if (!Number.isFinite(championScore)) championScore = null;
+    } catch (e) {
+      console.warn(`[ensemble] champion predict failed for ${ticker}`, e);
+      championScore = null;
+    }
+  }
+  const metaScore = blendMetaScore(championEnsemble, championScore, simpleMeta);
   if (metaScore !== null && Number.isFinite(metaScore)) {
     if (metaScore < gate.skip) {
-      return { kind: "HOLD", reason: `Meta-label skip: score=${metaScore.toFixed(3)} < ${gate.skip.toFixed(2)}` };
+      return { kind: "HOLD", reason: `Meta-label skip: score=${metaScore.toFixed(3)} < ${gate.skip.toFixed(2)}${championScore != null ? " (ensemble)" : ""}` };
     }
     if (metaScore < gate.pass && conviction < 80) {
-      return { kind: "HOLD", reason: `Meta-label demote: score=${metaScore.toFixed(3)} < ${gate.pass.toFixed(2)} (conv ${conviction} < 80) — consensus-only` };
+      return { kind: "HOLD", reason: `Meta-label demote: score=${metaScore.toFixed(3)} < ${gate.pass.toFixed(2)} (conv ${conviction} < 80) — consensus-only${championScore != null ? " (ensemble)" : ""}` };
     }
   }
 
@@ -1669,6 +1760,8 @@ async function runEntryDecision(
     siVelocity,
     siDelta,
     slippageBpsEst,
+    // WS1: preserve entry-observable features for the nightly ensemble trainer.
+    featureSnapshot: buildEntryFeatureSnapshot(effectiveConviction, sig, marketRegime),
   };
 }
 
@@ -2861,8 +2954,10 @@ async function processUser(
   // Both are null-safe → engine treats missing as no-op.
   const marketRegime = await loadLatestRegime();
   const metaModel = await loadLatestMetaModel();
+  const championEnsemble = await loadChampionEnsemble(supabase);
   if (marketRegime) console.log(`autotrader-scan: regime=${marketRegime}`);
   if (metaModel) console.log(`autotrader-scan: meta-model n=${metaModel.sample_size} AUC=${metaModel.auc ?? "n/a"}`);
+  if (championEnsemble) console.log(`autotrader-scan: ensemble champion loaded (n=${championEnsemble.training.sampleSize})`);
 
   // ── ADWIN drift detection (run once at scan start) ─────────────────────
   // Pulls last ~200 closed outcomes (binary hit = realized_pnl_pct > 0) and
@@ -2968,6 +3063,7 @@ async function processUser(
       shortInterestMap,
       metaGate,
       strategyExpectancy,
+      championEnsemble,
     );
 
 
@@ -3577,7 +3673,8 @@ async function executeExit(
     const { error: outcomeErr } = await supabase.from("signal_outcomes").insert({
       ticker: pos.ticker,
       signal_type: isLong ? "BUY" : "SELL",
-      regime: null,
+      regime: (pos.entry_feature_snapshot as Record<string, unknown> | null)?._signal_regime as string | null
+        ?? null,
       stock_profile: pos.entry_profile,
       weekly_bias: pos.entry_weekly_alloc != null
         ? (Number(pos.entry_weekly_alloc) >= 0 ? "bullish" : "bearish")
@@ -3587,13 +3684,15 @@ async function executeExit(
       entry_thesis: `AutoTrader ${pos.entry_strategy ?? "signal"} entry`,
       contributing_rules: {
         atr_pct: entry > 0 && entryAtr > 0 ? entryAtr / entry : 0.02,
-        market_regime: "neutral",
+        market_regime: (pos.entry_feature_snapshot as Record<string, unknown> | null)?._market_regime as string | "neutral",
         source: "autotrader",
       },
       feature_snapshot: {
+        // WS1: carry forward the entry-observable feature dict so the nightly
+        // ensemble trainer learns from what the engine actually saw at entry.
+        ...(pos.entry_feature_snapshot ?? {}),
         atr_pct: entry > 0 && entryAtr > 0 ? entryAtr / entry : 0.02,
         initial_stop_pct: entry > 0 ? initialRisk / entry : null,
-        entry_profile: pos.entry_profile,
         gap_through_stop_bps: gapSlipBps,
         source: "autotrader",
       },
@@ -3765,6 +3864,7 @@ async function executeEntry(
     trailing_stop_price: hardStop,
     peak_price: fillPrice,
     original_shares: shares,
+    entry_feature_snapshot: e.featureSnapshot ?? null,
   }).select("id").single();
   if (insErr) {
     // P-4: the partial unique index `uniq_open_position_per_user_ticker` rejects

@@ -1749,6 +1749,7 @@ export type Database = {
           created_at: string
           entry_atr: number | null
           entry_conviction: number | null
+          entry_feature_snapshot: Json | null
           entry_price: number
           entry_profile: string | null
           entry_strategy: string | null
@@ -1785,6 +1786,7 @@ export type Database = {
           created_at?: string
           entry_atr?: number | null
           entry_conviction?: number | null
+          entry_feature_snapshot?: Json | null
           entry_price: number
           entry_profile?: string | null
           entry_strategy?: string | null
@@ -1821,6 +1823,7 @@ export type Database = {
           created_at?: string
           entry_atr?: number | null
           entry_conviction?: number | null
+          entry_feature_snapshot?: Json | null
           entry_price?: number
           entry_profile?: string | null
           entry_strategy?: string | null
