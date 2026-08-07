@@ -8,7 +8,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 export async function recordHeartbeat(
   jobName: string,
   startedAtMs: number,
-  status: "ok" | "error" = "ok",
+  status: "ok" | "error" | "degraded" = "ok",
   notes?: string,
 ): Promise<void> {
   try {

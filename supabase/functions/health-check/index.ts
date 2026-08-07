@@ -28,6 +28,9 @@ const KNOWN_JOBS: JobConfig[] = [
   { name: "autotrader-scan", maxAgeMinutesMarket: 30 },
   { name: "calibrate-weights", maxAgeMinutesMarket: 60 * 24 + 60, alwaysOn: true },
   { name: "weekly-digest", maxAgeMinutesMarket: 60 * 24 * 7 + 60, alwaysOn: true },
+  // Learning-loop watchdog: degraded when enabled autotraders produce zero
+  // closed outcomes in 7d (the silent-starvation incident class).
+  { name: "learning-loop", maxAgeMinutesMarket: 60 * 24 + 60, alwaysOn: true },
 ];
 
 function isMarketHours(d: Date): boolean {
