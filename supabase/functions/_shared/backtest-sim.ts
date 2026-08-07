@@ -26,6 +26,8 @@ import {
   ROLLING_DD_HARD_BLOCK_PCT,
   CDAR_HARD_BLOCK_PCT,
   CORR_LOOKBACK_BARS,
+  gapCappedDollars,
+  edgeSizeMultiplier,
   type AdaptiveSettings,
   type AdaptiveContext,
   type RiskProfileName,
@@ -496,17 +498,27 @@ function stepDay(
       const corr = maxAbsCorrToBook(ticker, state.positions, bars, endIdx);
       if (corr >= corrCutoff) continue;
 
-      // Sizing — LIVE PARITY: kellyFraction × volScalar, then cap by
-      // effective single-name and remaining NAV headroom.
+      // Sizing — LIVE PARITY: kellyFraction × volScalar × edge multiplier,
+      // then cap by effective single-name and remaining NAV headroom.
       const currentPrice = d.close[i];
       let curExposure = 0;
       for (const p of state.positions) curExposure += p.entryPrice * p.shares;
       const totalNavExposurePct = (curExposure / Math.max(1, nav)) * 100;
       const headroom = Math.max(0, (eff.max_nav_exposure_pct - totalNavExposurePct) / 100);
-      const baseFrac = (sig.kellyFraction ?? 0.05) * volScalar;
+      // Edge-scaled sizing (live parity): meta-score unavailable in sim → null.
+      const edgeMult = edgeSizeMultiplier(sig.conviction, eff.min_conviction, null);
+      const baseFrac = (sig.kellyFraction ?? 0.05) * volScalar * edgeMult;
       const cappedFrac = Math.max(0, Math.min(baseFrac, eff.max_single_name_pct / 100, headroom));
       if (cappedFrac <= 0) continue;
-      const targetDollars = nav * cappedFrac;
+      let targetDollars = nav * cappedFrac;
+      if (targetDollars < currentPrice) continue;
+
+      // Gap-risk cap (live parity): a 95th-pctile overnight gap must cost
+      // ≤ GAP_LOSS_CAP_NAV_PCT% of NAV. Uses the same shared helper as live.
+      const gapMaxDollars = gapCappedDollars(slice.open, slice.close, nav);
+      if (gapMaxDollars !== null && targetDollars > gapMaxDollars) {
+        targetDollars = gapMaxDollars;
+      }
       if (targetDollars < currentPrice) continue;
 
       // Hard stop = stop_atr_mult * ATR from entry
