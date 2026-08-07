@@ -1653,7 +1653,12 @@ async function runEntryDecision(
   // fully adaptive to volatility — fat-tail control is enforced via
   // risk-parity sizing below, NOT a constant % cap.
   const profile = PROFILE_PARAMS[sig.profile];
-  const params = sig.blendedParams ?? profile;
+  // WS3: fold nightly-tuned exit geometry (hard-stop / trail / TP) into the
+  // params used for stop placement. Empty map → engine defaults.
+  const params = applyExitParams(
+    sig.blendedParams ?? profile,
+    resolveExitParams(ADAPTIVE_EXITS, sig.profile, sig.marketRegime ?? marketRegime),
+  );
   const atr = sig.atr;
   const isLong = sig.decision === "BUY";
   const atrStopDist = atr * params.hardStopATRMult;
