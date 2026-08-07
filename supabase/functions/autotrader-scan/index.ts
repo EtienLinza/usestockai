@@ -2975,7 +2975,10 @@ async function processUser(
   const metaModel = await loadLatestMetaModel();
   const championEnsemble = await loadChampionEnsemble(supabase);
   ADAPTIVE_THRESHOLDS = await loadAdaptiveThresholds(supabase);
+  ADAPTIVE_EXITS = await loadAdaptiveExits(supabase);
+  CURRENT_MARKET_REGIME = marketRegime ?? null;
   if (ADAPTIVE_THRESHOLDS.size > 0) console.log(`autotrader-scan: adaptive thresholds loaded (${ADAPTIVE_THRESHOLDS.size} buckets)`);
+  if (ADAPTIVE_EXITS.size > 0) console.log(`autotrader-scan: adaptive exits loaded (${ADAPTIVE_EXITS.size} buckets)`);
   if (marketRegime) console.log(`autotrader-scan: regime=${marketRegime}`);
   if (metaModel) console.log(`autotrader-scan: meta-model n=${metaModel.sample_size} AUC=${metaModel.auc ?? "n/a"}`);
   if (championEnsemble) console.log(`autotrader-scan: ensemble champion loaded (n=${championEnsemble.training.sampleSize})`);
