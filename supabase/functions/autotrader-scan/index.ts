@@ -46,6 +46,7 @@ import {
   VOL_SCALAR_MIN,
   VOL_SCALAR_MAX,
   CORR_LOOKBACK_BARS,
+  POS_STREAK_LOOKBACK_DAYS,
   GAP_LOSS_CAP_NAV_PCT,
   gapCappedDollars,
   overnightGapPct95,
@@ -2150,6 +2151,9 @@ serve(async (req) => {
         rollingDrawdownPct,
         rollingCdarPct,
         adjustments: [],
+        recentWinRate,
+        recentAvgPnlPct,
+        recentClosedCount,
       };
 
       const settings = computeEffectiveSettings(rawSettings, adaptiveCtx, regimeFloors);
