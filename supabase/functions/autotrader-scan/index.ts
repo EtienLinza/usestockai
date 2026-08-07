@@ -1333,6 +1333,9 @@ async function runEntryDecision(
   /** WS1: promoted 4-model ensemble champion for live meta-filtering. Null
    *  during cold start → falls back to the simple meta-labeler only. */
   championEnsemble?: EnsembleModel | null,
+  /** WS4: cached headline sentiment per ticker. Supporting factor only —
+   *  missing/stale/low-confidence entries are strictly neutral. */
+  newsMap?: NewsSentimentMap | null,
 ): Promise<EntryAction> {
   // Daily loss limit — block all new entries
   if (todayPnlPct <= -settings.daily_loss_limit_pct) {
