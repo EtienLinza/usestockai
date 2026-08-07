@@ -1760,6 +1760,8 @@ async function runEntryDecision(
     siVelocity,
     siDelta,
     slippageBpsEst,
+    // WS1: preserve entry-observable features for the nightly ensemble trainer.
+    featureSnapshot: buildEntryFeatureSnapshot(effectiveConviction, sig, marketRegime),
   };
 }
 
