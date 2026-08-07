@@ -1224,7 +1224,66 @@ function assessReversalRisk(
   return { score: Number(score.toFixed(3)), tags, details };
 }
 
+// ── Ensemble champion feature builder (WS1) ─────────────────────────────────
+// Produces the entry-observable feature dict the nightly trainer learns from
+// (stored on virtual_positions at entry → copied to signal_outcomes at exit →
+// fed to trainEnsemble). The trainer prepends the `conviction` column, so this
+// snapshot deliberately EXCLUDES conviction. Numeric keys become ensemble
+// features; the leading-underscore string keys (`_market_regime`, etc.) are
+// consumed only at exit to populate signal_outcomes columns and are dropped by
+// the trainer's flattenFeatures (string → skipped).
+function buildEntryFeatureSnapshot(
+  conviction: number,
+  sig: ReturnType<typeof evaluateSignal>,
+  marketRegime: string | null | undefined,
+): FeatureSnapshot {
+  const mr = (marketRegime ?? sig?.marketRegime ?? "neutral") as string;
+  const snap: FeatureSnapshot = {
+    // numeric ensemble features (entry-observable)
+    atr_pct: sig?.atrPct ?? 0,
+    weekly_alloc: sig?.weeklyBias?.targetAllocation ?? 0,
+    kelly_fraction: sig?.kellyFraction ?? 0,
+    danelfin_score: typeof sig?.danelfinScore === "number" ? sig.danelfinScore : 0,
+    danelfin_delta: sig?.danelfinDelta ?? 0,
+    eps_revision_score: typeof sig?.epsRevisionScore === "number" ? sig.epsRevisionScore : 0,
+    eps_revision_delta: sig?.epsRevisionDelta ?? 0,
+    regime_delta: sig?.regimeDelta ?? 0,
+    is_buy: sig?.decision === "BUY" ? 1 : 0,
+    is_short: sig?.decision === "SHORT" ? 1 : 0,
+    mr_bull_quiet: mr === "bull_quiet" ? 1 : 0,
+    mr_bull_volatile: mr === "bull_volatile" ? 1 : 0,
+    mr_bear_quiet: mr === "bear_quiet" ? 1 : 0,
+    mr_bear_volatile: mr === "bear_volatile" ? 1 : 0,
+    hour_of_day: (new Date().getUTCHours() + 19) % 24,
+    day_of_week: new Date().getUTCDay(),
+    conviction_at_entry: conviction,
+    // exit-time metadata (strings — skipped by the trainer, used to populate
+    // signal_outcomes columns when the position closes).
+    _market_regime: mr,
+    _signal_regime: sig?.regime ?? null,
+    _strategy: sig?.strategy ?? null,
+    _profile: sig?.profile ?? null,
+  };
+  return snap;
+}
 
+/** Blend the ensemble champion score with the simple meta-labeler score. */
+function blendMetaScore(
+  champion: EnsembleModel | null | undefined,
+  championScore: number | null,
+  simpleScore: number | null,
+): number | null {
+  // champion-only when no simple model (simple removed / cold)
+  if (championScore != null && Number.isFinite(championScore) && (simpleScore == null || !Number.isFinite(simpleScore))) {
+    return championScore;
+  }
+  // simple-only when no champion (cold start — most common today)
+  if ((championScore == null || !Number.isFinite(championScore)) && simpleScore != null && Number.isFinite(simpleScore)) {
+    return simpleScore;
+  }
+  if (championScore == null || simpleScore == null) return null;
+  return 0.7 * championScore + 0.3 * simpleScore;
+}
 
 async function runEntryDecision(
   ticker: string,
