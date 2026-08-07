@@ -86,6 +86,7 @@ import {
 import { detectAdwinDrift, adwinGateAdjust } from "../_shared/adwin.ts";
 import { loadAdaptiveThresholds, resolveThresholds, type ThresholdMap } from "../_shared/adaptive-thresholds.ts";
 import { loadAdaptiveExits, resolveExitParams, applyExitParams, type ExitParamMap } from "../_shared/adaptive-exits.ts";
+import { loadNewsSentiment, newsConvictionDelta, type NewsSentimentMap } from "../_shared/news-sentiment-loader.ts";
 
 // WS2: nightly-tuned indicator thresholds (profile × market regime). Loaded
 // once per scan; null/empty → engine defaults (cold-start safe).
@@ -737,6 +738,12 @@ function runWinExit(
 // ============================================================================
 // LOSS EXIT — thesis invalidation (priority order)
 // ============================================================================
+// Grace multiple applied to a strategy's max-hold before a red position is
+// force-closed as stale. 1.5× gives the thesis a full extra half-horizon to
+// recover; past that the slot is worth more than the trade.
+const STALE_HOLD_MULT = 1.5;
+
+
 function runLossExit(
   pos: Position, _data: DataSet, currentPrice: number, profile: ProfileParams,
   liveDecision: "BUY" | "SHORT" | "HOLD" | null,
@@ -876,8 +883,11 @@ function runLossExit(
     }
   }
 
-  // T3: Time stop — only fire on green. On red, hold and let the hard stop
-  // (or a recovery) decide the exit. No "dead capital" sells at a loss.
+  // T3: Time stop — fire immediately on green at max hold. On red we grant a
+  // grace window (STALE_HOLD_MULT × max hold) for the thesis to recover; past
+  // that the position is dead capital that starves fresher setups, so it is
+  // closed regardless of P&L. This is the only non-hard-stop red exit and it
+  // fires late enough that it cannot pre-empt normal mean reversion.
   if (barsHeld >= maxHold) {
     if (pnlPct > 0) {
       return {
@@ -886,7 +896,15 @@ function runLossExit(
         price: currentPrice,
       };
     }
-    // Red at time stop: do nothing. Hard stop remains the only red exit.
+    const staleLimit = Math.ceil(maxHold * STALE_HOLD_MULT);
+    if (barsHeld >= staleLimit) {
+      return {
+        kind: "FULL_EXIT",
+        reason: `Time stop — stale after ${barsHeld}/${staleLimit} bars with no progress (${(pnlPct * 100).toFixed(1)}%), freeing the slot`,
+        price: currentPrice,
+      };
+    }
+    // Inside the grace window: hold and let the hard stop or a recovery decide.
   }
 
   return null; // no loss-exit triggered
@@ -1247,6 +1265,7 @@ function buildEntryFeatureSnapshot(
   conviction: number,
   sig: ReturnType<typeof evaluateSignal>,
   marketRegime: string | null | undefined,
+  news?: { score: number; confidence: number } | null,
 ): FeatureSnapshot {
   const mr = (marketRegime ?? sig?.marketRegime ?? "neutral") as string;
   const snap: FeatureSnapshot = {
@@ -1272,6 +1291,9 @@ function buildEntryFeatureSnapshot(
     adx_at_entry: sig?.adx ?? 0,
     rsi_at_entry: sig?.rsi ?? 50,
     vol_ratio: sig?.volRatio ?? 1,
+    // WS4 — headline sentiment (0 when absent, so the trainer sees "neutral")
+    news_sentiment_score: news && Number.isFinite(news.score) ? news.score : 0,
+    news_confidence: news && Number.isFinite(news.confidence) ? news.confidence : 0,
     // exit-time metadata (strings — skipped by the trainer, used to populate
     // signal_outcomes columns when the position closes).
     _market_regime: mr,
@@ -1332,6 +1354,9 @@ async function runEntryDecision(
   /** WS1: promoted 4-model ensemble champion for live meta-filtering. Null
    *  during cold start → falls back to the simple meta-labeler only. */
   championEnsemble?: EnsembleModel | null,
+  /** WS4: cached headline sentiment per ticker. Supporting factor only —
+   *  missing/stale/low-confidence entries are strictly neutral. */
+  newsMap?: NewsSentimentMap | null,
 ): Promise<EntryAction> {
   // Daily loss limit — block all new entries
   if (todayPnlPct <= -settings.daily_loss_limit_pct) {
@@ -1591,6 +1616,11 @@ async function runEntryDecision(
     const rev = reversalRisk.score / Math.max(0.01, envelope.reversalRiskCeiling);
     effectiveConviction -= Math.max(0, Math.min(6, rev * 6));
   }
+  // WS4 — headline sentiment as a supporting conviction delta (±5 max, scaled
+  // by the classifier's own confidence). Never blocks; missing news → 0.
+  const newsRow = newsMap?.get(ticker.toUpperCase()) ?? null;
+  const newsDelta = newsConvictionDelta(newsRow, sig.decision === "SHORT" ? "short" : "long");
+  effectiveConviction += newsDelta;
   effectiveConviction = Math.max(0, Math.min(100, Math.round(effectiveConviction)));
   if (effectiveConviction < settings.min_conviction + benchBoost) {
     return {
@@ -1783,7 +1813,7 @@ async function runEntryDecision(
     siDelta,
     slippageBpsEst,
     // WS1: preserve entry-observable features for the nightly ensemble trainer.
-    featureSnapshot: buildEntryFeatureSnapshot(effectiveConviction, sig, marketRegime),
+    featureSnapshot: buildEntryFeatureSnapshot(effectiveConviction, sig, marketRegime, newsRow),
   };
 }
 
@@ -2981,6 +3011,15 @@ async function processUser(
     console.log(`autotrader-scan: short-interest coverage ${shortInterestMap.size}/${watchlistForEntry.length}`);
   }
 
+  // WS4 — headline sentiment (cached, read-only). Supporting factor: it bends
+  // conviction by at most ±5 points and never blocks an entry.
+  const newsMap = await loadNewsSentiment(supabase, watchlistForEntry);
+  if (newsMap.size > 0) {
+    console.log(`autotrader-scan: news sentiment coverage ${newsMap.size}/${watchlistForEntry.length}`);
+  }
+
+
+
   // Pre-load current market regime (cached daily) + meta-label model (latest).
   // Both are null-safe → engine treats missing as no-op.
   const marketRegime = await loadLatestRegime();
@@ -3100,6 +3139,7 @@ async function processUser(
       metaGate,
       strategyExpectancy,
       championEnsemble,
+      newsMap,
     );
 
 

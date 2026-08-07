@@ -569,30 +569,57 @@ serve(async (req) => {
     // ─── LEARNING-LOOP WATCHDOG ──────────────────────────────────────────
     // The July 2026 incident: exits stopped inserting into signal_outcomes,
     // so every nightly trainer ran on ZERO fresh samples for weeks — silently.
-    // If any autotrader is enabled but no closed outcome landed in 7 days,
-    // mark the learning-loop heartbeat degraded so SystemHealth shows red.
+    // Two checks now: (a) enabled autotraders but nothing closed at all, and
+    // (b) positions actually closed in the book without a matching outcome row
+    // (the real failure mode — a partially broken write path, not a dead one).
     try {
       const since7 = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString();
-      const [{ count: closed7d }, { count: enabledUsers }] = await Promise.all([
+      const [{ count: closed7d }, { count: enabledUsers }, { count: closedPositions7d }] = await Promise.all([
         supabase.from("signal_outcomes").select("id", { count: "exact", head: true })
           .eq("status", "closed").gte("exit_date", since7),
         supabase.from("autotrade_settings").select("user_id", { count: "exact", head: true })
           .eq("enabled", true),
+        supabase.from("virtual_positions").select("id", { count: "exact", head: true })
+          .eq("status", "closed").gte("closed_at", since7),
       ]);
-      if ((enabledUsers ?? 0) > 0 && (closed7d ?? 0) === 0) {
+      const outcomes = closed7d ?? 0;
+      const positions = closedPositions7d ?? 0;
+      // Tolerance: manual closes and partial exits legitimately produce a small
+      // mismatch. Only flag when a meaningful share of exits went unrecorded.
+      const missing = positions - outcomes;
+      const leaking = positions >= 5 && missing > Math.max(2, positions * 0.2);
+      const starved = (enabledUsers ?? 0) > 0 && outcomes === 0;
+
+      if (leaking) {
+        await supabase.from("drift_detections").insert({
+          drift_kind: "pipeline",
+          metric: "outcome_write_gap",
+          feature_name: "signal_outcomes",
+          value: missing,
+          threshold: Math.max(2, Math.round(positions * 0.2)),
+          severity: "critical",
+          window_days: 7,
+          details: { closed_positions_7d: positions, closed_outcomes_7d: outcomes, missing },
+        });
+      }
+
+      if (starved || leaking) {
         await recordHeartbeat(
           "learning-loop", startedAt, "degraded",
-          `ALERT: ${enabledUsers} enabled autotrader(s) but 0 closed outcomes in 7d — learning pipeline may be starved`,
+          starved
+            ? `ALERT: ${enabledUsers} enabled autotrader(s) but 0 closed outcomes in 7d — learning pipeline may be starved`
+            : `ALERT: ${positions} positions closed in 7d but only ${outcomes} outcome rows written (${missing} missing) — exit logging is leaking`,
         );
       } else {
         await recordHeartbeat(
           "learning-loop", startedAt, "ok",
-          `closed7d=${closed7d ?? 0} enabledAutotraders=${enabledUsers ?? 0}`,
+          `closed7d=${outcomes} closedPositions7d=${positions} enabledAutotraders=${enabledUsers ?? 0}`,
         );
       }
     } catch (wdErr) {
       console.warn("learning-loop watchdog failed:", wdErr);
     }
+
 
     await recordHeartbeat(
       "calibrate-weights",
