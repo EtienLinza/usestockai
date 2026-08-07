@@ -3503,6 +3503,20 @@ async function executeExit(
     // for hard-stop exits (T1 hard_stop / regime breaker).
     const isLossExit = pnl < 0;
     const isHardStop = /hard[_ ]?stop|stop[_ ]?loss|regime[_ ]?breaker|cdar/i.test(action.reason ?? "");
+    // ── Gap-through-stop feedback ─────────────────────────────────────────
+    // When a stop exit fills WORSE than the stop (overnight gap), record the
+    // adverse slippage in bps. Nightly per-ticker calibration penalizes
+    // chronically gappy names so they get entered less, smaller, or never.
+    let gapSlipBps: number | null = null;
+    if (isHardStop && pos.hard_stop_price != null) {
+      const stopRef = Number(pos.hard_stop_price);
+      if (stopRef > 0) {
+        const adverse = isLong
+          ? (stopRef - action.price) / stopRef
+          : (action.price - stopRef) / stopRef;
+        if (adverse > 0.0005) gapSlipBps = Math.round(adverse * 10000);
+      }
+    }
     const cdMult = isHardStop ? 2.0 : isLossExit ? 1.5 : 1.0;
     const cdDays = Math.round(baseCdDays * cdMult);
     const cooldownUntil = new Date(Date.now() + cdDays * 86400000).toISOString();
@@ -3562,6 +3576,7 @@ async function executeExit(
         atr_pct: entry > 0 && entryAtr > 0 ? entryAtr / entry : 0.02,
         initial_stop_pct: entry > 0 ? initialRisk / entry : null,
         entry_profile: pos.entry_profile,
+        gap_through_stop_bps: gapSlipBps,
         source: "autotrader",
       },
       entry_price: entry,
@@ -3569,9 +3584,12 @@ async function executeExit(
       status: "closed",
       exit_price: action.price,
       exit_date: new Date().toISOString(),
-      exit_reason: action.reason,
+      exit_reason: gapSlipBps !== null
+        ? `${action.reason} [gap through stop: −${(gapSlipBps / 100).toFixed(2)}% vs stop]`
+        : action.reason,
       bars_held: barsHeld,
       realized_pnl_pct: pnlPct,
+      slippage_bps_est: gapSlipBps,
       max_favorable_excursion_pct: mfePct,
       mfe_pct: mfePct,
       realized_rr: realizedR,
