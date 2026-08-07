@@ -550,10 +550,19 @@ export function computeStrategySignal(
   strategy: "trend" | "mean_reversion" | "breakout" | "none";
   positionSizeMultiplier: number;
   atr: number;
+  /** Entry-observable indicator readings — persisted into feature snapshots so
+   *  the nightly threshold tuner can learn where the real edge lives. */
+  adx: number;
+  rsi: number;
+  volRatio: number;
 } {
+  // Mutable so early HOLD returns after indicator computation still carry the
+  // live readings (used by the adaptive-threshold tuner).
+  const liveMetrics = { adx: 0, rsi: 50, volRatio: 1 };
   const HOLD_RESULT = (regime: string) => ({
     consensusScore: 0, regime, confidence: 0,
     strategy: "none" as const, positionSizeMultiplier: 1, atr: 0,
+    ...liveMetrics,
   });
 
   if (signalState.cooldownBarsRemaining > 0) {
