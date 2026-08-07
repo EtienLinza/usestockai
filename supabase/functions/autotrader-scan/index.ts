@@ -1494,7 +1494,12 @@ async function runEntryDecision(
   // single-name and headroom caps so the user-facing caps remain absolute
   // ceilings while sizing breathes with realized SPY vol.
   const headroom = (settings.max_nav_exposure_pct - totalNavExposurePct) / 100;
-  const baseFrac = sig.kellyFraction * volScalar;
+  // ── Edge-scaled sizing (asymmetric edge upgrade) ────────────────────────
+  // A+ setups (high calibrated conviction + strong meta-label agreement) get
+  // up to 1.5× the Kelly base; marginal passes get 0.5×. All absolute caps
+  // below still apply — this only moves size WITHIN the safety envelope.
+  const edgeMult = edgeSizeMultiplier(effectiveConviction, settings.min_conviction, metaScore);
+  const baseFrac = sig.kellyFraction * volScalar * edgeMult;
   let cappedFrac = Math.min(baseFrac, settings.max_single_name_pct / 100, headroom);
   const currentPrice = data.close[data.close.length - 1];
   // C-3 FIX: size off dynamic NAV when caller provides it; fall back to
@@ -1620,7 +1625,29 @@ async function runEntryDecision(
     return { kind: "HOLD", reason: `Stop too wide for risk budget — would size below 1 share at ${(riskPct * 100).toFixed(2)}% NAV cap` };
   }
 
+  // ── GAP-RISK CAP (asymmetric edge upgrade) ──────────────────────────────
+  // Hard stops cannot protect against overnight gaps — the -18.9%/-14.8%
+  // losses were fills at the OPEN, far below the stop. The only defense is
+  // size: cap dollars so the ticker's own 95th-percentile historical
+  // overnight gap costs ≤ GAP_LOSS_CAP_NAV_PCT% of NAV if it hits tomorrow.
+  let gap95: number | null = null;
+  {
+    const gapMaxDollars = gapCappedDollars(data.open, data.close, navForSizing);
+    if (gapMaxDollars !== null && targetDollars > gapMaxDollars) {
+      const n = Math.min(data.open.length, data.close.length);
+      const pc = data.close[n - 2] ?? 0, o = data.open[n - 1] ?? 0;
+      gap95 = pc > 0 && o > 0 ? Math.abs(o / pc - 1) : null;
+      cappedFrac = cappedFrac * (gapMaxDollars / targetDollars);
+      targetDollars = gapMaxDollars;
+    }
+  }
+  if (targetDollars < currentPrice) {
+    return { kind: "HOLD", reason: `Gap-risk cap: 95th-pctile overnight gap limits size below 1 share (≤${GAP_LOSS_CAP_NAV_PCT}% NAV gap-loss budget)` };
+  }
+
   const reasoningExtra: string[] = [];
+  if (edgeMult !== 1) reasoningExtra.push(`edge×${edgeMult.toFixed(2)}`);
+  if (gap95 !== null) reasoningExtra.push(`gap-cap applied (last gap ${(gap95 * 100).toFixed(1)}%)`);
   if (siDelta !== 0) reasoningExtra.push(`siΔ=${siDelta > 0 ? "+" : ""}${siDelta}`);
   if (slippageBpsEst !== null && slippageBpsEst > 0) reasoningExtra.push(`slip=${slippageBpsEst.toFixed(1)}bps`);
   const reasoning = reasoningExtra.length > 0
