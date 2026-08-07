@@ -1,0 +1,1 @@
+ALTER TABLE public.virtual_positions ADD COLUMN IF NOT EXISTS entry_feature_snapshot jsonb;
