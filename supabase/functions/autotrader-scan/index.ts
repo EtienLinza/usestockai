@@ -1244,6 +1244,10 @@ async function runEntryDecision(
   strategyEdges?: Record<string, { winRate: number; avgWin: number; avgLoss: number; sampleSize: number }>,
   shortInterestMap?: Map<string, ShortInterestRow>,
   metaGate?: { pass: number; skip: number },
+  /** Per-strategy trailing expectancy from nightly calibration. Benched
+   *  strategies (negative expectancy over ≥15 closed trades) get their
+   *  conviction floor raised by floorBoost until their record recovers. */
+  strategyExpectancy?: Record<string, { expectancy: number; winRate: number; count: number; benched: boolean; floorBoost: number }> | null,
 ): Promise<EntryAction> {
   // Daily loss limit — block all new entries
   if (todayPnlPct <= -settings.daily_loss_limit_pct) {
@@ -1311,6 +1315,15 @@ async function runEntryDecision(
   const sig = evaluateSignal(data, ticker, undefined, macro, undefined, undefined, danelfin, epsRev, marketRegime, edge ?? null);
   if (!sig) return { kind: "HOLD", reason: "Insufficient data" };
   if (sig.decision === "HOLD") return { kind: "HOLD", reason: sig.reasoning };
+
+  // ── Strategy expectancy circuit breaker ─────────────────────────────────
+  // A strategy that has LOST money on average over its last ≥15 closed trades
+  // (90d window, time-decay weighted) is benched by the nightly calibrator:
+  // its conviction floor is raised by floorBoost points until the trailing
+  // record recovers. This is what stops a structurally bleeding strategy
+  // (e.g. trend at 38% WR / −45% cumulative) from re-entering daily.
+  const stratExp = strategyExpectancy?.[sig.strategy] ?? null;
+  const benchBoost = stratExp?.benched ? Math.max(0, Number(stratExp.floorBoost ?? 10)) : 0;
 
   // ── Short-interest velocity overlay (supporting factor, NEVER a gate) ──
   // Applied AFTER the engine returns so the backtest stays deterministic.
