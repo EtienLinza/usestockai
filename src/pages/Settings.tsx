@@ -667,8 +667,8 @@ function SettingsShell({ caps, setCaps, bot, setBot, adaptiveState, lastScanAt, 
               effective={bot.adaptive_mode ? adaptiveState?.effective_min_conviction : undefined}
             />
             <CapSlider
-              label="Max open positions"
-              hint="Maximum simultaneous trades."
+              label="Max open positions (ceiling)"
+              hint="Ceiling for simultaneous trades. The engine breathes below this with the market and your recent record — it shrinks automatically in crises, never exceeds it."
               value={bot.max_positions}
               onChange={(v) => setBot({ ...bot, max_positions: Math.round(v) })}
               min={1} max={20} step={1}
