@@ -1248,6 +1248,7 @@ function buildEntryFeatureSnapshot(
   conviction: number,
   sig: ReturnType<typeof evaluateSignal>,
   marketRegime: string | null | undefined,
+  news?: { score: number; confidence: number } | null,
 ): FeatureSnapshot {
   const mr = (marketRegime ?? sig?.marketRegime ?? "neutral") as string;
   const snap: FeatureSnapshot = {
