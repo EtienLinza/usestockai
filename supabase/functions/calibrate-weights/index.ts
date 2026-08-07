@@ -501,6 +501,7 @@ serve(async (req) => {
           : { skipped: true, reason: `insufficient labelled feature snapshots (${ensembleInput.length})` },
         regime_probabilities,
         regime_prob_row_count: regimeProbRowCount,
+        strategy_expectancy,
         thresholds: {
           MIN_SAMPLES_BUCKET, MIN_SAMPLES_STRATEGY, MIN_SAMPLES_REGIME,
           MIN_SAMPLES_STRATEGY_REGIME, MIN_SAMPLES_EXIT, MIN_SAMPLES_TICKER,
@@ -563,6 +564,34 @@ serve(async (req) => {
         .single();
       if (mvErr) console.error("model_versions insert err:", mvErr);
       else modelVersionId = mv?.id ?? null;
+    }
+
+    // ─── LEARNING-LOOP WATCHDOG ──────────────────────────────────────────
+    // The July 2026 incident: exits stopped inserting into signal_outcomes,
+    // so every nightly trainer ran on ZERO fresh samples for weeks — silently.
+    // If any autotrader is enabled but no closed outcome landed in 7 days,
+    // mark the learning-loop heartbeat degraded so SystemHealth shows red.
+    try {
+      const since7 = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString();
+      const [{ count: closed7d }, { count: enabledUsers }] = await Promise.all([
+        supabase.from("signal_outcomes").select("id", { count: "exact", head: true })
+          .eq("status", "closed").gte("exit_date", since7),
+        supabase.from("autotrade_settings").select("user_id", { count: "exact", head: true })
+          .eq("enabled", true),
+      ]);
+      if ((enabledUsers ?? 0) > 0 && (closed7d ?? 0) === 0) {
+        await recordHeartbeat(
+          "learning-loop", startedAt, "degraded",
+          `ALERT: ${enabledUsers} enabled autotrader(s) but 0 closed outcomes in 7d — learning pipeline may be starved`,
+        );
+      } else {
+        await recordHeartbeat(
+          "learning-loop", startedAt, "ok",
+          `closed7d=${closed7d ?? 0} enabledAutotraders=${enabledUsers ?? 0}`,
+        );
+      }
+    } catch (wdErr) {
+      console.warn("learning-loop watchdog failed:", wdErr);
     }
 
     await recordHeartbeat(
