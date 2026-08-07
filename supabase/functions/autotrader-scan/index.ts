@@ -2954,8 +2954,10 @@ async function processUser(
   // Both are null-safe → engine treats missing as no-op.
   const marketRegime = await loadLatestRegime();
   const metaModel = await loadLatestMetaModel();
+  const championEnsemble = await loadChampionEnsemble(supabase);
   if (marketRegime) console.log(`autotrader-scan: regime=${marketRegime}`);
   if (metaModel) console.log(`autotrader-scan: meta-model n=${metaModel.sample_size} AUC=${metaModel.auc ?? "n/a"}`);
+  if (championEnsemble) console.log(`autotrader-scan: ensemble champion loaded (n=${championEnsemble.training.sampleSize})`);
 
   // ── ADWIN drift detection (run once at scan start) ─────────────────────
   // Pulls last ~200 closed outcomes (binary hit = realized_pnl_pct > 0) and
