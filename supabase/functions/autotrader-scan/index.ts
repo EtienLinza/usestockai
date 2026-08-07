@@ -1314,6 +1314,9 @@ async function runEntryDecision(
    *  strategies (negative expectancy over ≥15 closed trades) get their
    *  conviction floor raised by floorBoost until their record recovers. */
   strategyExpectancy?: Record<string, { expectancy: number; winRate: number; count: number; benched: boolean; floorBoost: number }> | null,
+  /** WS1: promoted 4-model ensemble champion for live meta-filtering. Null
+   *  during cold start → falls back to the simple meta-labeler only. */
+  championEnsemble?: EnsembleModel | null,
 ): Promise<EntryAction> {
   // Daily loss limit — block all new entries
   if (todayPnlPct <= -settings.daily_loss_limit_pct) {
