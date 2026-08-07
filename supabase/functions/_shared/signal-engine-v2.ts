@@ -969,7 +969,7 @@ export function computeStrategySignal(
   }
   confidence = Math.max(0, Math.min(100, Math.round(confidence)));
 
-  return { consensusScore, regime, confidence, strategy: bestStrategy, positionSizeMultiplier, atr: currentATR };
+  return { consensusScore, regime, confidence, strategy: bestStrategy, positionSizeMultiplier, atr: currentATR, ...liveMetrics };
 }
 
 // (EvaluateSignalResult is declared once below — single canonical interface.)
