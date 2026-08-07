@@ -608,6 +608,9 @@ export function computeStrategySignal(
   const avgVolume = volSlice.length > 0 ? volSlice.reduce((a, b) => a + b, 0) / volSlice.length : 1;
   const currentVolume = volume[n - 1] || 0;
   const volRatio = avgVolume > 0 ? currentVolume / avgVolume : 1;
+  liveMetrics.adx = adxVal;
+  liveMetrics.rsi = rsiVal;
+  liveMetrics.volRatio = volRatio;
 
   const bwSlice = bb.bandwidth.filter(v => !isNaN(v));
   const bwAvg50 = bwSlice.length >= 50
