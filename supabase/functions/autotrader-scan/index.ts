@@ -1370,8 +1370,13 @@ async function runEntryDecision(
   }
 
 
-  if (conviction < settings.min_conviction) {
-    return { kind: "HOLD", reason: `Calibrated conviction ${conviction} (raw ${sig.conviction}) < min ${settings.min_conviction}` };
+  if (conviction < settings.min_conviction + benchBoost) {
+    return {
+      kind: "HOLD",
+      reason: benchBoost > 0
+        ? `Calibrated conviction ${conviction} (raw ${sig.conviction}) < min ${settings.min_conviction}+${benchBoost} — ${sig.strategy} benched (90d expectancy ${stratExp?.expectancy?.toFixed(2)}% over ${stratExp?.count} trades)`
+        : `Calibrated conviction ${conviction} (raw ${sig.conviction}) < min ${settings.min_conviction}`,
+    };
   }
 
   // ── ADAPTIVE GUARDS — Phase 4 (post-BEAM) ───────────────────────────────
@@ -1477,10 +1482,10 @@ async function runEntryDecision(
     effectiveConviction -= Math.max(0, Math.min(6, rev * 6));
   }
   effectiveConviction = Math.max(0, Math.min(100, Math.round(effectiveConviction)));
-  if (effectiveConviction < settings.min_conviction) {
+  if (effectiveConviction < settings.min_conviction + benchBoost) {
     return {
       kind: "HOLD",
-      reason: `Effective conviction ${effectiveConviction} (calibrated ${conviction}${metaScore !== null ? `, meta ${metaScore.toFixed(2)}` : ""}, reversal ${reversalRisk.score.toFixed(2)}) < min ${settings.min_conviction}`,
+      reason: `Effective conviction ${effectiveConviction} (calibrated ${conviction}${metaScore !== null ? `, meta ${metaScore.toFixed(2)}` : ""}, reversal ${reversalRisk.score.toFixed(2)}) < min ${settings.min_conviction}${benchBoost > 0 ? `+${benchBoost} (${sig.strategy} benched)` : ""}`,
     };
   }
 
