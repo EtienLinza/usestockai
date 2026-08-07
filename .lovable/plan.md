@@ -1,117 +1,45 @@
-# Self-Improving Scanner / Autotrader — "Quant-Grade" Loop
+# Asymmetric Edge Upgrade — Lose Less, Make More
 
-Goal: build a nightly system that keeps getting statistically stronger, safer, and more adaptive — without GPUs, without overfitting, and with zero per-user cost until that user actually trades. Every layer follows one rule: **learn, quantify uncertainty about what you learned, and refuse to act on unreliable knowledge.**
+## The honest math (verified from live data, last 90 days)
 
-## Big picture
+- 26 closed trades, all from the **trend** strategy: **38.5% win rate, -44.8% cumulative**. One strategy is the entire bleed.
+- 11 hard-stop exits = **-88.6% combined**. The five worst (-18.9%, -14.8%, -12.6%, -10.5%, -8.9%) are **overnight gaps through the stop** — the stock opens below the stop, so no stop cap can prevent them. Only position size can.
+- Winners already work: earnings pre-exits +22.3%, peak detection +22%. The exit/win logic is not the problem.
 
-```text
-                     nightly (03:30 UTC)
-  signal_outcomes ─► calibrate-weights ─► strategy_weights (global)
-  + rejected_signals   │                     ├─ ensemble weights + calibrator
-  + partial-exit stats │                     ├─ regime probabilities
-  + feature snapshots  │                     ├─ interaction weights
-                       │                     ├─ feature importances + CIs
-                       │                     ├─ edge half-lives
-                       │                     └─ champion/challenger state
-                       ├─► train-user-models ─► user_model_state
-                       │   (Bayesian, shrunk toward archetype, then global)
-                       ├─► train-meta-labeler (existing, extended)
-                       ├─► drift-monitor  ─► drift_events (feature + concept)
-                       ├─► model-health   ─► model_health_reports
-                       └─► stress-test    ─► rejects/promotes challengers
+**Setting expectations plainly:** a 100% win rate does not exist — not for hedge funds, not for anyone. What we *can* engineer: any single trade's worst case capped near ~1% of NAV, strategies that provably lose get benched automatically, and the setups that actually win get more capital. That is "lose less AND make more" from the same set of changes — it raises expectancy per trade.
 
-  online: micro-Bayesian priors updated after every closed trade
-  scanner: reads global + archetype + user layers, always with CIs
-```
+## Changes
 
-## Core learning layers
+### 1. Gap-risk position cap — kills the -18.9% class of loss
+- Compute each ticker's overnight gap history (`|open / previous close − 1|`) from the 1y daily bars already in the bar cache (open prices are already fetched — no new data source).
+- Cap entry dollars so a 95th-percentile bad gap costs **≤ 1% of NAV** (`GAP_LOSS_CAP_NAV_PCT = 1.0`).
+- Gappy, stop-jumping names automatically get tiny positions; clean names keep full size.
+- Applied in the live entry sizing path after the existing vol-target/slippage caps, and mirrored in the backtest simulator so backtest matches live exactly (shared helper in `_shared/adaptive-context.ts` — the rule both sides already import).
 
-### A. Ensemble instead of a single model *(#1, #2, #24)*
-Nightly train four cheap models on the same feature matrix from `signal_outcomes`:
-- Logistic regression (linear main effects)
-- Gaussian naive Bayes (independent effects, robust to sparsity)
-- Ridge / linear SVM (margin-based linear)
-- Depth-3 decision tree (small interactions)
+### 2. Gap-through-stop feedback loop
+- When an exit fills *worse* than the stop (a gap), record the fill-vs-stop slippage into `signal_outcomes` (fields already exist: `slippage_bps_est`, exit data).
+- The nightly per-ticker calibration then automatically penalizes chronically gappy tickers — they get entered less often, smaller, or not at all. Self-healing, no manual work.
 
-Combine by **stacked meta-learner** (tiny logistic over the four probabilities) whose weights themselves are learned per market regime — so momentum-friendly regimes lean on the tree, mean-reverting regimes lean on NB, etc. Final probability is post-processed by **isotonic regression + Platt scaling** so "72% confidence" empirically wins 72% of the time. All coefficients stored as JSON in `strategy_weights.notes.ensemble`.
+### 3. Strategy expectancy circuit breaker — benches the -44.8% trend bleed
+- Nightly `calibrate-weights` computes trailing 90-day expectancy per strategy (min 15 closed trades).
+- **Negative expectancy → benched**: that strategy's conviction floor jumps +10 (effectively suspends it) until its trailing record recovers.
+- **Positive expectancy with strong sample → tilt range widened** from today's ±15% to ±25%, so capital flows harder toward what's working.
+- The scanner already reads floors/tilts from `strategy_weights` — this plugs into the existing pipeline, no new plumbing.
 
-### B. Separate Entry / Exit / Sizing specialists *(#10, #11, #22)*
-Three models trained on the same rows but different targets:
-- **Entry model** → P(trade profitable | features at open)
-- **Exit model** → learns from `MFE / MAE / exit_efficiency` (needs new columns on `signal_outcomes`) whether current trail multiples are too tight/loose per strategy×regime
-- **Sizing model** → `finalKelly = engineKelly × userScalar × volScalar × calibratedConfidence` — Kelly shrinks with predictive-variance, not just point estimate
+### 4. Edge-scaled sizing — bigger bets on A+ setups
+- Today every entry gets roughly the same Kelly-fraction size regardless of signal quality.
+- New: scale position size by edge quality (calibrated conviction + meta-label score blend) as a **0.5×–1.5× multiplier** — elite setups get up to 1.5× current size, marginal ones half.
+- Every existing safety cap still applies on top: single-name cap, 6% portfolio heat cap, CVaR budget, and the new gap cap. Upside scales, downside stays bolted down.
 
-### C. Feature engineering with statistical guardrails *(#5, #6, #7, #8, #33)*
-- Auto-generate candidate features nightly: rolling z-scores, ATR×RSI, RSI×trend, sector-momentum×regime, vol×earnings-proximity, multi-timeframe confirms.
-- Bucket nonlinear features (ATR into 0–1/1–2/2–3/3–5/5+) so we don't force a straight line through obvious curvature.
-- Every weight persisted with `{ mean, variance, sample_size, ci95_lo, ci95_hi }`. Scanner scales the applied nudge by `1 − relative_ci_width` — reliable weights fire fully, wide-CI weights barely move conviction.
-- Monthly permutation-importance + mutual-information pass drops features whose IG ≈ 0; new candidates are promoted only after two consecutive months of positive out-of-sample lift.
+### 5. Learning-loop watchdog — never starve silently again
+- The losses you just saw happened because the learner was training on zero data for weeks and nobody got alerted.
+- Nightly check: if the autotrader is enabled but **zero closed outcomes landed in 7 days**, mark the system heartbeat degraded and surface it in SystemHealth. A silent starvation becomes impossible to miss.
 
-### D. Regime as a probability, not a label *(#3)*
-`regime-detector` returns `{ bull_quiet, bull_volatile, bear_quiet, bear_volatile, neutral }` softmax probabilities. Every tilt, floor, and exit multiplier is applied as `Σ regime_p × per-regime-value`. Removes cliff effects on regime flips.
+## Technical details (for reference)
 
-### E. Rejected-signal learning *(#9)*
-New table `rejected_signals` writes every candidate the scanner *considered* but filtered (with all features + reason). Nightly job labels rejects with the counterfactual: what price did the ticker do over the strategy's typical horizon? Feeds back into the entry model as negative/positive-with-cost labels. Massively expands training data without any trading.
+- **Files touched**: `supabase/functions/autotrader-scan/index.ts` (gap cap in sizing, gap-fill logging), `supabase/functions/_shared/adaptive-context.ts` (gap-percentile helper + constants), `supabase/functions/_shared/backtest-sim.ts` (parity), `supabase/functions/calibrate-weights/index.ts` (expectancy breaker + wider tilts), heartbeat watchdog in the nightly job chain.
+- **No new tables, no new secrets, no new external APIs** — uses existing bar cache, `strategy_weights`, `signal_outcomes`, and `cron_heartbeat`.
+- Constants: `GAP_LOSS_CAP_NAV_PCT = 1.0`, `GAP_LOOKBACK = 1y of bars`, `EXPECTANCY_MIN_SAMPLES = 15`, edge multiplier clamped to `[0.5, 1.5]`.
 
-## Personalisation with real statistics
-
-### F. Dynamic Bayesian shrinkage *(#4, #23, #27)*
-Shrinkage constant is no longer a fixed `k=30`. It's
-`k = base × (1 + consistencyStdDev / meanEdge)` — noisy users shrink harder, consistent users unlock personalisation faster. Cold-start users inherit from their **archetype cluster** (K-means on account size, risk tolerance, style filter, first-week behaviour). Optional **federated aggregation**: only per-user *gradient means* (not trades) contribute to the global model — privacy-preserving global lift.
-
-### G. Online micro-updates between nightly retrains *(#12)*
-After every closed trade, a Beta-Binomial posterior on the user's per-strategy win-rate updates in <1 ms. No retraining — just posterior maths. Calibration stays current between 03:30 UTC runs.
-
-## Safe deployment
-
-### H. Champion / Challenger + auto-rollback *(#13, #14, #34, #35)*
-Every new nightly model is a **challenger**. It "paper-trades" the next session in shadow mode (signals computed and logged, never executed). Only after `n` shadow days with better calibrated log-loss AND non-inferior Sharpe does it promote to champion. If live calibration error jumps > threshold post-promotion, auto-rollback to previous champion. Everything **versioned** in `model_versions` (id, training window, feature list, hyperparams, validation metrics, deploy ts) so any trade is reproducible.
-
-### I. Stress-test gate *(#34)*
-Before promotion, replay challenger through canned regimes (2020 crash, 2022 bear, 2017 low-vol, earnings-heavy weeks) using the existing bar cache. Reject if it only shines in one environment.
-
-## Monitoring & self-healing
-
-### J. Drift detection (feature + concept) *(#15, #16, #18, #32)*
-- **Feature drift:** nightly PSI + KL between today's 30-day feature dists and the 90-day baseline.
-- **Concept drift:** Jensen-Shannon on predicted-probability distribution vs realised outcomes. Extends existing ADWIN.
-- **Adaptive decay:** exponential time-weight `e^(−days/λ)` with λ shortening automatically when drift is high (forget faster in fast markets).
-- Per-strategy **edge half-life** estimated from rolling Sharpe decay curves; short-half-life strategies get down-weighted.
-
-### K. Strategy retirement *(#31)*
-Every strategy tracked; auto-deactivated when 300+ trades show negative expectancy at 95% confidence. Automatically re-enabled if a rolling window recovers.
-
-### L. Anomaly & data-quality guard *(#28)*
-Pre-training pass rejects rows with impossible returns, duplicate trades, bad fills, stale bars, or feature outliers > 6σ. Garbage-in blocked before it corrupts weights.
-
-### M. Model Health Report *(#25, #30)*
-Nightly written to `model_health_reports` and rendered on a new Settings → "Engine Health" tab: calibration error, feature drift, concept drift, top/bottom features by lift, deployment status, rollback status, training time, per-signal **score decomposition** ("+4 trend, +2 sector, −1 ATR, +3 momentum → 81"). Every live signal card gets a "why" popover from this.
-
-## Optimisation & exploration
-
-### N. Bayesian threshold optimisation *(#20, #29)*
-Replaces grid search on `minConviction / trailMult / heatCap` with Gaussian-Process BO. Objective is **multi-objective**: weighted stack of Sharpe, Sortino, Calmar, MaxDD, Profit Factor, Expectancy, turnover — not Sharpe alone.
-
-### O. Adaptive exploration *(#26)*
-2–5% of autotrader budget reserved for *below-threshold* signals (ε-greedy with UCB bonus for under-sampled feature regions). Prevents the model from only reinforcing what it already believes; discovers new edges.
-
-### P. Portfolio-aware learning *(#21)*
-Entry model consumes live portfolio context (current correlation-to-book, sector exposure, factor beta, portfolio heat) as features. Great standalone signals can be rejected when they'd concentrate risk.
-
-## Market memory *(#17, #19)*
-Long-term `market_memory` table keeps years of `{features, outcome, regime probs, macro snapshot, VIX, rates, oil, earnings season flag, election year}`. Enables walk-forward retraining (train/validate/test never overlap) and lets us answer "what worked in high-rate bear markets?" — that historical replay powers the stress-test gate too.
-
-## Rollout — six shippable milestones
-
-1. **Foundations.** New columns on `signal_outcomes` (MFE/MAE/exit_efficiency), `rejected_signals` + `model_versions` + `model_health_reports` tables (with GRANTs + RLS), feature-snapshot writer in scanner. No behaviour change.
-2. **Ensemble + calibration + regime probabilities.** Extend `calibrate-weights` to train the 4-model stack + isotonic/Platt + soft regime probs. Scanner reads soft weights. Ship with CIs on every stored weight.
-3. **Per-user layer + archetypes + online Beta-Binomial.** `train-user-models`, dynamic shrinkage, cold-start via archetype cluster.
-4. **Rejected-signal learning + interaction features + auto feature selection.** Feature drift monitor lit up. Adaptive decay λ live.
-5. **Champion/Challenger, stress-test, auto-rollback, versioning.** Nothing promotes without shadow-days + regime replay.
-6. **Engine Health dashboard + score decomposition popover + strategy retirement + adaptive exploration + Bayesian threshold search.** User-visible transparency and self-tuning close the loop.
-
-## Explicit non-goals
-No neural nets, no GPU inference, no per-bar online retraining, no per-ticker deep models (ticker calibration stays a Bayesian-shrunk scalar), no trading against user equity curves. Backtester math stays deterministic — all new learning is consumed at scan time so backtests remain reproducible.
-
-## Cost profile
-Everything is closed-form or small-matrix. Four tiny models × ~5k rows × plain-JS gradient descent ≈ 1–2 s. Per-user fits are ~50 ms and only run for users with ≥5 closed trades. One new nightly cron beyond current + one extension of `calibrate-weights`. No new external APIs. Storage grows linearly with trade volume, not with users.
+## What this does NOT do
+- No 100% win rate — impossible for any system, full stop. What you get instead: worst single-trade loss ≈ 1% of NAV, provably losing strategies benched automatically, and capital concentrated on verified winners. Losses become small, rare, and survivable; winners get bigger.
