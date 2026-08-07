@@ -2994,6 +2994,15 @@ async function processUser(
     console.log(`autotrader-scan: short-interest coverage ${shortInterestMap.size}/${watchlistForEntry.length}`);
   }
 
+  // WS4 — headline sentiment (cached, read-only). Supporting factor: it bends
+  // conviction by at most ±5 points and never blocks an entry.
+  const newsMap = await loadNewsSentiment(supabase, watchlistForEntry);
+  if (newsMap.size > 0) {
+    console.log(`autotrader-scan: news sentiment coverage ${newsMap.size}/${watchlistForEntry.length}`);
+  }
+
+
+
   // Pre-load current market regime (cached daily) + meta-label model (latest).
   // Both are null-safe → engine treats missing as no-op.
   const marketRegime = await loadLatestRegime();
