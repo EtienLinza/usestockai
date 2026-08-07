@@ -85,10 +85,16 @@ import {
 } from "../_shared/portfolio-cvar.ts";
 import { detectAdwinDrift, adwinGateAdjust } from "../_shared/adwin.ts";
 import { loadAdaptiveThresholds, resolveThresholds, type ThresholdMap } from "../_shared/adaptive-thresholds.ts";
+import { loadAdaptiveExits, resolveExitParams, applyExitParams, type ExitParamMap } from "../_shared/adaptive-exits.ts";
 
 // WS2: nightly-tuned indicator thresholds (profile × market regime). Loaded
 // once per scan; null/empty → engine defaults (cold-start safe).
 let ADAPTIVE_THRESHOLDS: ThresholdMap | null = null;
+
+// WS3: nightly-tuned exit geometry (trailing/hard-stop ATR multiples + TP
+// ceiling) per profile × market regime. Empty → engine defaults.
+let ADAPTIVE_EXITS: ExitParamMap | null = null;
+let CURRENT_MARKET_REGIME: string | null = null;
 
 /** Thrown by the circuit breaker to abort the entire scan immediately. */
 class CircuitBreakerTrippedError extends Error {
