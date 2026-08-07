@@ -21,6 +21,7 @@ import { getEarningsBlackoutDays } from "../_shared/finnhub.ts";
 import { applyIsotonicCalibration, type IsotonicAnchor } from "../_shared/calibration.ts";
 import { requireCronOrUser } from "../_shared/cron-auth.ts";
 import { explainSignal } from "../_shared/signal-explainer.ts";
+import { loadAdaptiveThresholds, resolveThresholds } from "../_shared/adaptive-thresholds.ts";
 
 
 const corsHeaders = {
@@ -134,6 +135,9 @@ serve(async (req) => {
     clearTrackerCache();
     await primeTrackerCacheFromDB(supabase, tickers);
 
+    // WS2 — nightly-tuned indicator thresholds (profile × market regime).
+    const thresholdMap = await loadAdaptiveThresholds(supabase);
+
     // Load cached bars; fetch misses with bounded parallelism, pre-screen, and warm cache.
     const cache = await loadCachedBars(tickers);
     const misses = tickers.filter(t => !cache.has(t));
@@ -210,7 +214,7 @@ serve(async (req) => {
       try {
         const danelfin = danelfinScores[ticker.toUpperCase()] ?? null;
         const epsRev = epsRevisionScores[ticker.toUpperCase()] ?? null;
-        const sig = evaluateSignal(
+        let sig = evaluateSignal(
           data, ticker,
           { spyBearish: spyContext.spyBearish },
           (macro as MacroContext | null) ?? null,
@@ -219,6 +223,19 @@ serve(async (req) => {
           epsRev,
           marketRegime,
         );
+        // WS2 — re-run with the tuned thresholds for this profile × regime.
+        const tuned = resolveThresholds(thresholdMap, sig?.profile, sig?.marketRegime ?? marketRegime);
+        if (sig && tuned) {
+          sig = evaluateSignal(
+            data, ticker,
+            { spyBearish: spyContext.spyBearish },
+            (macro as MacroContext | null) ?? null,
+            undefined, tuned,
+            danelfin,
+            epsRev,
+            marketRegime,
+          );
+        }
         if (!sig || sig.decision === "HOLD") continue;
         const { regime, strategy, weeklyBias, profile, atrPct } = sig;
         const annualizedVol = atrPct * Math.sqrt(252) * 100;
@@ -259,6 +276,10 @@ serve(async (req) => {
           sector_bonus: sectorMod.bonus, danelfin_score: sig.danelfinScore ?? null,
           eps_revision_score: sig.epsRevisionScore ?? null,
           side: sig.decision === "BUY" ? "long" : "short",
+          market_regime: sig.marketRegime ?? marketRegime ?? "neutral",
+          adx: sig.adx ?? null,
+          rsi: sig.rsi ?? null,
+          vol_ratio: sig.volRatio ?? null,
         };
 
         // Pre-market overnight-gap gating + bonus.

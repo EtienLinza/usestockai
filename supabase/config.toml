@@ -70,6 +70,10 @@ verify_jwt = false
 [functions.refresh-short-interest]
 verify_jwt = false
 
+[functions.tune-signal-thresholds]
+verify_jwt = false
+
+
 
 
 

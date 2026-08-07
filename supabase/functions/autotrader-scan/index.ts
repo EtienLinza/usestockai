@@ -84,6 +84,11 @@ import {
   type CvarPosition,
 } from "../_shared/portfolio-cvar.ts";
 import { detectAdwinDrift, adwinGateAdjust } from "../_shared/adwin.ts";
+import { loadAdaptiveThresholds, resolveThresholds, type ThresholdMap } from "../_shared/adaptive-thresholds.ts";
+
+// WS2: nightly-tuned indicator thresholds (profile × market regime). Loaded
+// once per scan; null/empty → engine defaults (cold-start safe).
+let ADAPTIVE_THRESHOLDS: ThresholdMap | null = null;
 
 /** Thrown by the circuit breaker to abort the entire scan immediately. */
 class CircuitBreakerTrippedError extends Error {
@@ -1257,6 +1262,10 @@ function buildEntryFeatureSnapshot(
     hour_of_day: (new Date().getUTCHours() + 19) % 24,
     day_of_week: new Date().getUTCDay(),
     conviction_at_entry: conviction,
+    // WS2 — entry-observable indicator readings for the nightly threshold tuner
+    adx_at_entry: sig?.adx ?? 0,
+    rsi_at_entry: sig?.rsi ?? 50,
+    vol_ratio: sig?.volRatio ?? 1,
     // exit-time metadata (strings — skipped by the trainer, used to populate
     // signal_outcomes columns when the position closes).
     _market_regime: mr,
@@ -1381,7 +1390,9 @@ async function runEntryDecision(
   // Pre-evaluate without realized edge so we can fetch the right strategy bucket.
   const peek = evaluateSignal(data, ticker, undefined, macro, undefined, undefined, danelfin, epsRev, marketRegime);
   const edge = peek?.strategy ? strategyEdges?.[peek.strategy] : undefined;
-  const sig = evaluateSignal(data, ticker, undefined, macro, undefined, undefined, danelfin, epsRev, marketRegime, edge ?? null);
+  // WS2: apply nightly-tuned thresholds for this stock profile × market regime.
+  const tuned = resolveThresholds(ADAPTIVE_THRESHOLDS, peek?.profile, peek?.marketRegime ?? marketRegime);
+  const sig = evaluateSignal(data, ticker, undefined, macro, undefined, tuned, danelfin, epsRev, marketRegime, edge ?? null);
   if (!sig) return { kind: "HOLD", reason: "Insufficient data" };
   if (sig.decision === "HOLD") return { kind: "HOLD", reason: sig.reasoning };
 
@@ -1827,7 +1838,9 @@ async function evaluateAddOnCandidate(
   const epsRev = epsRevisionMap?.get(ticker.toUpperCase()) ?? null;
   const peek = evaluateSignal(data, ticker, undefined, macro, undefined, undefined, danelfin, epsRev, marketRegime);
   const edge = peek?.strategy ? strategyEdges?.[peek.strategy] : undefined;
-  const sig = evaluateSignal(data, ticker, undefined, macro, undefined, undefined, danelfin, epsRev, marketRegime, edge ?? null);
+  // WS2: apply nightly-tuned thresholds for this stock profile × market regime.
+  const tuned = resolveThresholds(ADAPTIVE_THRESHOLDS, peek?.profile, peek?.marketRegime ?? marketRegime);
+  const sig = evaluateSignal(data, ticker, undefined, macro, undefined, tuned, danelfin, epsRev, marketRegime, edge ?? null);
   if (!sig) return { kind: "SKIP", reason: "Insufficient data" };
   if (sig.decision === "HOLD") return { kind: "SKIP", reason: "Signal HOLD" };
 
@@ -2955,6 +2968,8 @@ async function processUser(
   const marketRegime = await loadLatestRegime();
   const metaModel = await loadLatestMetaModel();
   const championEnsemble = await loadChampionEnsemble(supabase);
+  ADAPTIVE_THRESHOLDS = await loadAdaptiveThresholds(supabase);
+  if (ADAPTIVE_THRESHOLDS.size > 0) console.log(`autotrader-scan: adaptive thresholds loaded (${ADAPTIVE_THRESHOLDS.size} buckets)`);
   if (marketRegime) console.log(`autotrader-scan: regime=${marketRegime}`);
   if (metaModel) console.log(`autotrader-scan: meta-model n=${metaModel.sample_size} AUC=${metaModel.auc ?? "n/a"}`);
   if (championEnsemble) console.log(`autotrader-scan: ensemble champion loaded (n=${championEnsemble.training.sampleSize})`);

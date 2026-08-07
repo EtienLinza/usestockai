@@ -550,10 +550,19 @@ export function computeStrategySignal(
   strategy: "trend" | "mean_reversion" | "breakout" | "none";
   positionSizeMultiplier: number;
   atr: number;
+  /** Entry-observable indicator readings — persisted into feature snapshots so
+   *  the nightly threshold tuner can learn where the real edge lives. */
+  adx: number;
+  rsi: number;
+  volRatio: number;
 } {
+  // Mutable so early HOLD returns after indicator computation still carry the
+  // live readings (used by the adaptive-threshold tuner).
+  const liveMetrics = { adx: 0, rsi: 50, volRatio: 1 };
   const HOLD_RESULT = (regime: string) => ({
     consensusScore: 0, regime, confidence: 0,
     strategy: "none" as const, positionSizeMultiplier: 1, atr: 0,
+    ...liveMetrics,
   });
 
   if (signalState.cooldownBarsRemaining > 0) {
@@ -599,6 +608,9 @@ export function computeStrategySignal(
   const avgVolume = volSlice.length > 0 ? volSlice.reduce((a, b) => a + b, 0) / volSlice.length : 1;
   const currentVolume = volume[n - 1] || 0;
   const volRatio = avgVolume > 0 ? currentVolume / avgVolume : 1;
+  liveMetrics.adx = adxVal;
+  liveMetrics.rsi = rsiVal;
+  liveMetrics.volRatio = volRatio;
 
   const bwSlice = bb.bandwidth.filter(v => !isNaN(v));
   const bwAvg50 = bwSlice.length >= 50
@@ -957,7 +969,7 @@ export function computeStrategySignal(
   }
   confidence = Math.max(0, Math.min(100, Math.round(confidence)));
 
-  return { consensusScore, regime, confidence, strategy: bestStrategy, positionSizeMultiplier, atr: currentATR };
+  return { consensusScore, regime, confidence, strategy: bestStrategy, positionSizeMultiplier, atr: currentATR, ...liveMetrics };
 }
 
 // (EvaluateSignalResult is declared once below — single canonical interface.)
@@ -1071,6 +1083,12 @@ export interface EvaluateSignalResult {
   regimeDelta?: number;
   /** The market regime that was applied (`bull_quiet` etc.) or null. */
   marketRegime?: string | null;
+  /** Entry-observable indicator readings at signal time (ADX(14), RSI(14) and
+   *  volume vs 20-bar average). Persisted into feature snapshots so the
+   *  nightly threshold tuner can learn where the edge actually lives. */
+  adx?: number;
+  rsi?: number;
+  volRatio?: number;
 }
 
 // ----------------------------------------------------------------------------
@@ -1441,6 +1459,9 @@ export function evaluateSignal(
         : "Conviction below threshold",
       regimeDelta,
       marketRegime: appliedRegime,
+      adx: sig.adx,
+      rsi: sig.rsi,
+      volRatio: sig.volRatio,
     };
   }
 
@@ -1466,6 +1487,9 @@ export function evaluateSignal(
     epsRevisionScore: (epsRevisionScore !== undefined && epsRevisionScore !== null && Number.isFinite(epsRevisionScore)) ? epsRevisionScore : undefined,
     regimeDelta,
     marketRegime: appliedRegime,
+    adx: sig.adx,
+    rsi: sig.rsi,
+    volRatio: sig.volRatio,
   };
 }
 
