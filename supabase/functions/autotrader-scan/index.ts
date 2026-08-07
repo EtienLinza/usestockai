@@ -877,8 +877,11 @@ function runLossExit(
     }
   }
 
-  // T3: Time stop — only fire on green. On red, hold and let the hard stop
-  // (or a recovery) decide the exit. No "dead capital" sells at a loss.
+  // T3: Time stop — fire immediately on green at max hold. On red we grant a
+  // grace window (STALE_HOLD_MULT × max hold) for the thesis to recover; past
+  // that the position is dead capital that starves fresher setups, so it is
+  // closed regardless of P&L. This is the only non-hard-stop red exit and it
+  // fires late enough that it cannot pre-empt normal mean reversion.
   if (barsHeld >= maxHold) {
     if (pnlPct > 0) {
       return {
@@ -887,7 +890,15 @@ function runLossExit(
         price: currentPrice,
       };
     }
-    // Red at time stop: do nothing. Hard stop remains the only red exit.
+    const staleLimit = Math.ceil(maxHold * STALE_HOLD_MULT);
+    if (barsHeld >= staleLimit) {
+      return {
+        kind: "FULL_EXIT",
+        reason: `Time stop — stale after ${barsHeld}/${staleLimit} bars with no progress (${(pnlPct * 100).toFixed(1)}%), freeing the slot`,
+        price: currentPrice,
+      };
+    }
+    // Inside the grace window: hold and let the hard stop or a recovery decide.
   }
 
   return null; // no loss-exit triggered
