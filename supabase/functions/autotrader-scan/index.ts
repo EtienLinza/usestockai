@@ -3673,7 +3673,8 @@ async function executeExit(
     const { error: outcomeErr } = await supabase.from("signal_outcomes").insert({
       ticker: pos.ticker,
       signal_type: isLong ? "BUY" : "SELL",
-      regime: null,
+      regime: (pos.entry_feature_snapshot as Record<string, unknown> | null)?._signal_regime as string | null
+        ?? null,
       stock_profile: pos.entry_profile,
       weekly_bias: pos.entry_weekly_alloc != null
         ? (Number(pos.entry_weekly_alloc) >= 0 ? "bullish" : "bearish")
@@ -3683,7 +3684,7 @@ async function executeExit(
       entry_thesis: `AutoTrader ${pos.entry_strategy ?? "signal"} entry`,
       contributing_rules: {
         atr_pct: entry > 0 && entryAtr > 0 ? entryAtr / entry : 0.02,
-        market_regime: "neutral",
+        market_regime: (pos.entry_feature_snapshot as Record<string, unknown> | null)?._market_regime as string | "neutral",
         source: "autotrader",
       },
       feature_snapshot: {
