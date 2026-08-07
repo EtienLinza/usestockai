@@ -85,7 +85,7 @@ Deno.serve(async (req) => {
         ? cfg.maxAgeMinutesMarket
         : 12 * 60; // after-hours grace for market-hours jobs
       let state: "healthy" | "stale" | "error" = "healthy";
-      if (row.status === "error") state = "error";
+      if (row.status === "error" || row.status === "degraded") state = "error";
       else if (ageMin > threshold) state = "stale";
       return {
         name: cfg.name,
