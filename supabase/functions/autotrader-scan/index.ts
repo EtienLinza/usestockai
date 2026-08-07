@@ -46,6 +46,9 @@ import {
   VOL_SCALAR_MIN,
   VOL_SCALAR_MAX,
   CORR_LOOKBACK_BARS,
+  GAP_LOSS_CAP_NAV_PCT,
+  gapCappedDollars,
+  edgeSizeMultiplier,
   spyTrendOf,
   isBearishMacro,
   vixRegimeOf,
@@ -1917,7 +1920,7 @@ serve(async (req) => {
       fetchYahooData("SPY"),
       fetchYahooData("^VIX"),
       supabase.from("strategy_weights")
-        .select("regime_floors, exit_calibration, calibration_curve, strategy_tilts, ticker_calibration")
+        .select("regime_floors, exit_calibration, calibration_curve, strategy_tilts, ticker_calibration, notes")
         .eq("is_active", true)
         .order("computed_at", { ascending: false }).limit(1).maybeSingle(),
     ]);
@@ -1937,6 +1940,11 @@ serve(async (req) => {
     const calibrationCurve = (weightsRes.data?.calibration_curve as Record<string, { adjust: number }> | null) ?? {};
     const strategyTilts = (weightsRes.data?.strategy_tilts as Record<string, { multiplier: number }> | null) ?? {};
     const tickerCalibration = (weightsRes.data?.ticker_calibration as Record<string, { adjust: number }> | null) ?? {};
+    // Strategy expectancy circuit breaker (asymmetric edge upgrade): nightly
+    // calibrate-weights benches strategies with negative trailing 90d
+    // expectancy. The scanner raises their conviction floor by floorBoost.
+    const strategyExpectancy = ((weightsRes.data?.notes as Record<string, unknown> | null)?.strategy_expectancy ?? null) as
+      Record<string, { expectancy: number; winRate: number; count: number; benched: boolean; floorBoost: number }> | null;
 
     if (scanMode !== "exits" && !isMarketOpen()) {
       await recordHeartbeat("autotrader-scan", startedAt, "ok", `entries skipped: market closed mode=${scanMode}`);
