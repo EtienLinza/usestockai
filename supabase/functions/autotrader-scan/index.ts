@@ -1274,6 +1274,9 @@ function buildEntryFeatureSnapshot(
     adx_at_entry: sig?.adx ?? 0,
     rsi_at_entry: sig?.rsi ?? 50,
     vol_ratio: sig?.volRatio ?? 1,
+    // WS4 — headline sentiment (0 when absent, so the trainer sees "neutral")
+    news_sentiment_score: news && Number.isFinite(news.score) ? news.score : 0,
+    news_confidence: news && Number.isFinite(news.confidence) ? news.confidence : 0,
     // exit-time metadata (strings — skipped by the trainer, used to populate
     // signal_outcomes columns when the position closes).
     _market_regime: mr,
