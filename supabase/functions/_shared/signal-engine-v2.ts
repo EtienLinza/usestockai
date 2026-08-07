@@ -1083,6 +1083,12 @@ export interface EvaluateSignalResult {
   regimeDelta?: number;
   /** The market regime that was applied (`bull_quiet` etc.) or null. */
   marketRegime?: string | null;
+  /** Entry-observable indicator readings at signal time (ADX(14), RSI(14) and
+   *  volume vs 20-bar average). Persisted into feature snapshots so the
+   *  nightly threshold tuner can learn where the edge actually lives. */
+  adx?: number;
+  rsi?: number;
+  volRatio?: number;
 }
 
 // ----------------------------------------------------------------------------
