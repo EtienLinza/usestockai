@@ -271,6 +271,12 @@ type EntryAction =
       decision: "BUY" | "SHORT";
       siVelocity?: number | null; siDelta?: number;
       slippageBpsEst?: number | null;
+      /** Sweep fix: dollar-risk budget + stop-cap decided at signal time, so
+       *  executeEntry can RE-assert them against the live fill price. */
+      riskBudgetDollars?: number;
+      stopCapPct?: number;
+      navForSizing?: number;
+      metaScore?: number | null;
       featureSnapshot?: FeatureSnapshot }
   | { kind: "HOLD" | "BLOCKED"; reason: string };
 
