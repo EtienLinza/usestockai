@@ -4145,7 +4145,20 @@ async function executeEntry(
   // Direction comes directly from the signal — never parse free-form reasoning.
   const positionType: "long" | "short" = e.decision === "SHORT" ? "short" : "long";
 
+  // Learning-loop guard: the nightly ensemble/meta-labeler trains exclusively on
+  // `entry_feature_snapshot`, and `signal_outcomes.meta_score` is read back out
+  // of it at exit. A missing snapshot is therefore a silent, weeks-long data
+  // outage — make it loud at the exact moment it happens instead.
+  const snapshot = e.featureSnapshot ?? null;
+  if (!snapshot || Object.keys(snapshot).length === 0) {
+    console.error(
+      `[entry][LEARNING-LOOP] ${ticker}: entry_feature_snapshot is EMPTY — this trade ` +
+      `will be invisible to the nightly trainer and will close with a null meta_score.`,
+    );
+  }
+
   const { data: ins, error: insErr } = await supabase.from("virtual_positions").insert({
+
     user_id: settings.user_id, ticker, entry_price: fillPrice, shares,
     position_type: positionType,
     status: "open",
@@ -4160,7 +4173,7 @@ async function executeEntry(
     trailing_stop_price: hardStop,
     peak_price: fillPrice,
     original_shares: shares,
-    entry_feature_snapshot: e.featureSnapshot ?? null,
+    entry_feature_snapshot: snapshot,
   }).select("id").single();
   if (insErr) {
     // P-4: the partial unique index `uniq_open_position_per_user_ticker` rejects
