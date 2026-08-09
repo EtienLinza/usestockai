@@ -201,11 +201,23 @@ serve(async (req) => {
     const signals: any[] = [];
     const rejected: any[] = [];
     const pushReject = (ticker: string, reason: string, snap: Record<string, unknown>, extras: Record<string, unknown> = {}) => {
+      // Wave 2: the nightly counterfactual labeler requires an entry_price and
+      // a horizon. Rejections logged without them (earnings blackout, early
+      // pre-screen bails) were unlabelable — ~94% of the table. Always fall
+      // back to the last close we already hold in the snapshot.
+
+      const fallbackPx = Number(
+        (extras as { entry_price?: unknown }).entry_price ??
+        (snap as { entry_price?: unknown }).entry_price ??
+        (snap as { last_close?: unknown }).last_close,
+      );
       rejected.push({
         ticker,
         rejection_reason: reason,
         feature_snapshot: snap,
         regime: marketRegime ?? null,
+        entry_price: Number.isFinite(fallbackPx) && fallbackPx > 0 ? fallbackPx : null,
+        horizon_bars: 10,
         ...extras,
       });
     };
@@ -213,9 +225,11 @@ serve(async (req) => {
       const data = cache.get(ticker);
       if (!data || data.close.length < 200) continue;
       if (blackoutSet.has(ticker)) {
-        pushReject(ticker, "earnings_blackout", { last_close: data.close[data.close.length - 1] });
+        const px = data.close[data.close.length - 1];
+        pushReject(ticker, "earnings_blackout", { last_close: px, entry_price: px, side: "long" });
         continue;
       }
+
       try {
         const danelfin = danelfinScores[ticker.toUpperCase()] ?? null;
         const epsRev = epsRevisionScores[ticker.toUpperCase()] ?? null;
