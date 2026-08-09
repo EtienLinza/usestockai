@@ -554,6 +554,36 @@ export type Database = {
         }
         Relationships: []
       }
+      gate_adjustments: {
+        Row: {
+          delta: number
+          gate_key: string
+          max_delta: number
+          min_delta: number
+          rationale: string | null
+          sample_size: number
+          updated_at: string
+        }
+        Insert: {
+          delta?: number
+          gate_key: string
+          max_delta?: number
+          min_delta?: number
+          rationale?: string | null
+          sample_size?: number
+          updated_at?: string
+        }
+        Update: {
+          delta?: number
+          gate_key?: string
+          max_delta?: number
+          min_delta?: number
+          rationale?: string | null
+          sample_size?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
       historical_constituents: {
         Row: {
           company: string | null
@@ -1170,6 +1200,48 @@ export type Database = {
           scan_run_id?: string | null
           strategy?: string | null
           ticker?: string
+        }
+        Relationships: []
+      }
+      rejection_accuracy: {
+        Row: {
+          avg_return_pct: number | null
+          computed_at: string
+          hit_stop_rate: number | null
+          hit_target_rate: number | null
+          id: string
+          notes: Json
+          rejection_reason: string
+          sample_size: number
+          verdict: string
+          window_days: number
+          would_win_rate: number | null
+        }
+        Insert: {
+          avg_return_pct?: number | null
+          computed_at?: string
+          hit_stop_rate?: number | null
+          hit_target_rate?: number | null
+          id?: string
+          notes?: Json
+          rejection_reason: string
+          sample_size?: number
+          verdict?: string
+          window_days?: number
+          would_win_rate?: number | null
+        }
+        Update: {
+          avg_return_pct?: number | null
+          computed_at?: string
+          hit_stop_rate?: number | null
+          hit_target_rate?: number | null
+          id?: string
+          notes?: Json
+          rejection_reason?: string
+          sample_size?: number
+          verdict?: string
+          window_days?: number
+          would_win_rate?: number | null
         }
         Relationships: []
       }

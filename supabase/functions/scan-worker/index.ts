@@ -22,6 +22,7 @@ import { applyIsotonicCalibration, type IsotonicAnchor } from "../_shared/calibr
 import { requireCronOrUser } from "../_shared/cron-auth.ts";
 import { explainSignal } from "../_shared/signal-explainer.ts";
 import { loadAdaptiveThresholds, resolveThresholds } from "../_shared/adaptive-thresholds.ts";
+import { loadGateAdjustments, gateDelta } from "../_shared/gate-adjustments.ts";
 
 
 const corsHeaders = {
@@ -137,6 +138,10 @@ serve(async (req) => {
 
     // WS2 — nightly-tuned indicator thresholds (profile × market regime).
     const thresholdMap = await loadAdaptiveThresholds(supabase);
+    // Rejection-learning loop — clamped nudge to the conviction floor. Negative
+    // when the nightly audit shows the floor has been blocking winners.
+    const gateAdj = await loadGateAdjustments(supabase);
+    const floorDelta = gateDelta(gateAdj, "conviction_floor");
 
     // Load cached bars; fetch misses with bounded parallelism, pre-screen, and warm cache.
     const cache = await loadCachedBars(tickers);
@@ -297,7 +302,7 @@ serve(async (req) => {
         const baselineFloor = strategy === "mean_reversion" ? 60 : 65;
         const adaptiveFloor = weights.regimeFloors[regime]?.floor ?? baselineFloor;
         const macroAdj = macro ? macroFloorAdjust(macro.score) : 0;
-        const minConviction = Math.max(50, Math.min(90, adaptiveFloor + macroAdj));
+        const minConviction = Math.max(50, Math.min(90, adaptiveFloor + macroAdj + floorDelta));
         if (conviction < minConviction) {
           pushReject(ticker, "below_conviction_floor",
             { ...snapBase, floor: minConviction },

@@ -87,6 +87,8 @@ import { detectAdwinDrift, adwinGateAdjust } from "../_shared/adwin.ts";
 import { loadAdaptiveThresholds, resolveThresholds, type ThresholdMap } from "../_shared/adaptive-thresholds.ts";
 import { loadAdaptiveExits, resolveExitParams, applyExitParams, type ExitParamMap } from "../_shared/adaptive-exits.ts";
 import { loadNewsSentiment, newsConvictionDelta, type NewsSentimentMap } from "../_shared/news-sentiment-loader.ts";
+import { loadGateAdjustments, gateDelta, type GateAdjustments } from "../_shared/gate-adjustments.ts";
+import { loadExitMetaModel, scoreExitMeta, computeGiveback, type ExitMetaModel } from "../_shared/exit-meta.ts";
 
 // WS2: nightly-tuned indicator thresholds (profile × market regime). Loaded
 // once per scan; null/empty → engine defaults (cold-start safe).
@@ -96,6 +98,14 @@ let ADAPTIVE_THRESHOLDS: ThresholdMap | null = null;
 // ceiling) per profile × market regime. Empty → engine defaults.
 let ADAPTIVE_EXITS: ExitParamMap | null = null;
 let CURRENT_MARKET_REGIME: string | null = null;
+
+// Rejection-learning loop: clamped nudges that can make gates LOOSER when the
+// nightly counterfactual audit shows they've been blocking winners.
+let GATE_ADJ: GateAdjustments | null = null;
+
+// Exit meta-labeler: empirical recovery-odds grid. Null → geometry-only exits.
+let EXIT_META: ExitMetaModel | null = null;
+const EXIT_META_MIN_PWIN = 0.35;
 
 /** Thrown by the circuit breaker to abort the entire scan immediately. */
 class CircuitBreakerTrippedError extends Error {
@@ -732,6 +742,23 @@ function runWinExit(
   if (fired === 2 && pnlPct >= profile.takeProfitPct / 100 * 0.8) {
     return { kind: "PARTIAL_EXIT", reason: `Approaching target with ${fired} peak signals: ${firedLabels.join(" + ")}`, pct: 0.5, price: currentPrice };
   }
+  // ── Exit meta-label: "should I still be in this?" ───────────────────────
+  // Geometry says hold, but history may disagree. If this trade has already
+  // handed back most of its peak gain and the empirical grid says trades in
+  // that state rarely finish green, take what's left instead of waiting for
+  // the trail. Null grid / thin cell → pure pass-through.
+  {
+    const gb = computeGiveback(entry, newPeak, currentPrice, isLong);
+    const meta = scoreExitMeta(EXIT_META, gb.mfePct, gb.givebackFrac);
+    if (meta && gb.givebackFrac >= 0.5 && meta.pWin < EXIT_META_MIN_PWIN) {
+      return {
+        kind: "FULL_EXIT",
+        price: currentPrice,
+        reason: `Exit meta-label: gave back ${(gb.givebackFrac * 100).toFixed(0)}% of a ${gb.mfePct.toFixed(1)}% peak — only ${(meta.pWin * 100).toFixed(0)}% of ${meta.n} similar trades finished green`,
+      };
+    }
+  }
+
   return { kind: "HOLD", reason: `peak-watch (${fired}/5)`, trailingUpdate: trailing, peakUpdate: newPeak };
 }
 
@@ -1392,7 +1419,9 @@ async function runEntryDecision(
   // crashing together) without forcing the user to enforce sector caps manually.
   if (openTickers.length > 0) {
     const corr = maxCorrelationToBook(ticker, openTickers);
-    const corrCutoff = adaptiveCorrThreshold(marketRegime, macro?.stressed ? "elevated" : "normal");
+    const corrCutoff = Math.max(0.55, Math.min(0.95,
+      adaptiveCorrThreshold(marketRegime, macro?.stressed ? "elevated" : "normal")
+      - gateDelta(GATE_ADJ, "correlation_threshold")));
     if (corr && corr.maxAbs >= corrCutoff) {
       return {
         kind: "BLOCKED",
@@ -1402,19 +1431,22 @@ async function runEntryDecision(
   }
 
   // ── Earnings blackout (Phase 1 #4) ──────────────────────────────────────
-  // Block new entries within 3 trading days of an earnings release. Earnings
+  // Block new entries within N trading days of an earnings release. Earnings
   // gaps routinely violate ATR-based stops and our signal engine has no edge
   // through binary fundamental events. Cached 6h via Finnhub free tier.
-  // Crypto / non-equity tickers return null and pass through.
+  // Crypto / non-equity tickers return null and pass through. N defaults to 3
+  // and is nudged by the nightly rejection audit within ±1/+2 days.
   try {
     const days = await getEarningsBlackoutDays(ticker);
-    if (days !== null && days <= 3) {
+    const blackoutDays = Math.max(1, Math.min(5, 3 + gateDelta(GATE_ADJ, "earnings_blackout_days")));
+    if (days !== null && days <= blackoutDays) {
       return {
         kind: "BLOCKED",
         reason: `Earnings blackout: report in ~${days} trading day${days === 1 ? "" : "s"} — gap risk too high for systematic entry`,
       };
     }
   } catch (_e) { /* non-fatal — never block scan on earnings API hiccup */ }
+
 
   const danelfin = danelfinMap?.get(ticker.toUpperCase()) ?? null;
   const epsRev = epsRevisionMap?.get(ticker.toUpperCase()) ?? null;
@@ -3028,6 +3060,11 @@ async function processUser(
   ADAPTIVE_THRESHOLDS = await loadAdaptiveThresholds(supabase);
   ADAPTIVE_EXITS = await loadAdaptiveExits(supabase);
   CURRENT_MARKET_REGIME = marketRegime ?? null;
+  GATE_ADJ = await loadGateAdjustments(supabase);
+  EXIT_META = await loadExitMetaModel(supabase);
+  if (EXIT_META) console.log(`autotrader-scan: exit-meta grid loaded (n=${EXIT_META.sample_size})`);
+  const gateKeys = Object.keys(GATE_ADJ ?? {});
+  if (gateKeys.length > 0) console.log(`autotrader-scan: gate adjustments ${JSON.stringify(GATE_ADJ)}`);
   if (ADAPTIVE_THRESHOLDS.size > 0) console.log(`autotrader-scan: adaptive thresholds loaded (${ADAPTIVE_THRESHOLDS.size} buckets)`);
   if (ADAPTIVE_EXITS.size > 0) console.log(`autotrader-scan: adaptive exits loaded (${ADAPTIVE_EXITS.size} buckets)`);
   if (marketRegime) console.log(`autotrader-scan: regime=${marketRegime}`);
