@@ -97,6 +97,10 @@ let ADAPTIVE_THRESHOLDS: ThresholdMap | null = null;
 let ADAPTIVE_EXITS: ExitParamMap | null = null;
 let CURRENT_MARKET_REGIME: string | null = null;
 
+// Rejection-learning loop: clamped nudges that can make gates LOOSER when the
+// nightly counterfactual audit shows they've been blocking winners.
+let GATE_ADJ: GateAdjustments | null = null;
+
 /** Thrown by the circuit breaker to abort the entire scan immediately. */
 class CircuitBreakerTrippedError extends Error {
   constructor(public readonly verdictReason: string) {
