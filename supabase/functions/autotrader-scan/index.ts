@@ -775,6 +775,13 @@ function runWinExit(
 // force-closed as stale. 1.5× gives the thesis a full extra half-horizon to
 // recover; past that the slot is worth more than the trade.
 const STALE_HOLD_MULT = 1.5;
+// Absolute hard ceiling on holding period, in trading days. Applies to every
+// open position regardless of strategy, entry vintage or P&L.
+const ABS_MAX_HOLD_BARS = 45;
+// Absolute single-name notional ceiling as a fraction of NAV (Wave 3).
+const HARD_SINGLE_NAME_CAP = 0.10;
+
+
 
 
 function runLossExit(
@@ -940,8 +947,21 @@ function runLossExit(
     // Inside the grace window: hold and let the hard stop or a recovery decide.
   }
 
+  // T3.5: ABSOLUTE age ceiling. The strategy-relative time stop above never
+  // reaches positions opened before it existed (a 50-bar trend maxHold with a
+  // 1.5× grace window tolerates ~75 bars, so May entries were still alive in
+  // August, occupying every slot). No thesis survives this long — close it.
+  if (barsHeld >= ABS_MAX_HOLD_BARS) {
+    return {
+      kind: "FULL_EXIT",
+      reason: `Absolute age ceiling — ${barsHeld} bars held (max ${ABS_MAX_HOLD_BARS}), freeing the slot (${(pnlPct * 100).toFixed(1)}%)`,
+      price: currentPrice,
+    };
+  }
+
   return null; // no loss-exit triggered
 }
+
 
 function businessDaysSince(iso: string): number {
   // H-1 FIX: walk day-by-day, skipping weekends AND NYSE holidays.
@@ -975,6 +995,23 @@ function bucketKeyAT(c: number): string {
   if (c < 90) return "80-89";
   return "90+";
 }
+
+// ── Wave 3: conviction-bucket expectancy weight ────────────────────────────
+// Returns a sizing multiplier in [0.35, 1.25] driven by the bucket's realized
+// trailing expectancy rather than the raw score. Unknown / thin buckets return
+// 1 (neutral) so cold starts behave exactly as before.
+function convictionBucketWeight(
+  edges: Record<string, { expectancy: number; winRate: number; count: number }> | null | undefined,
+  conviction: number,
+): number {
+  if (!edges) return 1;
+  const row = edges[bucketKeyAT(conviction)];
+  if (!row || row.count < 8) return 1;
+  if (row.expectancy <= 0) return 0.35;          // losing bucket → minimum size
+  // +1% expectancy per trade ≈ full size; scale linearly, clamped.
+  return Math.max(0.5, Math.min(1.25, 0.5 + row.expectancy * 0.75));
+}
+
 
 // ============================================================================
 // ADAPTIVE ENTRY-GUARD ENVELOPE  (Phase 4 — BEAM follow-up)
@@ -1390,7 +1427,11 @@ async function runEntryDecision(
   /** WS4: cached headline sentiment per ticker. Supporting factor only —
    *  missing/stale/low-confidence entries are strictly neutral. */
   newsMap?: NewsSentimentMap | null,
+  /** Wave 3: realized expectancy per conviction bucket. Sizing rides this
+   *  instead of the raw score whenever calibration is non-monotonic. */
+  convictionEdges?: Record<string, { expectancy: number; winRate: number; count: number }> | null,
 ): Promise<EntryAction> {
+
   // Daily loss limit — block all new entries
   if (todayPnlPct <= -settings.daily_loss_limit_pct) {
     return { kind: "BLOCKED", reason: `Daily loss limit (${todayPnlPct.toFixed(1)}% vs −${settings.daily_loss_limit_pct}% cap)` };
@@ -1677,8 +1718,26 @@ async function runEntryDecision(
   // up to 1.5× the Kelly base; marginal passes get 0.5×. All absolute caps
   // below still apply — this only moves size WITHIN the safety envelope.
   const edgeMult = edgeSizeMultiplier(effectiveConviction, settings.min_conviction, metaScore);
-  const baseFrac = sig.kellyFraction * volScalar * edgeMult;
-  let cappedFrac = Math.min(baseFrac, settings.max_single_name_pct / 100, headroom);
+  // ── Wave 3: realized-expectancy weight ─────────────────────────────────
+  // Conviction has been non-monotonic (the 80s bucket lost money while the
+  // 70s made it), and edgeSizeMultiplier scales with conviction — so the
+  // worst bucket was getting the most capital. Multiply the edge scalar by
+  // the bucket's own trailing expectancy weight: negative-expectancy buckets
+  // collapse to the floor regardless of score. Once calibration is monotonic
+  // again the weights converge back to ~1 and this becomes a no-op.
+  const convEdgeMult = convictionBucketWeight(convictionEdges, effectiveConviction);
+  const baseFrac = sig.kellyFraction * volScalar * edgeMult * convEdgeMult;
+  // Wave 3: absolute single-name ceiling on top of the user setting. EVMT sat
+  // at $16.3k (conviction 71) while DELL at 94 got $2.3k — concentration was
+  // inversely correlated with edge. No single name exceeds 10% of NAV.
+  let cappedFrac = Math.min(
+    baseFrac,
+    settings.max_single_name_pct / 100,
+    HARD_SINGLE_NAME_CAP,
+    headroom,
+  );
+
+
   const currentPrice = data.close[data.close.length - 1];
   // C-3 FIX: size off dynamic NAV when caller provides it; fall back to
   // starting_nav only for legacy paths that haven't been updated yet.
@@ -1855,7 +1914,14 @@ async function runEntryDecision(
     navForSizing,
     metaScore,
     // WS1: preserve entry-observable features for the nightly ensemble trainer.
-    featureSnapshot: buildEntryFeatureSnapshot(effectiveConviction, sig, marketRegime, newsRow),
+    // Wave 2: carry the meta/ensemble score too, so the exit writer can persist
+    // `signal_outcomes.meta_score` and the meta-labeler can finally be scored
+    // against realized results.
+    featureSnapshot: {
+      ...buildEntryFeatureSnapshot(effectiveConviction, sig, marketRegime, newsRow),
+      _meta_score: metaScore !== null && Number.isFinite(metaScore) ? metaScore : null,
+    },
+
   };
 }
 
@@ -3148,6 +3214,41 @@ async function processUser(
     }
   } catch (e) { console.warn("strategyEdges load failed", e); }
 
+  // ── Wave 3: realized expectancy per conviction bucket (last 180d) ────────
+  // Conviction drives sizing, so a mis-ranked bucket puts the most money on
+  // the worst trades. This measures each bucket's actual per-trade expectancy
+  // and hands it to the sizing weight.
+  const convictionEdges: Record<string, { expectancy: number; winRate: number; count: number }> = {};
+  try {
+    const cutoff = new Date(Date.now() - 180 * 86400000).toISOString();
+    const { data: rows } = await supabase
+      .from("signal_outcomes")
+      .select("conviction, realized_pnl_pct")
+      .gte("entry_date", cutoff)
+      .in("status", ["closed", "stopped_out", "took_profit"])
+      .limit(5000);
+    const acc: Record<string, { sum: number; wins: number; n: number }> = {};
+    for (const o of (rows ?? []) as Array<{ conviction: number | null; realized_pnl_pct: number | null }>) {
+      const c = Number(o.conviction), p = Number(o.realized_pnl_pct);
+      if (!Number.isFinite(c) || !Number.isFinite(p)) continue;
+      const k = bucketKeyAT(c);
+      acc[k] ??= { sum: 0, wins: 0, n: 0 };
+      acc[k].sum += p; acc[k].n++; if (p > 0) acc[k].wins++;
+    }
+    for (const [k, a] of Object.entries(acc)) {
+      convictionEdges[k] = {
+        expectancy: a.sum / a.n,
+        winRate: (a.wins / a.n) * 100,
+        count: a.n,
+      };
+    }
+    if (Object.keys(convictionEdges).length) {
+      console.log("autotrader-scan: conviction-bucket expectancy", convictionEdges);
+    }
+  } catch (e) { console.warn("convictionEdges load failed", e); }
+
+
+
   for (const ticker of watchlistForEntry) {
     if (heldTickers.has(ticker)) continue;
 
@@ -3187,7 +3288,9 @@ async function processUser(
       strategyExpectancy,
       championEnsemble,
       newsMap,
+      convictionEdges,
     );
+
 
 
     if (decision.kind === "ENTER") pending.push({ kind: "enter", ticker, decision });
@@ -3867,6 +3970,13 @@ async function executeExit(
       max_favorable_excursion_pct: mfePct,
       mfe_pct: mfePct,
       realized_rr: realizedR,
+      // Wave 2: persist the entry-time meta/ensemble score so the nightly
+      // calibrators can measure the meta-labeler against realized outcomes.
+      meta_score: (() => {
+        const m = (pos.entry_feature_snapshot as Record<string, unknown> | null)?._meta_score;
+        return typeof m === "number" && Number.isFinite(m) ? m : null;
+      })(),
+
     });
     if (outcomeErr) {
       console.error(`[learning] outcome insert failed for ${pos.ticker}`, outcomeErr);
