@@ -3061,6 +3061,8 @@ async function processUser(
   ADAPTIVE_EXITS = await loadAdaptiveExits(supabase);
   CURRENT_MARKET_REGIME = marketRegime ?? null;
   GATE_ADJ = await loadGateAdjustments(supabase);
+  EXIT_META = await loadExitMetaModel(supabase);
+  if (EXIT_META) console.log(`autotrader-scan: exit-meta grid loaded (n=${EXIT_META.sample_size})`);
   const gateKeys = Object.keys(GATE_ADJ ?? {});
   if (gateKeys.length > 0) console.log(`autotrader-scan: gate adjustments ${JSON.stringify(GATE_ADJ)}`);
   if (ADAPTIVE_THRESHOLDS.size > 0) console.log(`autotrader-scan: adaptive thresholds loaded (${ADAPTIVE_THRESHOLDS.size} buckets)`);
