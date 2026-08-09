@@ -83,14 +83,27 @@ export async function getAiScore(ticker: string): Promise<DanelfinScore | null> 
     }
 
     const j = await r.json();
-    // Response is typically an array of daily rows; take the most recent.
-    const rows: unknown[] = Array.isArray(j) ? j : (Array.isArray((j as { data?: unknown[] })?.data) ? (j as { data: unknown[] }).data : []);
+    // The API returns a date-keyed object: { "2026-08-08": { aiscore: 7, ... } }.
+    // Older/other endpoints return an array of rows. Support both — assuming
+    // only the array shape is what silently starved this feed since August.
+    let rows: unknown[];
+    if (Array.isArray(j)) {
+      rows = j;
+    } else if (Array.isArray((j as { data?: unknown[] })?.data)) {
+      rows = (j as { data: unknown[] }).data;
+    } else if (j && typeof j === "object") {
+      rows = Object.entries(j as Record<string, unknown>)
+        .filter(([k, v]) => /^\d{4}-\d{2}-\d{2}$/.test(k) && v && typeof v === "object")
+        .map(([k, v]) => ({ date: k, ...(v as Record<string, unknown>) }));
+    } else {
+      rows = [];
+    }
     if (rows.length === 0) {
       cache.set(t, { value: null, cachedAt: Date.now() });
       return null;
     }
 
-    // Sort by date desc and pick top.
+    // Sort by date desc and pick the most recent row.
     const sorted = [...rows].sort((a, b) => {
       const da = String((a as Record<string, unknown>).date ?? "");
       const db = String((b as Record<string, unknown>).date ?? "");
@@ -103,6 +116,7 @@ export async function getAiScore(ticker: string): Promise<DanelfinScore | null> 
       cache.set(t, { value: null, cachedAt: Date.now() });
       return null;
     }
+
 
     const score: DanelfinScore = {
       aiScore: Math.round(ai),
