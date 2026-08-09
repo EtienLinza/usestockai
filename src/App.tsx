@@ -36,6 +36,7 @@ const AiDividendStocks = lazy(() => import("./pages/guides/AiDividendStocks"));
 const AiStockSignalsExplained = lazy(() => import("./pages/guides/AiStockSignalsExplained"));
 const BacktestTradingStrategy = lazy(() => import("./pages/guides/BacktestTradingStrategy"));
 const BestAiStocksToBuyNow = lazy(() => import("./pages/guides/BestAiStocksToBuyNow"));
+const AiTradingBots = lazy(() => import("./pages/guides/AiTradingBots"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 
 const queryClient = new QueryClient();
@@ -74,6 +75,8 @@ const App = () => (
                   <Route path="/guides/ai-stock-signals-explained" element={<AiStockSignalsExplained />} />
                   <Route path="/guides/backtest-trading-strategy" element={<BacktestTradingStrategy />} />
                   <Route path="/guides/best-ai-stocks-to-buy-now" element={<BestAiStocksToBuyNow />} />
+                  <Route path="/guides/ai-trading-bots" element={<AiTradingBots />} />
+
                   <Route path="*" element={<NotFound />} />
                 </Routes>
               </Suspense>
