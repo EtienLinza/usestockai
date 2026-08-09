@@ -33,6 +33,9 @@ export const Footer = () => {
             <Link to="/guides/ai-dividend-stocks" className="text-muted-foreground hover:text-foreground transition-colors">
               Guides
             </Link>
+            <Link to="/guides/ai-trading-bots" className="text-muted-foreground hover:text-foreground transition-colors">
+              AI Trading Bots
+            </Link>
             <Link to="/pricing" className="text-muted-foreground hover:text-foreground transition-colors">
               Pricing
             </Link>
