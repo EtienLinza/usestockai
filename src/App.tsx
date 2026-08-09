@@ -75,6 +75,8 @@ const App = () => (
                   <Route path="/guides/ai-stock-signals-explained" element={<AiStockSignalsExplained />} />
                   <Route path="/guides/backtest-trading-strategy" element={<BacktestTradingStrategy />} />
                   <Route path="/guides/best-ai-stocks-to-buy-now" element={<BestAiStocksToBuyNow />} />
+                  <Route path="/guides/ai-trading-bots" element={<AiTradingBots />} />
+
                   <Route path="*" element={<NotFound />} />
                 </Routes>
               </Suspense>
