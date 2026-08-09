@@ -23,7 +23,12 @@ const corsHeaders = {
 };
 
 const MAX_ROWS = 2000;
-const MIN_AGE_DAYS = 8; // give the market time to play out (>= horizon)
+// Must exceed the horizon (10 trading days ≈ 14 calendar days) or every row
+// gets skipped for lack of forward bars. Previously 8 — which silently marked
+// rows labeled without ever pricing them, starving the rejection audit.
+const MIN_AGE_DAYS = 20;
+// Only give up permanently once the row is too old for the data to ever arrive.
+const ABANDON_AGE_DAYS = 60;
 
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
