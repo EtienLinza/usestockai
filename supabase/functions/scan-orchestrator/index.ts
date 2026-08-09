@@ -302,6 +302,40 @@ serve(async (req) => {
       await setProgress({ processed, signals_found: allSignals.length });
     }
 
+    // ─── 4b. Cross-sectional rank gate ────────────────────────────────────
+    // Relative, not absolute: keep only the top slice of *today's* candidate
+    // distribution. Prevents the book filling with marginal names in a hot
+    // tape, and stops the engine going dark in a quiet one.
+    {
+      const before = allSignals.length;
+      const gate = applyCrossSectionalGate(allSignals as RankableSignal[]);
+      for (const d of gate.dropped) {
+        const s = d.signal as any;
+        allRejected.push({
+          ticker: s.ticker,
+          strategy: s.strategy ?? null,
+          regime: s.regime ?? null,
+          raw_conviction: s.confidence ?? null,
+          calibrated_conviction: s.confidence ?? null,
+          rejection_reason: "below_cross_sectional_rank",
+          entry_price: s.entry_price ?? null,
+          horizon_bars: 10,
+          feature_snapshot: {
+            rank: d.rank, rank_score: Math.round(d.score * 100) / 100,
+            cutoff_score: gate.cutoffScore, cohort_size: gate.total,
+            side: s.signal_type === "BUY" ? "long" : "short",
+            atr_pct: s.atr_pct ?? null,
+            meta_score: s.meta_score ?? null,
+            market_regime: s.market_regime ?? null,
+          },
+        });
+      }
+      allSignals.length = 0;
+      allSignals.push(...(gate.kept as any[]));
+      console.log(`cross-sectional gate: kept ${allSignals.length}/${before} (cutoff=${gate.cutoffScore ?? "n/a"})`);
+    }
+
+
     // Persist rejected candidates for counterfactual learning (M4). Sampled
     // when volume is large so we don't overload the table on 500-ticker scans.
     try {
