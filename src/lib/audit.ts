@@ -22,16 +22,17 @@ export async function logAudit(
   metadata: Record<string, unknown> = {},
 ): Promise<void> {
   try {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-    await supabase.from("audit_log").insert([{
-      user_id: user.id,
-      action,
-      target_type: target?.type ?? undefined,
-      target_id: target?.id ?? undefined,
-      metadata: metadata as never,
-      user_agent: typeof navigator !== "undefined" ? navigator.userAgent : undefined,
-    }]);
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return;
+    // Audit rows are written server-side only — clients cannot forge entries.
+    await supabase.functions.invoke("log-audit", {
+      body: {
+        action,
+        target_type: target?.type ?? null,
+        target_id: target?.id ?? null,
+        metadata,
+      },
+    });
   } catch (err) {
     console.warn("[audit] insert failed", err);
   }
