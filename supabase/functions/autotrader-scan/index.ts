@@ -4173,7 +4173,7 @@ async function executeEntry(
     trailing_stop_price: hardStop,
     peak_price: fillPrice,
     original_shares: shares,
-    entry_feature_snapshot: e.featureSnapshot ?? null,
+    entry_feature_snapshot: snapshot,
   }).select("id").single();
   if (insErr) {
     // P-4: the partial unique index `uniq_open_position_per_user_ticker` rejects
