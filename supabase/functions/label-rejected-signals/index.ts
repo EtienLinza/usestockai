@@ -87,7 +87,11 @@ serve(async (req) => {
       slice.forEach((t, k) => {
         const d = bars[k];
         const items = byTicker.get(t)!;
-        if (!d || d.close.length < 30 || !d.timestamp) {
+        // NOTE: fetchDailyHistory returns `timestamps` as ISO yyyy-mm-dd
+        // strings — not a numeric `timestamp` array. Reading the wrong field
+        // made every row fall into the "data unavailable" branch, which is why
+        // nothing was ever labeled.
+        if (!d || d.close.length < 30 || !d.timestamps?.length) {
           // Data unavailable — retry next night unless the row is ancient.
           items.forEach(r => {
             skipped++;
@@ -98,11 +102,12 @@ serve(async (req) => {
         for (const r of items) {
           const entryPx = Number(r.entry_price);
           const horizon = Math.max(1, Math.min(60, Number(r.horizon_bars ?? 10)));
-          const createdMs = new Date(r.created_at).getTime();
-          // Find first bar strictly after created_at.
-          const startIdx = d.timestamp.findIndex((ts: number) => ts * 1000 > createdMs);
+          const createdDay = String(r.created_at).slice(0, 10);
+          // First bar strictly after the rejection date.
+          const startIdx = d.timestamps.findIndex((ts: string) => ts > createdDay);
           const lastIdx = d.close.length - 1;
           const available = startIdx >= 0 ? lastIdx - startIdx : -1;
+
           if (startIdx < 0 || available < MIN_FORWARD_BARS) {
             // Not enough forward bars yet — leave unlabeled so we can price it
             // once they exist. Never mark labeled on a skip.
