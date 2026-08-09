@@ -271,6 +271,12 @@ type EntryAction =
       decision: "BUY" | "SHORT";
       siVelocity?: number | null; siDelta?: number;
       slippageBpsEst?: number | null;
+      /** Sweep fix: dollar-risk budget + stop-cap decided at signal time, so
+       *  executeEntry can RE-assert them against the live fill price. */
+      riskBudgetDollars?: number;
+      stopCapPct?: number;
+      navForSizing?: number;
+      metaScore?: number | null;
       featureSnapshot?: FeatureSnapshot }
   | { kind: "HOLD" | "BLOCKED"; reason: string };
 
@@ -1844,6 +1850,10 @@ async function runEntryDecision(
     siVelocity,
     siDelta,
     slippageBpsEst,
+    riskBudgetDollars,
+    stopCapPct,
+    navForSizing,
+    metaScore,
     // WS1: preserve entry-observable features for the nightly ensemble trainer.
     featureSnapshot: buildEntryFeatureSnapshot(effectiveConviction, sig, marketRegime, newsRow),
   };
@@ -3331,7 +3341,13 @@ async function processUser(
         });
         continue;
       }
-      // Find worst-performing eligible position
+      // ── ROTATION v2: rank incumbents by REMAINING EDGE, not raw P&L% ──────
+      // v1 only ever displaced GREEN positions, so it systematically harvested
+      // winners early and left losers to run into their stops (measured: the 2
+      // rotation-opened trades cost −$371 while the book made +$5,273).
+      // v2 scores each incumbent on how much edge it still has left:
+      //   score = R-progress  −  time decay  −  broken-thesis penalty
+      // Lowest score is the weakest holder of the slot, green or red.
       const nowMs = Date.now();
       const ranked = livePositions
         .map(pos => {
@@ -3339,33 +3355,61 @@ async function processUser(
           if (!d) return null;
           const px = d.close[d.close.length - 1];
           const entry = Number(pos.entry_price);
-          const pnlPct = pos.position_type === "long"
-            ? ((px - entry) / entry) * 100
-            : ((entry - px) / entry) * 100;
+          const long = pos.position_type === "long";
+          const pnlPct = long ? ((px - entry) / entry) * 100 : ((entry - px) / entry) * 100;
           const ageMs = nowMs - new Date(pos.created_at).getTime();
-          return { pos, pnlPct, ageMs };
+          const barsHeld = Math.max(0, Math.round(ageMs / 86400000));
+          const prof = PROFILE_PARAMS[(pos.entry_profile as StockProfile) ?? "normal"];
+          const maxHold = pos.entry_strategy === "mean_reversion"
+            ? prof.maxHoldMR
+            : pos.entry_strategy === "breakout"
+            ? prof.maxHoldBreakout
+            : prof.maxHoldTrend;
+          const initRisk = inferInitRiskPerShare(pos);
+          const progressR = initRisk > 0
+            ? (long ? px - entry : entry - px) / initRisk
+            : pnlPct / 5;
+          // Time decay: a position that has burned half its hold window with
+          // little to show is occupying a slot it hasn't earned.
+          const timeUsed = maxHold > 0 ? Math.min(1.5, barsHeld / maxHold) : 0;
+          // Broken thesis: negative R past the halfway mark of its own window.
+          const brokenThesis = progressR < 0 && barsHeld >= Math.max(2, Math.floor(maxHold / 2));
+          const score = progressR - timeUsed * 0.6 - (brokenThesis ? 0.75 : 0);
+          return { pos, pnlPct, ageMs, progressR, barsHeld, maxHold, brokenThesis, score };
         })
-        .filter((r): r is { pos: Position; pnlPct: number; ageMs: number } =>
-          !!r && !r.pos.opened_by_rotation && r.ageMs >= MIN_POSITION_AGE_MS && r.pnlPct > 0,
+        .filter((r): r is NonNullable<typeof r> =>
+          // Only the min-age gate now — rotation-opened positions are no longer
+          // permanently immune (v1 made them untouchable slot squatters).
+          !!r && r.ageMs >= MIN_POSITION_AGE_MS &&
+          // Never displace a position that is still working: require either a
+          // broken thesis or sub-0.5R progress. Real winners are left alone.
+          (r.brokenThesis || r.progressR < 0.5),
         )
-        .sort((a, b) => a.pnlPct - b.pnlPct);
+        .sort((a, b) => a.score - b.score);
       const worst = ranked[0];
       if (!worst) {
         summary.blocked++; userSummary.blocked++;
         queueLog({
           user_id: userId, ticker: p.ticker, action: "BLOCKED",
-          reason: `Rotation skipped — no eligible GREEN position to displace (never rotate on a loss)`,
+          reason: `Rotation skipped — every open position still has edge (no incumbent below 0.5R or with a broken thesis)`,
           conviction: p.decision.conviction, strategy: p.decision.strategy, profile: p.decision.profile,
         });
         continue;
       }
       const incumbentConv = worst.pos.entry_conviction ?? 0;
       const delta = p.decision.conviction - incumbentConv;
-      if (delta < settings.rotation_min_delta_conviction) {
+      // Composite requirement: the challenger must beat the incumbent on
+      // conviction AND the incumbent must be genuinely weak. A broken thesis
+      // earns a discount on the conviction hurdle (half, min 5) because the
+      // slot is actively bleeding.
+      const convHurdle = worst.brokenThesis
+        ? Math.max(5, Math.round(settings.rotation_min_delta_conviction / 2))
+        : settings.rotation_min_delta_conviction;
+      if (delta < convHurdle) {
         summary.holds++; userSummary.holds++;
         queueLog({
           user_id: userId, ticker: p.ticker, action: "HOLD",
-          reason: `Rotation skipped — Δconv ${delta} < min ${settings.rotation_min_delta_conviction} (incumbent ${worst.pos.ticker} @ conv ${incumbentConv}, P&L ${worst.pnlPct.toFixed(1)}%)`,
+          reason: `Rotation skipped — Δconv ${delta} < hurdle ${convHurdle} (incumbent ${worst.pos.ticker} conv ${incumbentConv}, ${worst.progressR.toFixed(2)}R after ${worst.barsHeld}/${worst.maxHold} bars, P&L ${worst.pnlPct.toFixed(1)}%${worst.brokenThesis ? ", thesis broken" : ""})`,
           conviction: p.decision.conviction, strategy: p.decision.strategy, profile: p.decision.profile,
         });
         continue;
@@ -3378,7 +3422,7 @@ async function processUser(
       await executeExit(supabase, worst.pos, {
         kind: "FULL_EXIT",
         price: worstPx,
-        reason: `Capital rotation: replaced by ${p.ticker} (Δconv +${delta})`,
+        reason: `Capital rotation: replaced by ${p.ticker} (Δconv +${delta}, incumbent ${worst.progressR.toFixed(2)}R after ${worst.barsHeld}/${worst.maxHold} bars${worst.brokenThesis ? ", thesis broken" : ""})`,
       } as ExitAction, profile, innerSummary);
       userSummary.exits += innerSummary.exits;
       // Update live book state
@@ -3951,12 +3995,41 @@ async function executeEntry(
   const fillPrice = live.price;
   const isLong = e.decision !== "SHORT";
   const stopATRMult = e.atr > 0 ? Math.abs(e.price - e.hardStop) / e.atr : 2;
-  const hardStop = isLong
-    ? fillPrice - e.atr * stopATRMult
-    : fillPrice + e.atr * stopATRMult;
+  let stopDistLive = e.atr * stopATRMult;
 
-  const dollars = settings.starting_nav * e.kellyFraction;
-  const shares = Math.floor(dollars / fillPrice);
+  // ── SWEEP FIX #1: re-assert the stop-distance cap against the LIVE fill ──
+  // The decision-time stop was clamped to `stopCapPct` of the *signal* price.
+  // When the live quote is materially different, the same ATR distance can be
+  // a much larger % of the actual fill, which is how −14.8% / −27.8% stops got
+  // through. Re-clamp here so the % risk is bounded by the price we pay.
+  const stopCapPct = e.stopCapPct;
+  if (stopCapPct && stopCapPct > 0) {
+    const capDistLive = fillPrice * stopCapPct;
+    if (stopDistLive > capDistLive) stopDistLive = capDistLive;
+  }
+  const hardStop = isLong ? fillPrice - stopDistLive : fillPrice + stopDistLive;
+
+  const navBase = e.navForSizing && e.navForSizing > 0 ? e.navForSizing : settings.starting_nav;
+  const dollars = navBase * e.kellyFraction;
+  let shares = Math.floor(dollars / fillPrice);
+
+  // ── SWEEP FIX #2: hard dollar-risk assertion on the live fill ───────────
+  // Risk-parity sizing ran against the signal price/stop. Re-derive shares so
+  // |fill − stop| × shares can never exceed the risk budget decided upstream,
+  // no matter how the quote moved between decision and execution.
+  const riskBudget = e.riskBudgetDollars;
+  if (riskBudget && riskBudget > 0 && stopDistLive > 0) {
+    const maxSharesByRisk = Math.floor(riskBudget / stopDistLive);
+    if (maxSharesByRisk < shares) shares = maxSharesByRisk;
+    if (shares < 1) {
+      await supabase.from("autotrade_log").insert({
+        user_id: settings.user_id, ticker, action: "BLOCKED",
+        reason: `Risk assertion: live stop distance $${stopDistLive.toFixed(2)} vs $${riskBudget.toFixed(0)} risk budget sizes below 1 share`,
+        price: fillPrice, conviction: e.conviction, strategy: e.strategy, profile: e.profile,
+      });
+      return;
+    }
+  }
   if (shares < 1) return;
 
   // Direction comes directly from the signal — never parse free-form reasoning.
