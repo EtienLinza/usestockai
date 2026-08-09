@@ -3,7 +3,7 @@
 // supabase function: mcp
 // Bundled from src/lib/mcp/index.ts by @lovable.dev/mcp-js.
 // src/lib/mcp/index.ts
-import { defineMcp } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { auth, defineMcp } from "npm:@lovable.dev/mcp-js@0.26.1";
 
 // src/lib/mcp/tools/list-live-signals.ts
 import { createClient } from "npm:@supabase/supabase-js@2.49.1";
@@ -95,11 +95,16 @@ var get_stock_price_default = defineTool3({
 });
 
 // src/lib/mcp/index.ts
+var projectRef = "mgudiiwaadvmpznpfmsg";
 var mcp_default = defineMcp({
   name: "usestockai-mcp",
   title: "UseStockAI Signals",
   version: "0.1.0",
   instructions: "Tools for UseStockAI. Use `list_live_signals` to browse the current AI-generated BUY/SELL trading signals ranked by confidence, `get_signal` to check the active signal for a specific ticker, and `get_stock_price` to fetch a live quote. Signals are informational, not financial advice.",
+  auth: auth.oauth.issuer({
+    issuer: `https://${projectRef}.supabase.co/auth/v1`,
+    acceptedAudiences: "authenticated"
+  }),
   tools: [list_live_signals_default, get_signal_default, get_stock_price_default]
 });
 
