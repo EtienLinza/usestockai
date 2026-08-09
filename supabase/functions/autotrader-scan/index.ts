@@ -103,6 +103,10 @@ let CURRENT_MARKET_REGIME: string | null = null;
 // nightly counterfactual audit shows they've been blocking winners.
 let GATE_ADJ: GateAdjustments | null = null;
 
+// Exit meta-labeler: empirical recovery-odds grid. Null → geometry-only exits.
+let EXIT_META: ExitMetaModel | null = null;
+const EXIT_META_MIN_PWIN = 0.35;
+
 /** Thrown by the circuit breaker to abort the entire scan immediately. */
 class CircuitBreakerTrippedError extends Error {
   constructor(public readonly verdictReason: string) {
