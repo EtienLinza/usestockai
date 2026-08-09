@@ -67,6 +67,8 @@ const App = () => (
                   
                   <Route path="/settings" element={<Settings />} />
                   <Route path="/settings/activity" element={<SecurityActivity />} />
+                  <Route path="/.lovable/oauth/consent" element={<OAuthConsent />} />
+
                   <Route path="/security" element={<Security />} />
                   <Route path="/autotrader-log" element={<AutotraderLog />} />
                   <Route path="/terms" element={<Terms />} />
