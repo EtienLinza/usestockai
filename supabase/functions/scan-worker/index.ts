@@ -22,6 +22,7 @@ import { applyIsotonicCalibration, type IsotonicAnchor } from "../_shared/calibr
 import { requireCronOrUser } from "../_shared/cron-auth.ts";
 import { explainSignal } from "../_shared/signal-explainer.ts";
 import { loadAdaptiveThresholds, resolveThresholds } from "../_shared/adaptive-thresholds.ts";
+import { loadGateAdjustments, gateDelta } from "../_shared/gate-adjustments.ts";
 
 
 const corsHeaders = {
