@@ -23,6 +23,7 @@ const Backtest = lazy(() => import("./pages/Backtest"));
 
 const Settings = lazy(() => import("./pages/Settings"));
 const SecurityActivity = lazy(() => import("./pages/SecurityActivity"));
+const OAuthConsent = lazy(() => import("./pages/OAuthConsent"));
 const Security = lazy(() => import("./pages/Security"));
 const AutotraderLog = lazy(() => import("./pages/AutotraderLog"));
 const Terms = lazy(() => import("./pages/Terms"));
