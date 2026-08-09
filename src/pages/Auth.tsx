@@ -106,7 +106,7 @@ const Auth = () => {
           toast.error(error.message);
         } else {
           toast.success("Account created successfully!");
-          navigate("/dashboard");
+          navigate(nextPath);
         }
       } else {
         const { error } = await signIn(email, password);
