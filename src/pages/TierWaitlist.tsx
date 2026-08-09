@@ -6,6 +6,7 @@ import { Footer } from "@/components/Footer";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { SEO } from "@/components/SEO";
 import { Tier, TIER_LABELS, TIER_PRICES, TIER_FEATURE_LIST } from "@/lib/tier-features";
@@ -104,12 +105,15 @@ export default function TierWaitlist() {
               </span>
             </div>
             <h1 className="text-4xl md:text-5xl font-light tracking-tight mb-4">
+              Join the {TIER_LABELS[tier]} waitlist
+            </h1>
+            <p className="text-lg text-muted-foreground mb-4">
               {tier === "elite"
                 ? "Full automation, calibrated for you."
                 : tier === "pro"
                 ? "Built for active traders."
                 : "Everything you need to start."}
-            </h1>
+            </p>
             <p className="text-muted-foreground max-w-xl mx-auto">
               We're finalizing billing. Drop your email to lock in early-access
               pricing — your account is created instantly so you can preview the
@@ -141,7 +145,11 @@ export default function TierWaitlist() {
               </div>
             ) : (
               <form onSubmit={handleSubmit} className="space-y-3">
+                <Label htmlFor="waitlist-email" className="sr-only">
+                  Email address
+                </Label>
                 <Input
+                  id="waitlist-email"
                   type="email"
                   placeholder="you@example.com"
                   value={email}
