@@ -574,21 +574,59 @@ serve(async (req) => {
     // (the real failure mode — a partially broken write path, not a dead one).
     try {
       const since7 = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString();
-      const [{ count: closed7d }, { count: enabledUsers }, { count: closedPositions7d }] = await Promise.all([
+      const since30 = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString();
+      const [
+        { count: closed7d },
+        { count: enabledUsers },
+        { count: closedPositions7d },
+        { count: opened30d },
+        { count: opened30dWithSnap },
+      ] = await Promise.all([
         supabase.from("signal_outcomes").select("id", { count: "exact", head: true })
           .eq("status", "closed").gte("exit_date", since7),
         supabase.from("autotrade_settings").select("user_id", { count: "exact", head: true })
           .eq("enabled", true),
+        // SWEEP FIX: partial exits insert a PAIRED CLOSED accounting row whose
+        // exit_reason is prefixed "partial:". Those are slices, not trades, and
+        // never produce a signal_outcomes row — counting them made the leak
+        // detector cry wolf (48 of 89 closed rows were partial slices).
         supabase.from("virtual_positions").select("id", { count: "exact", head: true })
-          .eq("status", "closed").gte("closed_at", since7),
+          .eq("status", "closed").gte("closed_at", since7)
+          .not("exit_reason", "like", "partial:%"),
+        supabase.from("virtual_positions").select("id", { count: "exact", head: true })
+          .eq("opened_by", "autotrader").gte("created_at", since30),
+        supabase.from("virtual_positions").select("id", { count: "exact", head: true })
+          .eq("opened_by", "autotrader").gte("created_at", since30)
+          .not("entry_feature_snapshot", "is", null),
       ]);
       const outcomes = closed7d ?? 0;
       const positions = closedPositions7d ?? 0;
-      // Tolerance: manual closes and partial exits legitimately produce a small
-      // mismatch. Only flag when a meaningful share of exits went unrecorded.
+      // Tolerance: manual closes legitimately produce a small mismatch. Only
+      // flag when a meaningful share of full exits went unrecorded.
       const missing = positions - outcomes;
       const leaking = positions >= 5 && missing > Math.max(2, positions * 0.2);
       const starved = (enabledUsers ?? 0) > 0 && outcomes === 0;
+
+      // ── Snapshot-coverage watchdog ─────────────────────────────────────────
+      // The WS1 ensemble trains on `entry_feature_snapshot`. If entries stop
+      // persisting it, the trainer silently degrades to zero fresh rows with no
+      // error anywhere. Flag when coverage over 30d falls below 80%.
+      const openedN = opened30d ?? 0;
+      const snapN = opened30dWithSnap ?? 0;
+      const snapCoverage = openedN > 0 ? snapN / openedN : 1;
+      const snapBlind = openedN >= 5 && snapCoverage < 0.8;
+      if (snapBlind) {
+        await supabase.from("drift_detections").insert({
+          drift_kind: "pipeline",
+          metric: "entry_snapshot_coverage",
+          feature_name: "entry_feature_snapshot",
+          value: Number(snapCoverage.toFixed(3)),
+          threshold: 0.8,
+          severity: "critical",
+          window_days: 30,
+          details: { opened_30d: openedN, with_snapshot_30d: snapN },
+        });
+      }
 
       if (leaking) {
         await supabase.from("drift_detections").insert({
@@ -603,17 +641,19 @@ serve(async (req) => {
         });
       }
 
-      if (starved || leaking) {
+      if (starved || leaking || snapBlind) {
         await recordHeartbeat(
           "learning-loop", startedAt, "degraded",
           starved
             ? `ALERT: ${enabledUsers} enabled autotrader(s) but 0 closed outcomes in 7d — learning pipeline may be starved`
-            : `ALERT: ${positions} positions closed in 7d but only ${outcomes} outcome rows written (${missing} missing) — exit logging is leaking`,
+            : leaking
+            ? `ALERT: ${positions} full exits in 7d but only ${outcomes} outcome rows written (${missing} missing) — exit logging is leaking`
+            : `ALERT: only ${snapN}/${openedN} entries in 30d carry an entry_feature_snapshot (${(snapCoverage * 100).toFixed(0)}%) — ensemble trainer is going blind`,
         );
       } else {
         await recordHeartbeat(
           "learning-loop", startedAt, "ok",
-          `closed7d=${outcomes} closedPositions7d=${positions} enabledAutotraders=${enabledUsers ?? 0}`,
+          `closed7d=${outcomes} fullExits7d=${positions} snapshotCoverage30d=${(snapCoverage * 100).toFixed(0)}% enabledAutotraders=${enabledUsers ?? 0}`,
         );
       }
     } catch (wdErr) {
