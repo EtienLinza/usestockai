@@ -101,7 +101,11 @@ export default function Pricing() {
 
             <div className="flex items-center justify-center gap-3 mt-8">
               <span className={!annual ? "text-foreground text-sm" : "text-muted-foreground text-sm"}>Monthly</span>
-              <Switch checked={annual} onCheckedChange={setAnnual} />
+              <Switch
+                checked={annual}
+                onCheckedChange={setAnnual}
+                aria-label="Toggle annual billing pricing"
+              />
               <span className={annual ? "text-foreground text-sm" : "text-muted-foreground text-sm"}>Annual</span>
               <Badge variant="outline" className="text-[10px] bg-primary/10 text-primary border-primary/30">2 months free</Badge>
             </div>
