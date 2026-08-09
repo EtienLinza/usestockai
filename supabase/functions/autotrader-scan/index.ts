@@ -3961,12 +3961,41 @@ async function executeEntry(
   const fillPrice = live.price;
   const isLong = e.decision !== "SHORT";
   const stopATRMult = e.atr > 0 ? Math.abs(e.price - e.hardStop) / e.atr : 2;
-  const hardStop = isLong
-    ? fillPrice - e.atr * stopATRMult
-    : fillPrice + e.atr * stopATRMult;
+  let stopDistLive = e.atr * stopATRMult;
 
-  const dollars = settings.starting_nav * e.kellyFraction;
-  const shares = Math.floor(dollars / fillPrice);
+  // ── SWEEP FIX #1: re-assert the stop-distance cap against the LIVE fill ──
+  // The decision-time stop was clamped to `stopCapPct` of the *signal* price.
+  // When the live quote is materially different, the same ATR distance can be
+  // a much larger % of the actual fill, which is how −14.8% / −27.8% stops got
+  // through. Re-clamp here so the % risk is bounded by the price we pay.
+  const stopCapPct = e.stopCapPct;
+  if (stopCapPct && stopCapPct > 0) {
+    const capDistLive = fillPrice * stopCapPct;
+    if (stopDistLive > capDistLive) stopDistLive = capDistLive;
+  }
+  const hardStop = isLong ? fillPrice - stopDistLive : fillPrice + stopDistLive;
+
+  const navBase = e.navForSizing && e.navForSizing > 0 ? e.navForSizing : settings.starting_nav;
+  const dollars = navBase * e.kellyFraction;
+  let shares = Math.floor(dollars / fillPrice);
+
+  // ── SWEEP FIX #2: hard dollar-risk assertion on the live fill ───────────
+  // Risk-parity sizing ran against the signal price/stop. Re-derive shares so
+  // |fill − stop| × shares can never exceed the risk budget decided upstream,
+  // no matter how the quote moved between decision and execution.
+  const riskBudget = e.riskBudgetDollars;
+  if (riskBudget && riskBudget > 0 && stopDistLive > 0) {
+    const maxSharesByRisk = Math.floor(riskBudget / stopDistLive);
+    if (maxSharesByRisk < shares) shares = maxSharesByRisk;
+    if (shares < 1) {
+      await supabase.from("autotrade_log").insert({
+        user_id: settings.user_id, ticker, action: "BLOCKED",
+        reason: `Risk assertion: live stop distance $${stopDistLive.toFixed(2)} vs $${riskBudget.toFixed(0)} risk budget sizes below 1 share`,
+        price: fillPrice, conviction: e.conviction, strategy: e.strategy, profile: e.profile,
+      });
+      return;
+    }
+  }
   if (shares < 1) return;
 
   // Direction comes directly from the signal — never parse free-form reasoning.
