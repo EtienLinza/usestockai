@@ -138,6 +138,10 @@ serve(async (req) => {
 
     // WS2 — nightly-tuned indicator thresholds (profile × market regime).
     const thresholdMap = await loadAdaptiveThresholds(supabase);
+    // Rejection-learning loop — clamped nudge to the conviction floor. Negative
+    // when the nightly audit shows the floor has been blocking winners.
+    const gateAdj = await loadGateAdjustments(supabase);
+    const floorDelta = gateDelta(gateAdj, "conviction_floor");
 
     // Load cached bars; fetch misses with bounded parallelism, pre-screen, and warm cache.
     const cache = await loadCachedBars(tickers);
