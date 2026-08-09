@@ -22,6 +22,7 @@ import { classifyRegime, upsertRegimeSnapshot } from "../_shared/regime-detector
 import { loadLatestMetaModel } from "../_shared/meta-labeler.ts";
 import { requireCronOrUser, cronSecretHeader } from "../_shared/cron-auth.ts";
 import { isMarketHoliday, etMinuteOfDay, etDayOfWeek } from "../_shared/market-calendar.ts";
+import { applyCrossSectionalGate, type RankableSignal } from "../_shared/cross-sectional-rank.ts";
 
 
 const corsHeaders = {
