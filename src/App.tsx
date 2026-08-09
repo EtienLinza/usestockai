@@ -36,6 +36,7 @@ const AiDividendStocks = lazy(() => import("./pages/guides/AiDividendStocks"));
 const AiStockSignalsExplained = lazy(() => import("./pages/guides/AiStockSignalsExplained"));
 const BacktestTradingStrategy = lazy(() => import("./pages/guides/BacktestTradingStrategy"));
 const BestAiStocksToBuyNow = lazy(() => import("./pages/guides/BestAiStocksToBuyNow"));
+const AiTradingBots = lazy(() => import("./pages/guides/AiTradingBots"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 
 const queryClient = new QueryClient();
