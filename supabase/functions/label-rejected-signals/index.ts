@@ -76,11 +76,18 @@ serve(async (req) => {
       const bars = await Promise.all(slice.map(t => fetchDailyHistory(t, "6mo").catch(() => null)));
       const updates: Array<{ id: string; row: Record<string, unknown> }> = [];
 
+      const abandonBefore = Date.now() - ABANDON_AGE_DAYS * 24 * 3600 * 1000;
+      const giveUp = (r: any) => new Date(r.created_at).getTime() < abandonBefore;
+
       slice.forEach((t, k) => {
         const d = bars[k];
         const items = byTicker.get(t)!;
         if (!d || d.close.length < 30 || !d.timestamp) {
-          items.forEach(r => { skipped++; updates.push({ id: r.id, row: { labeled_at: new Date().toISOString() } }); });
+          // Data unavailable — retry next night unless the row is ancient.
+          items.forEach(r => {
+            skipped++;
+            if (giveUp(r)) updates.push({ id: r.id, row: { labeled_at: new Date().toISOString() } });
+          });
           return;
         }
         for (const r of items) {
@@ -90,7 +97,10 @@ serve(async (req) => {
           // Find first bar strictly after created_at.
           const startIdx = d.timestamp.findIndex((ts: number) => ts * 1000 > createdMs);
           if (startIdx < 0 || startIdx + horizon >= d.close.length) {
-            skipped++; updates.push({ id: r.id, row: { labeled_at: new Date().toISOString() } });
+            // Forward window hasn't completed yet — leave unlabeled so we can
+            // price it once the bars exist. Never mark labeled on a skip.
+            skipped++;
+            if (giveUp(r)) updates.push({ id: r.id, row: { labeled_at: new Date().toISOString() } });
             continue;
           }
           const snap = (r.feature_snapshot ?? {}) as Record<string, unknown>;
