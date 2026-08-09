@@ -574,7 +574,14 @@ serve(async (req) => {
     // (the real failure mode — a partially broken write path, not a dead one).
     try {
       const since7 = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString();
-      const since30 = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString();
+      // Snapshot coverage can only be judged for entries taken AFTER the
+      // `entry_feature_snapshot` column existed (added 2026-08-07). Rows older
+      // than that are NULL by construction, not by failure — counting them
+      // would pin the watchdog to a permanent false "critical".
+      const SNAPSHOT_EPOCH = "2026-08-07T15:29:00Z";
+      const raw30 = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString();
+      const since30 = raw30 > SNAPSHOT_EPOCH ? raw30 : SNAPSHOT_EPOCH;
+
       const [
         { count: closed7d },
         { count: enabledUsers },
