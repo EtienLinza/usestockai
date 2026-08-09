@@ -737,6 +737,23 @@ function runWinExit(
   if (fired === 2 && pnlPct >= profile.takeProfitPct / 100 * 0.8) {
     return { kind: "PARTIAL_EXIT", reason: `Approaching target with ${fired} peak signals: ${firedLabels.join(" + ")}`, pct: 0.5, price: currentPrice };
   }
+  // ── Exit meta-label: "should I still be in this?" ───────────────────────
+  // Geometry says hold, but history may disagree. If this trade has already
+  // handed back most of its peak gain and the empirical grid says trades in
+  // that state rarely finish green, take what's left instead of waiting for
+  // the trail. Null grid / thin cell → pure pass-through.
+  {
+    const gb = computeGiveback(entry, newPeak, currentPrice, isLong);
+    const meta = scoreExitMeta(EXIT_META, gb.mfePct, gb.givebackFrac);
+    if (meta && gb.givebackFrac >= 0.5 && meta.pWin < EXIT_META_MIN_PWIN) {
+      return {
+        kind: "FULL_EXIT",
+        price: currentPrice,
+        reason: `Exit meta-label: gave back ${(gb.givebackFrac * 100).toFixed(0)}% of a ${gb.mfePct.toFixed(1)}% peak — only ${(meta.pWin * 100).toFixed(0)}% of ${meta.n} similar trades finished green`,
+      };
+    }
+  }
+
   return { kind: "HOLD", reason: `peak-watch (${fired}/5)`, trailingUpdate: trailing, peakUpdate: newPeak };
 }
 
