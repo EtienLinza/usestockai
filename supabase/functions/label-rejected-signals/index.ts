@@ -23,10 +23,15 @@ const corsHeaders = {
 };
 
 const MAX_ROWS = 2000;
-// Must exceed the horizon (10 trading days ≈ 14 calendar days) or every row
-// gets skipped for lack of forward bars. Previously 8 — which silently marked
-// rows labeled without ever pricing them, starving the rejection audit.
-const MIN_AGE_DAYS = 20;
+// Must exceed the horizon in trading days (10 bars ≈ 14 calendar days) or every
+// row gets skipped for lack of forward bars. 20 calendar days was too strict:
+// the whole table is younger than that on any given night, so the labeler
+// reported "nothing to label" forever. 15 days covers a 10-bar horizon plus a
+// weekend, and partial-horizon pricing below handles the rest.
+const MIN_AGE_DAYS = 15;
+// Minimum forward bars we accept when the full horizon hasn't completed.
+const MIN_FORWARD_BARS = 5;
+
 // Only give up permanently once the row is too old for the data to ever arrive.
 const ABANDON_AGE_DAYS = 60;
 
@@ -96,13 +101,18 @@ serve(async (req) => {
           const createdMs = new Date(r.created_at).getTime();
           // Find first bar strictly after created_at.
           const startIdx = d.timestamp.findIndex((ts: number) => ts * 1000 > createdMs);
-          if (startIdx < 0 || startIdx + horizon >= d.close.length) {
-            // Forward window hasn't completed yet — leave unlabeled so we can
-            // price it once the bars exist. Never mark labeled on a skip.
+          const lastIdx = d.close.length - 1;
+          const available = startIdx >= 0 ? lastIdx - startIdx : -1;
+          if (startIdx < 0 || available < MIN_FORWARD_BARS) {
+            // Not enough forward bars yet — leave unlabeled so we can price it
+            // once they exist. Never mark labeled on a skip.
             skipped++;
             if (giveUp(r)) updates.push({ id: r.id, row: { labeled_at: new Date().toISOString() } });
             continue;
           }
+          // Price against the full horizon when it has completed, otherwise
+          // against however many bars exist (≥ MIN_FORWARD_BARS).
+          const effHorizon = Math.min(horizon, available);
           const snap = (r.feature_snapshot ?? {}) as Record<string, unknown>;
           const side = snap.side === "short" ? -1 : 1;
           const atrPct = Number(snap.atr_pct) || 0.015;
@@ -111,7 +121,7 @@ serve(async (req) => {
           const targetPx = side > 0 ? entryPx * (1 + atrPct * targetMult) : entryPx * (1 - atrPct * targetMult);
 
           let hitTarget = false, hitStop = false;
-          for (let j = startIdx; j <= startIdx + horizon; j++) {
+          for (let j = startIdx; j <= startIdx + effHorizon; j++) {
             const hi = d.high[j], lo = d.low[j];
             if (side > 0) {
               if (lo <= stopPx) { hitStop = true; break; }
@@ -121,8 +131,9 @@ serve(async (req) => {
               if (lo <= targetPx) { hitTarget = true; break; }
             }
           }
-          const finalPx = d.close[startIdx + horizon];
+          const finalPx = d.close[startIdx + effHorizon];
           const rawRet = ((finalPx - entryPx) / entryPx) * 100 * side;
+
           updates.push({
             id: r.id,
             row: {

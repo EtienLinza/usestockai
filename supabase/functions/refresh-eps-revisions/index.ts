@@ -87,38 +87,76 @@ serve(async (req) => {
     }
   } catch (e) { console.warn("virtual_positions fetch err", e); }
 
-  const tickers = Array.from(universe).slice(0, HARD_CAP);
-  console.log(`refresh-eps-revisions: ${tickers.length} tickers (capped at ${HARD_CAP})`);
+  // Refresh stalest-first: skip anything already priced in the last 5 days so
+  // consecutive runs rotate through the universe within the 110s budget.
+  const freshSet = new Set<string>();
+  try {
+    const cutoff = new Date(Date.now() - 5 * 86400000).toISOString().slice(0, 10);
+    const { data: recent } = await supabase
+      .from("eps_revisions")
+      .select("ticker")
+      .gte("as_of", cutoff);
+    for (const r of (recent ?? []) as Array<{ ticker: string }>) freshSet.add(r.ticker.toUpperCase());
+  } catch (e) { console.warn("eps freshness fetch err", e); }
+
+  const tickers = Array.from(universe).filter(t => !freshSet.has(t)).slice(0, HARD_CAP);
+  console.log(`refresh-eps-revisions: ${tickers.length} stale tickers (${freshSet.size} already fresh)`);
+
 
   const fetched: EpsRevision[] = [];
-  let failStreak = 0;
+  // A `null` result usually just means "this small-cap has no analyst
+  // estimates" — that is normal coverage, not an outage. Only thrown errors
+  // (network / rate limit) count toward the abort streak; empty coverage gets
+  // a much wider tolerance. Conflating the two is what bailed this job out at
+  // ticker 3 of 256 every night since June.
+  const EMPTY_STREAK_LIMIT = 40;
+  let errStreak = 0;
+  let emptyStreak = 0;
   let degraded = false;
 
+  // Edge functions die at ~150s wall time. Flush incrementally and stop
+  // inside the budget so each nightly run persists real progress.
+  const TIME_BUDGET_MS = 110_000;
+  const FLUSH_EVERY = 25;
+  let upserted = 0;
+  let processed = 0;
+  const flush = async () => {
+    if (fetched.length === 0) return;
+    upserted += await upsertEpsRevisions(fetched.splice(0, fetched.length));
+  };
+
   for (let i = 0; i < tickers.length; i++) {
+    if (Date.now() - started > TIME_BUDGET_MS) {
+      console.log(`eps: time budget reached at ${i}/${tickers.length}`);
+      break;
+    }
     const t = tickers[i];
+    processed = i + 1;
     try {
       const rev = await getEpsRevision(t);
-      if (rev) { fetched.push(rev); failStreak = 0; }
-      else failStreak++;
+      if (rev) { fetched.push(rev); errStreak = 0; emptyStreak = 0; }
+      else { emptyStreak++; errStreak = 0; }
     } catch (e) {
       console.warn(`eps fetch ${t} threw`, e);
-      failStreak++;
+      errStreak++;
     }
-    if (failStreak >= FAIL_STREAK_LIMIT) {
+    if (fetched.length >= FLUSH_EVERY) await flush();
+    if (errStreak >= FAIL_STREAK_LIMIT || emptyStreak >= EMPTY_STREAK_LIMIT) {
       degraded = true;
-      console.warn(`eps: ${FAIL_STREAK_LIMIT} consecutive failures, exiting at ${i + 1}/${tickers.length}`);
+      console.warn(`eps: aborting at ${i + 1}/${tickers.length} (errStreak=${errStreak} emptyStreak=${emptyStreak})`);
       break;
     }
     if (i < tickers.length - 1) await sleep(REQUEST_DELAY_MS);
   }
+  await flush();
 
-  const upserted = await upsertEpsRevisions(fetched);
   const durationMs = Date.now() - started;
-  const status = degraded ? "degraded" : (fetched.length > 0 ? "ok" : "empty");
-  const notes = `attempted=${tickers.length} fetched=${fetched.length} upserted=${upserted}${degraded ? " (early exit)" : ""}`;
+  const status = degraded ? "degraded" : (upserted > 0 ? "ok" : "empty");
+  const notes = `attempted=${processed}/${tickers.length} upserted=${upserted}${degraded ? " (early exit)" : ""}`;
   await writeHeartbeat(supabase, status, notes, durationMs);
 
   return new Response(JSON.stringify({
-    ok: true, attempted: tickers.length, fetched: fetched.length, upserted, degraded, duration_ms: durationMs,
+    ok: true, attempted: processed, universe: tickers.length, upserted, degraded, duration_ms: durationMs,
   }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+
 });

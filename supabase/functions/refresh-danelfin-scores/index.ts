@@ -101,50 +101,87 @@ serve(async (req) => {
     }
   } catch (e) { console.warn("virtual_positions fetch err", e); }
 
-  // Cap to budget
-  const tickers = Array.from(universe).slice(0, HARD_CAP);
-  console.log(`refresh-danelfin-scores: ${tickers.length} tickers (capped at ${HARD_CAP})`);
+  // Only ~90 tickers fit in one 110s budget, so refresh the *stalest* first
+  // and skip anything already scored in the last 2 days. Consecutive runs then
+  // rotate through the whole universe instead of re-fetching the same head.
+  const freshSet = new Set<string>();
+  try {
+    const cutoff = new Date(Date.now() - 2 * 86400000).toISOString().slice(0, 10);
+    const { data: recent } = await supabase
+      .from("danelfin_scores")
+      .select("ticker")
+      .gte("as_of", cutoff);
+    for (const r of (recent ?? []) as Array<{ ticker: string }>) freshSet.add(r.ticker.toUpperCase());
+  } catch (e) { console.warn("danelfin freshness fetch err", e); }
+
+  const tickers = Array.from(universe).filter(t => !freshSet.has(t)).slice(0, HARD_CAP);
+  console.log(`refresh-danelfin-scores: ${tickers.length} stale tickers (${freshSet.size} already fresh)`);
+
 
   // ── Fetch loop with throttling + fail-streak guard ───────────────────────
   const fetched: Array<DanelfinScore & { ticker: string }> = [];
-  let failStreak = 0;
+  // Same distinction as the EPS job: a null is usually "no Danelfin coverage
+  // for this ticker" (US-only, large-cap biased), not an outage. Only thrown
+  // errors abort quickly.
+  const EMPTY_STREAK_LIMIT = 40;
+  let errStreak = 0;
+  let emptyStreak = 0;
   let degraded = false;
 
+
+  // Edge functions are killed at 150s of wall time, and the old code only
+  // persisted after the whole loop — so a 300-ticker run at ~1 req/s always
+  // died before writing anything. Flush incrementally and stop early.
+  const TIME_BUDGET_MS = 110_000;
+  const FLUSH_EVERY = 25;
+  let upserted = 0;
+  let processed = 0;
+  const flush = async () => {
+    if (fetched.length === 0) return;
+    upserted += await upsertDanelfinScores(fetched.splice(0, fetched.length));
+  };
+
   for (let i = 0; i < tickers.length; i++) {
+    if (Date.now() - started > TIME_BUDGET_MS) {
+      console.log(`danelfin: time budget reached at ${i}/${tickers.length}`);
+      break;
+    }
     const t = tickers[i];
+    processed = i + 1;
     try {
       const score = await getAiScore(t);
       if (score) {
         fetched.push({ ...score, ticker: t });
-        failStreak = 0;
+        errStreak = 0;
+        emptyStreak = 0;
       } else {
-        failStreak++;
+        emptyStreak++;
+        errStreak = 0;
       }
     } catch (e) {
       console.warn(`danelfin fetch ${t} threw`, e);
-      failStreak++;
+      errStreak++;
     }
-    if (failStreak >= FAIL_STREAK_LIMIT) {
+    if (fetched.length >= FLUSH_EVERY) await flush();
+    if (errStreak >= FAIL_STREAK_LIMIT || emptyStreak >= EMPTY_STREAK_LIMIT) {
       degraded = true;
-      console.warn(`danelfin: ${FAIL_STREAK_LIMIT} consecutive failures, exiting at ${i + 1}/${tickers.length}`);
+      console.warn(`danelfin: aborting at ${i + 1}/${tickers.length} (errStreak=${errStreak} emptyStreak=${emptyStreak})`);
       break;
     }
     if (i < tickers.length - 1) await sleep(REQUEST_DELAY_MS);
   }
-
-  // ── Persist ──────────────────────────────────────────────────────────────
-  const upserted = await upsertDanelfinScores(fetched);
-
+  await flush();
   const durationMs = Date.now() - started;
-  const status = degraded ? "degraded" : (fetched.length > 0 ? "ok" : "empty");
-  const notes = `attempted=${tickers.length} fetched=${fetched.length} upserted=${upserted}${degraded ? " (early exit)" : ""}`;
+  const status = degraded ? "degraded" : (upserted > 0 ? "ok" : "empty");
+  const notes = `attempted=${processed}/${tickers.length} upserted=${upserted}${degraded ? " (early exit)" : ""}`;
   await writeHeartbeat(supabase, status, notes, durationMs);
 
   return new Response(JSON.stringify({
     ok: true,
-    attempted: tickers.length,
-    fetched: fetched.length,
+    attempted: processed,
+    universe: tickers.length,
     upserted,
+
     degraded,
     duration_ms: durationMs,
   }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
