@@ -88,6 +88,7 @@ import { loadAdaptiveThresholds, resolveThresholds, type ThresholdMap } from "..
 import { loadAdaptiveExits, resolveExitParams, applyExitParams, type ExitParamMap } from "../_shared/adaptive-exits.ts";
 import { loadNewsSentiment, newsConvictionDelta, type NewsSentimentMap } from "../_shared/news-sentiment-loader.ts";
 import { loadGateAdjustments, gateDelta, type GateAdjustments } from "../_shared/gate-adjustments.ts";
+import { loadExitMetaModel, scoreExitMeta, computeGiveback, type ExitMetaModel } from "../_shared/exit-meta.ts";
 
 // WS2: nightly-tuned indicator thresholds (profile × market regime). Loaded
 // once per scan; null/empty → engine defaults (cold-start safe).
