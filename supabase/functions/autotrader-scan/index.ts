@@ -1397,7 +1397,9 @@ async function runEntryDecision(
   // crashing together) without forcing the user to enforce sector caps manually.
   if (openTickers.length > 0) {
     const corr = maxCorrelationToBook(ticker, openTickers);
-    const corrCutoff = adaptiveCorrThreshold(marketRegime, macro?.stressed ? "elevated" : "normal");
+    const corrCutoff = Math.max(0.55, Math.min(0.95,
+      adaptiveCorrThreshold(marketRegime, macro?.stressed ? "elevated" : "normal")
+      - gateDelta(GATE_ADJ, "correlation_threshold")));
     if (corr && corr.maxAbs >= corrCutoff) {
       return {
         kind: "BLOCKED",
@@ -1407,19 +1409,22 @@ async function runEntryDecision(
   }
 
   // ── Earnings blackout (Phase 1 #4) ──────────────────────────────────────
-  // Block new entries within 3 trading days of an earnings release. Earnings
+  // Block new entries within N trading days of an earnings release. Earnings
   // gaps routinely violate ATR-based stops and our signal engine has no edge
   // through binary fundamental events. Cached 6h via Finnhub free tier.
-  // Crypto / non-equity tickers return null and pass through.
+  // Crypto / non-equity tickers return null and pass through. N defaults to 3
+  // and is nudged by the nightly rejection audit within ±1/+2 days.
   try {
     const days = await getEarningsBlackoutDays(ticker);
-    if (days !== null && days <= 3) {
+    const blackoutDays = Math.max(1, Math.min(5, 3 + gateDelta(GATE_ADJ, "earnings_blackout_days")));
+    if (days !== null && days <= blackoutDays) {
       return {
         kind: "BLOCKED",
         reason: `Earnings blackout: report in ~${days} trading day${days === 1 ? "" : "s"} — gap risk too high for systematic entry`,
       };
     }
   } catch (_e) { /* non-fatal — never block scan on earnings API hiccup */ }
+
 
   const danelfin = danelfinMap?.get(ticker.toUpperCase()) ?? null;
   const epsRev = epsRevisionMap?.get(ticker.toUpperCase()) ?? null;
