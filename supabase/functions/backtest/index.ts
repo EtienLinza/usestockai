@@ -1906,6 +1906,21 @@ serve(async (req) => {
       }
     }
 
+    // Strict ticker validation — symbols are interpolated into upstream data URLs.
+    const TICKER_RE = /^[A-Z]{1,10}(-[A-Z]{2,4})?$/;
+    if (!Array.isArray(tickers) || tickers.length === 0) {
+      return new Response(JSON.stringify({ error: "tickers must be a non-empty array" }), {
+        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    tickers = tickers.map((t) => String(t ?? "").trim().toUpperCase());
+    const invalidTickers = tickers.filter((t) => !TICKER_RE.test(t));
+    if (invalidTickers.length > 0) {
+      return new Response(JSON.stringify({ error: `Invalid tickers: ${invalidTickers.slice(0, 10).join(", ")}` }), {
+        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     console.log(`Backtest request: ${tickers.length} tickers from ${startYear} to ${endYear}, mode=${strategyMode}, tier=${tier}, universe=${universe ?? "explicit"}`);
 
     // Tier feature gates

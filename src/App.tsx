@@ -23,6 +23,7 @@ const Backtest = lazy(() => import("./pages/Backtest"));
 
 const Settings = lazy(() => import("./pages/Settings"));
 const SecurityActivity = lazy(() => import("./pages/SecurityActivity"));
+const OAuthConsent = lazy(() => import("./pages/OAuthConsent"));
 const Security = lazy(() => import("./pages/Security"));
 const AutotraderLog = lazy(() => import("./pages/AutotraderLog"));
 const Terms = lazy(() => import("./pages/Terms"));
@@ -66,6 +67,8 @@ const App = () => (
                   
                   <Route path="/settings" element={<Settings />} />
                   <Route path="/settings/activity" element={<SecurityActivity />} />
+                  <Route path="/.lovable/oauth/consent" element={<OAuthConsent />} />
+
                   <Route path="/security" element={<Security />} />
                   <Route path="/autotrader-log" element={<AutotraderLog />} />
                   <Route path="/terms" element={<Terms />} />

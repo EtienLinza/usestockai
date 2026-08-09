@@ -1,9 +1,13 @@
 {
   "version": 1,
-  "sdk_version": "0.20.0",
+  "sdk_version": "0.26.1",
   "path": "/functions/v1/mcp",
   "auth": {
-    "type": "none"
+    "type": "oauth",
+    "issuer": "https://mgudiiwaadvmpznpfmsg.supabase.co/auth/v1",
+    "accepted_audiences": [
+      "authenticated"
+    ]
   },
   "mcp": {
     "server": {
