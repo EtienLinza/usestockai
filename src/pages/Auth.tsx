@@ -36,10 +36,14 @@ const Auth = () => {
   const [mfaCode, setMfaCode] = useState("");
   const [mfaVerifying, setMfaVerifying] = useState(false);
 
+  // Same-origin relative path only — prevents open-redirects.
+  const rawNext = searchParams.get("next");
+  const nextPath = rawNext && /^\/(?!\/)/.test(rawNext) ? rawNext : "/dashboard";
+
   const finishLogin = async () => {
     await logAudit("login", undefined, { method: mfaFactorId ? "password+totp" : "password" });
     toast.success("Welcome back!");
-    navigate("/dashboard");
+    navigate(nextPath);
   };
 
   const maybeChallengeMfa = async (): Promise<boolean> => {
