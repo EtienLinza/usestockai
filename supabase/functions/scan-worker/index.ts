@@ -302,7 +302,7 @@ serve(async (req) => {
         const baselineFloor = strategy === "mean_reversion" ? 60 : 65;
         const adaptiveFloor = weights.regimeFloors[regime]?.floor ?? baselineFloor;
         const macroAdj = macro ? macroFloorAdjust(macro.score) : 0;
-        const minConviction = Math.max(50, Math.min(90, adaptiveFloor + macroAdj));
+        const minConviction = Math.max(50, Math.min(90, adaptiveFloor + macroAdj + floorDelta));
         if (conviction < minConviction) {
           pushReject(ticker, "below_conviction_floor",
             { ...snapBase, floor: minConviction },
