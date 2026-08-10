@@ -559,7 +559,10 @@ serve(async (req) => {
       ticker_calibration,
       notes: {
         universeAvgReturnPct: universeAvgRet,
+        counterfactualRows: cfMerged,
+        counterfactualWeight: CF_WEIGHT,
         strategy_regime_tilts,
+
         walkForwardWeights: { "0-30d": 2.0, "30-60d": 1.5, "60-90d": 1.0 },
         tickerCalibrationCount: Object.keys(ticker_calibration).length,
         ensemble: ensemble
