@@ -303,6 +303,16 @@ serve(async (req) => {
           vol_ratio: sig.volRatio ?? null,
         };
 
+        // Earnings blackout — logged with full conviction + snapshot so the
+        // nightly labeler can measure what we gave up by sitting out.
+        if (inBlackout) {
+          pushReject(ticker, "earnings_blackout", { ...snapBase, last_close: entryPx },
+            { strategy, raw_conviction: sig.conviction, calibrated_conviction: conviction, entry_price: entryPx, horizon_bars: 10 });
+          continue;
+        }
+
+
+
         // Pre-market overnight-gap gating + bonus.
         if (mode === "premarket" && gapMap.has(ticker)) {
           const gap = gapMap.get(ticker)!;            // signed fraction (e.g. 0.025 = +2.5%)
