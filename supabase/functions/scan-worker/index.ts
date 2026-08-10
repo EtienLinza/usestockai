@@ -224,11 +224,13 @@ serve(async (req) => {
     for (const ticker of tickers) {
       const data = cache.get(ticker);
       if (!data || data.close.length < 200) continue;
-      if (blackoutSet.has(ticker)) {
-        const px = data.close[data.close.length - 1];
-        pushReject(ticker, "earnings_blackout", { last_close: px, entry_price: px, side: "long" });
-        continue;
-      }
+      // NOTE: earnings-blackout rejections are emitted AFTER the signal is
+      // evaluated (see below) so the counterfactual row carries conviction +
+      // the full feature snapshot. Bailing here produced ~5.4k unlearnable
+      // rows — the single biggest hole in the calibration training set.
+      const inBlackout = blackoutSet.has(ticker);
+
+
 
       try {
         const danelfin = danelfinScores[ticker.toUpperCase()] ?? null;
