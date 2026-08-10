@@ -52,10 +52,10 @@ serve(async (req) => {
       .from("rejected_signals")
       .select("id, ticker, entry_price, horizon_bars, feature_snapshot, created_at")
       .is("labeled_at", null)
-      .not("entry_price", "is", null)
       .lte("created_at", cutoffIso)
       .order("created_at", { ascending: true })
       .limit(MAX_ROWS);
+
     if (error) throw error;
 
     const pending = rows ?? [];
@@ -76,8 +76,14 @@ serve(async (req) => {
     let labeled = 0, skipped = 0;
     const tickers = [...byTicker.keys()];
     const PAR = 8;
+    // Wall-clock budget: with the null-price filter removed the backlog is
+    // thousands of rows, so stop cleanly and let the next nightly run continue.
+    const BUDGET_MS = 110_000;
+    let stoppedEarly = false;
     for (let i = 0; i < tickers.length; i += PAR) {
+      if (Date.now() - started > BUDGET_MS) { stoppedEarly = true; break; }
       const slice = tickers.slice(i, i + PAR);
+
       const bars = await Promise.all(slice.map(t => fetchDailyHistory(t, "6mo").catch(() => null)));
       const updates: Array<{ id: string; row: Record<string, unknown> }> = [];
 
@@ -100,7 +106,6 @@ serve(async (req) => {
           return;
         }
         for (const r of items) {
-          const entryPx = Number(r.entry_price);
           const horizon = Math.max(1, Math.min(60, Number(r.horizon_bars ?? 10)));
           const createdDay = String(r.created_at).slice(0, 10);
           // First bar strictly after the rejection date.
@@ -119,7 +124,20 @@ serve(async (req) => {
           // against however many bars exist (≥ MIN_FORWARD_BARS).
           const effHorizon = Math.min(horizon, available);
           const snap = (r.feature_snapshot ?? {}) as Record<string, unknown>;
+          // Entry-price fallback chain: stored price → snapshot → the close on
+          // the rejection day itself. Requiring a stored entry_price left ~94%
+          // of the table (mostly earnings blackouts) permanently unlabelable.
+          let entryPx = Number(r.entry_price);
+          if (!Number.isFinite(entryPx) || entryPx <= 0) entryPx = Number(snap.entry_price);
+          if (!Number.isFinite(entryPx) || entryPx <= 0) entryPx = Number(snap.last_close);
+          if (!Number.isFinite(entryPx) || entryPx <= 0) entryPx = Number(d.close[Math.max(0, startIdx - 1)]);
+          if (!Number.isFinite(entryPx) || entryPx <= 0) {
+            skipped++;
+            if (giveUp(r)) updates.push({ id: r.id, row: { labeled_at: new Date().toISOString() } });
+            continue;
+          }
           const side = snap.side === "short" ? -1 : 1;
+
           const atrPct = Number(snap.atr_pct) || 0.015;
           const stopMult = 1.0, targetMult = 1.0;
           const stopPx = side > 0 ? entryPx * (1 - atrPct * stopMult) : entryPx * (1 + atrPct * stopMult);
@@ -142,12 +160,14 @@ serve(async (req) => {
           updates.push({
             id: r.id,
             row: {
+              entry_price: Math.round(entryPx * 10000) / 10000,
               counterfactual_return_pct: Math.round(rawRet * 100) / 100,
               counterfactual_hit_target: hitTarget,
               counterfactual_hit_stop: hitStop,
               labeled_at: new Date().toISOString(),
             },
           });
+
           labeled++;
         }
       });
@@ -160,7 +180,8 @@ serve(async (req) => {
 
     const ms = Date.now() - started;
     await recordHeartbeat("label-rejected-signals", started, "ok",
-      `labeled=${labeled} skipped=${skipped} tickers=${tickers.length}`);
+      `labeled=${labeled} skipped=${skipped} tickers=${tickers.length}${stoppedEarly ? " (budget hit — backlog continues next run)" : ""}`);
+
     return new Response(JSON.stringify({ ok: true, labeled, skipped, tickers: tickers.length, ms }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });

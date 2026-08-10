@@ -115,6 +115,35 @@ serve(async (req) => {
     // Pre-compute time weight per row so all aggregates use walk-forward decay.
     const tw = rows.map(r => timeWeight(r.entry_date, nowMs));
 
+    // ─── 0) COUNTERFACTUAL SET (labeled rejections) ───────────────────────
+    // Closed trades alone are a starvation diet (tens of rows), so the
+    // conviction curve never becomes monotonic. Labeled rejections carry a
+    // calibrated conviction AND a realized forward return — exactly the
+    // (score, outcome) pair calibration needs. They're pseudo-observations
+    // (no fills, no slippage), so they enter the curve down-weighted and are
+    // never used for tilts, floors or exit calibration.
+    const CF_WEIGHT = 0.35;
+    let cfRows: Array<{ conviction: number; ret: number }> = [];
+    try {
+      const { data: cf } = await supabase
+        .from("rejected_signals")
+        .select("calibrated_conviction, raw_conviction, counterfactual_return_pct, created_at")
+        .not("labeled_at", "is", null)
+        .not("counterfactual_return_pct", "is", null)
+        .gte("created_at", sinceISO)
+        .limit(20000);
+      cfRows = (cf ?? [])
+        .map((r: any) => ({
+          conviction: Number(r.calibrated_conviction ?? r.raw_conviction),
+          ret: Number(r.counterfactual_return_pct),
+        }))
+        .filter(r => Number.isFinite(r.conviction) && r.conviction > 0 && Number.isFinite(r.ret));
+      console.log(`calibrate-weights: ${cfRows.length} counterfactual rows merged (w=${CF_WEIGHT})`);
+    } catch (e) {
+      console.warn("counterfactual load failed", e);
+    }
+
+
     // ─── 1) CALIBRATION CURVE (walk-forward weighted) ─────────────────────
     // Each trade's contribution to its bucket is scaled by `timeWeight`
     // (recent trades count 2× and 1.5× vs the oldest tier). The MIN_SAMPLES
@@ -156,6 +185,20 @@ serve(async (req) => {
       fine[lo].wCount += tw[i];
       if (Number(r.realized_pnl_pct ?? 0) > 0) fine[lo].wWins += tw[i];
     });
+    // Merge counterfactuals at CF_WEIGHT. They count toward `raw` so a bucket
+    // backed only by rejections can still anchor the curve, but their weight
+    // keeps a real fill worth ~3 pseudo-observations.
+    let cfMerged = 0;
+    for (const r of cfRows) {
+      const c = Math.max(0, Math.min(100, r.conviction));
+      const lo = Math.floor(c / 5) * 5;
+      fine[lo] ??= { wWins: 0, wCount: 0, raw: 0 };
+      fine[lo].raw++;
+      fine[lo].wCount += CF_WEIGHT;
+      if (r.ret > 0) fine[lo].wWins += CF_WEIGHT;
+      cfMerged++;
+    }
+
     // Bayesian shrinkage toward the bucket-expected win-rate. With small N,
     // the empirical win-rate is noisy; shrink with pseudo-count K=10 so an
     // 8-sample bucket is ~44% empirical / 56% prior, while a 50-sample
@@ -243,10 +286,21 @@ serve(async (req) => {
         ? Math.max(-1, Math.min(1, (avgRet - universeAvgRet) / Math.max(0.5, Math.abs(universeAvgRet))))
         : Math.max(-1, Math.min(1, avgRet / 2));
       const score = (winRateZ + retZ) / 2;
-      const benched = avgRet < 0;
-      const tMin = benched ? TILT_MIN : TILT_MIN_WIDE;
-      const tMax = benched ? TILT_MAX : TILT_MAX_WIDE;
-      const scale = benched ? 0.15 : 0.25;
+      // Benching a strategy stops it trading entirely, so it needs more than
+      // a 15-trade coin flip. Require a real sample AND a materially negative
+      // expectancy — a −0.1% average over 16 trades is noise, not an edge
+      // failure, and benching on it froze the whole engine for weeks.
+      const BENCH_MIN_SAMPLES = 30;
+      const BENCH_EXPECTANCY = -0.5;
+      const benched = v.raw >= BENCH_MIN_SAMPLES && avgRet < BENCH_EXPECTANCY;
+      const softNegative = avgRet < 0;
+
+      // Soft-negative strategies keep the narrow tilt band (less capital) but
+      // are NOT frozen out — they still need to trade to generate the data
+      // that would clear or confirm them.
+      const tMin = softNegative ? TILT_MIN : TILT_MIN_WIDE;
+      const tMax = softNegative ? TILT_MAX : TILT_MAX_WIDE;
+      const scale = softNegative ? 0.15 : 0.25;
       const multiplier = Math.max(tMin, Math.min(tMax, 1 + score * scale));
       strategy_tilts[k] = { multiplier, winRate, avgReturn: avgRet, avgWin, avgLoss, count: v.raw };
       strategy_expectancy[k] = {
@@ -254,8 +308,11 @@ serve(async (req) => {
         winRate: Number(winRate.toFixed(1)),
         count: v.raw,
         benched,
-        floorBoost: benched ? 10 : 0,
+        // Scale the freeze with sample confidence: a 30-trade bench nudges the
+        // floor +5, a 60-trade bench applies the full +10.
+        floorBoost: benched ? (v.raw >= 60 ? 10 : 5) : 0,
       };
+
     }
 
     // ─── 2b) STRATEGY × REGIME TILTS (walk-forward weighted) ───────────────
@@ -395,14 +452,30 @@ serve(async (req) => {
       // Overall regime hit rate also gates: if the regime is brutal, raise floor more.
       const overallWins = regRows.filter(r => Number(r.realized_pnl_pct ?? 0) > 0).length;
       const overallWR = (overallWins / regRows.length) * 100;
-      if (overallWR < 40) chosenFloor = Math.max(chosenFloor, 75);
-      else if (overallWR < 50) chosenFloor = Math.max(chosenFloor, 70);
+      // Harsh escalation (75/70) locks the engine out of a regime entirely, so
+      // it needs a real sample behind it. Under 40 trades we cap the raise at
+      // DEFAULT_FLOOR+5 — enough to be selective, not enough to stop trading.
+      const HARSH_MIN_SAMPLES = 40;
+      if (regRows.length >= HARSH_MIN_SAMPLES) {
+        if (overallWR < 40) chosenFloor = Math.max(chosenFloor, 75);
+        else if (overallWR < 50) chosenFloor = Math.max(chosenFloor, 70);
+      } else if (overallWR < 50) {
+        chosenFloor = Math.max(chosenFloor, Math.min(DEFAULT_FLOOR + 5, FLOOR_MAX));
+      }
+
+      // Small-sample ceiling: with <40 closed trades in a regime the sweep can
+      // land on an 80 floor off a handful of lucky high-conviction wins, which
+      // silently halts entries. Cap the raise until the sample earns it.
+      if (regRows.length < HARSH_MIN_SAMPLES) {
+        chosenFloor = Math.min(chosenFloor, DEFAULT_FLOOR + 5);
+      }
 
       regimeFloors[regime] = {
         floor: Math.max(FLOOR_MIN, Math.min(FLOOR_MAX, chosenFloor)),
         sampleWinRate: chosenWR || overallWR,
         count: regRows.length,
       };
+
     }
 
     // ─── 4) ENSEMBLE (M2 — 4-model stack + iso/Platt + regime-aware meta) ──
@@ -486,7 +559,10 @@ serve(async (req) => {
       ticker_calibration,
       notes: {
         universeAvgReturnPct: universeAvgRet,
+        counterfactualRows: cfMerged,
+        counterfactualWeight: CF_WEIGHT,
         strategy_regime_tilts,
+
         walkForwardWeights: { "0-30d": 2.0, "30-60d": 1.5, "60-90d": 1.0 },
         tickerCalibrationCount: Object.keys(ticker_calibration).length,
         ensemble: ensemble
