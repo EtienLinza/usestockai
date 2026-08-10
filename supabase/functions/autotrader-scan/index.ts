@@ -831,7 +831,12 @@ function runLossExit(
       const barsHeldForTrim = businessDaysSince(pos.created_at);
       const peak = pos.peak_price != null ? Number(pos.peak_price) : entry;
       const peakR = entryAtr > 0 ? (peak - entry) / entryAtr : 0;
-      if (barsHeldForTrim >= 1 && peakR < peakRFloor) {
+      // ≥2 sessions: trimming after a single session (or same-day) fired on
+      // ~1/3 of positions before the thesis had any chance to develop, which
+      // is a large part of why the average win collapsed. Give every entry a
+      // full session plus one before calling it "unproven".
+      if (barsHeldForTrim >= 2 && peakR < peakRFloor) {
+
         return {
           kind: "PARTIAL_EXIT",
           reason: `Overnight-gap trim (adaptive ${(trimPct * 100).toFixed(0)}%): ATR ${(atrPctEntry * 100).toFixed(1)}% unproven after ${barsHeldForTrim}b (peak +${peakR.toFixed(2)}R < ${peakRFloor.toFixed(2)}R)`,
