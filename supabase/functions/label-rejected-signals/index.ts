@@ -180,7 +180,8 @@ serve(async (req) => {
 
     const ms = Date.now() - started;
     await recordHeartbeat("label-rejected-signals", started, "ok",
-      `labeled=${labeled} skipped=${skipped} tickers=${tickers.length}`);
+      `labeled=${labeled} skipped=${skipped} tickers=${tickers.length}${stoppedEarly ? " (budget hit — backlog continues next run)" : ""}`);
+
     return new Response(JSON.stringify({ ok: true, labeled, skipped, tickers: tickers.length, ms }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
