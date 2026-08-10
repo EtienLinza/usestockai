@@ -185,6 +185,20 @@ serve(async (req) => {
       fine[lo].wCount += tw[i];
       if (Number(r.realized_pnl_pct ?? 0) > 0) fine[lo].wWins += tw[i];
     });
+    // Merge counterfactuals at CF_WEIGHT. They count toward `raw` so a bucket
+    // backed only by rejections can still anchor the curve, but their weight
+    // keeps a real fill worth ~3 pseudo-observations.
+    let cfMerged = 0;
+    for (const r of cfRows) {
+      const c = Math.max(0, Math.min(100, r.conviction));
+      const lo = Math.floor(c / 5) * 5;
+      fine[lo] ??= { wWins: 0, wCount: 0, raw: 0 };
+      fine[lo].raw++;
+      fine[lo].wCount += CF_WEIGHT;
+      if (r.ret > 0) fine[lo].wWins += CF_WEIGHT;
+      cfMerged++;
+    }
+
     // Bayesian shrinkage toward the bucket-expected win-rate. With small N,
     // the empirical win-rate is noisy; shrink with pseudo-count K=10 so an
     // 8-sample bucket is ~44% empirical / 56% prior, while a 50-sample
