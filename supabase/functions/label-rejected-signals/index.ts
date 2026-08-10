@@ -154,12 +154,14 @@ serve(async (req) => {
           updates.push({
             id: r.id,
             row: {
+              entry_price: Math.round(entryPx * 10000) / 10000,
               counterfactual_return_pct: Math.round(rawRet * 100) / 100,
               counterfactual_hit_target: hitTarget,
               counterfactual_hit_stop: hitStop,
               labeled_at: new Date().toISOString(),
             },
           });
+
           labeled++;
         }
       });
