@@ -295,9 +295,12 @@ serve(async (req) => {
       const benched = v.raw >= BENCH_MIN_SAMPLES && avgRet < BENCH_EXPECTANCY;
       const softNegative = avgRet < 0;
 
-      const tMin = benched ? TILT_MIN : TILT_MIN_WIDE;
-      const tMax = benched ? TILT_MAX : TILT_MAX_WIDE;
-      const scale = benched ? 0.15 : 0.25;
+      // Soft-negative strategies keep the narrow tilt band (less capital) but
+      // are NOT frozen out — they still need to trade to generate the data
+      // that would clear or confirm them.
+      const tMin = softNegative ? TILT_MIN : TILT_MIN_WIDE;
+      const tMax = softNegative ? TILT_MAX : TILT_MAX_WIDE;
+      const scale = softNegative ? 0.15 : 0.25;
       const multiplier = Math.max(tMin, Math.min(tMax, 1 + score * scale));
       strategy_tilts[k] = { multiplier, winRate, avgReturn: avgRet, avgWin, avgLoss, count: v.raw };
       strategy_expectancy[k] = {
@@ -305,8 +308,11 @@ serve(async (req) => {
         winRate: Number(winRate.toFixed(1)),
         count: v.raw,
         benched,
-        floorBoost: benched ? 10 : 0,
+        // Scale the freeze with sample confidence: a 30-trade bench nudges the
+        // floor +5, a 60-trade bench applies the full +10.
+        floorBoost: benched ? (v.raw >= 60 ? 10 : 5) : 0,
       };
+
     }
 
     // ─── 2b) STRATEGY × REGIME TILTS (walk-forward weighted) ───────────────
