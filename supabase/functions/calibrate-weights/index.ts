@@ -452,8 +452,17 @@ serve(async (req) => {
       // Overall regime hit rate also gates: if the regime is brutal, raise floor more.
       const overallWins = regRows.filter(r => Number(r.realized_pnl_pct ?? 0) > 0).length;
       const overallWR = (overallWins / regRows.length) * 100;
-      if (overallWR < 40) chosenFloor = Math.max(chosenFloor, 75);
-      else if (overallWR < 50) chosenFloor = Math.max(chosenFloor, 70);
+      // Harsh escalation (75/70) locks the engine out of a regime entirely, so
+      // it needs a real sample behind it. Under 40 trades we cap the raise at
+      // DEFAULT_FLOOR+5 — enough to be selective, not enough to stop trading.
+      const HARSH_MIN_SAMPLES = 40;
+      if (regRows.length >= HARSH_MIN_SAMPLES) {
+        if (overallWR < 40) chosenFloor = Math.max(chosenFloor, 75);
+        else if (overallWR < 50) chosenFloor = Math.max(chosenFloor, 70);
+      } else if (overallWR < 50) {
+        chosenFloor = Math.max(chosenFloor, Math.min(DEFAULT_FLOOR + 5, FLOOR_MAX));
+      }
+
 
       regimeFloors[regime] = {
         floor: Math.max(FLOOR_MIN, Math.min(FLOOR_MAX, chosenFloor)),
