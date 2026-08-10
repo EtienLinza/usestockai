@@ -488,11 +488,28 @@ function runWinExit(
       const baseRung1 = Math.min(0.75, Math.max(0.10, profile.partialScaleOutPct ?? (1 / 3)));
       const rung1Pct = isRunner ? Math.max(0.10, baseRung1 * 0.5) : baseRung1;
       if (rung === 0 && rMult >= 1.0) {
-        // Rung 1: take `rung1Pct`, ratchet trailing to breakeven (entry)
-        const newTrail = isLong ? Math.max(trailing, entry) : Math.min(trailing, entry);
+        // Rung 1: take `rung1Pct`, then hand the runner an ATR-width trail
+        // instead of a hard breakeven snap. Snapping to entry meant the back
+        // half of every winner died at 0 on ordinary noise — the runner tail
+        // averaged nothing. The trail is the TIGHTER of {breakeven, peak −
+        // 3.5×ATR} only when ATR is unknown; when we have ATR we let it sit
+        // wherever the Chandelier says, floored by the original hard stop so
+        // the trade can never become a full-size loser after banking 1R.
+        const atrTrail = atr > 0
+          ? (isLong ? newPeak - atr * 3.5 : newPeak + atr * 3.5)
+          : null;
+        const hardFloor = pos.hard_stop_price != null ? Number(pos.hard_stop_price) : null;
+        let newTrail = isLong ? Math.max(trailing, entry) : Math.min(trailing, entry);
+        if (atrTrail !== null) {
+          // Loosen toward the ATR trail, never below the original hard stop.
+          const loosened = isLong ? Math.min(entry, atrTrail) : Math.max(entry, atrTrail);
+          newTrail = hardFloor !== null
+            ? (isLong ? Math.max(loosened, hardFloor) : Math.min(loosened, hardFloor))
+            : loosened;
+        }
         return {
           kind: "PARTIAL_EXIT",
-          reason: `R-ladder rung 1: +1R hit (${(pnlPct * 100).toFixed(1)}%), scale ${Math.round(rung1Pct * 100)}%${isRunner ? " [runner]" : ""}, trail → breakeven`,
+          reason: `R-ladder rung 1: +1R hit (${(pnlPct * 100).toFixed(1)}%), scale ${Math.round(rung1Pct * 100)}%${isRunner ? " [runner]" : ""}, trail → ${atrTrail !== null ? "3.5×ATR chandelier" : "breakeven"}`,
           pct: rung1Pct,
           price: currentPrice,
           nextRung: 1,
@@ -512,6 +529,23 @@ function runWinExit(
           trailingUpdate: newTrail,
         };
       }
+      if (rung === 2 && rMult >= 3.5) {
+        // Rung 3 (new): the ladder used to stop at +2R and leave the final
+        // sliver to the trail or the stale-sliver harvester, so the fat right
+        // tail was never actually banked. Take half of what's left at +3.5R
+        // and lock +2R underneath it.
+        const lockPx = isLong ? entry + initRisk * 2 : entry - initRisk * 2;
+        const newTrail = isLong ? Math.max(trailing, lockPx) : Math.min(trailing, lockPx);
+        return {
+          kind: "PARTIAL_EXIT",
+          reason: `R-ladder rung 3: +3.5R hit (${(pnlPct * 100).toFixed(1)}%), trail → +2R locked`,
+          pct: 0.5,
+          price: currentPrice,
+          nextRung: 3,
+          trailingUpdate: newTrail,
+        };
+      }
+
     }
   }
 
