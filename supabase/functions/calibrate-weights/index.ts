@@ -463,12 +463,19 @@ serve(async (req) => {
         chosenFloor = Math.max(chosenFloor, Math.min(DEFAULT_FLOOR + 5, FLOOR_MAX));
       }
 
+      // Small-sample ceiling: with <40 closed trades in a regime the sweep can
+      // land on an 80 floor off a handful of lucky high-conviction wins, which
+      // silently halts entries. Cap the raise until the sample earns it.
+      if (regRows.length < HARSH_MIN_SAMPLES) {
+        chosenFloor = Math.min(chosenFloor, DEFAULT_FLOOR + 5);
+      }
 
       regimeFloors[regime] = {
         floor: Math.max(FLOOR_MIN, Math.min(FLOOR_MAX, chosenFloor)),
         sampleWinRate: chosenWR || overallWR,
         count: regRows.length,
       };
+
     }
 
     // ─── 4) ENSEMBLE (M2 — 4-model stack + iso/Platt + regime-aware meta) ──
