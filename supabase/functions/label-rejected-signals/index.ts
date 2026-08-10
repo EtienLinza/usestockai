@@ -100,7 +100,6 @@ serve(async (req) => {
           return;
         }
         for (const r of items) {
-          const entryPx = Number(r.entry_price);
           const horizon = Math.max(1, Math.min(60, Number(r.horizon_bars ?? 10)));
           const createdDay = String(r.created_at).slice(0, 10);
           // First bar strictly after the rejection date.
@@ -119,7 +118,20 @@ serve(async (req) => {
           // against however many bars exist (≥ MIN_FORWARD_BARS).
           const effHorizon = Math.min(horizon, available);
           const snap = (r.feature_snapshot ?? {}) as Record<string, unknown>;
+          // Entry-price fallback chain: stored price → snapshot → the close on
+          // the rejection day itself. Requiring a stored entry_price left ~94%
+          // of the table (mostly earnings blackouts) permanently unlabelable.
+          let entryPx = Number(r.entry_price);
+          if (!Number.isFinite(entryPx) || entryPx <= 0) entryPx = Number(snap.entry_price);
+          if (!Number.isFinite(entryPx) || entryPx <= 0) entryPx = Number(snap.last_close);
+          if (!Number.isFinite(entryPx) || entryPx <= 0) entryPx = Number(d.close[Math.max(0, startIdx - 1)]);
+          if (!Number.isFinite(entryPx) || entryPx <= 0) {
+            skipped++;
+            if (giveUp(r)) updates.push({ id: r.id, row: { labeled_at: new Date().toISOString() } });
+            continue;
+          }
           const side = snap.side === "short" ? -1 : 1;
+
           const atrPct = Number(snap.atr_pct) || 0.015;
           const stopMult = 1.0, targetMult = 1.0;
           const stopPx = side > 0 ? entryPx * (1 - atrPct * stopMult) : entryPx * (1 + atrPct * stopMult);
