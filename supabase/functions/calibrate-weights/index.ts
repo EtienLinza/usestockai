@@ -286,7 +286,15 @@ serve(async (req) => {
         ? Math.max(-1, Math.min(1, (avgRet - universeAvgRet) / Math.max(0.5, Math.abs(universeAvgRet))))
         : Math.max(-1, Math.min(1, avgRet / 2));
       const score = (winRateZ + retZ) / 2;
-      const benched = avgRet < 0;
+      // Benching a strategy stops it trading entirely, so it needs more than
+      // a 15-trade coin flip. Require a real sample AND a materially negative
+      // expectancy — a −0.1% average over 16 trades is noise, not an edge
+      // failure, and benching on it froze the whole engine for weeks.
+      const BENCH_MIN_SAMPLES = 30;
+      const BENCH_EXPECTANCY = -0.5;
+      const benched = v.raw >= BENCH_MIN_SAMPLES && avgRet < BENCH_EXPECTANCY;
+      const softNegative = avgRet < 0;
+
       const tMin = benched ? TILT_MIN : TILT_MIN_WIDE;
       const tMax = benched ? TILT_MAX : TILT_MAX_WIDE;
       const scale = benched ? 0.15 : 0.25;
