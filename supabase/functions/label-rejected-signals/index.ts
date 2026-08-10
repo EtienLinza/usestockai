@@ -76,8 +76,14 @@ serve(async (req) => {
     let labeled = 0, skipped = 0;
     const tickers = [...byTicker.keys()];
     const PAR = 8;
+    // Wall-clock budget: with the null-price filter removed the backlog is
+    // thousands of rows, so stop cleanly and let the next nightly run continue.
+    const BUDGET_MS = 110_000;
+    let stoppedEarly = false;
     for (let i = 0; i < tickers.length; i += PAR) {
+      if (Date.now() - started > BUDGET_MS) { stoppedEarly = true; break; }
       const slice = tickers.slice(i, i + PAR);
+
       const bars = await Promise.all(slice.map(t => fetchDailyHistory(t, "6mo").catch(() => null)));
       const updates: Array<{ id: string; row: Record<string, unknown> }> = [];
 
