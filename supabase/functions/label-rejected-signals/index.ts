@@ -52,10 +52,10 @@ serve(async (req) => {
       .from("rejected_signals")
       .select("id, ticker, entry_price, horizon_bars, feature_snapshot, created_at")
       .is("labeled_at", null)
-      .not("entry_price", "is", null)
       .lte("created_at", cutoffIso)
       .order("created_at", { ascending: true })
       .limit(MAX_ROWS);
+
     if (error) throw error;
 
     const pending = rows ?? [];
