@@ -115,6 +115,35 @@ serve(async (req) => {
     // Pre-compute time weight per row so all aggregates use walk-forward decay.
     const tw = rows.map(r => timeWeight(r.entry_date, nowMs));
 
+    // ─── 0) COUNTERFACTUAL SET (labeled rejections) ───────────────────────
+    // Closed trades alone are a starvation diet (tens of rows), so the
+    // conviction curve never becomes monotonic. Labeled rejections carry a
+    // calibrated conviction AND a realized forward return — exactly the
+    // (score, outcome) pair calibration needs. They're pseudo-observations
+    // (no fills, no slippage), so they enter the curve down-weighted and are
+    // never used for tilts, floors or exit calibration.
+    const CF_WEIGHT = 0.35;
+    let cfRows: Array<{ conviction: number; ret: number }> = [];
+    try {
+      const { data: cf } = await supabase
+        .from("rejected_signals")
+        .select("calibrated_conviction, raw_conviction, counterfactual_return_pct, created_at")
+        .not("labeled_at", "is", null)
+        .not("counterfactual_return_pct", "is", null)
+        .gte("created_at", sinceISO)
+        .limit(20000);
+      cfRows = (cf ?? [])
+        .map((r: any) => ({
+          conviction: Number(r.calibrated_conviction ?? r.raw_conviction),
+          ret: Number(r.counterfactual_return_pct),
+        }))
+        .filter(r => Number.isFinite(r.conviction) && r.conviction > 0 && Number.isFinite(r.ret));
+      console.log(`calibrate-weights: ${cfRows.length} counterfactual rows merged (w=${CF_WEIGHT})`);
+    } catch (e) {
+      console.warn("counterfactual load failed", e);
+    }
+
+
     // ─── 1) CALIBRATION CURVE (walk-forward weighted) ─────────────────────
     // Each trade's contribution to its bucket is scaled by `timeWeight`
     // (recent trades count 2× and 1.5× vs the oldest tier). The MIN_SAMPLES
