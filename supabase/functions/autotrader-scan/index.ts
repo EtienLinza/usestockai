@@ -265,17 +265,14 @@ function maxCorrelationToBook(
 type FeatureSnapshot = Record<string, number | string | null>;
 
 /** Result of an exit evaluation (loss-side or win-side). */
-type ExitAction = {
-  kind: "HOLD" | "PARTIAL_EXIT" | "FULL_EXIT";
-  reason: string;
-  /** Fraction of the CURRENT position to close (PARTIAL_EXIT only). */
-  pct?: number;
-  price?: number;
-  /** Next R-ladder rung index to persist after a partial. */
-  nextRung?: number;
-  trailingUpdate?: number | null;
-  peakUpdate?: number | null;
-};
+type ExitAction =
+  | { kind: "HOLD"; reason: string; pct?: undefined; price?: number;
+      nextRung?: number; trailingUpdate?: number | null; peakUpdate?: number | null }
+  | { kind: "FULL_EXIT"; reason: string; price: number; pct?: number;
+      nextRung?: number; trailingUpdate?: number | null; peakUpdate?: number | null }
+  | { kind: "PARTIAL_EXIT"; reason: string; price: number; pct: number;
+      nextRung?: number; trailingUpdate?: number | null; peakUpdate?: number | null };
+
 
 /**
  * Adaptive scan cadence (minutes) for non-advanced users. Faster when the tape
