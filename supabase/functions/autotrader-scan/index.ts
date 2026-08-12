@@ -2492,6 +2492,7 @@ serve(async (req) => {
           tickerCalibration,
           scanMode,
           { shard: entryShard, shards: entryShardCount },
+          strategyExpectancy,
         );
 
         // Always write a per-scan rollup so users see the bot is alive even when
