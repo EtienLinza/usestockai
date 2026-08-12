@@ -2859,6 +2859,10 @@ async function processUser(
   tickerCalibration: Record<string, { adjust: number }>,
   scanMode: ScanMode = "all",
   entryShard: { shard: number; shards: number } = { shard: 0, shards: 1 },
+  // Strategy circuit-breaker map from calibrate-weights. Was referenced deep
+  // inside this function but never passed in → ReferenceError on every entry
+  // evaluation, which silently killed all new entries.
+  strategyExpectancy: Record<string, { expectancy: number; winRate: number; count: number; benched: boolean; floorBoost: number }> | null = null,
 ) {
   const userId = settings.user_id;
 
