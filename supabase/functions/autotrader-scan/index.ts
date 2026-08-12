@@ -264,6 +264,34 @@ function maxCorrelationToBook(
 
 type FeatureSnapshot = Record<string, number | string | null>;
 
+/** Result of an exit evaluation (loss-side or win-side). */
+type ExitAction =
+  | { kind: "HOLD"; reason: string; pct?: undefined; price?: number;
+      nextRung?: number; trailingUpdate?: number | null; peakUpdate?: number | null }
+  | { kind: "FULL_EXIT"; reason: string; price: number; pct?: number;
+      nextRung?: number; trailingUpdate?: number | null; peakUpdate?: number | null }
+  | { kind: "PARTIAL_EXIT"; reason: string; price: number; pct: number;
+      nextRung?: number; trailingUpdate?: number | null; peakUpdate?: number | null };
+
+
+/**
+ * Adaptive scan cadence (minutes) for non-advanced users. Faster when the tape
+ * is volatile (stops/targets move quicker), slower when it's calm — this is the
+ * only lever on scan cost, so calm regimes must not burn invocations.
+ */
+function algoScanIntervalMinutes(
+  macro: MacroContext | null,
+  vixRegime: string | null | undefined,
+): number {
+  switch (vixRegime) {
+    case "crisis": return 5;
+    case "elevated": return 10;
+    case "calm": return 20;
+    default: return macro ? 15 : 15;
+  }
+}
+
+
 type EntryAction =
   | { kind: "ENTER"; conviction: number; kellyFraction: number; price: number;
       strategy: string; profile: StockProfile; atr: number; hardStop: number;
