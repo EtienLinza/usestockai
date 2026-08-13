@@ -168,6 +168,7 @@ interface Position {
   hard_stop_price: number | null;
   entry_atr: number | null;
   entry_conviction: number | null;
+  entry_feature_snapshot?: Record<string, unknown> | string | null;
   entry_strategy: string | null;
   entry_profile: string | null;
   entry_weekly_alloc: number | null;
