@@ -64,6 +64,7 @@ import {
 } from "../_shared/adaptive-context.ts";
 import { evaluateScanHealth, type TickerHealth } from "../_shared/circuit-breaker.ts";
 import { fetchDailyHistory } from "../_shared/yahoo-history.ts";
+import { loadCachedBars, upsertBars } from "../_shared/bars-cache.ts";
 import { getQuoteWithFallback, getEarningsBlackoutDays, getSector, getBeta } from "../_shared/finnhub.ts";
 import { recordHeartbeat } from "../_shared/heartbeat.ts";
 import { applyIsotonicCalibration, type IsotonicAnchor } from "../_shared/calibration.ts";
@@ -133,11 +134,28 @@ async function fetchYahooData(ticker: string): Promise<DataSet | null> {
 
 async function batchFetch(tickers: string[]): Promise<void> {
   const need = tickers.filter(t => !priceCache.has(t));
-  for (let i = 0; i < need.length; i += 5) {
-    const batch = need.slice(i, i + 5);
-    await Promise.all(batch.map(fetchYahooData));
-    if (i + 5 < need.length) await new Promise(r => setTimeout(r, 200));
+  if (need.length === 0) return;
+
+  // The scanner used to bypass the shared cache and hit Yahoo for every
+  // watchlist name every five minutes. Yahoo throttling then left most names
+  // with null history (observed live: only 4/31 evaluable), so no entry could
+  // reach the decision engine. Prime from the daily cache first and only fetch
+  // true misses/stale rows from the upstream provider.
+  const cached = await loadCachedBars(need);
+  for (const [ticker, data] of cached.entries()) priceCache.set(ticker, data);
+
+  const misses = need.filter(t => !priceCache.has(t));
+  const warmed: { ticker: string; bars: DataSet }[] = [];
+  for (let i = 0; i < misses.length; i += 5) {
+    const batch = misses.slice(i, i + 5);
+    const results = await Promise.all(batch.map(fetchYahooData));
+    batch.forEach((ticker, index) => {
+      const bars = results[index];
+      if (bars && bars.close.length >= 200) warmed.push({ ticker, bars });
+    });
+    if (i + 5 < misses.length) await new Promise(r => setTimeout(r, 200));
   }
+  if (warmed.length > 0) await upsertBars(warmed);
 }
 
 // ── Live intraday quote — Finnhub primary, Yahoo fallback ──────────────────
@@ -2935,7 +2953,16 @@ async function processUser(
   const entryCandidatesForShard = watchlist.filter(t =>
     entryShard.shards <= 1 || tickerShard(t, entryShard.shards) === entryShard.shard
   );
-  const entryTickers = entryCandidatesForShard.slice(0, MAX_ENTRY_TICKERS_PER_INVOCATION);
+  // Rotate the bounded window instead of permanently evaluating the first 30
+  // symbols. The old fixed slice starved every ticker after index 29 forever.
+  const scanOrdinal = Math.floor(Date.now() / (5 * 60_000));
+  const windowStart = entryCandidatesForShard.length > MAX_ENTRY_TICKERS_PER_INVOCATION
+    ? (scanOrdinal * MAX_ENTRY_TICKERS_PER_INVOCATION) % entryCandidatesForShard.length
+    : 0;
+  const rotatedCandidates = windowStart === 0
+    ? entryCandidatesForShard
+    : [...entryCandidatesForShard.slice(windowStart), ...entryCandidatesForShard.slice(0, windowStart)];
+  const entryTickers = rotatedCandidates.slice(0, MAX_ENTRY_TICKERS_PER_INVOCATION);
   const tickersForThisMode = scanMode === "exits"
     ? positions.map(p => p.ticker.toUpperCase())
     : scanMode === "entries"
