@@ -18,8 +18,8 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-cron-secret",
 };
 
-const PARALLELISM = 20;
-const TIME_BUDGET_MS = 100_000; // stay well under the worker wall-clock limit
+const PARALLELISM = 12;
+const TIME_BUDGET_MS = 40_000; // stay well under the worker CPU limit
 
 function freshCutoff(): string {
   return new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
