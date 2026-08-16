@@ -59,7 +59,13 @@ serve(async (req) => {
     console.log(`prefetch-bars: universe=${universe.length} fresh=${fresh.size} stale=${stale.length}`);
 
     let written = 0, failed = 0, processed = 0;
-    const work = stale.slice(0, MAX_PER_RUN);
+    // Rotate the window each run so a block of permanently-unfetchable tickers
+    // (delisted / foreign / <200 bars) can't starve the rest of the backlog.
+    const offset = stale.length > 0
+      ? (Math.floor(Date.now() / (10 * 60_000)) * MAX_PER_RUN) % stale.length
+      : 0;
+    const work = [...stale.slice(offset), ...stale.slice(0, offset)].slice(0, MAX_PER_RUN);
+
     for (let i = 0; i < work.length; i += PARALLELISM) {
       if (Date.now() - startedAt > TIME_BUDGET_MS) {
         console.log(`prefetch-bars: time budget reached at ${processed}/${work.length}`);
