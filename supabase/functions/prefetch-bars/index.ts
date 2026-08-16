@@ -58,12 +58,13 @@ serve(async (req) => {
     console.log(`prefetch-bars: universe=${universe.length} fresh=${fresh.size} stale=${stale.length}`);
 
     let written = 0, failed = 0, processed = 0;
-    for (let i = 0; i < stale.length; i += PARALLELISM) {
+    const work = stale.slice(0, MAX_PER_RUN);
+    for (let i = 0; i < work.length; i += PARALLELISM) {
       if (Date.now() - startedAt > TIME_BUDGET_MS) {
-        console.log(`prefetch-bars: time budget reached at ${processed}/${stale.length}`);
+        console.log(`prefetch-bars: time budget reached at ${processed}/${work.length}`);
         break;
       }
-      const slice = stale.slice(i, i + PARALLELISM);
+      const slice = work.slice(i, i + PARALLELISM);
       const results = await Promise.all(slice.map(async (t) => {
         const bars = await fetchDailyHistory(t, "1y");
         return bars && bars.close.length >= 200 ? { ticker: t, bars } : null;
@@ -73,6 +74,7 @@ serve(async (req) => {
       failed += slice.length - ok.length;
       written += await upsertBars(ok);
     }
+
 
     const remaining = Math.max(0, stale.length - processed);
     const elapsed = Date.now() - startedAt;
