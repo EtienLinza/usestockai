@@ -19,7 +19,8 @@ const corsHeaders = {
 };
 
 const PARALLELISM = 12;
-const TIME_BUDGET_MS = 40_000; // stay well under the worker CPU limit
+const TIME_BUDGET_MS = 40_000; // wall-clock guard
+const MAX_PER_RUN = 400;   // hard work cap per invocation (CPU limit guard)
 
 function freshCutoff(): string {
   return new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
