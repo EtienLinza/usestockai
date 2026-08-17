@@ -30,8 +30,11 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-cron-secret",
 };
 
-const WORKER_CHUNK = 80;        // tickers per worker call
-const WORKER_PARALLELISM = 10;  // concurrent worker invocations
+// Keep each worker comfortably below the edge runtime CPU ceiling. Signal
+// evaluation is indicator-heavy and an 80-name chunk repeatedly died with
+// WORKER_RESOURCE_LIMIT, silently discarding whole sections of the universe.
+const WORKER_CHUNK = 12;        // tickers per worker call
+const WORKER_PARALLELISM = 8;   // safe small workers, enough throughput for full universe
 const DISCOVERY_TTL_MS = 24 * 60 * 60 * 1000;
 
 serve(async (req) => {
@@ -422,12 +425,13 @@ serve(async (req) => {
         // outcome and corrupt the calibration win-rate. Drop them.
         const outcomeRowsClean = outcomeRows.filter(r => r.signal_id != null);
         if (outcomeRowsClean.length > 0) {
-          // Upsert on the unique partial index (signal_id WHERE status='open')
-          // so retries after partial writes don't create duplicates.
+          // PostgREST cannot target a partial unique index through onConflict
+          // (42P10). We already excluded open tickers above, so insert directly;
+          // a concurrent duplicate is harmless and is caught by the index.
           const { error: oe } = await supabase
             .from("signal_outcomes")
-            .upsert(outcomeRowsClean, { onConflict: "signal_id", ignoreDuplicates: true });
-          if (oe) console.error("signal_outcomes upsert err:", oe);
+            .insert(outcomeRowsClean);
+          if (oe && oe.code !== "23505") console.error("signal_outcomes insert err:", oe);
         }
       } catch (e) { console.error("outcome logging:", e); }
     }
