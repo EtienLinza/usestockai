@@ -1184,12 +1184,12 @@ serve(async (req) => {
         // outcome and corrupt calibration win-rate. Drop them.
         const outcomeRowsClean = outcomeRows.filter(r => r.signal_id != null);
         if (outcomeRowsClean.length > 0) {
-          // Upsert on the unique partial index (signal_id WHERE status='open')
-          // so retries don't create duplicate open outcomes for the same signal.
+          // PostgREST cannot target this partial unique index via onConflict.
+          // Existing open tickers were filtered above; the index catches races.
           const { error: outErr } = await supabase
             .from("signal_outcomes")
-            .upsert(outcomeRowsClean, { onConflict: "signal_id", ignoreDuplicates: true });
-          if (outErr) console.error("Failed to log signal outcomes:", outErr);
+            .insert(outcomeRowsClean);
+          if (outErr && outErr.code !== "23505") console.error("Failed to log signal outcomes:", outErr);
           else console.log(`Logged ${outcomeRowsClean.length} new outcome rows`);
         }
       } catch (e) {
