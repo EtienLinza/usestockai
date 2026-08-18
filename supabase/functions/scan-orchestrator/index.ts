@@ -23,6 +23,7 @@ import { loadLatestMetaModel } from "../_shared/meta-labeler.ts";
 import { requireCronOrUser, cronSecretHeader } from "../_shared/cron-auth.ts";
 import { isMarketHoliday, etMinuteOfDay, etDayOfWeek } from "../_shared/market-calendar.ts";
 import { applyCrossSectionalGate, type RankableSignal } from "../_shared/cross-sectional-rank.ts";
+import { explainSignal } from "../_shared/signal-explainer.ts";
 
 
 const corsHeaders = {
@@ -366,6 +367,35 @@ serve(async (req) => {
 
     // ─── 5. Persist signals + outcomes ────────────────────────────────────
     allSignals.sort((a, b) => (b.qualityScore ?? 0) - (a.qualityScore ?? 0));
+
+    // Generate explanations only after every quantitative/fundamental model
+    // and the cross-sectional rank gate have selected the final signals. This
+    // preserves a core product feature without spending gateway calls or worker
+    // time narrating candidates that will be rejected downstream.
+    if (allSignals.length > 0) {
+      const explanations = await Promise.all(allSignals.slice(0, 20).map((s) =>
+        explainSignal({
+          ticker: s.ticker,
+          side: s.signal_type === "BUY" ? "long" : "short",
+          conviction: s.confidence,
+          strategy: s.strategy,
+          profile: s.stock_profile,
+          regime: s.regime,
+          weeklyBias: s.weekly_bias,
+          factors: {
+            danelfin_delta: s.danelfin_delta ?? 0,
+            danelfin_score: s.danelfin_score ?? null,
+            eps_revision_delta: s.eps_revision_delta ?? 0,
+            eps_revision_score: s.eps_revision_score ?? null,
+            meta_score: s.meta_score ?? null,
+            target_allocation: s.target_allocation,
+          },
+        }).catch(() => "")
+      ));
+      allSignals.slice(0, 20).forEach((s, i) => {
+        s.explanation = explanations[i] || s.explanation || "";
+      });
+    }
 
     if (allSignals.length > 0) {
       // Live signals expire 24h out; premarket signals expire at end of today's
