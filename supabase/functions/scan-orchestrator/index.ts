@@ -34,8 +34,11 @@ const corsHeaders = {
 // Keep each worker comfortably below the edge runtime CPU ceiling. Signal
 // evaluation is indicator-heavy and an 80-name chunk repeatedly died with
 // WORKER_RESOURCE_LIMIT, silently discarding whole sections of the universe.
-const WORKER_CHUNK = 12;        // tickers per worker call
-const WORKER_PARALLELISM = 8;   // safe small workers, enough throughput for full universe
+// Keep the full universe and full signal math, but avoid bursting enough
+// function calls to trip the platform limiter. Twenty names remains far below
+// the old 80-name CPU-failure batch; three concurrent workers smooths the load.
+const WORKER_CHUNK = 20;
+const WORKER_PARALLELISM = 3;
 const DISCOVERY_TTL_MS = 24 * 60 * 60 * 1000;
 
 serve(async (req) => {
