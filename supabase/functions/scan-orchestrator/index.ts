@@ -413,6 +413,10 @@ serve(async (req) => {
         source: mode === "premarket" ? "premarket" : "live",
         explanation: s.explanation ?? null,
         meta_score: s.meta_score ?? null,
+        // `ticker` is the upsert key, so Postgres otherwise preserves the date
+        // from the first time this symbol ever fired. AutoTrader uses freshness
+        // to discover candidates; refresh the timestamp on every confirmed scan.
+        created_at: new Date().toISOString(),
       }));
       const { data: upserted, error } = await supabase
         .from("live_signals").upsert(rows, { onConflict: "ticker" }).select("id, ticker");
