@@ -2565,26 +2565,20 @@ serve(async (req) => {
           .update(timestampPatch)
           .eq("user_id", rawSettings.user_id);
       } catch (err) {
-        // Circuit breaker trips abort the current scan only — no global state is
-        // persisted. Each scan re-evaluates Yahoo health from scratch; if the
-        // upstream issue is resolved, the next scan proceeds normally.
+        // A bad ticker set must isolate only this user. Returning here used to
+        // abort the entire cron invocation and starve every user after the one
+        // that tripped the data-health breaker.
         if (err instanceof CircuitBreakerTrippedError) {
-          // Log a row to every active user's autotrade_log so it surfaces in their UI.
-          const allUserIds = settingsRows.map(s => (s as Settings).user_id);
-          if (allUserIds.length > 0) {
-            await supabase.from("autotrade_log").insert(
-              allUserIds.map(uid => ({
-                user_id: uid,
-                ticker: "SCAN",
-                action: "CIRCUIT_BREAKER",
-                reason: err.verdictReason,
-              })),
-            );
-          }
+          await supabase.from("autotrade_log").insert({
+            user_id: rawSettings.user_id,
+            ticker: "SCAN",
+            action: "CIRCUIT_BREAKER",
+            reason: err.verdictReason,
+          });
+          summary.errors++;
           (summary as Record<string, unknown>).circuit_breaker_tripped = true;
           (summary as Record<string, unknown>).reason = err.verdictReason;
-          await recordHeartbeat("autotrader-scan", startedAt, "error", `circuit-breaker: ${err.verdictReason}`);
-          return json({ status: "circuit-breaker-tripped", reason: err.verdictReason, summary });
+          continue;
         }
         console.error(`User ${rawSettings.user_id} failed:`, err);
         summary.errors++;
@@ -2682,13 +2676,14 @@ async function syncAutoWatchlist(
   const floor = Math.max(50, Math.min(95, settings.auto_watchlist_consideration_floor ?? 60));
   const staleDays = Math.max(1, Math.min(90, settings.auto_watchlist_stale_days ?? 14));
 
-  // Pull recent qualifying live signals (last 24h)
-  const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  // Pull currently-active ranked signals. `expires_at` is the authoritative
+  // freshness marker: an upserted ticker historically kept its original
+  // `created_at`, so a valid signal could be renewed every scan yet remain
+  // invisible behind a last-24-hours created_at filter.
   const { data: sigs, error: sErr } = await supabase
     .from("live_signals")
     .select("ticker, confidence, created_at")
     .gte("confidence", floor)
-    .gte("created_at", since)
     .gt("expires_at", new Date().toISOString())
     .order("confidence", { ascending: false });
   if (sErr) {
