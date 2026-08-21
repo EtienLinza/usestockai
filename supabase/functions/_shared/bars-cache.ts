@@ -30,9 +30,26 @@ function staleCutoff(): string {
   return new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 }
 
+// Age distribution of the rows returned by the last loadCachedBars() call.
+// Exposed so callers (the scanner) can log/heartbeat cache staleness instead
+// of silently pre-screening on yesterday's bar.
+export interface CacheAgeStats {
+  byDate: Record<string, number>;
+  newestAsOf: string | null;
+  oldestAsOf: string | null;
+  sameDayPct: number; // share of rows stamped with today's UTC date
+}
+
+let lastAgeStats: CacheAgeStats = { byDate: {}, newestAsOf: null, oldestAsOf: null, sameDayPct: 0 };
+
+export function lastCacheAgeStats(): CacheAgeStats {
+  return lastAgeStats;
+}
+
 export async function loadCachedBars(tickers: string[]): Promise<Map<string, DataSet>> {
   if (tickers.length === 0) return new Map();
   const out = new Map<string, DataSet>();
+  const byDate: Record<string, number> = {};
   // Chunk to avoid URL length limits
   const CHUNK = 200;
   const cutoff = staleCutoff();
@@ -46,8 +63,19 @@ export async function loadCachedBars(tickers: string[]): Promise<Map<string, Dat
     if (error) { console.warn("bars-cache load err", error.message); continue; }
     for (const row of data ?? []) {
       out.set((row as any).ticker, (row as any).bars as DataSet);
+      const d = String((row as any).as_of ?? "");
+      if (d) byDate[d] = (byDate[d] ?? 0) + 1;
     }
   }
+  const dates = Object.keys(byDate).sort();
+  const today = todayUtc();
+  const total = out.size || 1;
+  lastAgeStats = {
+    byDate,
+    newestAsOf: dates.length ? dates[dates.length - 1] : null,
+    oldestAsOf: dates.length ? dates[0] : null,
+    sameDayPct: Math.round(((byDate[today] ?? 0) / total) * 100),
+  };
   return out;
 }
 
