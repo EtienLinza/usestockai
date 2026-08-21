@@ -21,6 +21,12 @@ const corsHeaders = {
 const PARALLELISM = 12;
 const TIME_BUDGET_MS = 40_000; // wall-clock guard
 const MAX_PER_RUN = 400;   // hard work cap per invocation (CPU limit guard)
+// After this many consecutive failed fetches a symbol is quarantined. The
+// universe carries a long tail of delisted / foreign / <200-bar tickers that
+// can never succeed; the old time-derived rotation kept landing on them and
+// burned the whole per-run budget without writing anything.
+const FAILURE_QUARANTINE_AT = 3;
+const QUARANTINE_DAYS = 30;
 
 function freshCutoff(): string {
   return new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
