@@ -484,7 +484,8 @@ serve(async (req) => {
       signals_found: allSignals.length, processed: survivors.length,
     });
     await recordHeartbeat("scan-orchestrator", heartbeatStart, "ok",
-      `signals=${allSignals.length} survivors=${survivors.length}/${allTickers.length} ${elapsed}ms`);
+      `signals=${allSignals.length} survivors=${survivors.length}/${allTickers.length} ` +
+      `cache=${cacheAge.newestAsOf ?? "none"}/${cacheAge.sameDayPct}%same-day ${elapsed}ms`);
 
     return new Response(JSON.stringify({
       ok: true, runId,
