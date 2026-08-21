@@ -1729,6 +1729,30 @@ export type Database = {
         }
         Relationships: []
       }
+      ticker_fetch_failures: {
+        Row: {
+          consecutive_failures: number
+          last_failure_at: string
+          quarantined_until: string | null
+          ticker: string
+          updated_at: string
+        }
+        Insert: {
+          consecutive_failures?: number
+          last_failure_at?: string
+          quarantined_until?: string | null
+          ticker: string
+          updated_at?: string
+        }
+        Update: {
+          consecutive_failures?: number
+          last_failure_at?: string
+          quarantined_until?: string | null
+          ticker?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       upgrade_waitlist: {
         Row: {
           billing_cycle: string
