@@ -15,7 +15,7 @@ import {
   discoverTickers, computeMacroRegime, fetchSectorMomentum, preScreen,
   type MacroRegime, type SectorMomentum,
 } from "../_shared/scan-pipeline.ts";
-import { loadCachedBars } from "../_shared/bars-cache.ts";
+import { loadCachedBars, lastCacheAgeStats } from "../_shared/bars-cache.ts";
 import { loadDanelfinScores } from "../_shared/danelfin.ts";
 import { loadEpsRevisions } from "../_shared/eps-revisions.ts";
 import { classifyRegime, upsertRegimeSnapshot } from "../_shared/regime-detector.ts";
@@ -208,7 +208,12 @@ serve(async (req) => {
       if (preScreen(data)) survivors.push(t);
       else prescreenRejected++;
     }
+    const cacheAge = lastCacheAgeStats();
     console.log(`pre-screen: hit=${cacheHit} survivors=${survivors.length} rejected=${prescreenRejected} misses-deferred=${allTickers.length - cacheHit}`);
+    // Cache age matters: the pre-screen's gap/range rejects are only correct
+    // when the cached bar is the current session's. A frozen survivor count
+    // across runs is the symptom of a cache stuck on a prior day.
+    console.log(`bar-cache age: newest=${cacheAge.newestAsOf} oldest=${cacheAge.oldestAsOf} same-day=${cacheAge.sameDayPct}%`, cacheAge.byDate);
 
     // Fire-and-forget: warm the cache for next run (don't await).
     try {
