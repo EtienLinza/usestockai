@@ -48,12 +48,17 @@ serve(async (req) => {
 
   try {
     const cutoffIso = new Date(Date.now() - MIN_AGE_DAYS * 24 * 3600 * 1000).toISOString();
+    // Newest-first. The calibrator only benefits from counterfactuals that
+    // describe the gates as they behave *now*; an oldest-first sweep spent the
+    // whole nightly budget on an ancient backlog and left every rejection from
+    // the past week unlabeled, which is exactly what starved conviction
+    // recalibration.
     const { data: rows, error } = await supabase
       .from("rejected_signals")
       .select("id, ticker, entry_price, horizon_bars, feature_snapshot, created_at")
       .is("labeled_at", null)
       .lte("created_at", cutoffIso)
-      .order("created_at", { ascending: true })
+      .order("created_at", { ascending: false })
       .limit(MAX_ROWS);
 
     if (error) throw error;

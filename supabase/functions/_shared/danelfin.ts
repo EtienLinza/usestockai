@@ -41,6 +41,14 @@ export function isDanelfinConfigured(): boolean {
 const cache = new Map<string, { value: DanelfinScore | null; cachedAt: number }>();
 const TTL_MS = 24 * 60 * 60 * 1000;
 
+// Plan-quota tripwire. A 401/402/429 is NOT "this ticker has no coverage" —
+// it means every subsequent request in this run will fail too. Callers poll
+// this so they can abort instead of burning a 110s budget on guaranteed
+// failures (the nightly refresh was doing 40 doomed requests per run).
+let quotaExhausted = false;
+export function isDanelfinQuotaExhausted(): boolean { return quotaExhausted; }
+export function resetDanelfinQuotaFlag(): void { quotaExhausted = false; }
+
 function toNum(v: unknown): number | null {
   if (typeof v === "number" && Number.isFinite(v)) return v;
   if (typeof v === "string") {
