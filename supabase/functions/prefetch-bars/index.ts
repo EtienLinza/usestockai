@@ -146,11 +146,14 @@ serve(async (req) => {
 
     const remaining = Math.max(0, stale.length - processed);
     const elapsed = Date.now() - startedAt;
-    const msg = `wrote=${written} failed=${failed} remaining=${remaining} universe=${universe.length} ${elapsed}ms`;
+    const msg = `wrote=${written} failed=${failed} quarantined=${quarantined.size} remaining=${remaining} universe=${universe.length} ${elapsed}ms`;
     console.log("prefetch-bars done:", msg);
     await recordHeartbeat("prefetch-bars", startedAt, remaining > 0 ? "degraded" : "ok", msg);
     return new Response(
-      JSON.stringify({ ok: true, written, failed, remaining, universe: universe.length, elapsed }),
+      JSON.stringify({
+        ok: true, written, failed, remaining,
+        quarantined: quarantined.size, universe: universe.length, elapsed,
+      }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   } catch (e) {
