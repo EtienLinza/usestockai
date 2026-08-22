@@ -8,7 +8,7 @@
 // ============================================================================
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
-import { getAiScore, isDanelfinConfigured, upsertDanelfinScores, type DanelfinScore } from "../_shared/danelfin.ts";
+import { getAiScore, isDanelfinConfigured, isDanelfinQuotaExhausted, upsertDanelfinScores, type DanelfinScore } from "../_shared/danelfin.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -141,6 +141,7 @@ serve(async (req) => {
     upserted += await upsertDanelfinScores(fetched.splice(0, fetched.length));
   };
 
+  let quotaHit = false;
   for (let i = 0; i < tickers.length; i++) {
     if (Date.now() - started > TIME_BUDGET_MS) {
       console.log(`danelfin: time budget reached at ${i}/${tickers.length}`);
@@ -163,6 +164,13 @@ serve(async (req) => {
       errStreak++;
     }
     if (fetched.length >= FLUSH_EVERY) await flush();
+    // Plan quota / auth failure: every remaining request would fail too. Bail
+    // on the first one instead of spending the whole budget on 429s.
+    if (isDanelfinQuotaExhausted()) {
+      quotaHit = true;
+      console.warn(`danelfin: plan quota or auth failure at ${i + 1}/${tickers.length} — aborting run`);
+      break;
+    }
     if (errStreak >= FAIL_STREAK_LIMIT || emptyStreak >= EMPTY_STREAK_LIMIT) {
       degraded = true;
       console.warn(`danelfin: aborting at ${i + 1}/${tickers.length} (errStreak=${errStreak} emptyStreak=${emptyStreak})`);
@@ -172,8 +180,10 @@ serve(async (req) => {
   }
   await flush();
   const durationMs = Date.now() - started;
-  const status = degraded ? "degraded" : (upserted > 0 ? "ok" : "empty");
-  const notes = `attempted=${processed}/${tickers.length} upserted=${upserted}${degraded ? " (early exit)" : ""}`;
+  const status = quotaHit ? "quota_exhausted" : (degraded ? "degraded" : (upserted > 0 ? "ok" : "empty"));
+  const notes = quotaHit
+    ? `attempted=${processed}/${tickers.length} upserted=${upserted} — Danelfin API plan quota/auth rejected the request (HTTP 401/402/429). Scores are stale until the plan is renewed; the Danelfin conviction overlay contributes 0 in the meantime.`
+    : `attempted=${processed}/${tickers.length} upserted=${upserted}${degraded ? " (early exit)" : ""}`;
   await writeHeartbeat(supabase, status, notes, durationMs);
 
   return new Response(JSON.stringify({
