@@ -3815,13 +3815,45 @@ async function processUser(
     });
   }
 
-  for (const p of pending) {
-    if (p.kind !== "blocked") continue;
-    summary.blocked++;
-    userSummary.blocked++;
-    await supabase.from("autotrade_log").insert({
-      user_id: userId, ticker: p.ticker, action: "BLOCKED", reason: p.decision.reason,
-    });
+  // BLOCKED log hysteresis. The same ticker gets re-evaluated and re-rejected
+  // by the same gate on every scan (e.g. an ATR% ceiling missed by 0.13 pts,
+  // 47 identical rows in 48h), which drowns real blocks in the user's log.
+  // Suppress a repeat when the same ticker + same gate class was already
+  // logged in the recent window; the decision itself is unchanged.
+  const blockedPending = pending.filter((p) => p.kind === "blocked");
+  if (blockedPending.length > 0) {
+    const BLOCK_LOG_DEDUP_MS = 6 * 60 * 60 * 1000;
+    // Coarse gate class = leading words of the reason, before the numbers.
+    const gateClass = (reason: string) =>
+      reason.replace(/[\d.,%+\-—()/]+/g, " ").replace(/\s+/g, " ").trim().slice(0, 60);
+
+    const recentBlocks = new Set<string>();
+    try {
+      const { data } = await supabase
+        .from("autotrade_log")
+        .select("ticker, reason")
+        .eq("user_id", userId)
+        .eq("action", "BLOCKED")
+        .gte("created_at", new Date(Date.now() - BLOCK_LOG_DEDUP_MS).toISOString())
+        .limit(500);
+      for (const r of (data ?? []) as Array<{ ticker: string; reason: string | null }>) {
+        recentBlocks.add(`${r.ticker}|${gateClass(r.reason ?? "")}`);
+      }
+    } catch (_) { /* dedup is best-effort; never block the scan on it */ }
+
+    let suppressed = 0;
+    for (const p of blockedPending) {
+      if (p.kind !== "blocked") continue;
+      summary.blocked++;
+      userSummary.blocked++;
+      const key = `${p.ticker}|${gateClass(p.decision.reason)}`;
+      if (recentBlocks.has(key)) { suppressed++; continue; }
+      recentBlocks.add(key);
+      await supabase.from("autotrade_log").insert({
+        user_id: userId, ticker: p.ticker, action: "BLOCKED", reason: p.decision.reason,
+      });
+    }
+    if (suppressed > 0) console.log(`autotrader-scan: suppressed ${suppressed} duplicate BLOCKED log rows`);
   }
 
   for (const p of pending) {
