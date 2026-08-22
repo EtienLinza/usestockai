@@ -82,8 +82,12 @@ export async function getAiScore(ticker: string): Promise<DanelfinScore | null> 
     clearTimeout(timer);
 
     if (!r.ok) {
-      // 401/402/429 are common with free tier — silently return null.
-      if (r.status !== 401 && r.status !== 402 && r.status !== 429) {
+      // 401/402/429 = key/plan/quota problem, not a per-ticker coverage gap.
+      // Trip the run-wide flag so batch callers stop immediately.
+      if (r.status === 401 || r.status === 402 || r.status === 429) {
+        if (!quotaExhausted) console.warn(`danelfin quota/auth tripwire → HTTP ${r.status} (aborting batch)`);
+        quotaExhausted = true;
+      } else {
         console.warn(`danelfin ${t} → HTTP ${r.status}`);
       }
       cache.set(t, { value: null, cachedAt: Date.now() });
