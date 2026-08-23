@@ -1,0 +1,77 @@
+// Curated ticker universe used for programmatic /stocks/:ticker/ai-forecast pages
+// and for sitemap generation. Keep this list bounded — one static page per entry.
+
+export interface SeoTicker {
+  symbol: string;
+  name: string;
+  sector: string;
+}
+
+export const SEO_TICKERS: SeoTicker[] = [
+  { symbol: "AAPL", name: "Apple Inc.", sector: "Technology" },
+  { symbol: "MSFT", name: "Microsoft Corporation", sector: "Technology" },
+  { symbol: "NVDA", name: "NVIDIA Corporation", sector: "Semiconductors" },
+  { symbol: "GOOGL", name: "Alphabet Inc.", sector: "Communication Services" },
+  { symbol: "AMZN", name: "Amazon.com, Inc.", sector: "Consumer Discretionary" },
+  { symbol: "META", name: "Meta Platforms, Inc.", sector: "Communication Services" },
+  { symbol: "TSLA", name: "Tesla, Inc.", sector: "Consumer Discretionary" },
+  { symbol: "AMD", name: "Advanced Micro Devices, Inc.", sector: "Semiconductors" },
+  { symbol: "AVGO", name: "Broadcom Inc.", sector: "Semiconductors" },
+  { symbol: "NFLX", name: "Netflix, Inc.", sector: "Communication Services" },
+  { symbol: "JPM", name: "JPMorgan Chase & Co.", sector: "Financials" },
+  { symbol: "BAC", name: "Bank of America Corporation", sector: "Financials" },
+  { symbol: "V", name: "Visa Inc.", sector: "Financials" },
+  { symbol: "MA", name: "Mastercard Incorporated", sector: "Financials" },
+  { symbol: "BRK-B", name: "Berkshire Hathaway Inc.", sector: "Financials" },
+  { symbol: "UNH", name: "UnitedHealth Group Incorporated", sector: "Healthcare" },
+  { symbol: "JNJ", name: "Johnson & Johnson", sector: "Healthcare" },
+  { symbol: "LLY", name: "Eli Lilly and Company", sector: "Healthcare" },
+  { symbol: "PFE", name: "Pfizer Inc.", sector: "Healthcare" },
+  { symbol: "MRK", name: "Merck & Co., Inc.", sector: "Healthcare" },
+  { symbol: "XOM", name: "Exxon Mobil Corporation", sector: "Energy" },
+  { symbol: "CVX", name: "Chevron Corporation", sector: "Energy" },
+  { symbol: "WMT", name: "Walmart Inc.", sector: "Consumer Staples" },
+  { symbol: "COST", name: "Costco Wholesale Corporation", sector: "Consumer Staples" },
+  { symbol: "PG", name: "The Procter & Gamble Company", sector: "Consumer Staples" },
+  { symbol: "KO", name: "The Coca-Cola Company", sector: "Consumer Staples" },
+  { symbol: "PEP", name: "PepsiCo, Inc.", sector: "Consumer Staples" },
+  { symbol: "HD", name: "The Home Depot, Inc.", sector: "Consumer Discretionary" },
+  { symbol: "MCD", name: "McDonald's Corporation", sector: "Consumer Discretionary" },
+  { symbol: "NKE", name: "NIKE, Inc.", sector: "Consumer Discretionary" },
+  { symbol: "DIS", name: "The Walt Disney Company", sector: "Communication Services" },
+  { symbol: "CRM", name: "Salesforce, Inc.", sector: "Technology" },
+  { symbol: "ORCL", name: "Oracle Corporation", sector: "Technology" },
+  { symbol: "ADBE", name: "Adobe Inc.", sector: "Technology" },
+  { symbol: "INTC", name: "Intel Corporation", sector: "Semiconductors" },
+  { symbol: "MU", name: "Micron Technology, Inc.", sector: "Semiconductors" },
+  { symbol: "QCOM", name: "QUALCOMM Incorporated", sector: "Semiconductors" },
+  { symbol: "TSM", name: "Taiwan Semiconductor Manufacturing Company", sector: "Semiconductors" },
+  { symbol: "ARM", name: "Arm Holdings plc", sector: "Semiconductors" },
+  { symbol: "PLTR", name: "Palantir Technologies Inc.", sector: "Technology" },
+  { symbol: "SHOP", name: "Shopify Inc.", sector: "Technology" },
+  { symbol: "UBER", name: "Uber Technologies, Inc.", sector: "Industrials" },
+  { symbol: "ABNB", name: "Airbnb, Inc.", sector: "Consumer Discretionary" },
+  { symbol: "COIN", name: "Coinbase Global, Inc.", sector: "Financials" },
+  { symbol: "SOFI", name: "SoFi Technologies, Inc.", sector: "Financials" },
+  { symbol: "SQ", name: "Block, Inc.", sector: "Financials" },
+  { symbol: "PYPL", name: "PayPal Holdings, Inc.", sector: "Financials" },
+  { symbol: "BA", name: "The Boeing Company", sector: "Industrials" },
+  { symbol: "CAT", name: "Caterpillar Inc.", sector: "Industrials" },
+  { symbol: "GE", name: "GE Aerospace", sector: "Industrials" },
+  { symbol: "F", name: "Ford Motor Company", sector: "Consumer Discretionary" },
+  { symbol: "GM", name: "General Motors Company", sector: "Consumer Discretionary" },
+  { symbol: "RIVN", name: "Rivian Automotive, Inc.", sector: "Consumer Discretionary" },
+  { symbol: "LCID", name: "Lucid Group, Inc.", sector: "Consumer Discretionary" },
+  { symbol: "T", name: "AT&T Inc.", sector: "Communication Services" },
+  { symbol: "VZ", name: "Verizon Communications Inc.", sector: "Communication Services" },
+  { symbol: "SPY", name: "SPDR S&P 500 ETF Trust", sector: "Index ETF" },
+  { symbol: "QQQ", name: "Invesco QQQ Trust", sector: "Index ETF" },
+  { symbol: "IWM", name: "iShares Russell 2000 ETF", sector: "Index ETF" },
+  { symbol: "BTC-USD", name: "Bitcoin", sector: "Crypto" },
+  { symbol: "ETH-USD", name: "Ethereum", sector: "Crypto" },
+  { symbol: "SOL-USD", name: "Solana", sector: "Crypto" },
+];
+
+export const SEO_TICKER_MAP: Record<string, SeoTicker> = Object.fromEntries(
+  SEO_TICKERS.map((t) => [t.symbol, t]),
+);
