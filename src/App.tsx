@@ -89,6 +89,16 @@ const App = () => (
                   <Route path="/guides/backtest-trading-strategy" element={<BacktestTradingStrategy />} />
                   <Route path="/guides/best-ai-stocks-to-buy-now" element={<BestAiStocksToBuyNow />} />
                   <Route path="/guides/ai-trading-bots" element={<AiTradingBots />} />
+                  <Route path="/ai-stock-trading" element={<AiStockTrading />} />
+                  <Route path="/performance" element={<Performance />} />
+                  <Route path="/stocks" element={<StocksIndex />} />
+                  <Route path="/stocks/:ticker/ai-forecast" element={<TickerForecast />} />
+                  <Route path="/guides" element={<GuidesIndex />} />
+                  <Route path="/guides/does-ai-stock-trading-work" element={<DoesAiStockTradingWork />} />
+                  <Route path="/guides/ai-stock-trading-for-beginners" element={<AiStockTradingForBeginners />} />
+                  <Route path="/guides/ai-stock-trading-software" element={<AiStockTradingSoftware />} />
+                  <Route path="/guides/how-accurate-are-ai-stock-predictions" element={<HowAccurateAreAiStockPredictions />} />
+                  <Route path="/guides/ai-vs-human-traders" element={<AiVsHumanTraders />} />
 
                   <Route path="*" element={<NotFound />} />
                 </Routes>
