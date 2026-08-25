@@ -498,10 +498,12 @@ const Landing = () => {
           </motion.div>
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {[
-              { to: "/guides/ai-dividend-stocks", title: "AI Dividend Stocks", desc: "Screen SCHD, JEPI & dividend aristocrats with AI conviction scoring and backtesting." },
-              { to: "/guides/ai-stock-signals-explained", title: "AI Stock Signals Explained", desc: "How conviction scoring, calibration, and regime detection actually work under the hood." },
+              { to: "/ai-stock-trading", title: "AI Stock Trading: Complete Guide", desc: "How model-driven engines scan, score, size and exit trades — and how to evaluate one honestly." },
+              { to: "/guides/ai-trading-bots", title: "AI Trading Bots", desc: "How automated execution works, and how to tell a real edge from marketing." },
+              { to: "/guides/does-ai-stock-trading-work", title: "Does AI Stock Trading Work?", desc: "The evidence-based answer: realistic win rates, failure modes, and how to test it yourself." },
+              { to: "/guides/ai-stock-trading-for-beginners", title: "AI Stock Trading for Beginners", desc: "A jargon-free vocabulary and a 90-day plan before risking real capital." },
               { to: "/guides/backtest-trading-strategy", title: "How to Backtest a Strategy", desc: "The institutional playbook: Sharpe, Sortino, walk-forward, and Monte Carlo stress tests." },
-              { to: "/guides/best-ai-stocks-to-buy-now", title: "Best AI Stocks to Buy Now", desc: "NVDA, MSFT, GOOGL, META, AMD & TSMC — evaluated with AI conviction, not headline hype." },
+              { to: "/guides", title: "All Guides", desc: "The full learning hub: signals, accuracy, software selection, AI vs human traders, and more." },
             ].map((g) => (
               <Link key={g.to} to={g.to}>
                 <Card className="glass-card p-6 h-full hover:border-primary/30 transition-colors group">

@@ -30,11 +30,17 @@ export const Footer = () => {
             © {new Date().getFullYear()} StockAI. Paper trading & market research.
           </p>
           <nav className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-xs">
-            <Link to="/guides/ai-dividend-stocks" className="text-muted-foreground hover:text-foreground transition-colors">
+            <Link to="/guides" className="text-muted-foreground hover:text-foreground transition-colors">
               Guides
             </Link>
-            <Link to="/guides/ai-trading-bots" className="text-muted-foreground hover:text-foreground transition-colors">
-              AI Trading Bots
+            <Link to="/ai-stock-trading" className="text-muted-foreground hover:text-foreground transition-colors">
+              AI Stock Trading
+            </Link>
+            <Link to="/stocks" className="text-muted-foreground hover:text-foreground transition-colors">
+              Forecasts
+            </Link>
+            <Link to="/performance" className="text-muted-foreground hover:text-foreground transition-colors">
+              Track Record
             </Link>
             <Link to="/pricing" className="text-muted-foreground hover:text-foreground transition-colors">
               Pricing
