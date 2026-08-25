@@ -7,9 +7,23 @@ StockAI is a research and paper-trading platform — not financial advice. It co
 ## Pages
 
 - [Home](/): Product overview, live signal counts, and feature summary.
+- [AI Stock Trading — Complete Guide](/ai-stock-trading): How model-driven engines scan, score, size, and exit trades; how to evaluate a platform honestly.
+- [Guides Hub](/guides): All learning content on AI stock trading, signals, and backtesting.
+- [Track Record](/performance): Live signal feed with conviction, regimes, and the methodology StockAI measures itself on.
+- [Stock Forecasts by Ticker](/stocks): Per-ticker AI forecast pages (e.g. /stocks/AAPL/ai-forecast) with live signal stance, conviction, and rationale.
 - [Dashboard](/dashboard): Live AI trading signals, market scanner output, virtual portfolio P&L.
 - [Backtest](/backtest): Strategy backtesting with Monte Carlo and walk-forward analysis.
 - [Watchlist](/watchlist): User watchlist with AI-suggested tickers and price alerts.
+- [Does AI Stock Trading Work?](/guides/does-ai-stock-trading-work): Evidence-based answer with realistic win rates and failure modes.
+- [AI Stock Trading for Beginners](/guides/ai-stock-trading-for-beginners): Vocabulary and a 90-day plan before risking capital.
+- [AI Stock Trading Software](/guides/ai-stock-trading-software): Buyer's checklist and red flags.
+- [How Accurate Are AI Stock Predictions?](/guides/how-accurate-are-ai-stock-predictions): Calibration vs accuracy and how to verify hit rates.
+- [AI vs Human Traders](/guides/ai-vs-human-traders): Where models win, where judgement wins.
+- [AI Trading Bots](/guides/ai-trading-bots): How automated trading works and how to spot a fake edge.
+- [AI Stock Signals Explained](/guides/ai-stock-signals-explained): What goes into a single signal.
+- [Backtest a Trading Strategy](/guides/backtest-trading-strategy): Sharpe, Sortino, Monte Carlo, walk-forward.
+- [Best AI Stocks to Buy Now](/guides/best-ai-stocks-to-buy-now): Current strongest model setups.
+- [AI Dividend Stocks](/guides/ai-dividend-stocks): Systematic income screening.
 - [Disclosure](/disclosure): Risk disclosure and paper-trading limitations.
 - [Terms](/terms): Terms of service.
 - [Privacy](/privacy): Privacy policy.
