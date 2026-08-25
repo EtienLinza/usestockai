@@ -148,10 +148,10 @@ const Performance = () => {
           <section className="space-y-4">
             <h2 className="text-2xl font-medium tracking-tight">Live signal feed, right now</h2>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <MetricCard label="Active signals" value={stats ? String(stats.active) : "—"} />
-              <MetricCard label="BUY" value={stats ? String(stats.buys) : "—"} />
-              <MetricCard label="SELL" value={stats ? String(stats.sells) : "—"} />
-              <MetricCard label="Avg conviction" value={stats ? String(stats.avgConfidence) : "—"} />
+              <MetricCard label="Active signals" value={stats ? String(stats.active) : "—"} icon={Activity} />
+              <MetricCard label="BUY" value={stats ? String(stats.buys) : "—"} icon={ArrowRight} />
+              <MetricCard label="SELL" value={stats ? String(stats.sells) : "—"} icon={ShieldCheck} />
+              <MetricCard label="Avg conviction" value={stats ? String(stats.avgConfidence) : "—"} icon={Gauge} />
             </div>
 
             {stats && Object.keys(stats.regimes).length > 0 && (
