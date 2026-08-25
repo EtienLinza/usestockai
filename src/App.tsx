@@ -38,6 +38,16 @@ const AiStockSignalsExplained = lazy(() => import("./pages/guides/AiStockSignals
 const BacktestTradingStrategy = lazy(() => import("./pages/guides/BacktestTradingStrategy"));
 const BestAiStocksToBuyNow = lazy(() => import("./pages/guides/BestAiStocksToBuyNow"));
 const AiTradingBots = lazy(() => import("./pages/guides/AiTradingBots"));
+const DoesAiStockTradingWork = lazy(() => import("./pages/guides/DoesAiStockTradingWork"));
+const AiStockTradingForBeginners = lazy(() => import("./pages/guides/AiStockTradingForBeginners"));
+const AiStockTradingSoftware = lazy(() => import("./pages/guides/AiStockTradingSoftware"));
+const HowAccurateAreAiStockPredictions = lazy(() => import("./pages/guides/HowAccurateAreAiStockPredictions"));
+const AiVsHumanTraders = lazy(() => import("./pages/guides/AiVsHumanTraders"));
+const AiStockTrading = lazy(() => import("./pages/AiStockTrading"));
+const Performance = lazy(() => import("./pages/Performance"));
+const StocksIndex = lazy(() => import("./pages/StocksIndex"));
+const TickerForecast = lazy(() => import("./pages/TickerForecast"));
+const GuidesIndex = lazy(() => import("./pages/GuidesIndex"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 
 const queryClient = new QueryClient();
