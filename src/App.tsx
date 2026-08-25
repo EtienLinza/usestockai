@@ -38,6 +38,16 @@ const AiStockSignalsExplained = lazy(() => import("./pages/guides/AiStockSignals
 const BacktestTradingStrategy = lazy(() => import("./pages/guides/BacktestTradingStrategy"));
 const BestAiStocksToBuyNow = lazy(() => import("./pages/guides/BestAiStocksToBuyNow"));
 const AiTradingBots = lazy(() => import("./pages/guides/AiTradingBots"));
+const DoesAiStockTradingWork = lazy(() => import("./pages/guides/DoesAiStockTradingWork"));
+const AiStockTradingForBeginners = lazy(() => import("./pages/guides/AiStockTradingForBeginners"));
+const AiStockTradingSoftware = lazy(() => import("./pages/guides/AiStockTradingSoftware"));
+const HowAccurateAreAiStockPredictions = lazy(() => import("./pages/guides/HowAccurateAreAiStockPredictions"));
+const AiVsHumanTraders = lazy(() => import("./pages/guides/AiVsHumanTraders"));
+const AiStockTrading = lazy(() => import("./pages/AiStockTrading"));
+const Performance = lazy(() => import("./pages/Performance"));
+const StocksIndex = lazy(() => import("./pages/StocksIndex"));
+const TickerForecast = lazy(() => import("./pages/TickerForecast"));
+const GuidesIndex = lazy(() => import("./pages/GuidesIndex"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 
 const queryClient = new QueryClient();
@@ -79,6 +89,16 @@ const App = () => (
                   <Route path="/guides/backtest-trading-strategy" element={<BacktestTradingStrategy />} />
                   <Route path="/guides/best-ai-stocks-to-buy-now" element={<BestAiStocksToBuyNow />} />
                   <Route path="/guides/ai-trading-bots" element={<AiTradingBots />} />
+                  <Route path="/ai-stock-trading" element={<AiStockTrading />} />
+                  <Route path="/performance" element={<Performance />} />
+                  <Route path="/stocks" element={<StocksIndex />} />
+                  <Route path="/stocks/:ticker/ai-forecast" element={<TickerForecast />} />
+                  <Route path="/guides" element={<GuidesIndex />} />
+                  <Route path="/guides/does-ai-stock-trading-work" element={<DoesAiStockTradingWork />} />
+                  <Route path="/guides/ai-stock-trading-for-beginners" element={<AiStockTradingForBeginners />} />
+                  <Route path="/guides/ai-stock-trading-software" element={<AiStockTradingSoftware />} />
+                  <Route path="/guides/how-accurate-are-ai-stock-predictions" element={<HowAccurateAreAiStockPredictions />} />
+                  <Route path="/guides/ai-vs-human-traders" element={<AiVsHumanTraders />} />
 
                   <Route path="*" element={<NotFound />} />
                 </Routes>
