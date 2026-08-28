@@ -337,7 +337,7 @@ const Dashboard = () => {
           batch: (data as any).processed ?? p.batch,
           total: (data as any).total ?? p.total,
         }));
-      }, 1000);
+      }, 2000);
 
       const { data, error } = await invocation;
       if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
