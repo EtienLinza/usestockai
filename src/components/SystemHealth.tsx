@@ -76,10 +76,13 @@ export const SystemHealth = () => {
 
   useEffect(() => {
     load();
-    // Auto-refresh every 30 seconds while this component is mounted
-    const interval = setInterval(load, 30_000);
-    return () => clearInterval(interval);
+    // Auto-refresh every 30s while visible; skip ticks in a hidden tab and
+    // refresh immediately when the user returns (same freshness, fewer calls).
+    const interval = setInterval(() => { if (shouldPoll()) load(); }, 30_000);
+    const off = onVisible(load);
+    return () => { clearInterval(interval); off(); };
   }, [load]);
+
 
   const overall = data ? OVERALL_META[data.overall] : null;
 
