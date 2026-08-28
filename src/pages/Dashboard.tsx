@@ -284,10 +284,16 @@ const Dashboard = () => {
   useEffect(() => {
     if (openPositions.length === 0) return;
     fetchCurrentPrices();
-    // Re-fetch live prices every 60s so unrealized P&L stays current.
-    const id = setInterval(fetchCurrentPrices, 60_000);
-    return () => clearInterval(id);
+    // Re-fetch live prices every 60s so unrealized P&L stays current — but skip
+    // ticks while the tab is hidden or the market is closed (prices can't move),
+    // and refresh instantly the moment the user comes back.
+    const id = setInterval(() => {
+      if (shouldPollPrices()) fetchCurrentPrices();
+    }, 60_000);
+    const off = onVisible(fetchCurrentPrices);
+    return () => { clearInterval(id); off(); };
   }, [openPositions.length, fetchCurrentPrices]);
+
 
   // ── Market scan ──────────────────────────────────────────────────────────────
 
