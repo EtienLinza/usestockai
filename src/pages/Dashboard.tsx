@@ -25,6 +25,8 @@ import { cn } from "@/lib/utils";
 import { MarketTab } from "@/components/dashboard/MarketTab";
 import { TradingTab } from "@/components/dashboard/TradingTab";
 import { TickerSearchBar } from "@/components/dashboard/TickerSearchBar";
+import { shouldPollPrices, onVisible } from "@/lib/poll-utils";
+
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
