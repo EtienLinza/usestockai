@@ -6,6 +6,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
+import { shouldPoll, onVisible } from "@/lib/poll-utils";
+
 
 interface JobHealth {
   name: string;
