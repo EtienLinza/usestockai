@@ -54,11 +54,15 @@ export const RegisterBuyDialog = ({
     setSubmitting(true);
     try {
       // Pull starting_nav for sizing (fallback to default)
-      const { data: settings } = await supabase
+      const { data: settings, error: settingsError } = await supabase
         .from("autotrade_settings")
         .select("starting_nav")
         .eq("user_id", user.id)
         .maybeSingle();
+      if (settingsError) {
+        console.error("Failed to load starting NAV, sizing on default:", settingsError);
+        toast.warning("Couldn't read your account size — sizing this position on the default NAV.");
+      }
 
       const nav = Number(settings?.starting_nav) || DEFAULT_STARTING_NAV;
       const targetDollars = nav * POSITION_SIZE_PCT;

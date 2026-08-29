@@ -11,6 +11,7 @@ import {
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { cn } from "@/lib/utils";
+import { toast } from "sonner";
 
 type NotifType = "price_alert" | "sell_alert";
 
@@ -49,7 +50,7 @@ export function NotificationCenter() {
     if (!user) return;
 
     const loadNotifications = async () => {
-      const [{ data: priceAlerts }, { data: sellAlerts }] = await Promise.all([
+      const [priceRes, sellRes] = await Promise.all([
         supabase
           .from("price_alerts")
           .select("*")
@@ -66,6 +67,15 @@ export function NotificationCenter() {
           .limit(20),
       ]);
 
+      const loadError = priceRes.error ?? sellRes.error;
+      if (loadError) {
+        console.error("Failed to load notifications:", loadError);
+        toast.error("Could not load notifications");
+        return;
+      }
+
+      const { data: priceAlerts } = priceRes;
+      const { data: sellAlerts } = sellRes;
       const items: Notification[] = [];
 
       priceAlerts?.forEach((a: any) => {
@@ -123,10 +133,13 @@ export function NotificationCenter() {
   }), [notifications]);
 
   const dismissNotification = async (n: Notification) => {
-    if (n.type === "sell_alert") {
-      await supabase.from("sell_alerts").update({ is_dismissed: true }).eq("id", n.rawId);
-    } else {
-      await supabase.from("price_alerts").update({ is_triggered: false, triggered_at: null }).eq("id", n.rawId);
+    const { error } = n.type === "sell_alert"
+      ? await supabase.from("sell_alerts").update({ is_dismissed: true }).eq("id", n.rawId)
+      : await supabase.from("price_alerts").update({ is_triggered: false, triggered_at: null }).eq("id", n.rawId);
+    if (error) {
+      console.error("Failed to dismiss notification:", error);
+      toast.error("Could not dismiss notification");
+      return;
     }
     setNotifications((prev) => prev.filter((x) => x.id !== n.id));
   };
@@ -134,8 +147,20 @@ export function NotificationCenter() {
   const clearAll = async () => {
     const sellIds = notifications.filter((n) => n.type === "sell_alert").map((n) => n.rawId);
     const priceIds = notifications.filter((n) => n.type === "price_alert").map((n) => n.rawId);
-    if (sellIds.length) await supabase.from("sell_alerts").update({ is_dismissed: true }).in("id", sellIds);
-    if (priceIds.length) await supabase.from("price_alerts").update({ is_triggered: false, triggered_at: null }).in("id", priceIds);
+    const results = await Promise.all([
+      sellIds.length
+        ? supabase.from("sell_alerts").update({ is_dismissed: true }).in("id", sellIds)
+        : Promise.resolve({ error: null }),
+      priceIds.length
+        ? supabase.from("price_alerts").update({ is_triggered: false, triggered_at: null }).in("id", priceIds)
+        : Promise.resolve({ error: null }),
+    ]);
+    const error = results.find((r) => r.error)?.error;
+    if (error) {
+      console.error("Failed to clear notifications:", error);
+      toast.error("Could not clear notifications");
+      return;
+    }
     setNotifications([]);
   };
 

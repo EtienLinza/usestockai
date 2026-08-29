@@ -118,6 +118,7 @@ const Auth = () => {
         }
       }
     } catch (err) {
+      console.error("Auth submit failed:", err);
       toast.error("An unexpected error occurred");
     } finally {
       setIsLoading(false);

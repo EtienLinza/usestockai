@@ -221,8 +221,10 @@ serve(async (req) => {
       supabase.functions.invoke("prefetch-bars", {
         body: {},
         headers: cs ? { "x-cron-secret": cs } : {},
-      }).catch(() => {});
-    } catch (_) {}
+      }).catch((e) => console.warn("prefetch-bars warm-up failed:", e instanceof Error ? e.message : e));
+    } catch (e) {
+      console.warn("prefetch-bars warm-up could not be started:", e instanceof Error ? e.message : e);
+    }
 
     await setProgress({
       survivors: survivors.length, total: survivors.length,
@@ -262,7 +264,8 @@ serve(async (req) => {
         const snap = classifyRegime(spyData.close, spyData.high, spyData.low);
         if (snap) {
           currentRegime = snap.regime;
-          upsertRegimeSnapshot(snap).catch(() => {});
+          upsertRegimeSnapshot(snap).catch((e) =>
+            console.warn("regime snapshot upsert failed:", e instanceof Error ? e.message : e));
           console.log(`Regime: ${snap.regime} (atrPct=${snap.atrPct}, smaRatio=${snap.smaRatio})`);
         }
       }

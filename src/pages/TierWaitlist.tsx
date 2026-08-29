@@ -43,16 +43,25 @@ export default function TierWaitlist() {
     // after the user finishes verifying their email.
     try {
       localStorage.setItem("pending_waitlist_tier", tier);
-    } catch {}
+    } catch (err) {
+      // Storage can be unavailable (private mode, quota). The waitlist row is
+      // still recorded after sign-in, so this is non-fatal.
+      console.warn("Could not stash pending waitlist tier:", err);
+    }
 
     if (user) {
       // Already signed in — record waitlist row directly and continue to onboarding.
-      await supabase.from("upgrade_waitlist").insert({
+      const { error: waitlistError } = await supabase.from("upgrade_waitlist").insert({
         user_id: user.id,
         requested_tier: tier,
         billing_cycle: "monthly",
       });
       setLoading(false);
+      if (waitlistError) {
+        console.error("Waitlist insert failed:", waitlistError);
+        toast.error("Could not join the waitlist. Please try again.");
+        return;
+      }
       toast.success("You're on the waitlist. Let's set up your account.");
       navigate("/onboarding");
       return;

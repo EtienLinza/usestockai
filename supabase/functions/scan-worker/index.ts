@@ -159,7 +159,10 @@ serve(async (req) => {
           }
         });
       }
-      if (warm.length > 0) { upsertBars(warm).catch(() => {}); }
+      if (warm.length > 0) {
+        upsertBars(warm).catch((e) =>
+          console.warn("bars cache warm-up failed:", e instanceof Error ? e.message : e));
+      }
     }
 
     // Phase 1 #4 — Earnings blackout. Pre-fetch in parallel for the survivors
