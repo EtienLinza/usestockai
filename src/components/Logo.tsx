@@ -1,6 +1,5 @@
 import { forwardRef } from "react";
 import { motion } from "framer-motion";
-import logoMarkAsset from "@/assets/stockai-mark.jpg.asset.json";
 
 interface LogoProps {
   size?: "sm" | "md" | "lg";
@@ -25,7 +24,7 @@ export const Logo = forwardRef<HTMLDivElement, LogoProps>(
         transition={{ type: "spring", stiffness: 400 }}
       >
         <img
-          src={logoMarkAsset.url}
+          src="/stockai-mark.png"
           width={icon}
           height={icon}
           alt={showText ? "" : "StockAI"}
