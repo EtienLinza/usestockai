@@ -1,7 +1,7 @@
 import { forwardRef } from "react";
 import { motion } from "framer-motion";
-import darkLogoAsset from "@/assets/stockai-logo-dark.png.asset.json";
-import lightLogoAsset from "@/assets/stockai-logo-light.png.asset.json";
+import darkLogoAsset from "@/assets/stockai-logo-dark.png";
+import lightLogoAsset from "@/assets/stockai-logo-light.png";
 
 interface LogoProps {
   size?: "sm" | "md" | "lg";
@@ -30,14 +30,14 @@ export const Logo = forwardRef<HTMLDivElement, LogoProps>(
           style={{ width: icon, height: icon }}
         >
           <img
-            src={lightLogoAsset.url}
+            src={lightLogoAsset}
             width={icon}
             height={icon}
             alt={showText ? "" : "StockAI"}
             className="block size-full object-contain dark:hidden"
           />
           <img
-            src={darkLogoAsset.url}
+            src={darkLogoAsset}
             width={icon}
             height={icon}
             alt=""
