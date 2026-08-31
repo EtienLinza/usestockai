@@ -1,6 +1,7 @@
 import { forwardRef } from "react";
 import { motion } from "framer-motion";
-import logoAsset from "@/assets/stockai-logo.jpeg.asset.json";
+import darkLogoAsset from "@/assets/stockai-logo-dark.png";
+import lightLogoAsset from "@/assets/stockai-logo-light.png";
 
 interface LogoProps {
   size?: "sm" | "md" | "lg";
@@ -24,13 +25,26 @@ export const Logo = forwardRef<HTMLDivElement, LogoProps>(
         whileHover={{ scale: 1.01 }}
         transition={{ type: "spring", stiffness: 400 }}
       >
-        <img
-          src={logoAsset.url}
-          width={icon}
-          height={icon}
-          alt={showText ? "" : "StockAI"}
-          className="block shrink-0 object-contain"
-        />
+        <span
+          className="relative block shrink-0 overflow-hidden"
+          style={{ width: icon, height: icon }}
+        >
+          <img
+            src={lightLogoAsset}
+            width={icon}
+            height={icon}
+            alt={showText ? "" : "StockAI"}
+            className="block size-full object-contain dark:hidden"
+          />
+          <img
+            src={darkLogoAsset}
+            width={icon}
+            height={icon}
+            alt=""
+            aria-hidden="true"
+            className="hidden size-full object-contain dark:block"
+          />
+        </span>
         {showText && (
           <span className={`font-bold ${text}`}>
             <span className="text-foreground">Stock</span>
