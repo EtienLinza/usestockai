@@ -761,7 +761,15 @@ function runWalkForwardBacktest(
     if (position && position.blocks.length > 0) {
       const wIdx = dailyToWeeklyIdx[i];
       const wATR = (!isNaN(weeklyATR[wIdx]) && weeklyATR[wIdx] > 0) ? weeklyATR[wIdx] : close[i] * 0.05;
-      const hardStopDist = activeProfile.hardStopATRMult * wATR / position.avgEntryPrice;
+      const atrStopDist = activeProfile.hardStopATRMult * wATR / position.avgEntryPrice;
+      // User override: the "Max Stop %" control is a CEILING on the adaptive
+      // ATR stop — it can tighten the stop, never widen it.
+      const maxStopFrac = Number.isFinite(tradeConfig.stopLossPct) && tradeConfig.stopLossPct > 0
+        ? tradeConfig.stopLossPct / 100
+        : Infinity;
+      const hardStopDist = Math.min(atrStopDist, maxStopFrac);
+      if (hardStopDist < atrStopDist) exitClampStats.stopClamped++;
+
 
       // Lock the 1R risk distance the first time we see it (entry context)
       if (position.riskDistance <= 0) position.riskDistance = hardStopDist;
