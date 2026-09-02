@@ -136,6 +136,14 @@ Deno.serve(async (req) => {
       });
     }
 
+    // Idempotency gate — replays are acknowledged, never re-applied.
+    if (event.id && !(await claimEvent(event.id, event.type, env))) {
+      return new Response(JSON.stringify({ received: true, duplicate: true }), {
+        status: 200, headers: { "Content-Type": "application/json" },
+      });
+    }
+
+
     switch (event.type) {
       case "customer.subscription.created":
       case "customer.subscription.updated":
