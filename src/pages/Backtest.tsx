@@ -378,6 +378,11 @@ const Backtest = () => {
                       <Slider value={[takeProfit]} onValueChange={v => setTakeProfit(v[0])} min={2} max={30} step={1} />
                     </div>
                   </div>
+                  <p className="text-[10px] text-muted-foreground leading-relaxed">
+                    Exits are adaptive (ATR-based). These two act as ceilings: the stop never sits wider
+                    than Max Stop, and the profit ladder closes out at Take Profit.
+                  </p>
+
 
                   <div className="border-t border-border/50 pt-4 mt-2 space-y-4">
                     <div className="text-[10px] text-muted-foreground uppercase tracking-wide flex items-center gap-1.5">
