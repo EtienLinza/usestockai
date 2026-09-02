@@ -632,6 +632,20 @@ const Backtest = () => {
                         color={report.cagr > 0 ? "text-success" : "text-destructive"} />
                     </div>
 
+                    {report.exitModel && (
+                      <p className="text-[10px] text-muted-foreground">
+                        Exit model: adaptive ATR with user ceilings — Max Stop {report.exitModel.maxStopPct}%,
+                        Take Profit {report.exitModel.takeProfitPct}%.
+                        {report.exitModel.stopClampedBars > 0
+                          ? ` Max Stop bound the adaptive stop on ${report.exitModel.stopClampedBars} bar(s).`
+                          : " The adaptive stop stayed inside your Max Stop."}
+                        {report.exitModel.takeProfitCeilingExits > 0
+                          ? ` ${report.exitModel.takeProfitCeilingExits} trade(s) exited at the Take Profit ceiling.`
+                          : ""}
+                      </p>
+                    )}
+
+
                     {/* Risk Metrics */}
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                       <MetricCard label="Sharpe Ratio" value={report.sharpeRatio} icon={Gauge}
