@@ -2277,6 +2277,16 @@ serve(async (req) => {
         notes: healthNotes,
       },
       executionModel: tradeConfig.executionModel,
+      // Exit-model transparency (BT-002): the engine sizes exits from ATR and
+      // profile settings; the user's Max Stop / Take Profit are ceilings on it.
+      exitModel: {
+        model: "adaptive_atr_with_user_ceilings",
+        maxStopPct: tradeConfig.stopLossPct,
+        takeProfitPct: tradeConfig.takeProfitPct,
+        stopClampedBars: exitClampStats.stopClamped,
+        takeProfitCeilingExits: exitClampStats.tpCeilingExits,
+      },
+
       // Survivorship: true when caller passed universe='sp500' and constituents
       // were resolved point-in-time via constituents_as_of(). For explicit
       // user-supplied ticker lists this remains false (caller's responsibility).
