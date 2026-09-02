@@ -814,6 +814,27 @@ function runWalkForwardBacktest(
         position.breakevenStopActive = true;
       }
 
+      // User override: the "Take Profit %" control is a CEILING on the profit
+      // ladder — the remainder is closed once the gain reaches it.
+      const tpCeilFrac = Number.isFinite(tradeConfig.takeProfitPct) && tradeConfig.takeProfitPct > 0
+        ? tradeConfig.takeProfitPct / 100
+        : Infinity;
+      if (Number.isFinite(tpCeilFrac)) {
+        const tpCeilPrice = position.direction === "long"
+          ? position.avgEntryPrice * (1 + tpCeilFrac)
+          : position.avgEntryPrice * (1 - tpCeilFrac);
+        const tpCeilHit = intrabar
+          ? (position.direction === "long" ? high[i] >= tpCeilPrice : low[i] <= tpCeilPrice)
+          : priceChange >= tpCeilFrac;
+        if (tpCeilHit) {
+          exitClampStats.tpCeilingExits++;
+          closeFullPosition(position, i, "take_profit_ceiling", intrabar ? tpCeilPrice : undefined);
+          position = null;
+          continue;
+        }
+      }
+
+
       // Breakeven stop: once TP1 hit, exit remainder if price retraces back through entry
       const beTrigger = position.avgEntryPrice;
       const beHit = intrabar
