@@ -245,6 +245,13 @@ interface BacktestConfig {
   riskPerTrade: number; // Risk-based sizing: fraction of capital risked per trade
 }
 
+// Exit-model transparency: counts how often the user's Max Stop / Take Profit
+// ceilings actually bound the adaptive ATR exits during a run.
+const exitClampStats = { stopClamped: 0, tpCeilingExits: 0 };
+function resetExitClampStats() { exitClampStats.stopClamped = 0; exitClampStats.tpCeilingExits = 0; }
+
+
+
 interface BacktestReport {
   periods: { start: string; end: string; accuracy: number; returnPct: number; trades: number }[];
   totalTrades: number;
@@ -761,7 +768,15 @@ function runWalkForwardBacktest(
     if (position && position.blocks.length > 0) {
       const wIdx = dailyToWeeklyIdx[i];
       const wATR = (!isNaN(weeklyATR[wIdx]) && weeklyATR[wIdx] > 0) ? weeklyATR[wIdx] : close[i] * 0.05;
-      const hardStopDist = activeProfile.hardStopATRMult * wATR / position.avgEntryPrice;
+      const atrStopDist = activeProfile.hardStopATRMult * wATR / position.avgEntryPrice;
+      // User override: the "Max Stop %" control is a CEILING on the adaptive
+      // ATR stop — it can tighten the stop, never widen it.
+      const maxStopFrac = Number.isFinite(tradeConfig.stopLossPct) && tradeConfig.stopLossPct > 0
+        ? tradeConfig.stopLossPct / 100
+        : Infinity;
+      const hardStopDist = Math.min(atrStopDist, maxStopFrac);
+      if (hardStopDist < atrStopDist) exitClampStats.stopClamped++;
+
 
       // Lock the 1R risk distance the first time we see it (entry context)
       if (position.riskDistance <= 0) position.riskDistance = hardStopDist;
@@ -798,6 +813,27 @@ function runWalkForwardBacktest(
         position.firstTargetHit = true;
         position.breakevenStopActive = true;
       }
+
+      // User override: the "Take Profit %" control is a CEILING on the profit
+      // ladder — the remainder is closed once the gain reaches it.
+      const tpCeilFrac = Number.isFinite(tradeConfig.takeProfitPct) && tradeConfig.takeProfitPct > 0
+        ? tradeConfig.takeProfitPct / 100
+        : Infinity;
+      if (Number.isFinite(tpCeilFrac)) {
+        const tpCeilPrice = position.direction === "long"
+          ? position.avgEntryPrice * (1 + tpCeilFrac)
+          : position.avgEntryPrice * (1 - tpCeilFrac);
+        const tpCeilHit = intrabar
+          ? (position.direction === "long" ? high[i] >= tpCeilPrice : low[i] <= tpCeilPrice)
+          : priceChange >= tpCeilFrac;
+        if (tpCeilHit) {
+          exitClampStats.tpCeilingExits++;
+          closeFullPosition(position, i, "take_profit_ceiling", intrabar ? tpCeilPrice : undefined);
+          position = null;
+          continue;
+        }
+      }
+
 
       // Breakeven stop: once TP1 hit, exit remainder if price retraces back through entry
       const beTrigger = position.avgEntryPrice;
@@ -1998,6 +2034,8 @@ serve(async (req) => {
       slippagePct: 0.02,
       executionModel: executionModel === "legacy" ? "legacy" : "intrabar",
     };
+    resetExitClampStats();
+
 
     const startDate = Math.floor(new Date(`${startYear}-01-01`).getTime() / 1000);
     const endDate = Math.floor(new Date(`${endYear}-12-31`).getTime() / 1000);
@@ -2241,6 +2279,16 @@ serve(async (req) => {
         notes: healthNotes,
       },
       executionModel: tradeConfig.executionModel,
+      // Exit-model transparency (BT-002): the engine sizes exits from ATR and
+      // profile settings; the user's Max Stop / Take Profit are ceilings on it.
+      exitModel: {
+        model: "adaptive_atr_with_user_ceilings",
+        maxStopPct: tradeConfig.stopLossPct,
+        takeProfitPct: tradeConfig.takeProfitPct,
+        stopClampedBars: exitClampStats.stopClamped,
+        takeProfitCeilingExits: exitClampStats.tpCeilingExits,
+      },
+
       // Survivorship: true when caller passed universe='sp500' and constituents
       // were resolved point-in-time via constituents_as_of(). For explicit
       // user-supplied ticker lists this remains false (caller's responsibility).

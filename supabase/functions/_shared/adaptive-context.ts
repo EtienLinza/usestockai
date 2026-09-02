@@ -1,8 +1,9 @@
 // ============================================================================
 // ADAPTIVE-CONTEXT — shared adaptive-tuning primitives.
 //
-// SINGLE SOURCE OF TRUTH. Both the live autotrader (autotrader-scan) and the
-// portfolio backtest (backtest-sim) import from here. Any change to regime,
+// SINGLE SOURCE OF TRUTH. The live autotrader (autotrader-scan) and every
+// backtest path import from here. Any change to regime,
+
 // VIX, vol-target, drawdown, or profile logic MUST live in this file — never
 // duplicate in a call site. Divergence between live and backtest is a bug.
 // ============================================================================

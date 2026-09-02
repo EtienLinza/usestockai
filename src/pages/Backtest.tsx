@@ -45,6 +45,14 @@ interface BacktestReport {
   totalReturn: number;
   maxDrawdown: number;
   sharpeRatio: number;
+  exitModel?: {
+    model: string;
+    maxStopPct: number;
+    takeProfitPct: number;
+    stopClampedBars: number;
+    takeProfitCeilingExits: number;
+  };
+
   deflatedSharpe?: number;
   avgSampleUniqueness?: number;
   sortinoRatio: number;
@@ -378,6 +386,11 @@ const Backtest = () => {
                       <Slider value={[takeProfit]} onValueChange={v => setTakeProfit(v[0])} min={2} max={30} step={1} />
                     </div>
                   </div>
+                  <p className="text-[10px] text-muted-foreground leading-relaxed">
+                    Exits are adaptive (ATR-based). These two act as ceilings: the stop never sits wider
+                    than Max Stop, and the profit ladder closes out at Take Profit.
+                  </p>
+
 
                   <div className="border-t border-border/50 pt-4 mt-2 space-y-4">
                     <div className="text-[10px] text-muted-foreground uppercase tracking-wide flex items-center gap-1.5">
@@ -626,6 +639,20 @@ const Backtest = () => {
                       <MetricCard label="CAGR" value={report.cagr} suffix="%" icon={TrendingUp}
                         color={report.cagr > 0 ? "text-success" : "text-destructive"} />
                     </div>
+
+                    {report.exitModel && (
+                      <p className="text-[10px] text-muted-foreground">
+                        Exit model: adaptive ATR with user ceilings — Max Stop {report.exitModel.maxStopPct}%,
+                        Take Profit {report.exitModel.takeProfitPct}%.
+                        {report.exitModel.stopClampedBars > 0
+                          ? ` Max Stop bound the adaptive stop on ${report.exitModel.stopClampedBars} bar(s).`
+                          : " The adaptive stop stayed inside your Max Stop."}
+                        {report.exitModel.takeProfitCeilingExits > 0
+                          ? ` ${report.exitModel.takeProfitCeilingExits} trade(s) exited at the Take Profit ceiling.`
+                          : ""}
+                      </p>
+                    )}
+
 
                     {/* Risk Metrics */}
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">

@@ -20,17 +20,69 @@ function resolvePriceId(item: any): string {
   );
 }
 
+/**
+ * Idempotency: record the event id first. A duplicate insert (unique violation)
+ * means Stripe replayed the event — we return 200 without re-applying it.
+ * Returns true when this is the first time we've seen the event.
+ */
+async function claimEvent(eventId: string, type: string, env: StripeEnv): Promise<boolean> {
+  const { error } = await getSupabase()
+    .from("stripe_events")
+    .insert({ event_id: eventId, event_type: type, environment: env });
+  if (!error) return true;
+  // 23505 = unique_violation → already processed.
+  if ((error as any).code === "23505") {
+    console.log(`Replayed Stripe event ignored: ${eventId}`);
+    return false;
+  }
+  // Fail closed on unexpected errors so Stripe retries.
+  throw new Error(`stripe_events insert failed: ${error.message}`);
+}
+
+/**
+ * Entitlement guard: the userId in metadata must map to a real profile, and the
+ * subscription's customer must match the one we already stored for that user.
+ */
+async function validateSubscriptionOwner(
+  userId: string,
+  customerId: string,
+  env: StripeEnv,
+): Promise<boolean> {
+  const sb = getSupabase();
+  const { data: profile } = await sb
+    .from("profiles").select("id").eq("id", userId).maybeSingle();
+  if (!profile) {
+    console.error("Rejected webhook: userId has no matching profile");
+    return false;
+  }
+  const { data: existing } = await sb
+    .from("subscriptions")
+    .select("stripe_customer_id")
+    .eq("user_id", userId)
+    .eq("environment", env)
+    .maybeSingle();
+  if (existing?.stripe_customer_id && existing.stripe_customer_id !== customerId) {
+    console.error("Rejected webhook: customer mismatch for user");
+    return false;
+  }
+  return true;
+}
+
+
 async function handleSubscriptionUpsert(subscription: any, env: StripeEnv) {
   const userId = subscription.metadata?.userId;
   if (!userId) {
     console.error("No userId in subscription metadata", subscription.id);
     return;
   }
+  if (!(await validateSubscriptionOwner(userId, subscription.customer, env))) return;
   const item = subscription.items?.data?.[0];
   const priceId = resolvePriceId(item);
   const productId = item?.price?.product;
   const periodStart = item?.current_period_start ?? subscription.current_period_start;
   const periodEnd = item?.current_period_end ?? subscription.current_period_end;
+
+
 
   await getSupabase().from("subscriptions").upsert(
     {
@@ -72,7 +124,7 @@ Deno.serve(async (req) => {
   const env: StripeEnv = rawEnv;
 
   try {
-    const event = await verifyWebhook(req, env) as { type: string; livemode?: boolean; data: { object: any } };
+    const event = await verifyWebhook(req, env) as { id: string; type: string; livemode?: boolean; data: { object: any } };
 
     // Cross-check the event's livemode flag against the env query parameter so
     // a sandbox-secret-signed event can't be replayed at the ?env=live URL.
@@ -83,6 +135,14 @@ Deno.serve(async (req) => {
         status: 200, headers: { "Content-Type": "application/json" },
       });
     }
+
+    // Idempotency gate — replays are acknowledged, never re-applied.
+    if (event.id && !(await claimEvent(event.id, event.type, env))) {
+      return new Response(JSON.stringify({ received: true, duplicate: true }), {
+        status: 200, headers: { "Content-Type": "application/json" },
+      });
+    }
+
 
     switch (event.type) {
       case "customer.subscription.created":
