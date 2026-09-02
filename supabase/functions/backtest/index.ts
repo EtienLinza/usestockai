@@ -2034,6 +2034,8 @@ serve(async (req) => {
       slippagePct: 0.02,
       executionModel: executionModel === "legacy" ? "legacy" : "intrabar",
     };
+    resetExitClampStats();
+
 
     const startDate = Math.floor(new Date(`${startYear}-01-01`).getTime() / 1000);
     const endDate = Math.floor(new Date(`${endYear}-12-31`).getTime() / 1000);
