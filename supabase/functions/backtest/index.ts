@@ -245,6 +245,13 @@ interface BacktestConfig {
   riskPerTrade: number; // Risk-based sizing: fraction of capital risked per trade
 }
 
+// Exit-model transparency: counts how often the user's Max Stop / Take Profit
+// ceilings actually bound the adaptive ATR exits during a run.
+const exitClampStats = { stopClamped: 0, tpCeilingExits: 0 };
+function resetExitClampStats() { exitClampStats.stopClamped = 0; exitClampStats.tpCeilingExits = 0; }
+
+
+
 interface BacktestReport {
   periods: { start: string; end: string; accuracy: number; returnPct: number; trades: number }[];
   totalTrades: number;
