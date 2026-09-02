@@ -45,6 +45,14 @@ interface BacktestReport {
   totalReturn: number;
   maxDrawdown: number;
   sharpeRatio: number;
+  exitModel?: {
+    model: string;
+    maxStopPct: number;
+    takeProfitPct: number;
+    stopClampedBars: number;
+    takeProfitCeilingExits: number;
+  };
+
   deflatedSharpe?: number;
   avgSampleUniqueness?: number;
   sortinoRatio: number;
