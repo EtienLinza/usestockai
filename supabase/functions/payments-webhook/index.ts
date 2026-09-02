@@ -20,6 +20,55 @@ function resolvePriceId(item: any): string {
   );
 }
 
+/**
+ * Idempotency: record the event id first. A duplicate insert (unique violation)
+ * means Stripe replayed the event — we return 200 without re-applying it.
+ * Returns true when this is the first time we've seen the event.
+ */
+async function claimEvent(eventId: string, type: string, env: StripeEnv): Promise<boolean> {
+  const { error } = await getSupabase()
+    .from("stripe_events")
+    .insert({ event_id: eventId, event_type: type, environment: env });
+  if (!error) return true;
+  // 23505 = unique_violation → already processed.
+  if ((error as any).code === "23505") {
+    console.log(`Replayed Stripe event ignored: ${eventId}`);
+    return false;
+  }
+  // Fail closed on unexpected errors so Stripe retries.
+  throw new Error(`stripe_events insert failed: ${error.message}`);
+}
+
+/**
+ * Entitlement guard: the userId in metadata must map to a real profile, and the
+ * subscription's customer must match the one we already stored for that user.
+ */
+async function validateSubscriptionOwner(
+  userId: string,
+  customerId: string,
+  env: StripeEnv,
+): Promise<boolean> {
+  const sb = getSupabase();
+  const { data: profile } = await sb
+    .from("profiles").select("id").eq("id", userId).maybeSingle();
+  if (!profile) {
+    console.error("Rejected webhook: userId has no matching profile");
+    return false;
+  }
+  const { data: existing } = await sb
+    .from("subscriptions")
+    .select("stripe_customer_id")
+    .eq("user_id", userId)
+    .eq("environment", env)
+    .maybeSingle();
+  if (existing?.stripe_customer_id && existing.stripe_customer_id !== customerId) {
+    console.error("Rejected webhook: customer mismatch for user");
+    return false;
+  }
+  return true;
+}
+
+
 async function handleSubscriptionUpsert(subscription: any, env: StripeEnv) {
   const userId = subscription.metadata?.userId;
   if (!userId) {
