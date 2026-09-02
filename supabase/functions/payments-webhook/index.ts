@@ -124,7 +124,7 @@ Deno.serve(async (req) => {
   const env: StripeEnv = rawEnv;
 
   try {
-    const event = await verifyWebhook(req, env) as { type: string; livemode?: boolean; data: { object: any } };
+    const event = await verifyWebhook(req, env) as { id: string; type: string; livemode?: boolean; data: { object: any } };
 
     // Cross-check the event's livemode flag against the env query parameter so
     // a sandbox-secret-signed event can't be replayed at the ?env=live URL.
