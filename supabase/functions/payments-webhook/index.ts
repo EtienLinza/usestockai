@@ -75,11 +75,14 @@ async function handleSubscriptionUpsert(subscription: any, env: StripeEnv) {
     console.error("No userId in subscription metadata", subscription.id);
     return;
   }
+  if (!(await validateSubscriptionOwner(userId, subscription.customer, env))) return;
   const item = subscription.items?.data?.[0];
   const priceId = resolvePriceId(item);
   const productId = item?.price?.product;
   const periodStart = item?.current_period_start ?? subscription.current_period_start;
   const periodEnd = item?.current_period_end ?? subscription.current_period_end;
+
+
 
   await getSupabase().from("subscriptions").upsert(
     {
