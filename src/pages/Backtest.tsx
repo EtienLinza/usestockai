@@ -286,7 +286,7 @@ const Backtest = () => {
     } catch (e) {
       console.error("Backtest error:", e);
       const err = e as { isTimeout?: boolean; isNetworkError?: boolean; message?: string };
-      const isTimeout = e?.isTimeout || e?.isNetworkError || (e?.message && e.message.includes("timed out"));
+      const isTimeout = err?.isTimeout || err?.isNetworkError || !!err?.message?.includes("timed out");
       if (isTimeout) {
         showErrorToast(e, "Backtest timed out. Try fewer tickers or a shorter date range.");
       } else {

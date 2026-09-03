@@ -27,6 +27,9 @@ import { TradingTab } from "@/components/dashboard/TradingTab";
 import { TickerSearchBar } from "@/components/dashboard/TickerSearchBar";
 import { shouldPollPrices, onVisible } from "@/lib/poll-utils";
 
+/** Loose row/result shape returned by scan progress rows and the scanner invoke. */
+type ScanRow = Record<string, number | string | null | undefined>;
+
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -326,16 +329,16 @@ const Dashboard = () => {
           .limit(1)
           .maybeSingle();
         if (!data) return;
-        const phase = (data as Record<string, any>).phase as string;
+        const phase = (data as ScanRow).phase as string;
         setScanProgress(p => ({
           ...p,
           phase: phase === "done" ? "finalizing"
                 : phase === "analyzing" ? "analyzing"
                 : "discovering",
-          universeSize: (data as Record<string, any>).universe_size ?? p.universeSize,
-          signalsFound: (data as Record<string, any>).signals_found ?? p.signalsFound,
-          batch: (data as Record<string, any>).processed ?? p.batch,
-          total: (data as Record<string, any>).total ?? p.total,
+          universeSize: (data as ScanRow).universe_size ?? p.universeSize,
+          signalsFound: (data as ScanRow).signals_found ?? p.signalsFound,
+          batch: (data as ScanRow).processed ?? p.batch,
+          total: (data as ScanRow).total ?? p.total,
         }));
       }, 2000);
 
@@ -343,10 +346,10 @@ const Dashboard = () => {
       if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
       if (error) throw error;
 
-      const totalSignals = (data as Record<string, any>)?.signals ?? 0;
-      const universe = (data as Record<string, any>)?.universe ?? 0;
+      const totalSignals = (data as ScanRow)?.signals ?? 0;
+      const universe = (data as ScanRow)?.universe ?? 0;
       setLastScanTime(new Date().toISOString());
-      toast.success(`Scan complete! Found ${totalSignals} signals across ${universe} stocks in ${Math.round(((data as Record<string, any>)?.elapsed ?? (Date.now() - startedAt)) / 1000)}s`);
+      toast.success(`Scan complete! Found ${totalSignals} signals across ${universe} stocks in ${Math.round(((data as ScanRow)?.elapsed ?? (Date.now() - startedAt)) / 1000)}s`);
       await loadSignalData();
       if (openPositions.length > 0) fetchCurrentPrices();
     } catch (err) {
