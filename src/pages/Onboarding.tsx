@@ -69,7 +69,7 @@ export default function Onboarding() {
     try {
       const stashed = localStorage.getItem("pending_waitlist_tier") as Tier | null;
       if (stashed === "pro" || stashed === "elite") pendingTier = stashed;
-    } catch {}
+    } catch (e) { console.warn("pending_waitlist_tier read failed", e); }
     const waitlistTier = chosenTier && chosenTier !== "free" ? chosenTier : pendingTier;
     if (waitlistTier) {
       await supabase.from("upgrade_waitlist").insert({
@@ -77,7 +77,7 @@ export default function Onboarding() {
         requested_tier: waitlistTier,
         billing_cycle: "monthly",
       });
-      try { localStorage.removeItem("pending_waitlist_tier"); } catch {}
+      try { localStorage.removeItem("pending_waitlist_tier"); } catch (e) { console.warn("pending_waitlist_tier clear failed", e); }
     }
 
     setSaving(false);
