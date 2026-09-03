@@ -397,7 +397,7 @@ const Dashboard = () => {
       user_id: user.id, ticker: selectedSignal.ticker, entry_price: selectedSignal.entry_price,
       shares, position_type: selectedSignal.signal_type === "BUY" ? "long" : "short", signal_id: selectedSignal.id,
       target_profit_pct: profitTarget,
-    } as any);
+    });
 
     if (error) {
       // P-4: unique-violation on (user, ticker) WHERE status='open' — friendlier message.
