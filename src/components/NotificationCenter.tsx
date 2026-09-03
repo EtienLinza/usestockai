@@ -12,6 +12,9 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { cn } from "@/lib/utils";
 
+/** Loose row shape shared by price_alerts and sell_alerts. */
+type AlertRow = Record<string, string | number | boolean | null>;
+
 type NotifType = "price_alert" | "sell_alert";
 
 interface Notification {
@@ -68,7 +71,7 @@ export function NotificationCenter() {
 
       const items: Notification[] = [];
 
-      priceAlerts?.forEach((a: any) => {
+      priceAlerts?.forEach((a: AlertRow) => {
         items.push({
           id: `pa-${a.id}`,
           rawId: a.id,
@@ -82,7 +85,7 @@ export function NotificationCenter() {
         });
       });
 
-      sellAlerts?.forEach((a: any) => {
+      sellAlerts?.forEach((a: AlertRow) => {
         items.push({
           id: `sa-${a.id}`,
           rawId: a.id,

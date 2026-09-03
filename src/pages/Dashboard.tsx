@@ -204,7 +204,7 @@ const Dashboard = () => {
         ]);
         if (posData) setPositions(posData as Position[]);
         if (histData) setPortfolioHistory(histData as PortfolioSnapshot[]);
-        if (alertData) setSellAlerts(alertData.map((a: any) => ({ ...a, currentPrice: Number(a.current_price) })) as SellAlert[]);
+        if (alertData) setSellAlerts(alertData.map((a: Record<string, unknown>) => ({ ...a, currentPrice: Number(a.current_price) })) as SellAlert[]);
       }
     } catch (err) {
       console.error("Failed to load signal data:", err);
@@ -326,16 +326,16 @@ const Dashboard = () => {
           .limit(1)
           .maybeSingle();
         if (!data) return;
-        const phase = (data as any).phase as string;
+        const phase = (data as Record<string, any>).phase as string;
         setScanProgress(p => ({
           ...p,
           phase: phase === "done" ? "finalizing"
                 : phase === "analyzing" ? "analyzing"
                 : "discovering",
-          universeSize: (data as any).universe_size ?? p.universeSize,
-          signalsFound: (data as any).signals_found ?? p.signalsFound,
-          batch: (data as any).processed ?? p.batch,
-          total: (data as any).total ?? p.total,
+          universeSize: (data as Record<string, any>).universe_size ?? p.universeSize,
+          signalsFound: (data as Record<string, any>).signals_found ?? p.signalsFound,
+          batch: (data as Record<string, any>).processed ?? p.batch,
+          total: (data as Record<string, any>).total ?? p.total,
         }));
       }, 2000);
 
@@ -343,14 +343,14 @@ const Dashboard = () => {
       if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
       if (error) throw error;
 
-      const totalSignals = (data as any)?.signals ?? 0;
-      const universe = (data as any)?.universe ?? 0;
+      const totalSignals = (data as Record<string, any>)?.signals ?? 0;
+      const universe = (data as Record<string, any>)?.universe ?? 0;
       setLastScanTime(new Date().toISOString());
-      toast.success(`Scan complete! Found ${totalSignals} signals across ${universe} stocks in ${Math.round(((data as any)?.elapsed ?? (Date.now() - startedAt)) / 1000)}s`);
+      toast.success(`Scan complete! Found ${totalSignals} signals across ${universe} stocks in ${Math.round(((data as Record<string, any>)?.elapsed ?? (Date.now() - startedAt)) / 1000)}s`);
       await loadSignalData();
       if (openPositions.length > 0) fetchCurrentPrices();
-    } catch (err: any) {
-      toast.error(err.message || "Scan failed");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Scan failed");
     } finally {
       if (pollTimer) clearInterval(pollTimer);
     }
@@ -381,10 +381,10 @@ const Dashboard = () => {
       if (gateErr) {
         console.warn("Portfolio gate failed, continuing:", gateErr.message);
       } else if (gate?.decision === "block") {
-        toast.error(`Blocked by risk cap: ${gate.violations.map((v: any) => v.message).join(" • ")}`, { duration: 8000 });
+        toast.error(`Blocked by risk cap: ${gate.violations.map((v: { message: string }) => v.message).join(" • ")}`, { duration: 8000 });
         return;
       } else if (gate?.decision === "warn" && gate.violations?.length) {
-        toast.warning(`Risk cap warning: ${gate.violations.map((v: any) => v.message).join(" • ")}`, { duration: 6000 });
+        toast.warning(`Risk cap warning: ${gate.violations.map((v: { message: string }) => v.message).join(" • ")}`, { duration: 6000 });
       }
     } catch (e) {
       console.warn("Portfolio gate exception, continuing:", e);

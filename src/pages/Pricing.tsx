@@ -1,3 +1,4 @@
+import type { LucideIcon } from "lucide-react";
 import { useState } from "react";
 import { motion } from "framer-motion";
 import { useNavigate } from "react-router-dom";
@@ -22,7 +23,7 @@ const FAQS = [
   { q: "How does annual billing work?", a: "Annual plans are billed once per year and include 2 months free (you pay for 10, get 12)." },
 ];
 
-const tiers: { id: Tier; name: string; tagline: string; popular?: boolean; icon: any }[] = [
+const tiers: { id: Tier; name: string; tagline: string; popular?: boolean; icon: LucideIcon }[] = [
   { id: "free", name: "Free", tagline: "Everything you need to start", icon: Sparkles },
   { id: "pro", name: "Pro", tagline: "For active traders", popular: true, icon: Sparkles },
   { id: "elite", name: "Elite", tagline: "Full automation & analytics", icon: Crown },
