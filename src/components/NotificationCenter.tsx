@@ -78,7 +78,7 @@ export function NotificationCenter() {
           title: `${a.ticker} crossed ${a.direction} $${Number(a.target_price).toFixed(2)}`,
           detail: `Target ${a.direction} $${Number(a.target_price).toFixed(2)}`,
           price: Number(a.target_price),
-          direction: a.direction,
+          direction: a.direction === "below" ? "below" : "above",
           timestamp: a.triggered_at || a.created_at,
         });
       });
