@@ -169,10 +169,10 @@ const Settings = () => {
         setBot({
           enabled: Boolean(botRes.data.enabled),
           kill_switch: Boolean(botRes.data.kill_switch),
-          emergency_mode: ((botRes.data as any).emergency_mode as "off" | "freeze_entries" | "liquidate") ?? (botRes.data.kill_switch ? "freeze_entries" : "off"),
-          rotation_enabled: Boolean((botRes.data as any).rotation_enabled ?? false),
-          rotation_min_delta_conviction: Number((botRes.data as any).rotation_min_delta_conviction ?? 15),
-          rotation_max_per_day: Number((botRes.data as any).rotation_max_per_day ?? 3),
+          emergency_mode: ((botRes.data as Record<string, unknown>).emergency_mode as "off" | "freeze_entries" | "liquidate") ?? (botRes.data.kill_switch ? "freeze_entries" : "off"),
+          rotation_enabled: Boolean((botRes.data as Record<string, unknown>).rotation_enabled ?? false),
+          rotation_min_delta_conviction: Number((botRes.data as Record<string, unknown>).rotation_min_delta_conviction ?? 15),
+          rotation_max_per_day: Number((botRes.data as Record<string, unknown>).rotation_max_per_day ?? 3),
           paper_mode: Boolean(botRes.data.paper_mode),
           advanced_mode: Boolean(botRes.data.advanced_mode),
           adaptive_mode: botRes.data.adaptive_mode ?? true,
@@ -187,8 +187,8 @@ const Settings = () => {
           auto_add_watchlist: botRes.data.auto_add_watchlist ?? true,
           auto_watchlist_consideration_floor: Number(botRes.data.auto_watchlist_consideration_floor ?? 60),
           auto_watchlist_stale_days: Number(botRes.data.auto_watchlist_stale_days ?? 14),
-          single_stock_mode: Boolean((botRes.data as any).single_stock_mode ?? false),
-          single_stock_ticker: ((botRes.data as any).single_stock_ticker as string | null) ?? null,
+          single_stock_mode: Boolean((botRes.data as Record<string, unknown>).single_stock_mode ?? false),
+          single_stock_ticker: ((botRes.data as Record<string, unknown>).single_stock_ticker as string | null) ?? null,
         });
         setLastScanAt(botRes.data.last_scan_at as string | null);
         setNextScanAt(botRes.data.next_scan_at as string | null);

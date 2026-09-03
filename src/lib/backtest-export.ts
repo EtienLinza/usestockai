@@ -1,7 +1,8 @@
 // Backtest export helpers — multiple formats including the full trade log.
 // Kept UI-agnostic so it can be reused elsewhere.
 
-type AnyReport = any;
+type TradeRow = Record<string, string | number | null | undefined>;
+type AnyReport = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
 
 function download(filename: string, content: BlobPart, mime: string) {
   const blob = new Blob([content], { type: mime });
@@ -160,7 +161,7 @@ export function exportMarkdown(report: AnyReport) {
 
   lines.push("", "## Trade Log", "", "| # | Entry | Exit | Ticker | Action | Strategy | Entry $ | Exit $ | Return % | PnL | Bars | Regime | Conf |");
   lines.push("|---:|---|---|---|---|---|---:|---:|---:|---:|---:|---|---:|");
-  (report.tradeLog ?? []).forEach((t: any, i: number) => {
+  (report.tradeLog ?? []).forEach((t: TradeRow, i: number) => {
     lines.push(`| ${i + 1} | ${t.date} | ${t.exitDate} | ${t.ticker} | ${t.action} | ${t.strategy ?? ""} | ${Number(t.entryPrice).toFixed(2)} | ${Number(t.exitPrice).toFixed(2)} | ${Number(t.returnPct).toFixed(2)} | ${Number(t.pnl).toFixed(2)} | ${t.duration} | ${t.regime} | ${t.confidence} |`);
   });
 
@@ -178,7 +179,7 @@ export function exportHTML(report: AnyReport, opts: { print?: boolean } = {}) {
   const metric = (label: string, value: unknown, cls = "") =>
     `<div class="stat"><div class="stat-label">${esc(label)}</div><div class="stat-value ${cls}">${esc(value)}</div></div>`;
 
-  const tradesRows = (report.tradeLog ?? []).map((t: any, i: number) => `
+  const tradesRows = (report.tradeLog ?? []).map((t: TradeRow, i: number) => `
     <tr class="${Number(t.returnPct) >= 0 ? "pos" : "neg"}">
       <td>${i + 1}</td><td>${esc(t.date)}</td><td>${esc(t.exitDate)}</td>
       <td>${esc(t.ticker)}</td><td>${esc(t.action)}</td><td>${esc(t.strategy ?? "")}</td>

@@ -43,7 +43,7 @@ export default function TierWaitlist() {
     // after the user finishes verifying their email.
     try {
       localStorage.setItem("pending_waitlist_tier", tier);
-    } catch {}
+    } catch (e) { console.warn("pending_waitlist_tier write failed", e); }
 
     if (user) {
       // Already signed in — record waitlist row directly and continue to onboarding.

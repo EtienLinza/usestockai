@@ -27,6 +27,9 @@ import { TradingTab } from "@/components/dashboard/TradingTab";
 import { TickerSearchBar } from "@/components/dashboard/TickerSearchBar";
 import { shouldPollPrices, onVisible } from "@/lib/poll-utils";
 
+/** Loose row/result shape returned by scan progress rows and the scanner invoke. */
+type ScanRow = Record<string, number | string | null | undefined>;
+
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -204,7 +207,7 @@ const Dashboard = () => {
         ]);
         if (posData) setPositions(posData as Position[]);
         if (histData) setPortfolioHistory(histData as PortfolioSnapshot[]);
-        if (alertData) setSellAlerts(alertData.map((a: any) => ({ ...a, currentPrice: Number(a.current_price) })) as SellAlert[]);
+        if (alertData) setSellAlerts(alertData.map((a: Record<string, unknown>) => ({ ...a, currentPrice: Number(a.current_price) })) as SellAlert[]);
       }
     } catch (err) {
       console.error("Failed to load signal data:", err);
@@ -326,16 +329,16 @@ const Dashboard = () => {
           .limit(1)
           .maybeSingle();
         if (!data) return;
-        const phase = (data as any).phase as string;
+        const phase = (data as ScanRow).phase as string;
         setScanProgress(p => ({
           ...p,
           phase: phase === "done" ? "finalizing"
                 : phase === "analyzing" ? "analyzing"
                 : "discovering",
-          universeSize: (data as any).universe_size ?? p.universeSize,
-          signalsFound: (data as any).signals_found ?? p.signalsFound,
-          batch: (data as any).processed ?? p.batch,
-          total: (data as any).total ?? p.total,
+          universeSize: Number((data as ScanRow).universe_size ?? p.universeSize),
+          signalsFound: Number((data as ScanRow).signals_found ?? p.signalsFound),
+          batch: Number((data as ScanRow).processed ?? p.batch),
+          total: Number((data as ScanRow).total ?? p.total),
         }));
       }, 2000);
 
@@ -343,14 +346,14 @@ const Dashboard = () => {
       if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
       if (error) throw error;
 
-      const totalSignals = (data as any)?.signals ?? 0;
-      const universe = (data as any)?.universe ?? 0;
+      const totalSignals = (data as ScanRow)?.signals ?? 0;
+      const universe = (data as ScanRow)?.universe ?? 0;
       setLastScanTime(new Date().toISOString());
-      toast.success(`Scan complete! Found ${totalSignals} signals across ${universe} stocks in ${Math.round(((data as any)?.elapsed ?? (Date.now() - startedAt)) / 1000)}s`);
+      toast.success(`Scan complete! Found ${totalSignals} signals across ${universe} stocks in ${Math.round(Number((data as ScanRow)?.elapsed ?? (Date.now() - startedAt)) / 1000)}s`);
       await loadSignalData();
       if (openPositions.length > 0) fetchCurrentPrices();
-    } catch (err: any) {
-      toast.error(err.message || "Scan failed");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Scan failed");
     } finally {
       if (pollTimer) clearInterval(pollTimer);
     }
@@ -381,10 +384,10 @@ const Dashboard = () => {
       if (gateErr) {
         console.warn("Portfolio gate failed, continuing:", gateErr.message);
       } else if (gate?.decision === "block") {
-        toast.error(`Blocked by risk cap: ${gate.violations.map((v: any) => v.message).join(" • ")}`, { duration: 8000 });
+        toast.error(`Blocked by risk cap: ${gate.violations.map((v: { message: string }) => v.message).join(" • ")}`, { duration: 8000 });
         return;
       } else if (gate?.decision === "warn" && gate.violations?.length) {
-        toast.warning(`Risk cap warning: ${gate.violations.map((v: any) => v.message).join(" • ")}`, { duration: 6000 });
+        toast.warning(`Risk cap warning: ${gate.violations.map((v: { message: string }) => v.message).join(" • ")}`, { duration: 6000 });
       }
     } catch (e) {
       console.warn("Portfolio gate exception, continuing:", e);
@@ -394,7 +397,7 @@ const Dashboard = () => {
       user_id: user.id, ticker: selectedSignal.ticker, entry_price: selectedSignal.entry_price,
       shares, position_type: selectedSignal.signal_type === "BUY" ? "long" : "short", signal_id: selectedSignal.id,
       target_profit_pct: profitTarget,
-    } as any);
+    });
 
     if (error) {
       // P-4: unique-violation on (user, ticker) WHERE status='open' — friendlier message.

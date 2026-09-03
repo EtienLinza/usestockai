@@ -40,9 +40,9 @@ export const TickerSearchBar = () => {
       if (error) throw error;
       if (!data) throw new Error("Empty response");
       setResult(data);
-    } catch (e: any) {
+    } catch (e) {
       console.error("analyze-ticker failed", e);
-      toast.error(e?.message || "Analysis failed");
+      toast.error(e instanceof Error ? e.message : "Analysis failed");
     } finally {
       setLoading(false);
     }

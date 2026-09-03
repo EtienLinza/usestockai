@@ -264,7 +264,7 @@ const Backtest = () => {
               setIsLoading(false);
               return;
             }
-          } catch {}
+          } catch (e) { console.warn("error body was not JSON", e); }
         }
         if (resp.status === 400) {
           try {
@@ -274,7 +274,7 @@ const Backtest = () => {
               setIsLoading(false);
               return;
             }
-          } catch {}
+          } catch (e) { console.warn("error body was not JSON", e); }
         }
         await handleResponseError(resp, navigate);
       }
@@ -283,9 +283,10 @@ const Backtest = () => {
       setReport(data);
       qc.invalidateQueries({ queryKey: USAGE_QUERY_KEY });
       toast.success(`Backtest complete: ${data.totalTrades} trades analyzed`);
-    } catch (e: any) {
+    } catch (e) {
       console.error("Backtest error:", e);
-      const isTimeout = e?.isTimeout || e?.isNetworkError || (e?.message && e.message.includes("timed out"));
+      const err = e as { isTimeout?: boolean; isNetworkError?: boolean; message?: string };
+      const isTimeout = err?.isTimeout || err?.isNetworkError || !!err?.message?.includes("timed out");
       if (isTimeout) {
         showErrorToast(e, "Backtest timed out. Try fewer tickers or a shorter date range.");
       } else {
@@ -1211,7 +1212,7 @@ const Backtest = () => {
                                 <YAxis dataKey="name" type="category" width={90}
                                   tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} />
                                 <Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 8, fontSize: 12 }}
-                                  formatter={(v: number, _: string, entry: any) => [`${v} (${entry.payload.pct}%)`, "Trades"]} />
+                                  formatter={(v: number, _: string, entry: { payload: { pct: number } }) => [`${v} (${entry.payload.pct}%)`, "Trades"]} />
                                 <Bar dataKey="count" radius={[0, 4, 4, 0]}>
                                   {exitData.map((_, i) => (
                                     <Cell key={i} fill={["hsl(var(--destructive))", "hsl(var(--success))", "hsl(var(--primary))", "hsl(var(--muted-foreground))"][i % 4]} />

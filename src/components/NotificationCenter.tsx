@@ -12,6 +12,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { cn } from "@/lib/utils";
 
+
 type NotifType = "price_alert" | "sell_alert";
 
 interface Notification {
@@ -68,7 +69,7 @@ export function NotificationCenter() {
 
       const items: Notification[] = [];
 
-      priceAlerts?.forEach((a: any) => {
+      priceAlerts?.forEach((a) => {
         items.push({
           id: `pa-${a.id}`,
           rawId: a.id,
@@ -77,12 +78,12 @@ export function NotificationCenter() {
           title: `${a.ticker} crossed ${a.direction} $${Number(a.target_price).toFixed(2)}`,
           detail: `Target ${a.direction} $${Number(a.target_price).toFixed(2)}`,
           price: Number(a.target_price),
-          direction: a.direction,
+          direction: a.direction === "below" ? "below" : "above",
           timestamp: a.triggered_at || a.created_at,
         });
       });
 
-      sellAlerts?.forEach((a: any) => {
+      sellAlerts?.forEach((a) => {
         items.push({
           id: `sa-${a.id}`,
           rawId: a.id,

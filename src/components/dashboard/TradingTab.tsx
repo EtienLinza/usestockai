@@ -90,7 +90,7 @@ interface TradingTabProps {
   portfolioHistory: PortfolioSnapshot[];
   showTradeLog: boolean;
   setShowTradeLog: (v: boolean) => void;
-  user: any;
+  user: { id: string; email?: string | null } | null;
   tradingStyle: string;
   setTradingStyle: (v: string) => void;
   runScan: () => void;
@@ -236,7 +236,7 @@ function MarketRegimeBadge() {
         .order("date", { ascending: false })
         .limit(1)
         .maybeSingle();
-      if (!cancelled && row) setData(row as any);
+      if (!cancelled && row) setData(row as never);
     })();
     return () => { cancelled = true; };
   }, []);
@@ -282,7 +282,7 @@ function DriftBadge() {
         .order("detected_at", { ascending: false })
         .limit(1)
         .maybeSingle();
-      if (!cancelled && row) setData(row as any);
+      if (!cancelled && row) setData(row as never);
     })();
     return () => { cancelled = true; };
   }, []);

@@ -82,7 +82,9 @@ export async function handleResponseError(response: Response, navigate?: (path: 
     try {
       const data = await response.json();
       retryAfter = data.retryAfter || 60;
-    } catch {}
+    } catch (e) {
+      console.warn("429 body was not JSON", e);
+    }
     throw new ApiError(
       `Too many requests. Please wait ${retryAfter} seconds before trying again.`,
       429,
@@ -109,7 +111,9 @@ export async function handleResponseError(response: Response, navigate?: (path: 
   try {
     const data = await response.json();
     errorMessage = data.error || data.message || errorMessage;
-  } catch {}
+  } catch (e) {
+    console.warn("error body was not JSON", e);
+  }
 
   throw new ApiError(errorMessage, response.status);
 }
