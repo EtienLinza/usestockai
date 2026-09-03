@@ -335,10 +335,10 @@ const Dashboard = () => {
           phase: phase === "done" ? "finalizing"
                 : phase === "analyzing" ? "analyzing"
                 : "discovering",
-          universeSize: (data as ScanRow).universe_size ?? p.universeSize,
-          signalsFound: (data as ScanRow).signals_found ?? p.signalsFound,
-          batch: (data as ScanRow).processed ?? p.batch,
-          total: (data as ScanRow).total ?? p.total,
+          universeSize: Number((data as ScanRow).universe_size ?? p.universeSize),
+          signalsFound: Number((data as ScanRow).signals_found ?? p.signalsFound),
+          batch: Number((data as ScanRow).processed ?? p.batch),
+          total: Number((data as ScanRow).total ?? p.total),
         }));
       }, 2000);
 
@@ -349,7 +349,7 @@ const Dashboard = () => {
       const totalSignals = (data as ScanRow)?.signals ?? 0;
       const universe = (data as ScanRow)?.universe ?? 0;
       setLastScanTime(new Date().toISOString());
-      toast.success(`Scan complete! Found ${totalSignals} signals across ${universe} stocks in ${Math.round(((data as ScanRow)?.elapsed ?? (Date.now() - startedAt)) / 1000)}s`);
+      toast.success(`Scan complete! Found ${totalSignals} signals across ${universe} stocks in ${Math.round(Number((data as ScanRow)?.elapsed ?? (Date.now() - startedAt)) / 1000)}s`);
       await loadSignalData();
       if (openPositions.length > 0) fetchCurrentPrices();
     } catch (err) {

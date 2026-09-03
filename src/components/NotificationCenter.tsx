@@ -12,8 +12,17 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { cn } from "@/lib/utils";
 
-/** Loose row shape shared by price_alerts and sell_alerts. */
-type AlertRow = Record<string, string | number | boolean | null>;
+/** Row shape shared by price_alerts and sell_alerts. */
+interface AlertRow {
+  id: string;
+  ticker: string;
+  direction?: "above" | "below";
+  target_price?: number | string;
+  current_price?: number | string;
+  reason?: string;
+  triggered_at?: string | null;
+  created_at: string;
+}
 
 type NotifType = "price_alert" | "sell_alert";
 
