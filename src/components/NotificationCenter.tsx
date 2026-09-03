@@ -12,17 +12,6 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { cn } from "@/lib/utils";
 
-/** Row shape shared by price_alerts and sell_alerts. */
-interface AlertRow {
-  id: string;
-  ticker: string;
-  direction?: "above" | "below";
-  target_price?: number | string;
-  current_price?: number | string;
-  reason?: string;
-  triggered_at?: string | null;
-  created_at: string;
-}
 
 type NotifType = "price_alert" | "sell_alert";
 
@@ -80,7 +69,7 @@ export function NotificationCenter() {
 
       const items: Notification[] = [];
 
-      priceAlerts?.forEach((a: AlertRow) => {
+      priceAlerts?.forEach((a) => {
         items.push({
           id: `pa-${a.id}`,
           rawId: a.id,
@@ -94,7 +83,7 @@ export function NotificationCenter() {
         });
       });
 
-      sellAlerts?.forEach((a: AlertRow) => {
+      sellAlerts?.forEach((a) => {
         items.push({
           id: `sa-${a.id}`,
           rawId: a.id,
