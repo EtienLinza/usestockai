@@ -3497,7 +3497,22 @@ async function processUser(
         console.warn("autotrade_log insert failed", e);
       }),
     );
+    // Shadow-log every blocked candidate to the research ledger so the reason
+    // a trade did NOT happen is replayable later. Best-effort by design.
+    if (row.action === "BLOCKED" && typeof row.ticker === "string") {
+      queueQuantDecision(supabase, {
+        userId,
+        ticker: row.ticker,
+        side: "long",
+        sleeve: String(row.profile ?? "core"),
+        mode: "live",
+        allowed: false,
+        blockReasons: [String(row.reason ?? "blocked")],
+        rawScore: typeof row.conviction === "number" ? row.conviction : null,
+      }, logInserts);
+    }
   };
+
 
   // ── Engine-speed: CVaR base/marginal caching ─────────────────────────────
   // Build the base sim (open book only) once per scan, reuse across all
