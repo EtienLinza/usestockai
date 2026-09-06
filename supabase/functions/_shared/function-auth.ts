@@ -36,6 +36,10 @@ export const FUNCTION_AUTH_REGISTRY: Record<string, AuthMode> = {
   "delete-account": "user",
   "log-audit": "user",
   "portfolio-gate": "user",
+  // Users may request shadow/paper/backtest intents; live mode is additionally
+  // gated inside the function to the cron-controlled execution path.
+  "quant-decision": "user",
+
 
   // Cron / admin only
   "market-scanner": "cron-admin",

@@ -88,3 +88,6 @@ verify_jwt = false
 
 [functions.payments-webhook]
 verify_jwt = false
+
+[functions.quant-decision]
+verify_jwt = false
