@@ -85,6 +85,7 @@ import {
   type CvarPosition,
 } from "../_shared/portfolio-cvar.ts";
 import { detectAdwinDrift, adwinGateAdjust } from "../_shared/adwin.ts";
+import { queueQuantDecision } from "../_shared/quant-ledger.ts";
 import { loadAdaptiveThresholds, resolveThresholds, type ThresholdMap } from "../_shared/adaptive-thresholds.ts";
 import { loadAdaptiveExits, resolveExitParams, applyExitParams, type ExitParamMap } from "../_shared/adaptive-exits.ts";
 import { loadNewsSentiment, newsConvictionDelta, type NewsSentimentMap } from "../_shared/news-sentiment-loader.ts";
@@ -3795,6 +3796,18 @@ async function processUser(
     await executeEntry(supabase, settings, p.ticker, p.decision, summary, rotationActive);
     userSummary.entries += summary.entries - beforeEntries;
     if (summary.entries > beforeEntries) {
+      // Shadow-log the approved decision alongside the blocked ones.
+      queueQuantDecision(supabase, {
+        userId,
+        ticker: p.ticker,
+        side: p.decision.decision === "BUY" ? "long" : "short",
+        sleeve: String(p.decision.profile ?? "core"),
+        mode: "live",
+        allowed: true,
+        rawScore: p.decision.conviction,
+        proposedNotional: candidateDollars,
+        approvedNotional: candidateDollars,
+      }, logInserts);
       totalNavExposureDollars += candidateDollars;
       openRiskDollars += candidateRisk;
       heldTickers.add(p.ticker);
