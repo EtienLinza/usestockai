@@ -1143,6 +1143,217 @@ export type Database = {
         }
         Relationships: []
       }
+      quant_counterfactual_outcomes: {
+        Row: {
+          created_at: string
+          decision_id: string
+          gross_return_pct: number | null
+          horizon_bars: number
+          id: string
+          label: string
+          label_version: string
+          max_adverse_pct: number | null
+          max_favorable_pct: number | null
+          net_return_pct: number | null
+          outcome_at: string
+          realized_cost_pct: number | null
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          decision_id: string
+          gross_return_pct?: number | null
+          horizon_bars: number
+          id?: string
+          label: string
+          label_version: string
+          max_adverse_pct?: number | null
+          max_favorable_pct?: number | null
+          net_return_pct?: number | null
+          outcome_at: string
+          realized_cost_pct?: number | null
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          decision_id?: string
+          gross_return_pct?: number | null
+          horizon_bars?: number
+          id?: string
+          label?: string
+          label_version?: string
+          max_adverse_pct?: number | null
+          max_favorable_pct?: number | null
+          net_return_pct?: number | null
+          outcome_at?: string
+          realized_cost_pct?: number | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "quant_counterfactual_outcomes_decision_id_fkey"
+            columns: ["decision_id"]
+            isOneToOne: false
+            referencedRelation: "quant_decision_log"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      quant_decision_log: {
+        Row: {
+          allowed: boolean
+          approved_notional: number
+          approved_risk_pct: number
+          block_reasons: Json
+          calibrated_probability: number | null
+          created_at: string
+          decision_at: string
+          expected_net_edge_pct: number | null
+          experiment_id: string | null
+          feature_set_version: string
+          generated_at: string
+          id: string
+          intent_id: string | null
+          mode: string
+          model_version: string
+          proposed_notional: number
+          provenance: Json
+          raw_score: number | null
+          side: string
+          signal_id: string
+          sleeve: string
+          ticker: string
+          updated_at: string
+          user_id: string | null
+        }
+        Insert: {
+          allowed: boolean
+          approved_notional?: number
+          approved_risk_pct?: number
+          block_reasons?: Json
+          calibrated_probability?: number | null
+          created_at?: string
+          decision_at: string
+          expected_net_edge_pct?: number | null
+          experiment_id?: string | null
+          feature_set_version: string
+          generated_at: string
+          id?: string
+          intent_id?: string | null
+          mode: string
+          model_version: string
+          proposed_notional?: number
+          provenance?: Json
+          raw_score?: number | null
+          side: string
+          signal_id: string
+          sleeve: string
+          ticker: string
+          updated_at?: string
+          user_id?: string | null
+        }
+        Update: {
+          allowed?: boolean
+          approved_notional?: number
+          approved_risk_pct?: number
+          block_reasons?: Json
+          calibrated_probability?: number | null
+          created_at?: string
+          decision_at?: string
+          expected_net_edge_pct?: number | null
+          experiment_id?: string | null
+          feature_set_version?: string
+          generated_at?: string
+          id?: string
+          intent_id?: string | null
+          mode?: string
+          model_version?: string
+          proposed_notional?: number
+          provenance?: Json
+          raw_score?: number | null
+          side?: string
+          signal_id?: string
+          sleeve?: string
+          ticker?: string
+          updated_at?: string
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "quant_decision_log_experiment_id_fkey"
+            columns: ["experiment_id"]
+            isOneToOne: false
+            referencedRelation: "quant_experiment_runs"
+            referencedColumns: ["experiment_id"]
+          },
+        ]
+      }
+      quant_experiment_runs: {
+        Row: {
+          code_revision: string
+          completed_at: string | null
+          cost_model_version: string
+          created_at: string
+          dataset_snapshot: string
+          decision_lag_bars: number
+          embargo_bars: number
+          experiment_id: string
+          feature_set_version: string
+          id: string
+          model_versions: Json
+          purge_bars: number
+          random_seed: number
+          status: string
+          test_window: Json
+          train_window: Json
+          universe_definition: string
+          updated_at: string
+          validation_window: Json
+        }
+        Insert: {
+          code_revision: string
+          completed_at?: string | null
+          cost_model_version: string
+          created_at?: string
+          dataset_snapshot: string
+          decision_lag_bars?: number
+          embargo_bars?: number
+          experiment_id: string
+          feature_set_version: string
+          id?: string
+          model_versions?: Json
+          purge_bars?: number
+          random_seed: number
+          status?: string
+          test_window: Json
+          train_window: Json
+          universe_definition: string
+          updated_at?: string
+          validation_window: Json
+        }
+        Update: {
+          code_revision?: string
+          completed_at?: string | null
+          cost_model_version?: string
+          created_at?: string
+          dataset_snapshot?: string
+          decision_lag_bars?: number
+          embargo_bars?: number
+          experiment_id?: string
+          feature_set_version?: string
+          id?: string
+          model_versions?: Json
+          purge_bars?: number
+          random_seed?: number
+          status?: string
+          test_window?: Json
+          train_window?: Json
+          universe_definition?: string
+          updated_at?: string
+          validation_window?: Json
+        }
+        Relationships: []
+      }
       rejected_signals: {
         Row: {
           calibrated_conviction: number | null
@@ -2163,12 +2374,12 @@ export type Tables<
   DefaultSchemaTableNameOrOptions extends
     | keyof (DefaultSchema["Tables"] & DefaultSchema["Views"])
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof (DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"] &
         DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Views"])
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -2192,11 +2403,11 @@ export type TablesInsert<
   DefaultSchemaTableNameOrOptions extends
     | keyof DefaultSchema["Tables"]
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -2217,11 +2428,11 @@ export type TablesUpdate<
   DefaultSchemaTableNameOrOptions extends
     | keyof DefaultSchema["Tables"]
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -2242,11 +2453,11 @@ export type Enums<
   DefaultSchemaEnumNameOrOptions extends
     | keyof DefaultSchema["Enums"]
     | { schema: keyof DatabaseWithoutInternals },
-  EnumName extends DefaultSchemaEnumNameOrOptions extends {
+  EnumName extends (DefaultSchemaEnumNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaEnumNameOrOptions["schema"]]["Enums"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaEnumNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -2259,11 +2470,11 @@ export type CompositeTypes<
   PublicCompositeTypeNameOrOptions extends
     | keyof DefaultSchema["CompositeTypes"]
     | { schema: keyof DatabaseWithoutInternals },
-  CompositeTypeName extends PublicCompositeTypeNameOrOptions extends {
+  CompositeTypeName extends (PublicCompositeTypeNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"]
-    : never = never,
+    : never) = never,
 > = PublicCompositeTypeNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
