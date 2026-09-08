@@ -1086,17 +1086,46 @@ export type Database = {
           },
         ]
       }
+      product_events: {
+        Row: {
+          created_at: string
+          event: string
+          id: string
+          properties: Json
+          user_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          event: string
+          id?: string
+          properties?: Json
+          user_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          event?: string
+          id?: string
+          properties?: Json
+          user_id?: string | null
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           alert_email_enabled: boolean | null
           avatar_url: string | null
           created_at: string
           dashboard_layout: Json | null
+          disclosure_accepted_at: string | null
           email: string | null
           focus_areas: string[] | null
           full_name: string | null
           id: string
           onboarding_completed: boolean
+          onboarding_completed_at: string | null
+          paywall_dismissed_at: string | null
+          paywall_recommended_tier: string | null
+          primary_goal: string | null
           subscription_tier: Database["public"]["Enums"]["subscription_tier"]
           tier_selected_at: string | null
           tier_updated_at: string
@@ -1104,17 +1133,23 @@ export type Database = {
           updated_at: string
           user_id: string
           weekly_digest_enabled: boolean | null
+          winback_shown_at: string | null
         }
         Insert: {
           alert_email_enabled?: boolean | null
           avatar_url?: string | null
           created_at?: string
           dashboard_layout?: Json | null
+          disclosure_accepted_at?: string | null
           email?: string | null
           focus_areas?: string[] | null
           full_name?: string | null
           id?: string
           onboarding_completed?: boolean
+          onboarding_completed_at?: string | null
+          paywall_dismissed_at?: string | null
+          paywall_recommended_tier?: string | null
+          primary_goal?: string | null
           subscription_tier?: Database["public"]["Enums"]["subscription_tier"]
           tier_selected_at?: string | null
           tier_updated_at?: string
@@ -1122,17 +1157,23 @@ export type Database = {
           updated_at?: string
           user_id: string
           weekly_digest_enabled?: boolean | null
+          winback_shown_at?: string | null
         }
         Update: {
           alert_email_enabled?: boolean | null
           avatar_url?: string | null
           created_at?: string
           dashboard_layout?: Json | null
+          disclosure_accepted_at?: string | null
           email?: string | null
           focus_areas?: string[] | null
           full_name?: string | null
           id?: string
           onboarding_completed?: boolean
+          onboarding_completed_at?: string | null
+          paywall_dismissed_at?: string | null
+          paywall_recommended_tier?: string | null
+          primary_goal?: string | null
           subscription_tier?: Database["public"]["Enums"]["subscription_tier"]
           tier_selected_at?: string | null
           tier_updated_at?: string
@@ -1140,6 +1181,7 @@ export type Database = {
           updated_at?: string
           user_id?: string
           weekly_digest_enabled?: boolean | null
+          winback_shown_at?: string | null
         }
         Relationships: []
       }
