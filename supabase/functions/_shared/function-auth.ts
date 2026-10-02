@@ -54,7 +54,6 @@ export const FUNCTION_AUTH_REGISTRY: Record<string, AuthMode> = {
   "evaluate-rejections": "cron-admin",
   "label-rejected-signals": "cron-admin",
   "manage-models": "cron-admin",
-  "refresh-danelfin-scores": "cron-admin",
   "refresh-eps-revisions": "cron-admin",
   "refresh-short-interest": "cron-admin",
   "send-alert-email": "cron-admin",

@@ -4,7 +4,7 @@ description: EPS estimate revision momentum used as supporting conviction factor
 type: feature
 ---
 
-EPS estimate-revision momentum is layered into conviction as a **supporting fundamental factor**, parallel to the Danelfin AI Score overlay. It never blocks a signal and never acts as a gate.
+EPS estimate-revision momentum is layered into conviction as a **supporting fundamental factor**. It never blocks a signal and never acts as a gate.
 
 **Source:** Finnhub `/stock/earnings` endpoint via `_shared/eps-revisions.ts` (`getEpsRevision`, `loadEpsRevisions`, `upsertEpsRevisions`, `isEpsRevisionsConfigured`). Uses the existing `FINNHUB_API_KEY` secret.
 
@@ -15,7 +15,7 @@ EPS estimate-revision momentum is layered into conviction as a **supporting fund
 
 **Refresh:** `refresh-eps-revisions` edge function, cron `refresh-eps-revisions-nightly` at 02:45 UTC weekdays. Throttled ~1 req/sec, hard cap 300 tickers, exits after 5 consecutive failures. Universe = `scan_universe_log.sample_tickers` ∪ `watchlist` ∪ open `virtual_positions`. Writes `cron_heartbeat` with `ok`/`degraded`/`empty`/`skipped`.
 
-**Factor formula** (in `_shared/signal-engine-v2.ts` `evaluateSignal`, applied **after** Danelfin delta, only when `sig.confidence > 0`):
+**Factor formula** (in `_shared/signal-engine-v2.ts` `evaluateSignal`, only when `sig.confidence > 0`):
 - Long:  `delta = round(revisionScore * 0.8)` → range −8 … +8
 - Short: `delta = -round(revisionScore * 0.8)`
 - Missing/null/NaN/crypto → `0` (neutral, never blocks).

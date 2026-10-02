@@ -4,7 +4,7 @@
 // upserts into the `eps_revisions` table. Free-tier safe: throttled to ~1
 // req/sec, hard-capped, exits early on repeated auth/rate-limit failures.
 //
-// Mirrors refresh-danelfin-scores. Trigger: pg_cron at 02:45 UTC weekdays.
+// Trigger: pg_cron at 02:45 UTC weekdays.
 // ============================================================================
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";

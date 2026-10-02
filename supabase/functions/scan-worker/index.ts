@@ -43,9 +43,6 @@ interface Body {
     exitCalibration?: Record<string, { trailMultAdjust: number }>;
     tickerCalibration?: Record<string, { adjust: number }>;
   };
-  /** Pre-loaded Danelfin AI Scores keyed by uppercase ticker — supporting
-   *  conviction factor passed through to evaluateSignal. Missing → neutral. */
-  danelfinScores?: Record<string, number>;
   /** Pre-loaded EPS revision scores keyed by uppercase ticker — supporting
    *  fundamental factor. Missing → neutral. */
   epsRevisionScores?: Record<string, number>;
@@ -115,7 +112,6 @@ serve(async (req) => {
   try {
     const body = await req.json() as Body;
     const { tickers, spyContext, macro, sectorMomentum, weights } = body;
-    const danelfinScores = body.danelfinScores ?? {};
     const epsRevisionScores = body.epsRevisionScores ?? {};
     const marketRegime = body.marketRegime ?? null;
     const metaModel = body.metaModel ?? null;
@@ -232,14 +228,12 @@ serve(async (req) => {
 
 
       try {
-        const danelfin = danelfinScores[ticker.toUpperCase()] ?? null;
         const epsRev = epsRevisionScores[ticker.toUpperCase()] ?? null;
         let sig = evaluateSignal(
           data, ticker,
           { spyBearish: spyContext.spyBearish },
           (macro as MacroContext | null) ?? null,
           undefined, undefined,
-          danelfin,
           epsRev,
           marketRegime,
         );
@@ -251,7 +245,6 @@ serve(async (req) => {
             { spyBearish: spyContext.spyBearish },
             (macro as MacroContext | null) ?? null,
             undefined, tuned,
-            danelfin,
             epsRev,
             marketRegime,
           );
@@ -293,7 +286,7 @@ serve(async (req) => {
         const snapBase = {
           strategy, regime, profile, atr_pct: atrPct, annualized_vol: annualizedVol,
           entry_price: entryPx, macro_score: macro?.score ?? null,
-          sector_bonus: sectorMod.bonus, danelfin_score: sig.danelfinScore ?? null,
+          sector_bonus: sectorMod.bonus,
           eps_revision_score: sig.epsRevisionScore ?? null,
           side: sig.decision === "BUY" ? "long" : "short",
           market_regime: sig.marketRegime ?? marketRegime ?? "neutral",
@@ -361,8 +354,7 @@ serve(async (req) => {
           reasoning: sig.reasoning,
           strategy,
           qualityScore,
-          danelfin_score: sig.danelfinScore ?? null,
-          danelfin_delta: sig.danelfinDelta ?? 0,
+         
           eps_revision_score: sig.epsRevisionScore ?? null,
           eps_revision_delta: sig.epsRevisionDelta ?? 0,
           market_regime: sig.marketRegime ?? marketRegime ?? null,

@@ -16,7 +16,6 @@ import {
   type MacroRegime, type SectorMomentum,
 } from "../_shared/scan-pipeline.ts";
 import { loadCachedBars, lastCacheAgeStats } from "../_shared/bars-cache.ts";
-import { loadDanelfinScores } from "../_shared/danelfin.ts";
 import { loadEpsRevisions } from "../_shared/eps-revisions.ts";
 import { classifyRegime, upsertRegimeSnapshot } from "../_shared/regime-detector.ts";
 import { loadLatestMetaModel } from "../_shared/meta-labeler.ts";
@@ -236,14 +235,6 @@ serve(async (req) => {
       chunks.push(survivors.slice(i, i + WORKER_CHUNK));
     }
 
-    // Pre-load Danelfin AI Scores for survivors once (one SELECT, no API hits).
-    // Forwarded to every worker so the engine can apply the supporting overlay
-    // without each worker hitting the DB independently.
-    const danelfinMap = await loadDanelfinScores(survivors);
-    const danelfinObj: Record<string, number> = {};
-    for (const [t, s] of danelfinMap.entries()) danelfinObj[t] = s;
-    console.log(`Danelfin coverage: ${danelfinMap.size}/${survivors.length}`);
-
     // Pre-load EPS revision scores once (supporting fundamental factor).
     const epsRevisionMap = await loadEpsRevisions(survivors);
     const epsRevisionObj: Record<string, number> = {};
@@ -290,7 +281,6 @@ serve(async (req) => {
       macro,
       sectorMomentum,
       weights,
-      danelfinScores: danelfinObj,
       epsRevisionScores: epsRevisionObj,
       marketRegime: currentRegime,
       metaModel: metaModelForWorker,
@@ -391,8 +381,6 @@ serve(async (req) => {
           regime: s.regime,
           weeklyBias: s.weekly_bias,
           factors: {
-            danelfin_delta: s.danelfin_delta ?? 0,
-            danelfin_score: s.danelfin_score ?? null,
             eps_revision_delta: s.eps_revision_delta ?? 0,
             eps_revision_score: s.eps_revision_score ?? null,
             meta_score: s.meta_score ?? null,
@@ -446,8 +434,6 @@ serve(async (req) => {
           strategy: s.strategy, entry_thesis: s.strategy,
           contributing_rules: {
             reasoning: s.reasoning,
-            danelfin: s.danelfin_delta ?? 0,
-            danelfin_score: s.danelfin_score ?? null,
             eps_revision: s.eps_revision_delta ?? 0,
             eps_revision_score: s.eps_revision_score ?? null,
             market_regime: s.market_regime ?? null,

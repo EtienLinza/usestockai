@@ -362,21 +362,21 @@ const Landing = () => {
                 <tr className="text-left">
                   <th className="p-4 font-medium text-xs uppercase tracking-wider text-muted-foreground"></th>
                   <th className="p-4 font-medium text-primary">StockAI</th>
-                  <th className="p-4 font-medium text-muted-foreground">Discord signal groups</th>
                   <th className="p-4 font-medium text-muted-foreground">TradingView</th>
-                  <th className="p-4 font-medium text-muted-foreground">Tickeron / Danelfin</th>
+                  <th className="p-4 font-medium text-muted-foreground">Danelfin</th>
+                  <th className="p-4 font-medium text-muted-foreground">Tickeron</th>
                 </tr>
               </thead>
               <tbody>
                 {[
-                  ["Reasoning shown for every signal", "yes", "no", "n/a", "partial"],
-                  ["Calibrated conviction (not just a score)", "yes", "no", "no", "no"],
-                  ["Institutional backtester (Sharpe, Sortino, Monte Carlo, walk-forward)", "yes", "no", "partial", "partial"],
-                  ["Export full trade log (CSV, Excel, JSON, HTML)", "yes", "no", "partial", "no"],
+                  ["Free plan available", "yes", "yes", "yes", "yes"],
+                  ["Ready-made AI buy/sell signals (no coding)", "yes", "no", "yes", "yes"],
+                  ["Written reasoning shown for every signal", "yes", "n/a", "partial", "partial"],
+                  ["Strategy backtester you can run yourself", "yes", "yes", "no", "no"],
+                  ["Export full trade log (CSV, Excel, JSON, HTML)", "yes", "partial", "partial", "no"],
+                  ["Paper-trading portfolio with live P&L", "yes", "yes", "no", "yes"],
                   ["Regime-aware sizing & correlation gating", "yes", "no", "no", "no"],
-                  ["Scans 6,000+ tickers automatically", "yes", "no", "manual", "yes"],
-                  ["Paper-trading portfolio with live P&L", "yes", "no", "partial", "no"],
-                  ["Starts free", "yes", "no", "yes", "no"],
+                  ["Best-in-class charting", "no", "yes", "no", "partial"],
                 ].map(([feature, a, b, c, d], i) => (
                   <tr key={i} className="border-t border-border/30">
                     <td className="p-4 text-muted-foreground">{feature}</td>
@@ -394,9 +394,9 @@ const Landing = () => {
           {/* Mobile cards */}
           <div className="md:hidden space-y-4">
             {[
-              { name: "vs Discord signal groups", win: "Every signal ships with the indicators, regime, and math behind it — no anonymous 'trust me' picks." },
-              { name: "vs TradingView", win: "You get a pre-built ensemble scanner instead of writing Pine Script. TradingView still wins on charting depth." },
-              { name: "vs Tickeron / Danelfin", win: "Transparent multi-layer scoring, exportable trade logs, and a backtester that uses the same engine as live signals." },
+              { name: "vs TradingView", win: "Both have free plans and paper trading. StockAI gives you ready-made signals instead of writing Pine Script; TradingView still wins on charting." },
+              { name: "vs Danelfin", win: "Danelfin has a free plan with a daily 1–10 AI Score (full explanations from $22/mo). StockAI adds a backtester you run yourself and paper trading." },
+              { name: "vs Tickeron", win: "Tickeron offers free paper trades and AI robots behind paid plans. StockAI explains every signal in plain words and exports the full trade log." },
             ].map((c) => (
               <Card key={c.name} className="glass-card p-5">
                 <div className="text-sm font-medium mb-1">{c.name}</div>
@@ -406,7 +406,7 @@ const Landing = () => {
           </div>
 
           <p className="text-[11px] text-muted-foreground text-center mt-6 max-w-2xl mx-auto">
-            Comparison based on publicly listed features as of 2026. StockAI is a research and paper-trading tool — it does not execute real orders or hold custody of funds.
+            Based on each company's public pricing and help pages, checked October 2026. Features change — check their sites for the latest. StockAI is a research and paper-trading tool — it does not execute real orders or hold custody of funds.
           </p>
         </div>
       </section>
