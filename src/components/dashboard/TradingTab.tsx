@@ -114,13 +114,6 @@ const getConfidenceBg = (c: number) => {
   return "bg-warning";
 };
 
-const SubScore = ({ label, value }: { label: string; value: number | null }) => (
-  <div className="flex items-center justify-between text-[11px]">
-    <span className="text-muted-foreground">{label}</span>
-    <span className="font-mono font-medium text-foreground">{value ?? "—"}</span>
-  </div>
-);
-
 
 const getRegimeBadge = (regime: string) => {
   const colors: Record<string, string> = {
