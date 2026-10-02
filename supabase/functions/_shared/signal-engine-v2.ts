@@ -1066,12 +1066,6 @@ export interface EvaluateSignalResult {
   atr: number;
   atrPct: number;
   reasoning: string;
-  /** Conviction delta from the Danelfin AI Score overlay (long: +(s-5)*1.5,
-   *  short: -(s-5)*1.5, rounded). 0 when no score available. Exposed so
-   *  callers can persist it to contributing_rules for the calibration loop. */
-  danelfinDelta?: number;
-  /** Raw Danelfin AI Score 1..10 (or undefined when missing). */
-  danelfinScore?: number;
   /** Conviction delta from the EPS revision overlay (long: +round(s*0.8),
    *  short: -round(s*0.8)). 0 when no score available. Persisted to
    *  contributing_rules.eps_revision_delta for calibration. */
@@ -1219,10 +1213,6 @@ export function evaluateSignal(
    *  parameter-sensitivity sweeps so changing `buyThreshold` actually changes
    *  the result instead of being silently overwritten by the classifier. */
   paramOverrides?: Partial<ProfileParams>,
-  /** Optional Danelfin AI Score (1–10) for the ticker. Used as a SUPPORTING
-   *  conviction factor — long: +(score-5)*1.5, short: -(score-5)*1.5.
-   *  Missing/undefined → 0 (neutral, never blocks). */
-  danelfinScore?: number | null,
   /** Optional EPS revision score (-10..+10). Used as a SUPPORTING conviction
    *  factor — long: +round(score*0.8), short: -round(score*0.8).
    *  Missing/undefined → 0 (neutral, never blocks). */
@@ -1362,7 +1352,6 @@ export function evaluateSignal(
   // EPS revision overlay — supporting conviction factor (NEVER a gate).
   // Long: +round(score * 0.8)  → -8 … +8
   // Short: -round(score * 0.8)
-  // Applied after Danelfin so calibration can distinguish their contributions.
   let epsRevisionDelta = 0;
   if (sig.confidence > 0 && epsRevisionScore !== undefined && epsRevisionScore !== null && Number.isFinite(epsRevisionScore)) {
     const side: "long" | "short" = sig.consensusScore >= 0 ? "long" : "short";
@@ -1480,9 +1469,7 @@ export function evaluateSignal(
     kellyFraction,
     atr: sig.atr,
     atrPct: atrPctNow,
-    reasoning: `${sig.strategy.replace("_", " ")} ${sigDir.toLowerCase()} | ${cls.classification} profile | ${sig.regime} regime | conviction ${sig.confidence} | kelly ${(kellyFraction * 100).toFixed(1)}%${danelfinDelta !== 0 ? ` | danelfinΔ=${danelfinDelta > 0 ? "+" : ""}${danelfinDelta}` : ""}${epsRevisionDelta !== 0 ? ` | epsΔ=${epsRevisionDelta > 0 ? "+" : ""}${epsRevisionDelta}` : ""}${regimeDelta !== 0 ? ` | regimeΔ=${regimeDelta > 0 ? "+" : ""}${regimeDelta} (${appliedRegime})` : ""}${realizedEdge && realizedEdge.sampleSize >= 30 ? ` | realKelly(n=${realizedEdge.sampleSize})` : ""}`,
-    danelfinDelta,
-    danelfinScore: (danelfinScore !== undefined && danelfinScore !== null && Number.isFinite(danelfinScore)) ? danelfinScore : undefined,
+    reasoning: `${sig.strategy.replace("_", " ")} ${sigDir.toLowerCase()} | ${cls.classification} profile | ${sig.regime} regime | conviction ${sig.confidence} | kelly ${(kellyFraction * 100).toFixed(1)}%${epsRevisionDelta !== 0 ? ` | epsΔ=${epsRevisionDelta > 0 ? "+" : ""}${epsRevisionDelta}` : ""}${regimeDelta !== 0 ? ` | regimeΔ=${regimeDelta > 0 ? "+" : ""}${regimeDelta} (${appliedRegime})` : ""}${realizedEdge && realizedEdge.sampleSize >= 30 ? ` | realKelly(n=${realizedEdge.sampleSize})` : ""}`,
     epsRevisionDelta,
     epsRevisionScore: (epsRevisionScore !== undefined && epsRevisionScore !== null && Number.isFinite(epsRevisionScore)) ? epsRevisionScore : undefined,
     regimeDelta,

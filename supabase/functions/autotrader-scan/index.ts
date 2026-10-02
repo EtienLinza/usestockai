@@ -68,7 +68,6 @@ import { loadCachedBars, upsertBars } from "../_shared/bars-cache.ts";
 import { getQuoteWithFallback, getEarningsBlackoutDays, getSector, getBeta } from "../_shared/finnhub.ts";
 import { recordHeartbeat } from "../_shared/heartbeat.ts";
 import { applyIsotonicCalibration, type IsotonicAnchor } from "../_shared/calibration.ts";
-import { loadDanelfinScores } from "../_shared/danelfin.ts";
 import { loadEpsRevisions } from "../_shared/eps-revisions.ts";
 import { loadLatestRegime } from "../_shared/regime-detector.ts";
 import { loadLatestMetaModel, scoreMetaLabel, type MetaLabelModel } from "../_shared/meta-labeler.ts";
@@ -1436,8 +1435,6 @@ function buildEntryFeatureSnapshot(
     atr_pct: sig?.atrPct ?? 0,
     weekly_alloc: sig?.weeklyBias?.targetAllocation ?? 0,
     kelly_fraction: sig?.kellyFraction ?? 0,
-    danelfin_score: typeof sig?.danelfinScore === "number" ? sig.danelfinScore : 0,
-    danelfin_delta: sig?.danelfinDelta ?? 0,
     eps_revision_score: typeof sig?.epsRevisionScore === "number" ? sig.epsRevisionScore : 0,
     eps_revision_delta: sig?.epsRevisionDelta ?? 0,
     regime_delta: sig?.regimeDelta ?? 0,
@@ -1498,7 +1495,6 @@ async function runEntryDecision(
   calibrationCurve: Record<string, { adjust: number }>,
   strategyTilts: Record<string, { multiplier: number }>,
   tickerCalibration: Record<string, { adjust: number }>,
-  danelfinMap?: Map<string, number>,
   epsRevisionMap?: Map<string, number>,
   /** C-3 FIX: dynamic NAV (starting_nav + cumulative realized PnL +
    *  unrealized today). Previously we sized off `settings.starting_nav`
@@ -1588,14 +1584,13 @@ async function runEntryDecision(
   } catch (_e) { /* non-fatal — never block scan on earnings API hiccup */ }
 
 
-  const danelfin = danelfinMap?.get(ticker.toUpperCase()) ?? null;
   const epsRev = epsRevisionMap?.get(ticker.toUpperCase()) ?? null;
   // Pre-evaluate without realized edge so we can fetch the right strategy bucket.
-  const peek = evaluateSignal(data, ticker, undefined, macro, undefined, undefined, danelfin, epsRev, marketRegime);
+  const peek = evaluateSignal(data, ticker, undefined, macro, undefined, undefined, epsRev, marketRegime);
   const edge = peek?.strategy ? strategyEdges?.[peek.strategy] : undefined;
   // WS2: apply nightly-tuned thresholds for this stock profile × market regime.
   const tuned = resolveThresholds(ADAPTIVE_THRESHOLDS, peek?.profile, peek?.marketRegime ?? marketRegime);
-  const sig = evaluateSignal(data, ticker, undefined, macro, undefined, tuned, danelfin, epsRev, marketRegime, edge ?? null);
+  const sig = evaluateSignal(data, ticker, undefined, macro, undefined, tuned, epsRev, marketRegime, edge ?? null);
   if (!sig) return { kind: "HOLD", reason: "Insufficient data" };
   if (sig.decision === "HOLD") return { kind: "HOLD", reason: sig.reasoning };
 
@@ -2050,7 +2045,6 @@ async function evaluateAddOnCandidate(
   pos: Position,
   macro: MacroContext | null,
   settings: Settings,
-  danelfinMap: Map<string, number> | undefined,
   epsRevisionMap: Map<string, number> | undefined,
   marketRegime: string | null | undefined,
   metaModel: MetaLabelModel | null | undefined,
@@ -2076,13 +2070,12 @@ async function evaluateAddOnCandidate(
     if (d !== null && d <= 3) return { kind: "SKIP", reason: `Earnings in ~${d}d — no add-on` };
   } catch (_e) { /* non-fatal */ }
 
-  const danelfin = danelfinMap?.get(ticker.toUpperCase()) ?? null;
   const epsRev = epsRevisionMap?.get(ticker.toUpperCase()) ?? null;
-  const peek = evaluateSignal(data, ticker, undefined, macro, undefined, undefined, danelfin, epsRev, marketRegime);
+  const peek = evaluateSignal(data, ticker, undefined, macro, undefined, undefined, epsRev, marketRegime);
   const edge = peek?.strategy ? strategyEdges?.[peek.strategy] : undefined;
   // WS2: apply nightly-tuned thresholds for this stock profile × market regime.
   const tuned = resolveThresholds(ADAPTIVE_THRESHOLDS, peek?.profile, peek?.marketRegime ?? marketRegime);
-  const sig = evaluateSignal(data, ticker, undefined, macro, undefined, tuned, danelfin, epsRev, marketRegime, edge ?? null);
+  const sig = evaluateSignal(data, ticker, undefined, macro, undefined, tuned, epsRev, marketRegime, edge ?? null);
   if (!sig) return { kind: "SKIP", reason: "Insufficient data" };
   if (sig.decision === "HOLD") return { kind: "SKIP", reason: "Signal HOLD" };
 
@@ -3379,7 +3372,6 @@ async function processUser(
       Array.from(heldTickers),
       volScalar,
       calibrationCurve, strategyTilts, tickerCalibration,
-      danelfinMap,
       epsRevisionMap,
       currentNav, // C-3 FIX: dynamic NAV for sizing
       marketRegime,
@@ -3931,7 +3923,7 @@ async function processUser(
 
       const decision = await evaluateAddOnCandidate(
         ticker, data, pos, macro, settings,
-        danelfinMap, epsRevisionMap, marketRegime, metaModel,
+        epsRevisionMap, marketRegime, metaModel,
         strategyEdges, metaGate,
         calibrationCurve, strategyTilts, tickerCalibration,
         openTix, mode,

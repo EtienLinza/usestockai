@@ -116,7 +116,6 @@ import {
 } from "../_shared/signal-engine-v2.ts";
 import { getEarningsBlackoutDays } from "../_shared/finnhub.ts";
 import { applyIsotonicCalibration, type IsotonicAnchor } from "../_shared/calibration.ts";
-import { loadDanelfinScores } from "../_shared/danelfin.ts";
 import { loadEpsRevisions } from "../_shared/eps-revisions.ts";
 import { explainSignal } from "../_shared/signal-explainer.ts";
 
@@ -955,8 +954,6 @@ serve(async (req) => {
       strategy: string;
       sector: string;
       qualityScore: number;
-      danelfin_score?: number | null;
-      danelfin_delta?: number;
       eps_revision_score?: number | null;
       eps_revision_delta?: number;
     }[] = [];
@@ -994,7 +991,6 @@ serve(async (req) => {
         // Use the canonical evaluateSignal() — same code path the autotrader
         // uses for entries and the backtester validates against. Eliminates
         // scanner/autotrader divergence.
-        const danelfin = danelfinMap.get(ticker.toUpperCase()) ?? null;
         const epsRev = epsRevisionMap.get(ticker.toUpperCase()) ?? null;
         const sig = evaluateSignal(
           data,
@@ -1002,7 +998,6 @@ serve(async (req) => {
           { spyBearish },
           (macro as MacroContext | null) ?? null,
           undefined, undefined,
-          danelfin,
           epsRev,
         );
         if (!sig || sig.decision === "HOLD") continue;
@@ -1068,8 +1063,6 @@ serve(async (req) => {
           strategy,
           sector,
           qualityScore,
-          danelfin_score: sig.danelfinScore ?? null,
-          danelfin_delta: sig.danelfinDelta ?? 0,
           eps_revision_score: sig.epsRevisionScore ?? null,
           eps_revision_delta: sig.epsRevisionDelta ?? 0,
         });
@@ -1092,8 +1085,6 @@ serve(async (req) => {
         regime: s.regime,
         weeklyBias: s.weekly_bias,
         factors: {
-          danelfin_delta: s.danelfin_delta,
-          danelfin_score: s.danelfin_score,
           eps_revision_delta: s.eps_revision_delta,
           eps_revision_score: s.eps_revision_score,
           target_allocation: s.target_allocation,
@@ -1165,8 +1156,6 @@ serve(async (req) => {
             entry_thesis: s.strategy, // strategy doubles as thesis tag for now
             contributing_rules: {
               reasoning: s.reasoning,
-              danelfin: s.danelfin_delta ?? 0,
-              danelfin_score: s.danelfin_score ?? null,
               eps_revision: s.eps_revision_delta ?? 0,
               eps_revision_score: s.eps_revision_score ?? null,
             },

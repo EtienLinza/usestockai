@@ -30,7 +30,7 @@ const PSI_WARN = 0.1;
 const PSI_CRIT = 0.25;
 const NUMERIC_FEATURES = [
   "atr_pct", "annualized_vol", "macro_score", "sector_bonus",
-  "danelfin_score", "eps_revision_score",
+  "eps_revision_score",
 ];
 
 function psi(recent: number[], baseline: number[], bins = PSI_BINS): number {
