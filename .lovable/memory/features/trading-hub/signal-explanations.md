@@ -8,7 +8,7 @@ Each fired signal can carry a short retail-friendly natural-language explanation
 
 **Generator:** `_shared/signal-explainer.ts` → `explainSignal({ ticker, side, conviction, strategy, profile, regime, weeklyBias, factors }): Promise<string>`. Uses Lovable AI Gateway (`google/gemini-2.5-flash-lite`) via raw `fetch` to keep the helper self-contained. 8s timeout. Returns `""` on any failure / missing `LOVABLE_API_KEY` / non-2xx — **never throws, never blocks**.
 
-**Prompt contract:** system asks for 2-3 sentences, ≤280 chars, no emojis/disclaimers/greetings, just the rationale citing the strongest 2-3 contributing factors. Inputs are passed as compact JSON (side, conviction, regime, strategy, danelfin/eps deltas, target allocation).
+**Prompt contract:** system asks for 2-3 sentences, ≤280 chars, no emojis/disclaimers/greetings, just the rationale citing the strongest 2-3 contributing factors. Inputs are passed as compact JSON (side, conviction, regime, strategy, eps deltas, target allocation).
 
 **Where it runs:**
 - `scan-worker`: after the signal-push loop, top-20 by conviction get `explainSignal` calls fanned out via `Promise.all`. Failures from any one explainer don't affect any other signal.
