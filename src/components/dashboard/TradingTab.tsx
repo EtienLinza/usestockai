@@ -176,38 +176,6 @@ const SubScore = ({ label, value }: { label: string; value: number | null }) => 
   </div>
 );
 
-function DanelfinBadge({ row }: { row: DanelfinRow }) {
-  return (
-    <HoverCard openDelay={120} closeDelay={80}>
-      <HoverCardTrigger asChild>
-        <Badge
-          variant="outline"
-          className={cn("text-[10px] font-mono cursor-help", danelfinBadgeClass(row.ai_score))}
-        >
-          AI {row.ai_score}
-        </Badge>
-      </HoverCardTrigger>
-      <HoverCardContent className="w-56 p-3 space-y-2" align="start" side="top">
-        <div className="flex items-center justify-between">
-          <span className="text-xs font-semibold">Danelfin AI Score</span>
-          <span className={cn("text-xs font-mono font-bold", row.ai_score >= 6 ? "text-primary" : row.ai_score <= 3 ? "text-destructive" : "text-muted-foreground")}>
-            {row.ai_score}/10
-          </span>
-        </div>
-        <div className="space-y-1 border-t border-border/40 pt-2">
-          <SubScore label="Technical" value={row.technical} />
-          <SubScore label="Fundamental" value={row.fundamental} />
-          <SubScore label="Sentiment" value={row.sentiment} />
-          {row.low_risk !== null && <SubScore label="Low Risk" value={row.low_risk} />}
-        </div>
-        <div className="text-[10px] text-muted-foreground pt-1 border-t border-border/40">
-          Supporting factor only — never blocks signals. As of {row.as_of}.
-        </div>
-      </HoverCardContent>
-    </HoverCard>
-  );
-}
-
 
 const getRegimeBadge = (regime: string) => {
   const colors: Record<string, string> = {
@@ -359,12 +327,6 @@ export function TradingTab({
     return signals.filter(s => matchesTradingStyle(s, tradingStyle));
   }, [signals, tradingStyle]);
 
-  // Danelfin AI Scores for visible signals + open positions (supporting badge).
-  const danelfinTickers = useMemo(
-    () => Array.from(new Set([...filteredSignals.map(s => s.ticker), ...openPositions.map(p => p.ticker)])),
-    [filteredSignals, openPositions],
-  );
-  const danelfinScores = useDanelfinScores(danelfinTickers);
 
 
   const totalUnrealizedPnL = useMemo(() => {
@@ -582,9 +544,6 @@ export function TradingTab({
                         <Badge variant="outline" className={cn("text-[10px]", signal.signal_type === "BUY" ? "bg-success/10 text-success border-success/30" : "bg-destructive/10 text-destructive border-destructive/30")}>
                           {signal.signal_type}
                         </Badge>
-                        {danelfinScores[signal.ticker.toUpperCase()] !== undefined && (
-                          <DanelfinBadge row={danelfinScores[signal.ticker.toUpperCase()]} />
-                        )}
                       </div>
                       <Button
                         size="sm"

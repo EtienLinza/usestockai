@@ -1330,25 +1330,6 @@ export function evaluateSignal(
     }
   }
 
-  // Danelfin AI Score overlay — supporting conviction factor (NEVER a gate).
-  // Long: +(score-5)*1.5  → range -6 … +7.5
-  // Short: -(score-5)*1.5
-  // Missing/null → 0 (neutral). The adaptive weighting loop will tune real
-  // influence over time by reading contributing_rules.danelfin from outcomes.
-  let danelfinDelta = 0;
-  if (sig.confidence > 0 && danelfinScore !== undefined && danelfinScore !== null && Number.isFinite(danelfinScore)) {
-    const side: "long" | "short" = sig.consensusScore >= 0 ? "long" : "short";
-    const raw = (danelfinScore - 5) * 1.5;
-    danelfinDelta = Math.round(side === "long" ? raw : -raw);
-    if (danelfinDelta !== 0) {
-      const before = sig.confidence;
-      sig.confidence = Math.max(0, Math.min(100, sig.confidence + danelfinDelta));
-      if (before > 0 && sig.consensusScore !== 0) {
-        sig.consensusScore = Math.sign(sig.consensusScore) * sig.confidence;
-      }
-    }
-  }
-
   // EPS revision overlay — supporting conviction factor (NEVER a gate).
   // Long: +round(score * 0.8)  → -8 … +8
   // Short: -round(score * 0.8)

@@ -234,7 +234,6 @@ serve(async (req) => {
           { spyBearish: spyContext.spyBearish },
           (macro as MacroContext | null) ?? null,
           undefined, undefined,
-          danelfin,
           epsRev,
           marketRegime,
         );
@@ -356,7 +355,6 @@ serve(async (req) => {
           strategy,
           qualityScore,
          
-          danelfin_delta: sig.danelfinDelta ?? 0,
           eps_revision_score: sig.epsRevisionScore ?? null,
           eps_revision_delta: sig.epsRevisionDelta ?? 0,
           market_regime: sig.marketRegime ?? marketRegime ?? null,
