@@ -114,61 +114,6 @@ const getConfidenceBg = (c: number) => {
   return "bg-warning";
 };
 
-// Danelfin AI Score record (subset of danelfin_scores row used by the UI).
-interface DanelfinRow {
-  ai_score: number;
-  technical: number | null;
-  fundamental: number | null;
-  sentiment: number | null;
-  low_risk: number | null;
-  as_of: string;
-}
-
-// Hook: fetch Danelfin AI Scores for a list of tickers (≤7 days fresh).
-// Returns map ticker → row. Missing tickers simply omitted.
-function useDanelfinScores(tickers: string[]): Record<string, DanelfinRow> {
-  const [scores, setScores] = useState<Record<string, DanelfinRow>>({});
-  const key = tickers.slice().sort().join(",");
-  useEffect(() => {
-    if (tickers.length === 0) return;
-    const cutoff = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
-    let cancelled = false;
-    (async () => {
-      const { data } = await supabase
-        .from("danelfin_scores")
-        .select("ticker, ai_score, technical, fundamental, sentiment, low_risk, as_of")
-        .in("ticker", Array.from(new Set(tickers.map(t => t.toUpperCase()))))
-        .gte("as_of", cutoff)
-        .order("as_of", { ascending: false });
-      if (cancelled || !data) return;
-      const m: Record<string, DanelfinRow> = {};
-      for (const r of data as Array<DanelfinRow & { ticker: string }>) {
-        if (!(r.ticker in m)) {
-          m[r.ticker] = {
-            ai_score: r.ai_score,
-            technical: r.technical,
-            fundamental: r.fundamental,
-            sentiment: r.sentiment,
-            low_risk: r.low_risk,
-            as_of: r.as_of,
-          };
-        }
-      }
-      setScores(m);
-    })();
-    return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key]);
-  return scores;
-}
-
-const danelfinBadgeClass = (score: number) => {
-  if (score >= 8) return "bg-primary/20 text-primary border-primary/30";
-  if (score >= 6) return "bg-primary/10 text-primary border-primary/20";
-  if (score <= 3) return "bg-destructive/10 text-destructive border-destructive/20";
-  return "bg-muted/30 text-muted-foreground border-border/30";
-};
-
 const SubScore = ({ label, value }: { label: string; value: number | null }) => (
   <div className="flex items-center justify-between text-[11px]">
     <span className="text-muted-foreground">{label}</span>
