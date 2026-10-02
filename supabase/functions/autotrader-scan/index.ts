@@ -3184,9 +3184,6 @@ async function processUser(
     | { kind: "hold" };
   const pending: Pending[] = [];
 
-  // Pre-load Danelfin AI Scores for the whole watchlist in one query — used
-  // as a SUPPORTING conviction factor inside evaluateSignal. Missing scores
-  // are neutral (never block).
   const watchlistForEntry = entryTickers;
   if (watchlistForEntry.length < entryCandidatesForShard.length) {
     await supabase.from("autotrade_log").insert({
@@ -3195,11 +3192,6 @@ async function processUser(
       action: "HOLD",
       reason: `Entry scan chunked: evaluating ${watchlistForEntry.length}/${entryCandidatesForShard.length} eligible watchlist tickers this run to stay within CPU budget`,
     });
-  }
-
-  const danelfinMap = await loadDanelfinScores(watchlistForEntry);
-  if (danelfinMap.size > 0) {
-    console.log(`autotrader-scan: Danelfin coverage ${danelfinMap.size}/${watchlistForEntry.length}`);
   }
 
   // Pre-load EPS revision scores — supporting fundamental factor (never blocks).

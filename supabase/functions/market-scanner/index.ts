@@ -969,11 +969,6 @@ serve(async (req) => {
       if (days !== null && days <= 3) blackoutSet.add(t);
     });
 
-    // Pre-load Danelfin AI Scores for the batch (one DB query, no API hits).
-    const danelfinMap = await loadDanelfinScores(tickersToScan);
-    if (danelfinMap.size > 0) {
-      console.log(`market-scanner: Danelfin coverage ${danelfinMap.size}/${tickersToScan.length}`);
-    }
     // Pre-load EPS revision scores (supporting fundamental factor).
     const epsRevisionMap = await loadEpsRevisions(tickersToScan);
     if (epsRevisionMap.size > 0) {
