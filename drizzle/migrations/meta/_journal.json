@@ -1,0 +1,13 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1790971081984,
+      "tag": "0000_remove_danelfin_and_tighten_rls",
+      "breakpoints": true
+    }
+  ]
+}
