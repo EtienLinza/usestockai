@@ -29,6 +29,9 @@ const Auth = () => {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [signupStep, setSignupStep] = useState<"email" | "password">("email");
+  const strength = passwordStrength(password);
+  const showPassword = !isSignUp || signupStep === "password";
 
   // MFA challenge state
   const [mfaFactorId, setMfaFactorId] = useState<string | null>(null);
@@ -89,11 +92,25 @@ const Auth = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
+    if (isSignUp && signupStep === "email") {
+      const emailOk = authSchema.shape.email.safeParse(email);
+      if (!emailOk.success) {
+        toast.error(emailOk.error.errors[0].message);
+        return;
+      }
+      setSignupStep("password");
+      return;
+    }
+
     // Validate inputs with Zod
     const result = authSchema.safeParse({ email, password });
     if (!result.success) {
       toast.error(result.error.errors[0].message);
+      return;
+    }
+    if (isSignUp && !strength.acceptable) {
+      toast.error(strength.hint ?? "Choose a stronger password");
       return;
     }
 
