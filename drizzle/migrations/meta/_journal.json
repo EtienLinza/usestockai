@@ -8,6 +8,13 @@
       "when": 1790971081984,
       "tag": "0000_remove_danelfin_and_tighten_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1791132494742,
+      "tag": "0001_lock_internal_model_tables",
+      "breakpoints": true
     }
   ]
 }
