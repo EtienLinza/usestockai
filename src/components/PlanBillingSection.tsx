@@ -91,6 +91,12 @@ export const PlanBillingSection = () => {
         </div>
       </div>
 
+      {isPaid && (
+        <p className="text-xs text-muted-foreground mb-4">
+          On monthly billing? Switch to annual and save ~17% — use Manage billing to change it anytime.
+        </p>
+      )}
+
       <div className="flex flex-wrap gap-2">
         <Button onClick={() => navigate("/pricing")} variant={isPaid ? "outline" : "default"}>
           {isPaid ? "Change plan" : "Upgrade plan"}
