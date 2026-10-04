@@ -26,6 +26,7 @@ import { MarketTab } from "@/components/dashboard/MarketTab";
 import { TradingTab } from "@/components/dashboard/TradingTab";
 import { TickerSearchBar } from "@/components/dashboard/TickerSearchBar";
 import { shouldPollPrices, onVisible } from "@/lib/poll-utils";
+import { WinbackBanner } from "@/components/WinbackBanner";
 
 /** Loose row/result shape returned by scan progress rows and the scanner invoke. */
 type ScanRow = Record<string, number | string | null | undefined>;
@@ -483,6 +484,8 @@ const Dashboard = () => {
 
       <main className="pt-20 pb-24 md:pb-12 px-3 sm:px-6 relative z-10">
         <div className="container mx-auto max-w-7xl">
+          <WinbackBanner />
+
 
           {/* Per-user emergency stop banner */}
           {killSwitchActive && (

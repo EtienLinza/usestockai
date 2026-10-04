@@ -31,13 +31,13 @@ export const LockedFeature = ({ requiredTier, feature, children, blur = true }: 
             </div>
             <div>
               <div className="text-xs uppercase tracking-wide text-primary font-medium mb-1">
-                {TIER_LABELS[requiredTier]} feature
+                {TIER_LABELS[requiredTier]}
               </div>
               <p className="text-sm text-muted-foreground">
-                {feature ?? "This area"} is available on the {TIER_LABELS[requiredTier]} plan.
+                {TIER_LABELS[requiredTier]} unlocks {feature ? feature.toLowerCase() : "this view"}. Here's a preview.
               </p>
             </div>
-            <Button size="sm" onClick={() => setOpen(true)}>Upgrade to {TIER_LABELS[requiredTier]}</Button>
+            <Button size="sm" onClick={() => setOpen(true)}>See what {TIER_LABELS[requiredTier]} adds</Button>
           </div>
         </div>
       </div>

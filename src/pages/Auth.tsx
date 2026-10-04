@@ -14,6 +14,7 @@ import { toast } from "sonner";
 import { Loader2, Mail, Lock, ArrowLeft, ShieldCheck } from "lucide-react";
 import { Link } from "react-router-dom";
 import { z } from "zod";
+import { passwordStrength } from "@/lib/password-strength";
 
 const authSchema = z.object({
   email: z.string().trim().email("Please enter a valid email address"),
@@ -29,6 +30,9 @@ const Auth = () => {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [signupStep, setSignupStep] = useState<"email" | "password">("email");
+  const strength = passwordStrength(password);
+  const showPassword = !isSignUp || signupStep === "password";
 
   // MFA challenge state
   const [mfaFactorId, setMfaFactorId] = useState<string | null>(null);
@@ -89,11 +93,25 @@ const Auth = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
+    if (isSignUp && signupStep === "email") {
+      const emailOk = authSchema.shape.email.safeParse(email);
+      if (!emailOk.success) {
+        toast.error(emailOk.error.errors[0].message);
+        return;
+      }
+      setSignupStep("password");
+      return;
+    }
+
     // Validate inputs with Zod
     const result = authSchema.safeParse({ email, password });
     if (!result.success) {
       toast.error(result.error.errors[0].message);
+      return;
+    }
+    if (isSignUp && !strength.acceptable) {
+      toast.error(strength.hint ?? "Choose a stronger password");
       return;
     }
 
@@ -222,8 +240,16 @@ const Auth = () => {
                   </div>
                 </div>
 
+                {showPassword && (
                 <div className="space-y-2">
-                  <Label htmlFor="password">Password</Label>
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="password">Password</Label>
+                    {isSignUp && (
+                      <button type="button" onClick={() => setSignupStep("email")} className="text-xs text-muted-foreground hover:text-primary">
+                        Change email
+                      </button>
+                    )}
+                  </div>
                   <div className="relative">
                     <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                     <Input
@@ -234,13 +260,32 @@ const Auth = () => {
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
                       className="pl-10"
+                      autoFocus={isSignUp}
+                      autoComplete={isSignUp ? "new-password" : "current-password"}
                       required
                     />
                   </div>
-                  <p className="text-xs text-muted-foreground">
-                    {isSignUp ? "Must include uppercase, lowercase, number, and special character" : ""}
-                  </p>
+                  {isSignUp && (
+                    <div aria-live="polite" data-testid="password-strength">
+                      <div className="flex gap-1 mt-1" aria-hidden="true">
+                        {[1, 2, 3, 4].map((n) => (
+                          <div
+                            key={n}
+                            className={`h-1 flex-1 rounded-full transition-colors ${
+                              password && strength.score >= n
+                                ? strength.score <= 1 ? "bg-destructive" : strength.score === 2 ? "bg-muted-foreground" : "bg-primary"
+                                : "bg-muted"
+                            }`}
+                          />
+                        ))}
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        {password ? <>{strength.label}{strength.hint ? ` · ${strength.hint}` : ""}</> : "Mix upper and lower case, a number and a symbol."}
+                      </p>
+                    </div>
+                  )}
                 </div>
+                )}
 
                 <Button
                   type="submit"
@@ -255,9 +300,12 @@ const Auth = () => {
                       {isSignUp ? "Creating Account..." : "Signing In..."}
                     </>
                   ) : (
-                    isSignUp ? "Create Account" : "Sign In"
+                    isSignUp ? (signupStep === "email" ? "Continue" : "Create Account") : "Sign In"
                   )}
                 </Button>
+                {isSignUp && (
+                  <p className="text-xs text-center text-muted-foreground">Free to start, no card required.</p>
+                )}
               </form>
               )}
 
@@ -265,7 +313,7 @@ const Auth = () => {
                 <div className="mt-6 text-center">
                   <button
                     type="button"
-                    onClick={() => setIsSignUp(!isSignUp)}
+                    onClick={() => { setIsSignUp(!isSignUp); setSignupStep("email"); }}
                     className="text-sm text-muted-foreground hover:text-primary transition-colors"
                   >
                     {isSignUp

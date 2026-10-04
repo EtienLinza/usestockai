@@ -1,7 +1,10 @@
+import { useEffect } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { useNavigate } from "react-router-dom";
 import { Tier, TIER_LABELS, TIER_FEATURE_LIST } from "@/lib/tier-features";
+import { PAYMENTS_ENABLED } from "@/lib/paywall";
+import { track } from "@/lib/analytics";
 import { Check, Sparkles, Crown } from "lucide-react";
 
 interface Props {
@@ -14,6 +17,11 @@ interface Props {
 export const UpgradeRequiredModal = ({ open, onOpenChange, requiredTier, feature }: Props) => {
   const navigate = useNavigate();
   const Icon = requiredTier === "elite" ? Crown : Sparkles;
+  const label = TIER_LABELS[requiredTier];
+
+  useEffect(() => {
+    if (open) track("feature_gate_hit", { feature: feature ?? "unknown", tier_required: requiredTier });
+  }, [open, feature, requiredTier]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -21,14 +29,12 @@ export const UpgradeRequiredModal = ({ open, onOpenChange, requiredTier, feature
         <DialogHeader>
           <div className="flex items-center gap-2 mb-2">
             <Icon className="w-5 h-5 text-primary" />
-            <span className="text-xs uppercase tracking-wide text-primary font-medium">
-              {TIER_LABELS[requiredTier]} feature
-            </span>
+            <span className="text-xs uppercase tracking-wide text-primary font-medium">{label}</span>
           </div>
-          <DialogTitle>{TIER_LABELS[requiredTier]} is launching soon</DialogTitle>
+          <DialogTitle>{feature ? `${label} unlocks ${feature.toLowerCase()}` : `Unlock this with ${label}`}</DialogTitle>
           <DialogDescription>
-            {feature ? `${feature} is part of the ${TIER_LABELS[requiredTier]} plan.` : `This feature is part of the ${TIER_LABELS[requiredTier]} plan.`}
-            {" "}Payments are paused — join the waitlist to be first in line.
+            Everything you have on Free stays free.
+            {PAYMENTS_ENABLED ? "" : ` ${label} opens soon — join the list to be first in line.`}
           </DialogDescription>
         </DialogHeader>
         <ul className="space-y-2 my-2">
@@ -40,9 +46,9 @@ export const UpgradeRequiredModal = ({ open, onOpenChange, requiredTier, feature
           ))}
         </ul>
         <DialogFooter>
-          <Button variant="ghost" onClick={() => onOpenChange(false)}>Maybe later</Button>
-          <Button onClick={() => { onOpenChange(false); navigate(`/tier/${requiredTier}`); }}>
-            Join {TIER_LABELS[requiredTier]} waitlist
+          <Button variant="ghost" onClick={() => onOpenChange(false)}>Not now</Button>
+          <Button onClick={() => { onOpenChange(false); navigate(PAYMENTS_ENABLED ? "/pricing" : `/tier/${requiredTier}`); }}>
+            {PAYMENTS_ENABLED ? `Upgrade to ${label}` : `Join ${label} list`}
           </Button>
         </DialogFooter>
       </DialogContent>
