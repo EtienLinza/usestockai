@@ -22,6 +22,13 @@
       "when": 1791187298840,
       "tag": "0002_lock_adaptive_param_tables",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1791194469918,
+      "tag": "0003_lock_rejected_archetypes_drift",
+      "breakpoints": true
     }
   ]
 }

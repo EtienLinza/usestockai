@@ -309,7 +309,15 @@ export function classifyStock(close: number[], high: number[], low: number[], ti
       blendedParams = blendProfiles(PROFILE_PARAMS["value"], PROFILE_PARAMS["index"], blendWeight * 0.4);
     }
   } else {
-    classification = "index";
+    // Audit fix (Oct 2026): single stocks in the no-man's-land used to fall
+    // through to "index", inheriting the 3% ATR ceiling meant for ETFs and
+    // getting blocked forever. "index" is now reserved for INDEX_TICKERS.
+    if (atrPctAvg > 0.03) {
+      classification = "volatile";
+    } else {
+      classification = "momentum";
+      blendedParams = blendProfiles(PROFILE_PARAMS["momentum"], PROFILE_PARAMS["value"], 0.5);
+    }
   }
 
   return { classification, trendPersistence: trendScore, meanReversionRate, avgVolatility, atrPctAvg, blendedParams };
