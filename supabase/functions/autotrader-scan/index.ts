@@ -867,6 +867,8 @@ const STALE_HOLD_MULT = 1.5;
 const ABS_MAX_HOLD_BARS = 45;
 // Absolute single-name notional ceiling as a fraction of NAV (Wave 3).
 const HARD_SINGLE_NAME_CAP = 0.10;
+/** Minimum NAV fraction for a fully-gated entry (before risk/gap caps). */
+const MIN_ENTRY_FRAC = 0.04;
 
 
 
@@ -1814,7 +1816,12 @@ async function runEntryDecision(
   // collapse to the floor regardless of score. Once calibration is monotonic
   // again the weights converge back to ~1 and this becomes a no-op.
   const convEdgeMult = convictionBucketWeight(convictionEdges, effectiveConviction);
-  const baseFrac = sig.kellyFraction * volScalar * edgeMult * convEdgeMult;
+  // Audit fix (Oct 2026): seven stacked multipliers collapsed size to
+  // ~0.03% of NAV (1-share entries) while 95%+ sat in cash. A setup that
+  // cleared every gate now gets a floor of MIN_ENTRY_FRAC of NAV; the
+  // risk-budget, gap and single-name caps below still shrink it if needed.
+  const rawFrac = sig.kellyFraction * volScalar * edgeMult * convEdgeMult;
+  const baseFrac = Math.max(Math.abs(rawFrac), MIN_ENTRY_FRAC);
   // Wave 3: absolute single-name ceiling on top of the user setting. EVMT sat
   // at $16.3k (conviction 71) while DELL at 94 got $2.3k — concentration was
   // inversely correlated with edge. No single name exceeds 10% of NAV.
