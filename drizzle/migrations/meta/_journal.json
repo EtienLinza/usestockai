@@ -15,6 +15,13 @@
       "when": 1791132494742,
       "tag": "0001_lock_internal_model_tables",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1791187298840,
+      "tag": "0002_lock_adaptive_param_tables",
+      "breakpoints": true
     }
   ]
 }
