@@ -869,6 +869,11 @@ const ABS_MAX_HOLD_BARS = 45;
 const HARD_SINGLE_NAME_CAP = 0.10;
 /** Minimum NAV fraction for a fully-gated entry (before risk/gap caps). */
 const MIN_ENTRY_FRAC = 0.04;
+/** Aggressive profile: money first. Larger floor, conviction top-up, 15% name cap. */
+const AGGR_MIN_ENTRY_FRAC = 0.08;
+const AGGR_TOP_ENTRY_FRAC = 0.12;
+const AGGR_SINGLE_NAME_CAP = 0.15;
+const AGGR_HAIRCUT_FLOOR = 0.6;
 
 
 
@@ -1529,7 +1534,13 @@ async function runEntryDecision(
   }
   // Rolling 30-day drawdown circuit breaker (Phase 3 #16) — applies even
   // when adaptive_mode is off, so manual users still get crash protection.
-  if (settings.current_drawdown_pct >= ROLLING_DD_HARD_BLOCK_PCT) {
+  const AGGR = settings.risk_profile === "aggressive";
+  let aggrHaircut = 1;
+  const aggrNotes: string[] = [];
+  if (AGGR && (settings.current_drawdown_pct >= 12 || settings.current_cdar_pct >= 12)) {
+    aggrHaircut *= 0.5; aggrNotes.push("dd-brake×0.5");
+  }
+  if (!AGGR && settings.current_drawdown_pct >= ROLLING_DD_HARD_BLOCK_PCT) {
     return {
       kind: "BLOCKED",
       reason: `Rolling drawdown circuit breaker: 30d NAV dd ${settings.current_drawdown_pct.toFixed(1)}% ≥ ${ROLLING_DD_HARD_BLOCK_PCT}% — entries paused`,
@@ -1538,7 +1549,7 @@ async function runEntryDecision(
   // CDaR_0.95 circuit breaker (idea #13) — also runs in non-adaptive mode.
   // Catches sustained slow bleeds where the peak-to-current snapshot is mild
   // but the *average* worst-tail drawdown across the window is severe.
-  if (settings.current_cdar_pct >= CDAR_HARD_BLOCK_PCT) {
+  if (!AGGR && settings.current_cdar_pct >= CDAR_HARD_BLOCK_PCT) {
     return {
       kind: "BLOCKED",
       reason: `CDaR circuit breaker: 30d CDaR_0.95 ${settings.current_cdar_pct.toFixed(1)}% ≥ ${CDAR_HARD_BLOCK_PCT}% — entries paused`,
@@ -1560,7 +1571,9 @@ async function runEntryDecision(
     const corrCutoff = Math.max(0.55, Math.min(0.95,
       adaptiveCorrThreshold(marketRegime, macro?.stressed ? "elevated" : "normal")
       - gateDelta(GATE_ADJ, "correlation_threshold")));
-    if (corr && corr.maxAbs >= corrCutoff) {
+    if (corr && corr.maxAbs >= corrCutoff && AGGR) {
+      aggrHaircut *= 0.8; aggrNotes.push(`corr${corr.maxAbs.toFixed(2)}×0.8`);
+    } else if (corr && corr.maxAbs >= corrCutoff) {
       return {
         kind: "BLOCKED",
         reason: `Correlation gate: |ρ|=${corr.maxAbs.toFixed(2)} vs ${corr.against} ≥ ${corrCutoff.toFixed(2)} (regime-adaptive) over ${CORR_LOOKBACK_BARS}d`,
@@ -1576,7 +1589,7 @@ async function runEntryDecision(
   // and is nudged by the nightly rejection audit within ±1/+2 days.
   try {
     const days = await getEarningsBlackoutDays(ticker);
-    const blackoutDays = Math.max(1, Math.min(5, 3 + gateDelta(GATE_ADJ, "earnings_blackout_days")));
+    const blackoutDays = AGGR ? 1 : Math.max(1, Math.min(5, 3 + gateDelta(GATE_ADJ, "earnings_blackout_days")));
     if (days !== null && days <= blackoutDays) {
       return {
         kind: "BLOCKED",
@@ -1691,7 +1704,9 @@ async function runEntryDecision(
   {
     const isHighConv = conviction >= envelope.highConvFloor;
     const activeCeiling = isHighConv ? envelope.atrOverrideCeiling : envelope.atrCeiling;
-    if (sig.atrPct > activeCeiling) {
+    if (sig.atrPct > activeCeiling && AGGR) {
+      aggrHaircut *= 0.75; aggrNotes.push("atr-ceiling×0.75");
+    } else if (sig.atrPct > activeCeiling) {
       return {
         kind: "BLOCKED",
         reason: `ATR% ${(sig.atrPct * 100).toFixed(2)}% > adaptive ${sig.profile} ceiling ${(envelope.atrCeiling * 100).toFixed(2)}%${isHighConv ? ` (override ${(envelope.atrOverrideCeiling*100).toFixed(2)}% @ conv≥${envelope.highConvFloor})` : ""} — vol too high for regime/liquidity`,
@@ -1820,15 +1835,20 @@ async function runEntryDecision(
   // ~0.03% of NAV (1-share entries) while 95%+ sat in cash. A setup that
   // cleared every gate now gets a floor of MIN_ENTRY_FRAC of NAV; the
   // risk-budget, gap and single-name caps below still shrink it if needed.
-  const rawFrac = sig.kellyFraction * volScalar * edgeMult * convEdgeMult;
-  const baseFrac = Math.max(Math.abs(rawFrac), MIN_ENTRY_FRAC);
+  const rawFrac = AGGR
+    ? sig.kellyFraction * volScalar
+    : sig.kellyFraction * volScalar * edgeMult * convEdgeMult;
+  const aggrFloor = effectiveConviction >= 85 ? AGGR_TOP_ENTRY_FRAC : AGGR_MIN_ENTRY_FRAC;
+  const baseFrac = AGGR
+    ? Math.max(Math.abs(rawFrac), aggrFloor) * Math.max(AGGR_HAIRCUT_FLOOR, aggrHaircut)
+    : Math.max(Math.abs(rawFrac), MIN_ENTRY_FRAC);
   // Wave 3: absolute single-name ceiling on top of the user setting. EVMT sat
   // at $16.3k (conviction 71) while DELL at 94 got $2.3k — concentration was
   // inversely correlated with edge. No single name exceeds 10% of NAV.
   let cappedFrac = Math.min(
     baseFrac,
     settings.max_single_name_pct / 100,
-    HARD_SINGLE_NAME_CAP,
+    AGGR ? AGGR_SINGLE_NAME_CAP : HARD_SINGLE_NAME_CAP,
     headroom,
   );
 
@@ -1845,7 +1865,7 @@ async function runEntryDecision(
   // Estimate ADV from last 20 bars (close × volume), compute expected impact,
   // shrink the order if impact would consume > 30% of expected edge.
   let slippageBpsEst: number | null = null;
-  if (data.volume && data.volume.length >= 20 && targetDollars > 0) {
+  if (!AGGR && data.volume && data.volume.length >= 20 && targetDollars > 0) {
     const n = data.close.length;
     let advDollars = 0;
     for (let i = n - 20; i < n; i++) {
@@ -1949,7 +1969,7 @@ async function runEntryDecision(
   ));
   const riskPct = minRiskPct + (maxRiskPct - minRiskPct) * convBlend;
   const riskBudgetDollars = navForSizing * riskPct;
-  if (stopDist > 0) {
+  if (stopDist > 0 && !AGGR) {
     const maxSharesByRisk = riskBudgetDollars / stopDist;
     const maxDollarsByRisk = maxSharesByRisk * currentPrice;
     if (targetDollars > maxDollarsByRisk) {
@@ -1970,7 +1990,7 @@ async function runEntryDecision(
   let gap95: number | null = null;
   {
     const gapMaxDollars = gapCappedDollars(data.open, data.close, navForSizing);
-    if (gapMaxDollars !== null && targetDollars > gapMaxDollars) {
+    if (!AGGR && gapMaxDollars !== null && targetDollars > gapMaxDollars) {
       gap95 = overnightGapPct95(data.open, data.close);
       cappedFrac = cappedFrac * (gapMaxDollars / targetDollars);
       targetDollars = gapMaxDollars;
@@ -1981,6 +2001,7 @@ async function runEntryDecision(
   }
 
   const reasoningExtra: string[] = [];
+  if (AGGR) reasoningExtra.push(`aggressive${aggrNotes.length ? " " + aggrNotes.join(",") : ""}`);
   if (edgeMult !== 1) reasoningExtra.push(`edge×${edgeMult.toFixed(2)}`);
   if (gap95 !== null) reasoningExtra.push(`gap-cap applied (p95 gap ${(gap95 * 100).toFixed(1)}%)`);
   if (siDelta !== 0) reasoningExtra.push(`siΔ=${siDelta > 0 ? "+" : ""}${siDelta}`);
