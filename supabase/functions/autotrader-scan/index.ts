@@ -3449,7 +3449,8 @@ async function processUser(
   // worst-case $ lost if every stop hits today. Capped at 6% of starting_nav
   // (institutional standard: never have >6% of book at risk simultaneously).
   // Falls back to inferHardStopPrice() for legacy positions without stops.
-  const PORTFOLIO_HEAT_CAP_PCT = 6;
+  const PORTFOLIO_HEAT_CAP_PCT = settings.risk_profile === "aggressive" ? 10 : 6;
+  const CVAR_CAP_PCT = settings.risk_profile === "aggressive" ? 4 : DEFAULT_CVAR_CAP_PCT;
   let openRiskDollars = 0;
   for (const pos of positions) {
     const entry = Number(pos.entry_price);
@@ -3788,11 +3789,11 @@ async function processUser(
             },
             currentNav,
           );
-          if (cvar && cvar.cvarPct > DEFAULT_CVAR_CAP_PCT) {
+          if (cvar && cvar.cvarPct > CVAR_CAP_PCT) {
             summary.blocked++; userSummary.blocked++;
             queueLog({
               user_id: userId, ticker: p.ticker, action: "BLOCKED",
-              reason: `Portfolio CVaR: 95% ES would reach ${cvar.cvarPct.toFixed(2)}% NAV (cap ${DEFAULT_CVAR_CAP_PCT}%, worst=${cvar.worstPathPct.toFixed(1)}%)`,
+              reason: `Portfolio CVaR: 95% ES would reach ${cvar.cvarPct.toFixed(2)}% NAV (cap ${CVAR_CAP_PCT}%, worst=${cvar.worstPathPct.toFixed(1)}%)`,
               conviction: p.decision.conviction, strategy: p.decision.strategy, profile: p.decision.profile,
               cvar_block_count: 1,
             });
@@ -3964,7 +3965,7 @@ async function processUser(
         currentNav * (navHeadroomPct / 100),
       );
       const stopDist = stopPx != null ? Math.abs(currentPx - stopPx) : currentPx * 0.05;
-      const heatBudgetRemaining = Math.max(0, currentNav * 0.06 - openRiskDollars);
+      const heatBudgetRemaining = Math.max(0, currentNav * (PORTFOLIO_HEAT_CAP_PCT / 100) - openRiskDollars);
       const maxByHeat = stopDist > 0 ? (heatBudgetRemaining / stopDist) * currentPx : maxByHeadroom;
       const cappedDollars = Math.min(decision.addDollars, maxByHeadroom, maxByHeat);
       if (cappedDollars < currentPx) {

@@ -38,9 +38,9 @@ export interface CrossSectionalConfig {
 }
 
 export const DEFAULT_CROSS_SECTIONAL: CrossSectionalConfig = {
-  topPct: 0.15,
-  minKeep: 5,
-  maxKeep: 40,
+  topPct: 0.30,
+  minKeep: 10,
+  maxKeep: 80,
   hardFloor: 55,
   metaWeight: 0.35,
 };
