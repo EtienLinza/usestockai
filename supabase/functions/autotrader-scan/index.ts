@@ -1901,6 +1901,10 @@ async function runEntryDecision(
     sig.blendedParams ?? profile,
     resolveExitParams(ADAPTIVE_EXITS, sig.profile, sig.marketRegime ?? marketRegime),
   );
+  // Aggressive: let momentum runners run toward +25% before the TP ceiling.
+  if (AGGR && (sig.profile === "momentum" || sig.profile === "volatile")) {
+    (params as any).takeProfitPct = Math.max((params as any).takeProfitPct ?? 0, 25);
+  }
   const atr = sig.atr;
   const isLong = sig.decision === "BUY";
   const atrStopDist = atr * params.hardStopATRMult;
