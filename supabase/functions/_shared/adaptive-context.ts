@@ -23,7 +23,7 @@ export const CDAR_TIGHTEN_PCT = 5;
 export const RISK_PROFILE_BASELINES = {
   conservative: { minConv: 78, maxPos: 5, maxNav: 60, maxSingle: 12 },
   balanced:     { minConv: 72, maxPos: 8, maxNav: 80, maxSingle: 20 },
-  aggressive:   { minConv: 66, maxPos: 12, maxNav: 95, maxSingle: 28 },
+  aggressive:   { minConv: 62, maxPos: 14, maxNav: 100, maxSingle: 15 },
 } as const;
 export type RiskProfileName = keyof typeof RISK_PROFILE_BASELINES;
 
@@ -400,7 +400,7 @@ export function computeEffectiveSettings<S extends AdaptiveSettings>(
     }
   }
 
-  minConv = Math.max(55, Math.min(95, Math.round(minConv)));
+  minConv = Math.max(s.risk_profile === "aggressive" ? 60 : 55, Math.min(95, Math.round(minConv)));
   maxPos = Math.max(1, Math.min(20, Math.round(maxPos)));
   maxNav = Math.max(20, Math.min(100, maxNav));
   maxSingle = Math.max(5, Math.min(50, maxSingle));

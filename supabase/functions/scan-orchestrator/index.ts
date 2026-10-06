@@ -398,7 +398,7 @@ serve(async (req) => {
       // session (so they naturally roll off after the open).
       const expiresAt = mode === "premarket"
         ? new Date(new Date().setUTCHours(21, 30, 0, 0)).toISOString() // ~16:30 ET worst-case (DST safe enough)
-        : new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+        : new Date(Date.now() + 40 * 60 * 60 * 1000).toISOString(); // survives to next session close
       const rows = allSignals.map(s => ({
         ticker: s.ticker, signal_type: s.signal_type,
         entry_price: s.entry_price, confidence: s.confidence,
