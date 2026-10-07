@@ -2934,6 +2934,7 @@ async function processUser(
   // evaluation, which silently killed all new entries.
   strategyExpectancy: Record<string, { expectancy: number; winRate: number; count: number; benched: boolean; floorBoost: number }> | null = null,
 ) {
+  if (settings.risk_profile === "aggressive") RISK_BY_USER.set(settings.user_id, await loadRiskParams(supabase, settings.user_id));
   const userId = settings.user_id;
 
   // Load open positions + watchlist + sector-exposure caps (Phase 3 #14)
@@ -3454,7 +3455,6 @@ async function processUser(
   // worst-case $ lost if every stop hits today. Capped at 6% of starting_nav
   // (institutional standard: never have >6% of book at risk simultaneously).
   // Falls back to inferHardStopPrice() for legacy positions without stops.
-  if (settings.risk_profile === "aggressive") RISK_BY_USER.set(settings.user_id, await loadRiskParams(supabase, settings.user_id));
   const PORTFOLIO_HEAT_CAP_PCT = settings.risk_profile === "aggressive" ? riskFor(settings.user_id).heat_cap_pct : 6;
   const CVAR_CAP_PCT = settings.risk_profile === "aggressive" ? riskFor(settings.user_id).cvar_cap_pct : DEFAULT_CVAR_CAP_PCT;
   let openRiskDollars = 0;
