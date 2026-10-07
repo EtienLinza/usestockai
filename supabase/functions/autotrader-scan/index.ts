@@ -1,3 +1,4 @@
+import { loadRiskParams, entryFloorFor, summarize as summarizeRisk, RISK_DEFAULTS, type RiskParams } from "../_shared/adaptive-risk.ts";
 // ============================================================================
 // AUTOTRADER SCAN — fully automated trade lifecycle, runs every 10 min via cron
 //
@@ -870,10 +871,9 @@ const HARD_SINGLE_NAME_CAP = 0.10;
 /** Minimum NAV fraction for a fully-gated entry (before risk/gap caps). */
 const MIN_ENTRY_FRAC = 0.04;
 /** Aggressive profile: money first. Larger floor, conviction top-up, 15% name cap. */
-const AGGR_MIN_ENTRY_FRAC = 0.08;
-const AGGR_TOP_ENTRY_FRAC = 0.12;
-const AGGR_SINGLE_NAME_CAP = 0.15;
-const AGGR_HAIRCUT_FLOOR = 0.6;
+// Aggressive numbers are adaptive per user (see _shared/adaptive-risk.ts).
+const RISK_BY_USER = new Map<string, RiskParams>();
+const riskFor = (uid: string): RiskParams => RISK_BY_USER.get(uid) ?? RISK_DEFAULTS;
 
 
 
@@ -1535,10 +1535,11 @@ async function runEntryDecision(
   // Rolling 30-day drawdown circuit breaker (Phase 3 #16) — applies even
   // when adaptive_mode is off, so manual users still get crash protection.
   const AGGR = settings.risk_profile === "aggressive";
+  const RP = riskFor(settings.user_id);
   let aggrHaircut = 1;
   const aggrNotes: string[] = [];
-  if (AGGR && (settings.current_drawdown_pct >= 12 || settings.current_cdar_pct >= 12)) {
-    aggrHaircut *= 0.5; aggrNotes.push("dd-brake×0.5");
+  if (AGGR && (settings.current_drawdown_pct >= RP.dd_brake_pct || settings.current_cdar_pct >= RP.dd_brake_pct)) {
+    aggrHaircut *= RP.haircut_dd; aggrNotes.push(`dd-brake×${RP.haircut_dd.toFixed(2)}`);
   }
   if (!AGGR && settings.current_drawdown_pct >= ROLLING_DD_HARD_BLOCK_PCT) {
     return {
@@ -1572,7 +1573,7 @@ async function runEntryDecision(
       adaptiveCorrThreshold(marketRegime, macro?.stressed ? "elevated" : "normal")
       - gateDelta(GATE_ADJ, "correlation_threshold")));
     if (corr && corr.maxAbs >= corrCutoff && AGGR) {
-      aggrHaircut *= 0.8; aggrNotes.push(`corr${corr.maxAbs.toFixed(2)}×0.8`);
+      aggrHaircut *= RP.haircut_corr; aggrNotes.push(`corr${corr.maxAbs.toFixed(2)}×${RP.haircut_corr.toFixed(2)}`);
     } else if (corr && corr.maxAbs >= corrCutoff) {
       return {
         kind: "BLOCKED",
@@ -1705,7 +1706,7 @@ async function runEntryDecision(
     const isHighConv = conviction >= envelope.highConvFloor;
     const activeCeiling = isHighConv ? envelope.atrOverrideCeiling : envelope.atrCeiling;
     if (sig.atrPct > activeCeiling && AGGR) {
-      aggrHaircut *= 0.75; aggrNotes.push("atr-ceiling×0.75");
+      aggrHaircut *= RP.haircut_atr; aggrNotes.push(`atr-ceiling×${RP.haircut_atr.toFixed(2)}`);
     } else if (sig.atrPct > activeCeiling) {
       return {
         kind: "BLOCKED",
@@ -1838,9 +1839,9 @@ async function runEntryDecision(
   const rawFrac = AGGR
     ? sig.kellyFraction * volScalar
     : sig.kellyFraction * volScalar * edgeMult * convEdgeMult;
-  const aggrFloor = effectiveConviction >= 85 ? AGGR_TOP_ENTRY_FRAC : AGGR_MIN_ENTRY_FRAC;
+  const aggrFloor = entryFloorFor(RP, effectiveConviction);
   const baseFrac = AGGR
-    ? Math.max(Math.abs(rawFrac), aggrFloor) * Math.max(AGGR_HAIRCUT_FLOOR, aggrHaircut)
+    ? Math.max(Math.abs(rawFrac), aggrFloor) * Math.max(RP.haircut_floor, aggrHaircut)
     : Math.max(Math.abs(rawFrac), MIN_ENTRY_FRAC);
   // Wave 3: absolute single-name ceiling on top of the user setting. EVMT sat
   // at $16.3k (conviction 71) while DELL at 94 got $2.3k — concentration was
@@ -1848,7 +1849,7 @@ async function runEntryDecision(
   let cappedFrac = Math.min(
     baseFrac,
     settings.max_single_name_pct / 100,
-    AGGR ? AGGR_SINGLE_NAME_CAP : HARD_SINGLE_NAME_CAP,
+    AGGR ? RP.single_name_cap : HARD_SINGLE_NAME_CAP,
     headroom,
   );
 
@@ -1903,7 +1904,7 @@ async function runEntryDecision(
   );
   // Aggressive: let momentum runners run toward +25% before the TP ceiling.
   if (AGGR && (sig.profile === "momentum" || sig.profile === "volatile")) {
-    (params as any).takeProfitPct = Math.max((params as any).takeProfitPct ?? 0, 25);
+    (params as any).takeProfitPct = Math.max((params as any).takeProfitPct ?? 0, RP.tp_ceiling_pct);
   }
   const atr = sig.atr;
   const isLong = sig.decision === "BUY";
@@ -2005,7 +2006,7 @@ async function runEntryDecision(
   }
 
   const reasoningExtra: string[] = [];
-  if (AGGR) reasoningExtra.push(`aggressive${aggrNotes.length ? " " + aggrNotes.join(",") : ""}`);
+  if (AGGR) reasoningExtra.push(`aggressive[${summarizeRisk(RP)}]${aggrNotes.length ? " " + aggrNotes.join(",") : ""}`);
   if (edgeMult !== 1) reasoningExtra.push(`edge×${edgeMult.toFixed(2)}`);
   if (gap95 !== null) reasoningExtra.push(`gap-cap applied (p95 gap ${(gap95 * 100).toFixed(1)}%)`);
   if (siDelta !== 0) reasoningExtra.push(`siΔ=${siDelta > 0 ? "+" : ""}${siDelta}`);
@@ -3453,8 +3454,9 @@ async function processUser(
   // worst-case $ lost if every stop hits today. Capped at 6% of starting_nav
   // (institutional standard: never have >6% of book at risk simultaneously).
   // Falls back to inferHardStopPrice() for legacy positions without stops.
-  const PORTFOLIO_HEAT_CAP_PCT = settings.risk_profile === "aggressive" ? 10 : 6;
-  const CVAR_CAP_PCT = settings.risk_profile === "aggressive" ? 4 : DEFAULT_CVAR_CAP_PCT;
+  if (settings.risk_profile === "aggressive") RISK_BY_USER.set(settings.user_id, await loadRiskParams(supabase, settings.user_id));
+  const PORTFOLIO_HEAT_CAP_PCT = settings.risk_profile === "aggressive" ? riskFor(settings.user_id).heat_cap_pct : 6;
+  const CVAR_CAP_PCT = settings.risk_profile === "aggressive" ? riskFor(settings.user_id).cvar_cap_pct : DEFAULT_CVAR_CAP_PCT;
   let openRiskDollars = 0;
   for (const pos of positions) {
     const entry = Number(pos.entry_price);
