@@ -88,3 +88,6 @@ verify_jwt = false
 
 [functions.quant-decision]
 verify_jwt = false
+
+[functions.tune-risk-params]
+verify_jwt = false
