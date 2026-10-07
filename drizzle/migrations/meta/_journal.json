@@ -29,6 +29,13 @@
       "when": 1791194469918,
       "tag": "0003_lock_rejected_archetypes_drift",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1791382307595,
+      "tag": "0004_adaptive_risk_params",
+      "breakpoints": true
     }
   ]
 }

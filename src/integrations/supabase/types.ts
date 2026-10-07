@@ -71,6 +71,30 @@ export type Database = {
         }
         Relationships: []
       }
+      adaptive_risk_params: {
+        Row: {
+          computed_at: string
+          params: Json
+          reasons: Json
+          sample_size: number
+          user_id: string
+        }
+        Insert: {
+          computed_at?: string
+          params?: Json
+          reasons?: Json
+          sample_size?: number
+          user_id: string
+        }
+        Update: {
+          computed_at?: string
+          params?: Json
+          reasons?: Json
+          sample_size?: number
+          user_id?: string
+        }
+        Relationships: []
+      }
       adaptive_signal_params: {
         Row: {
           baseline_params: Json
