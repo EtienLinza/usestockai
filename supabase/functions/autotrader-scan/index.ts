@@ -2934,7 +2934,11 @@ async function processUser(
   // evaluation, which silently killed all new entries.
   strategyExpectancy: Record<string, { expectancy: number; winRate: number; count: number; benched: boolean; floorBoost: number }> | null = null,
 ) {
-  if (settings.risk_profile === "aggressive") RISK_BY_USER.set(settings.user_id, await loadRiskParams(supabase, settings.user_id));
+  if (settings.risk_profile === "aggressive") {
+    const rp = await loadRiskParams(supabase, settings.user_id);
+    RISK_BY_USER.set(settings.user_id, rp);
+    settings = { ...settings, min_conviction: rp.min_conviction };
+  }
   const userId = settings.user_id;
 
   // Load open positions + watchlist + sector-exposure caps (Phase 3 #14)
