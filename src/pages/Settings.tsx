@@ -527,6 +527,7 @@ function SettingsShell({ caps, setCaps, bot, setBot, adaptiveState, lastScanAt, 
                 checked={bot.adaptive_mode}
                 onChange={(v) => setBot({ ...bot, adaptive_mode: v })}
               />
+              {bot.risk_profile === "aggressive" && <AdaptiveLimitsPanel />}
             </Card>
 
             <StartingCapitalCard
@@ -1158,3 +1159,44 @@ function StartingCapitalCard({ value, onChange }: StartingCapitalCardProps) {
 }
 
 export default Settings;
+
+function AdaptiveLimitsPanel() {
+  const { user } = useAuth();
+  const [row, setRow] = useState<{ params: Record<string, number>; reasons: string[]; sample_size: number; computed_at: string } | null>(null);
+  useEffect(() => {
+    if (!user) return;
+    supabase.from("adaptive_risk_params").select("params, reasons, sample_size, computed_at")
+      .eq("user_id", user.id).maybeSingle()
+      .then(({ data }) => setRow(data as never));
+  }, [user]);
+  if (!row) return null;
+  const p = row.params ?? {};
+  const pct = (v?: number) => (v == null ? "—" : `${(v * 100).toFixed(1)}%`);
+  const items: [string, string, string][] = [
+    ["Starting trade size", pct(p.min_entry_frac), "3–12%"],
+    ["Top-pick trade size", pct(p.top_entry_frac), "5–18%"],
+    ["Max in one stock", pct(p.single_name_cap), "5–20%"],
+    ["Money at risk cap", `${p.heat_cap_pct ?? "—"}%`, "4–14%"],
+    ["Bad-day loss cap", `${p.cvar_cap_pct ?? "—"}%`, "1.5–6%"],
+    ["Minimum buy score", `${p.min_conviction ?? "—"}`, "55–80"],
+    ["Profit ceiling", `${p.tp_ceiling_pct ?? "—"}%`, "12–30%"],
+    ["Drawdown brake at", `${p.dd_brake_pct ?? "—"}%`, "8–15%"],
+  ];
+  return (
+    <div className="mt-4 rounded-md border border-border p-3 space-y-2">
+      <div className="flex items-center justify-between">
+        <p className="text-sm font-medium">Adaptive limits</p>
+        <p className="text-[11px] text-muted-foreground">Updated {new Date(row.computed_at).toLocaleDateString()}</p>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1">
+        {items.map(([k, v, w]) => (
+          <div key={k} className="flex justify-between text-xs">
+            <span className="text-muted-foreground">{k}</span>
+            <span>{v} <span className="text-muted-foreground">({w})</span></span>
+          </div>
+        ))}
+      </div>
+      <p className="text-[11px] text-muted-foreground">{(row.reasons ?? []).join(" · ")}</p>
+    </div>
+  );
+}
