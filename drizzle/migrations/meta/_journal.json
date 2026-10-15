@@ -43,6 +43,13 @@
       "when": 1792068333853,
       "tag": "0005_position_campaign_lineage",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1792068539856,
+      "tag": "0006_notifications_feed",
+      "breakpoints": true
     }
   ]
 }

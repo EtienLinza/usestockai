@@ -952,6 +952,54 @@ export type Database = {
         }
         Relationships: []
       }
+      notifications: {
+        Row: {
+          body: string | null
+          category: string
+          created_at: string
+          digest_count: number
+          digest_key: string | null
+          id: string
+          kind: string
+          link: string | null
+          read_at: string | null
+          ticker: string | null
+          title: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          body?: string | null
+          category: string
+          created_at?: string
+          digest_count?: number
+          digest_key?: string | null
+          id?: string
+          kind: string
+          link?: string | null
+          read_at?: string | null
+          ticker?: string | null
+          title: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          body?: string | null
+          category?: string
+          created_at?: string
+          digest_count?: number
+          digest_key?: string | null
+          id?: string
+          kind?: string
+          link?: string | null
+          read_at?: string | null
+          ticker?: string | null
+          title?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       portfolio_caps: {
         Row: {
           created_at: string
@@ -2414,6 +2462,19 @@ export type Database = {
       increment_backtest_usage: {
         Args: { _limit: number; _month_key: string; _user_id: string }
         Returns: number
+      }
+      notify_user: {
+        Args: {
+          _body: string
+          _category: string
+          _digest?: string
+          _kind: string
+          _link: string
+          _ticker: string
+          _title: string
+          _user: string
+        }
+        Returns: undefined
       }
       tier_from_price_id: {
         Args: { _price_id: string }
