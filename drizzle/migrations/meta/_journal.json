@@ -57,6 +57,20 @@
       "when": 1792068702711,
       "tag": "0007_exit_rule_idempotency",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1792068965321,
+      "tag": "0008_bars_freshness_rpc",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1792068994757,
+      "tag": "0009_bars_freshness_latest",
+      "breakpoints": true
     }
   ]
 }
