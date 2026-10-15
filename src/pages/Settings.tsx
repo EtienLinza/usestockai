@@ -1173,8 +1173,8 @@ function AdaptiveLimitsPanel() {
   const p = row.params ?? {};
   const pct = (v?: number) => (v == null ? "—" : `${(v * 100).toFixed(1)}%`);
   const items: [string, string, string][] = [
-    ["Starting trade size", pct(p.min_entry_frac), "3–12%"],
-    ["Top-pick trade size", pct(p.top_entry_frac), "5–18%"],
+    ["Starting trade size", pct(p.min_entry_frac), "2–12%"],
+    ["Top-pick trade size", pct(p.top_entry_frac), "3–18%"],
     ["Max in one stock", pct(p.single_name_cap), "5–20%"],
     ["Money at risk cap", `${p.heat_cap_pct ?? "—"}%`, "4–14%"],
     ["Bad-day loss cap", `${p.cvar_cap_pct ?? "—"}%`, "1.5–6%"],
