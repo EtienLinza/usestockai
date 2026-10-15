@@ -558,7 +558,7 @@ export function computeStrategySignal(
   consensusScore: number;
   regime: string;
   confidence: number;
-  strategy: "trend" | "mean_reversion" | "breakout" | "none";
+  strategy: "trend" | "mean_reversion" | "breakout" | "catalyst" | "none";
   positionSizeMultiplier: number;
   atr: number;
   /** Entry-observable indicator readings — persisted into feature snapshots so
@@ -911,7 +911,7 @@ export function computeStrategySignal(
   // Select best strategy by conviction
   let bestSignal: "BUY" | "SHORT" | "HOLD" = "HOLD";
   let bestConviction = 0;
-  let bestStrategy: "trend" | "mean_reversion" | "breakout" | "none" = "none";
+  let bestStrategy: "trend" | "mean_reversion" | "breakout" | "catalyst" | "none" = "none";
 
   if (trendConviction > bestConviction && trendSignal !== "HOLD") {
     bestSignal = trendSignal; bestConviction = trendConviction; bestStrategy = "trend";
@@ -1069,7 +1069,7 @@ export interface EvaluateSignalResult {
   weeklyBias: WeeklyBias;
   profile: StockProfile;
   blendedParams: ProfileParams;
-  strategy: "trend" | "mean_reversion" | "breakout" | "none";
+  strategy: "trend" | "mean_reversion" | "breakout" | "catalyst" | "none";
   regime: string;
   /** Volatility-targeted Kelly fraction — single canonical sizing output.
    *  Range: 0…+0.25 for longs, 0…-0.25 for shorts. 0 when no entry. */
