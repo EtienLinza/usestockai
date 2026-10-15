@@ -1910,12 +1910,12 @@ async function runEntryDecision(
   // positive realized edge. A strategy whose expectancy (winRate·avgWin −
   // lossRate·avgLoss) is ≤ 0 over ≥ 20 trades, or a conviction bucket with
   // negative expectancy, gets NO floor and a quarter-size haircut instead.
-  const stratExp = edge && edge.sampleSize >= 20
+  const edgeExp = edge && edge.sampleSize >= 20
     ? (edge.winRate / 100) * edge.avgWin - (1 - edge.winRate / 100) * Math.abs(edge.avgLoss)
     : null;
-  const negativeEdge = (stratExp !== null && stratExp <= 0) || convEdgeMult <= 0.35;
+  const negativeEdge = (edgeExp !== null && edgeExp <= 0) || convEdgeMult <= 0.35;
   if (AGGR && negativeEdge) {
-    aggrNotes.push(`no-floor: ${stratExp !== null && stratExp <= 0 ? `strategy exp ${stratExp.toFixed(2)}%` : "losing score band"}`);
+    aggrNotes.push(`no-floor: ${edgeExp !== null && edgeExp <= 0 ? `strategy exp ${edgeExp.toFixed(2)}%` : "losing score band"}`);
   }
   const aggrFloor = entryFloorFor(RP, effectiveConviction) * rpMult;
   const baseFrac = AGGR
