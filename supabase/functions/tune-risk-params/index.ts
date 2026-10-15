@@ -29,8 +29,14 @@ serve(async (req) => {
 
     const { data: users } = await sb.from("autotrade_settings").select("user_id")
       .eq("risk_profile", "aggressive").limit(MAX_USERS);
-    const since = new Date(Date.now() - 60 * 86400_000).toISOString();
+    const since = new Date(Date.now() - 90 * 86400_000).toISOString();
     const out: any[] = [];
+    // Cold-start pool: closed trades from all users (90d). When a user has
+    // fewer than MIN_SAMPLES of their own, top up with pooled results so the
+    // tuner can still learn; own trades always come first.
+    const { data: poolRows } = await sb.from("virtual_positions")
+      .select("user_id,entry_price,exit_price,position_type")
+      .eq("status", "closed").gte("closed_at", since).limit(3000);
     for (const u of users ?? []) {
       const uid = (u as any).user_id;
       const prev = await loadRiskParams(sb, uid);
@@ -52,6 +58,16 @@ serve(async (req) => {
         if (r > 0 && Number(p.peak_price) > 0) mfe.push(Math.abs(Number(p.peak_price) - e) / e * 100);
         if ((p.entry_conviction ?? 100) < prev.min_conviction + 5) low.push(r);
       }
+      let pooled = 0;
+      if (pnl.length < MIN_SAMPLES) {
+        for (const p of (poolRows ?? []) as any[]) {
+          if (pnl.length >= MIN_SAMPLES) break;
+          if (p.user_id === uid) continue;
+          const e = Number(p.entry_price), x = Number(p.exit_price);
+          if (!(e > 0 && x > 0)) continue;
+          pnl.push((p.position_type === "short" ? -1 : 1) * (x - e) / e); pooled++;
+        }
+      }
       const corrF: number[] = []; const atrF: number[] = [];
       for (const l of (logs ?? []) as any[]) {
         const r = pnlByTicker.get(l.ticker); if (r === undefined) continue;
@@ -64,6 +80,7 @@ serve(async (req) => {
         vixRegime: (st as any)?.vix_regime ?? null, drawdownPct: dd,
         corrFlaggedPnl: corrF, atrFlaggedPnl: atrF,
       });
+      if (pooled > 0) reasons.unshift(`topped up with ${pooled} pooled trades from other accounts`);
       await sb.from("adaptive_risk_params").upsert({
         user_id: uid, params, reasons, sample_size: pnl.length, computed_at: new Date().toISOString(),
       });
