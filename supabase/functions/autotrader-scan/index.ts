@@ -68,6 +68,7 @@ import { fetchDailyHistory } from "../_shared/yahoo-history.ts";
 import { loadCachedBars, upsertBars } from "../_shared/bars-cache.ts";
 import { getQuoteWithFallback, getEarningsBlackoutDays, getSector, getBeta } from "../_shared/finnhub.ts";
 import { recordHeartbeat } from "../_shared/heartbeat.ts";
+import { fetchSectorMomentum, relStrengthFeature, sectorMomentumFeature, getSectorConvictionModifier, type SectorMomentum } from "../_shared/scan-pipeline.ts";
 import { applyIsotonicCalibration, type IsotonicAnchor } from "../_shared/calibration.ts";
 import { loadEpsRevisions } from "../_shared/eps-revisions.ts";
 import { loadLatestRegime } from "../_shared/regime-detector.ts";
@@ -109,6 +110,14 @@ let GATE_ADJ: GateAdjustments | null = null;
 let EXIT_META: ExitMetaModel | null = null;
 // Per-user strategy auto-pause (set before each user's entry pass).
 let PAUSED_STRATEGIES: Map<string, string> = new Map();
+// Sector ETF 20d momentum, loaded once per scan. Feeds the meta-labeler's
+// sector input and the catalyst strategy's sector-strength tilt.
+let SECTOR_MOM: SectorMomentum | null = null;
+// Per-scan count of how many candidates each check turned away.
+let GATE_BLOCKS: Map<string, number> = new Map();
+function gateKey(reason: string): string {
+  return reason.split(/[:(—]/)[0].replace(/[0-9.%+\-−]+/g, "").replace(/\s+/g, " ").trim().slice(0, 40) || "other";
+}
 
 // A strategy pauses when the user's last ≤50 closed trades with it have
 // non-positive average P&L (min 20 trades). It resumes automatically once the
@@ -1683,6 +1692,12 @@ async function runEntryDecision(
       sig.conviction = Math.max(0, Math.min(100, sig.conviction + siDelta));
     }
   }
+  // Catalyst strategy: sector strength is part of its thesis (±4).
+  if (sig.strategy === "catalyst" && SECTOR_MOM) {
+    const sm = getSectorConvictionModifier(ticker, SECTOR_MOM).bonus;
+    const tilt = sig.decision === "BUY" ? sm : -sm;
+    if (tilt !== 0) sig.conviction = Math.max(0, Math.min(100, sig.conviction + tilt));
+  }
 
   // ── Honest conviction calibration (Phase 1 #5) ──────────────────────────
   // Apply the same nightly-learned adjustments the scanner uses so the
@@ -1799,8 +1814,8 @@ async function runEntryDecision(
   const simpleMeta = scoreMetaLabel(metaModel ?? null, {
     conviction,
     atrPct: sig.atrPct,
-    relStrength: 0,
-    sectorMomentum: 0,
+    relStrength: relStrengthFeature(data.close, macro?.spyClose),
+    sectorMomentum: sectorMomentumFeature(ticker, SECTOR_MOM),
     epsRevisionScore: sig.epsRevisionScore ?? 0,
     regime: sig.marketRegime ?? marketRegime ?? null,
     hourOfDay: (new Date().getUTCHours() + 19) % 24,
@@ -2107,6 +2122,8 @@ async function runEntryDecision(
     // against realized results.
     featureSnapshot: {
       ...buildEntryFeatureSnapshot(effectiveConviction, sig, marketRegime, newsRow),
+      rel_strength: relStrengthFeature(data.close, macro?.spyClose),
+      sector_momentum: sectorMomentumFeature(ticker, SECTOR_MOM),
       _meta_score: metaScore !== null && Number.isFinite(metaScore) ? metaScore : null,
     },
 
@@ -2194,7 +2211,7 @@ async function evaluateAddOnCandidate(
   // Meta-label gate
   const gate = metaGate ?? { pass: 0.45, skip: 0.30 };
   const metaScore = scoreMetaLabel(metaModel ?? null, {
-    conviction, atrPct: sig.atrPct, relStrength: 0, sectorMomentum: 0,
+    conviction, atrPct: sig.atrPct, relStrength: relStrengthFeature(data.close, macro?.spyClose), sectorMomentum: sectorMomentumFeature(ticker, SECTOR_MOM),
     epsRevisionScore: sig.epsRevisionScore ?? 0,
     regime: sig.marketRegime ?? marketRegime ?? null,
     hourOfDay: (new Date().getUTCHours() + 19) % 24,
@@ -2411,6 +2428,8 @@ serve(async (req) => {
         .order("computed_at", { ascending: false }).limit(1).maybeSingle(),
     ]);
     const macro: MacroContext | null = spy ? { spyClose: spy.close } : null;
+    GATE_BLOCKS = new Map();
+    try { SECTOR_MOM = await fetchSectorMomentum(); } catch (e) { SECTOR_MOM = null; console.warn("sector momentum load failed", e); }
     const vixValue: number | null = vixData && vixData.close.length > 0
       ? vixData.close[vixData.close.length - 1]
       : null;
@@ -2686,11 +2705,14 @@ serve(async (req) => {
     (summary as Record<string, unknown>).skipped_kill_switch = skippedKillSwitch;
     (summary as Record<string, unknown>).liquidated_users = liquidatedUsers;
 
+    const gateTop = [...GATE_BLOCKS.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12);
+    (summary as Record<string, unknown>).gate_blocks = Object.fromEntries(gateTop);
+    if (gateTop.length) console.log("autotrader-scan: gate blocks", Object.fromEntries(gateTop));
     await recordHeartbeat(
       "autotrader-scan",
       startedAt,
       "ok",
-      `users=${summary.users} entries=${summary.entries} exits=${summary.exits} errors=${summary.errors}`,
+      `users=${summary.users} entries=${summary.entries} exits=${summary.exits} errors=${summary.errors} | blocks: ${gateTop.map(([k, v]) => `${k}=${v}`).join(", ")}`,
     );
     return json({ status: "ok", mode: scanMode, shard: entryShard, shards: entryShardCount, summary });
   } catch (err) {
@@ -3563,6 +3585,10 @@ async function processUser(
     if (decision.kind === "ENTER") pending.push({ kind: "enter", ticker, decision });
     else if (decision.kind === "BLOCKED") pending.push({ kind: "blocked", ticker, decision: { kind: "BLOCKED", reason: decision.reason } });
     else pending.push({ kind: "hold" });
+    if (decision.kind !== "ENTER") {
+      const k = gateKey(String((decision as { reason?: string }).reason ?? decision.kind));
+      GATE_BLOCKS.set(k, (GATE_BLOCKS.get(k) ?? 0) + 1);
+    }
   }
 
   // PASS 2 — sort ENTER candidates by conviction desc, take top N, defer the rest.
