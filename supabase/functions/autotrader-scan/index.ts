@@ -1,4 +1,4 @@
-import { loadRiskParams, entryFloorFor, summarize as summarizeRisk, RISK_DEFAULTS, type RiskParams } from "../_shared/adaptive-risk.ts";
+import { loadRiskParams, entryFloorFor, summarize as summarizeRisk, RISK_DEFAULTS, type RiskParams, HARD_SECTOR_CAP_PCT, CONCENTRATION_TRIM_TOLERANCE, HARD_SINGLE_NAME_WALL } from "../_shared/adaptive-risk.ts";
 // ============================================================================
 // AUTOTRADER SCAN — fully automated trade lifecycle, runs every 10 min via cron
 //
@@ -3451,9 +3451,14 @@ async function processUser(
   const sectorDollars = new Map<string, number>();
   const sectorOf = new Map<string, string | null>();
   const betaCapsActive = !!(caps && caps.enabled && (caps.portfolio_beta_max ?? 0) > 0);
-  const sectorCapsActive = !!(caps && caps.enabled && caps.sector_max_pct > 0);
+  // Sector concentration is a hard wall (audit Phase 4): always on, and the
+  // user's setting can only tighten it below HARD_SECTOR_CAP_PCT.
+  const sectorCapsActive = true;
   const capsActive = sectorCapsActive || betaCapsActive;
-  const capPct = caps?.sector_max_pct ?? 35;
+  const capPct = Math.min(
+    caps?.enabled && caps.sector_max_pct > 0 ? caps.sector_max_pct : HARD_SECTOR_CAP_PCT,
+    HARD_SECTOR_CAP_PCT,
+  );
   const betaCap = caps?.portfolio_beta_max ?? 1.5;
   const blockMode = (caps?.enforcement_mode ?? "warn") === "block";
 
@@ -4094,6 +4099,11 @@ async function executeExit(
       cooldown_until: cooldownUntil,
       // Slippage vs stored stop (positive = filled worse than the stop).
       stop_slippage_pct: isHardStop && gapSlipBps != null ? gapSlipBps / 100 : null,
+      // Exit cause: separates overnight gap-throughs from execution slippage.
+      exit_cause: !isHardStop ? null
+        : gapSlipBps == null ? "clean"
+        : gapSlipBps >= 150 ? "gap_through"
+        : gapSlipBps >= 30 ? "slippage" : "clean",
     }).eq("id", pos.id);
 
     await supabase.from("autotrade_log").insert({
@@ -4216,6 +4226,41 @@ async function executeExit(
     const atrPctApprox = entry > 0 && atrForWindow > 0 ? atrForWindow / entry : 0.02;
     const windowDays = Math.max(1, Math.min(10, Math.round(3 / Math.max(0.005, atrPctApprox))));
     const reentryDeadline = new Date(Date.now() + windowDays * 86400000).toISOString();
+
+    // ── Idempotency (audit Phase 2): one fire per campaign × rule × bar date.
+    // Claim the slot first; a conflict means this rule already fired today.
+    const campaignId = (pos as any).campaign_id ?? pos.id;
+    const ruleId = String(action.reason).split(/[:(]/)[0].trim().toLowerCase().slice(0, 60) || "partial";
+    const barDate = new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+    const { error: claimErr } = await supabase.from("position_rule_fires").insert({
+      campaign_id: campaignId, rule_id: ruleId, bar_date: barDate,
+      position_id: pos.id, user_id: pos.user_id, shares: sharesToClose,
+    });
+    if (claimErr) {
+      summary.partials = Math.max(0, summary.partials - 1);
+      summary.holds++;
+      if ((claimErr as any).code !== "23505") console.warn(`[idempotency] claim failed ${pos.ticker}`, claimErr);
+      return;
+    }
+
+    // ── Share invariant: remaining = original − Σ(partial fills in campaign).
+    try {
+      const orig = Number(pos.original_shares ?? 0);
+      if (orig > 0) {
+        const { data: fills } = await supabase.from("virtual_positions").select("shares")
+          .eq("campaign_id", campaignId).eq("status", "closed");
+        const filled = (fills ?? []).reduce((s: number, r: any) => s + Number(r.shares ?? 0), 0);
+        const addOns = Number(pos.add_on_count ?? 0);
+        const expected = orig - filled;
+        if (addOns === 0 && Math.abs(expected - Number(pos.shares)) > 0.0001) {
+          await supabase.from("autotrade_log").insert({
+            user_id: pos.user_id, ticker: pos.ticker, action: "INVARIANT",
+            reason: `Share mismatch: open ${pos.shares} vs expected ${expected} (orig ${orig} − filled ${filled})`,
+            position_id: pos.id,
+          });
+        }
+      }
+    } catch { /* diagnostic only */ }
 
     // Reduce shares on the open row
     const partialUpdates: Record<string, unknown> = {
