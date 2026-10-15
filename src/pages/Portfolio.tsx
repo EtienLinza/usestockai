@@ -9,6 +9,7 @@ import { TickerLink } from "@/components/TickerLink";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
+import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, Legend } from "recharts";
 import { Loader2, Wallet, ShieldAlert, Layers, Activity, Percent, RefreshCw, Lightbulb } from "lucide-react";
 
 interface Holding {
@@ -24,6 +25,8 @@ interface Data {
   holdings: Holding[];
   correlation: { tickers: string[]; matrix: (number | null)[][] };
   recommendations: Rec[];
+  vsSpy?: { date: string; account: number; spy: number }[];
+  gapToSpyPct?: number | null;
   asOf: string;
 }
 
@@ -82,6 +85,32 @@ export default function Portfolio() {
               <MetricCard label="Money at risk" value={`${m.heatPct.toFixed(1)}%`} subtext={`Bad week (95%): −${m.varWeek95.toFixed(1)}%`} icon={ShieldAlert} />
               <MetricCard label="Independent bets" value={m.effBets.toFixed(1)} subtext={`Beta ${m.beta == null ? "—" : m.beta.toFixed(2)} · avg overlap ${m.avgCorr.toFixed(2)}`} icon={Layers} />
             </div>
+
+            {data.vsSpy && data.vsSpy.length > 1 && (
+              <Card className="p-5 space-y-3">
+                <div className="flex items-baseline justify-between gap-4">
+                  <h2 className="text-sm font-medium">Your account vs SPY</h2>
+                  {data.gapToSpyPct != null && (
+                    <span className={cn("text-sm font-medium", data.gapToSpyPct >= 0 ? "text-primary" : "text-destructive")}>
+                      {data.gapToSpyPct >= 0 ? "Ahead of" : "Behind"} SPY by {Math.abs(data.gapToSpyPct).toFixed(1)} pts
+                    </span>
+                  )}
+                </div>
+                <div className="h-56">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={data.vsSpy} margin={{ left: 0, right: 8, top: 4, bottom: 0 }}>
+                      <XAxis dataKey="date" tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} minTickGap={40} />
+                      <YAxis domain={["auto", "auto"]} tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} width={36} />
+                      <Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", fontSize: 12 }} />
+                      <Legend wrapperStyle={{ fontSize: 11 }} />
+                      <Line type="monotone" dataKey="account" name="Your account" stroke="hsl(var(--primary))" dot={false} strokeWidth={2} />
+                      <Line type="monotone" dataKey="spy" name="SPY" stroke="hsl(var(--muted-foreground))" dot={false} strokeWidth={1.5} strokeDasharray="4 3" />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+                <p className="text-[11px] text-muted-foreground">Both start at 100 on your first recorded day.</p>
+              </Card>
+            )}
 
             <div className="grid lg:grid-cols-2 gap-4">
               <Card className="p-5 space-y-3">

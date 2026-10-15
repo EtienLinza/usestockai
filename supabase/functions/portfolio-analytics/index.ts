@@ -176,6 +176,30 @@ Deno.serve(async (req) => {
       reason: "A 5% market drop would cost roughly " + (beta * 5).toFixed(1) + "% of invested money. Favor steadier names next." });
     recs.sort((a, b) => b.priority - a.priority);
 
+    // ── Account vs SPY: both rebased to 100 at the first logged day ─────
+    const { data: logRows } = await sb.from("virtual_portfolio_log").select("date,total_value")
+      .eq("user_id", userId).order("date", { ascending: true }).limit(1000);
+    const spyFull = await fetchDailyHistory("SPY", "2y", 6000).catch(() => null);
+    const spyByDate = new Map<string, number>();
+    spyFull?.timestamps.forEach((d, i) => spyByDate.set(d, spyFull.close[i]));
+    const spyDates = spyFull?.timestamps ?? [];
+    const spyOn = (d: string) => {
+      if (spyByDate.has(d)) return spyByDate.get(d)!;
+      let v: number | undefined;
+      for (const x of spyDates) { if (x <= d) v = spyByDate.get(x); else break; }
+      return v;
+    };
+    const vsSpy: { date: string; account: number; spy: number }[] = [];
+    let a0: number | null = null, s0: number | null = null;
+    for (const r of (logRows ?? []) as any[]) {
+      const v = Number(r.total_value); const sp = spyOn(r.date);
+      if (!(v > 0) || !sp) continue;
+      if (a0 == null) { a0 = v; s0 = sp; }
+      vsSpy.push({ date: r.date, account: +(v / a0 * 100).toFixed(2), spy: +(sp / s0! * 100).toFixed(2) });
+    }
+    const lastPt = vsSpy[vsSpy.length - 1];
+    const gapToSpyPct = lastPt ? +(lastPt.account - lastPt.spy).toFixed(2) : null;
+
     return json({
       nav, cash, invested, startNav, realized, n,
       metrics: { beta, effNames, effBets, avgCorr, heatPct, varWeek95, volAnnualPct: pVolDaily * Math.sqrt(252) * 100, cashPct, targetPositions: rp.target_positions, sectorCap, singleCapPct: capPct },
@@ -188,6 +212,7 @@ Deno.serve(async (req) => {
       })),
       correlation: { tickers: rows.map((x) => x.ticker), matrix: C },
       recommendations: recs.slice(0, 10),
+      vsSpy, gapToSpyPct,
       asOf: new Date().toISOString(),
     });
   } catch (e) {
