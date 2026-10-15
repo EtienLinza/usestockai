@@ -207,7 +207,7 @@ interface Trade {
   mfe: number;
   volumeAtEntry: number;
   strategy: "trend" | "mean_reversion" | "breakout" | "catalyst" | "none";
-  exitReason: "stop_loss" | "take_profit" | "trailing_stop" | "time_exit" | "weekly_reversal" | "hard_stop" | "scale_down" | "tp1_partial" | "breakeven_stop";
+  exitReason: "stop_loss" | "take_profit" | "trailing_stop" | "time_exit" | "weekly_reversal" | "hard_stop" | "scale_down" | "tp1_partial" | "breakeven_stop" | "take_profit_ceiling";
   scaleLevel?: number;
   allocationAtEntry?: number;
 }
