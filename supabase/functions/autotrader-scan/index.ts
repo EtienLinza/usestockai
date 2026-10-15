@@ -4191,7 +4191,8 @@ async function executeExit(
       sharesToClose = Number(pos.shares);
     }
     if (sharesToClose >= Number(pos.shares)) {
-      return executeExit(supabase, pos, { kind: "EXIT", reason: `${action.reason} (sliver → full close)`, price: action.price } as any);
+      summary.partials = Math.max(0, summary.partials - 1);
+      return executeExit(supabase, pos, { kind: "FULL_EXIT", reason: `${action.reason} (sliver → full close)`, price: action.price }, profile, summary);
     }
     const remaining = Number(pos.shares) - sharesToClose;
     const partialPnl = isLong
