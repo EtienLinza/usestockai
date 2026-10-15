@@ -50,6 +50,13 @@
       "when": 1792068539856,
       "tag": "0006_notifications_feed",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1792068702711,
+      "tag": "0007_exit_rule_idempotency",
+      "breakpoints": true
     }
   ]
 }
