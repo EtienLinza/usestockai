@@ -27,6 +27,7 @@ const OAuthConsent = lazy(() => import("./pages/OAuthConsent"));
 const Security = lazy(() => import("./pages/Security"));
 const AutotraderLog = lazy(() => import("./pages/AutotraderLog"));
 const Reconciliation = lazy(() => import("./pages/Reconciliation"));
+const Portfolio = lazy(() => import("./pages/Portfolio"));
 const Terms = lazy(() => import("./pages/Terms"));
 const Privacy = lazy(() => import("./pages/Privacy"));
 const Disclosure = lazy(() => import("./pages/Disclosure"));
@@ -83,6 +84,7 @@ const App = () => (
                   <Route path="/security" element={<Security />} />
                   <Route path="/autotrader-log" element={<AutotraderLog />} />
                   <Route path="/reconciliation" element={<Reconciliation />} />
+                  <Route path="/portfolio" element={<Portfolio />} />
                   <Route path="/terms" element={<Terms />} />
                   <Route path="/privacy" element={<Privacy />} />
                   <Route path="/disclosure" element={<Disclosure />} />

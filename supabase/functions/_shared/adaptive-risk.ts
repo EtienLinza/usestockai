@@ -19,11 +19,15 @@ export interface RiskParams {
   haircut_dd: number;
   haircut_floor: number;
   dd_brake_pct: number;
+  /** Target number of simultaneous holdings (breadth). */
+  target_positions: number;
+  /** 0..1 — how hard a crowded pick (high corr to book) is shrunk. */
+  diversity_weight: number;
 }
 
 export const RISK_DEFAULTS: RiskParams = {
-  min_entry_frac: 0.08,
-  top_entry_frac: 0.12,
+  min_entry_frac: 0.035,
+  top_entry_frac: 0.05,
   single_name_cap: 0.15,
   heat_cap_pct: 10,
   cvar_cap_pct: 4,
@@ -34,12 +38,14 @@ export const RISK_DEFAULTS: RiskParams = {
   haircut_dd: 0.5,
   haircut_floor: 0.6,
   dd_brake_pct: 12,
+  target_positions: 22,
+  diversity_weight: 0.5,
 };
 
 /** Hard walls — never adaptive. */
 export const RISK_WALLS: Record<keyof RiskParams, [number, number]> = {
-  min_entry_frac: [0.03, 0.12],
-  top_entry_frac: [0.05, 0.18],
+  min_entry_frac: [0.02, 0.12],
+  top_entry_frac: [0.03, 0.18],
   single_name_cap: [0.05, 0.20],
   heat_cap_pct: [4, 14],
   cvar_cap_pct: [1.5, 6],
@@ -50,6 +56,8 @@ export const RISK_WALLS: Record<keyof RiskParams, [number, number]> = {
   haircut_dd: [0.3, 0.7],
   haircut_floor: [0.4, 0.9],
   dd_brake_pct: [8, 15],
+  target_positions: [10, 30],
+  diversity_weight: [0, 1],
 };
 
 /** Largest change allowed in one night, per key. */
@@ -57,7 +65,7 @@ export const MAX_STEP: Record<keyof RiskParams, number> = {
   min_entry_frac: 0.01, top_entry_frac: 0.015, single_name_cap: 0.015,
   heat_cap_pct: 1, cvar_cap_pct: 0.5, min_conviction: 2, tp_ceiling_pct: 2,
   haircut_corr: 0.05, haircut_atr: 0.05, haircut_dd: 0.05, haircut_floor: 0.05,
-  dd_brake_pct: 1,
+  dd_brake_pct: 1, target_positions: 1, diversity_weight: 0.05,
 };
 
 export const MIN_SAMPLES = 20;
@@ -143,7 +151,25 @@ export function tuneRiskParams(prev: RiskParams, x: TuneInputs): { params: RiskP
   t.haircut_dd = stepToward("haircut_dd", prev.haircut_dd, RISK_DEFAULTS.haircut_dd + 0.1 * z);
   t.haircut_floor = stepToward("haircut_floor", prev.haircut_floor, RISK_DEFAULTS.haircut_floor + 0.1 * z);
   t.dd_brake_pct = stepToward("dd_brake_pct", prev.dd_brake_pct, RISK_DEFAULTS.dd_brake_pct + 2 * z);
+  // Breadth: good results + calm market → a few more holdings; stress → fewer.
+  t.target_positions = Math.round(stepToward("target_positions", prev.target_positions, RISK_DEFAULTS.target_positions + 4 * z));
   return { params: t, reasons };
+}
+
+/** Per-slot NAV used to derive the slot budget from account size. */
+export const NAV_PER_SLOT = 4000;
+
+/** Crowding haircut: shrink picks that move with what we already hold. */
+export function diversityMult(p: RiskParams, maxAbsCorrToBook: number | null): number {
+  if (maxAbsCorrToBook == null || !Number.isFinite(maxAbsCorrToBook)) return 1;
+  const excess = Math.max(0, Math.min(1, (Math.abs(maxAbsCorrToBook) - 0.3) / 0.6));
+  return Math.max(0.5, 1 - p.diversity_weight * excess);
+}
+
+/** Inverse-volatility (risk-parity) scalar: 2% daily ATR = 1×, clamp 0.6–1.3×. */
+export function riskParityMult(atrPct: number | null | undefined): number {
+  if (!atrPct || !Number.isFinite(atrPct) || atrPct <= 0) return 1;
+  return Math.max(0.6, Math.min(1.3, 0.02 / atrPct));
 }
 
 /** Per-trade modulation: higher conviction → slightly larger entry floor. */
@@ -164,7 +190,7 @@ export async function loadRiskParams(supabase: any, userId: string): Promise<Ris
 }
 
 export function summarize(p: RiskParams): string {
-  return `size${(p.min_entry_frac * 100).toFixed(1)}/${(p.top_entry_frac * 100).toFixed(1)}% cap${(p.single_name_cap * 100).toFixed(0)}% heat${p.heat_cap_pct.toFixed(1)} cvar${p.cvar_cap_pct.toFixed(1)} tp${p.tp_ceiling_pct.toFixed(0)}`;
+  return `size${(p.min_entry_frac * 100).toFixed(1)}/${(p.top_entry_frac * 100).toFixed(1)}% cap${(p.single_name_cap * 100).toFixed(0)}% heat${p.heat_cap_pct.toFixed(1)} cvar${p.cvar_cap_pct.toFixed(1)} tp${p.tp_ceiling_pct.toFixed(0)} n${p.target_positions}`;
 }
 
 // ── Portfolio concentration walls (audit Phase 4) — never adaptive ────────

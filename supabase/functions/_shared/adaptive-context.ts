@@ -9,6 +9,7 @@
 // ============================================================================
 import { type MacroContext } from "./signal-engine-v2.ts";
 import { calculateSMA } from "./indicators.ts";
+import { RISK_DEFAULTS, NAV_PER_SLOT } from "./adaptive-risk.ts";
 
 // ── Rolling drawdown circuit breaker ────────────────────────────────────────
 export const ROLLING_DD_HARD_BLOCK_PCT = 10;
@@ -23,7 +24,7 @@ export const CDAR_TIGHTEN_PCT = 5;
 export const RISK_PROFILE_BASELINES = {
   conservative: { minConv: 78, maxPos: 5, maxNav: 60, maxSingle: 12 },
   balanced:     { minConv: 72, maxPos: 8, maxNav: 80, maxSingle: 20 },
-  aggressive:   { minConv: 62, maxPos: 14, maxNav: 100, maxSingle: 15 },
+  aggressive:   { minConv: 62, maxPos: RISK_DEFAULTS.target_positions, maxNav: 100, maxSingle: 15 },
 } as const;
 export type RiskProfileName = keyof typeof RISK_PROFILE_BASELINES;
 
@@ -260,7 +261,7 @@ export function computeEffectiveSettings<S extends AdaptiveSettings>(
   if (s.adaptive_mode) {
     const baseline = RISK_PROFILE_BASELINES[s.risk_profile];
     minConv = baseline.minConv;
-    maxPos = Math.min(baseline.maxPos, Math.max(3, Math.round(s.starting_nav / 12500)));
+    maxPos = Math.min(baseline.maxPos, Math.max(3, Math.round(s.starting_nav / (s.risk_profile === "aggressive" ? NAV_PER_SLOT : 12500))));
     maxNav = baseline.maxNav;
     maxSingle = baseline.maxSingle;
     adjustments.push(`base: ${s.risk_profile} profile`);
@@ -272,7 +273,7 @@ export function computeEffectiveSettings<S extends AdaptiveSettings>(
   } else {
     const baseline = RISK_PROFILE_BASELINES[s.risk_profile];
     minConv = baseline.minConv;
-    maxPos = Math.min(baseline.maxPos, Math.max(3, Math.round(s.starting_nav / 12500)));
+    maxPos = Math.min(baseline.maxPos, Math.max(3, Math.round(s.starting_nav / (s.risk_profile === "aggressive" ? NAV_PER_SLOT : 12500))));
     maxNav = baseline.maxNav;
     maxSingle = baseline.maxSingle;
   }

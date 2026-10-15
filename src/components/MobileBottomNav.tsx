@@ -1,5 +1,5 @@
 import { Link, useLocation } from "react-router-dom";
-import { LayoutDashboard, Heart, BarChart3, Shield, Home } from "lucide-react";
+import { LayoutDashboard, Heart, BarChart3, Shield, Home, PieChart } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/useAuth";
 
@@ -22,6 +22,7 @@ export const MobileBottomNav = () => {
   const items = user
     ? [
         { href: "/dashboard", label: "Hub", icon: LayoutDashboard },
+        { href: "/portfolio", label: "Book", icon: PieChart },
         { href: "/watchlist", label: "Watch", icon: Heart },
         { href: "/backtest", label: "Backtest", icon: BarChart3 },
         { href: "/settings", label: "Settings", icon: Shield },

@@ -22,7 +22,7 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
-import { User, LogOut, LayoutDashboard, Heart, Menu, BarChart3, Shield, Bot, Sparkles } from "lucide-react";
+import { User, LogOut, LayoutDashboard, Heart, Menu, BarChart3, Shield, Bot, Sparkles, PieChart } from "lucide-react";
 
 export const Navbar = () => {
   const location = useLocation();
@@ -34,6 +34,7 @@ export const Navbar = () => {
   // Primary nav (always visible on desktop)
   const navLinks = [
     { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+    { href: "/portfolio", label: "Portfolio", icon: PieChart },
     { href: "/watchlist", label: "Watchlist", icon: Heart },
     { href: "/backtest", label: "Backtest", icon: BarChart3 },
     { href: "/settings", label: "Settings", icon: Shield },
