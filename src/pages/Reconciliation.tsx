@@ -8,7 +8,7 @@ import { TickerLink } from "@/components/TickerLink";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
-import { Loader2 } from "lucide-react";
+import { Loader2, Clock, Database, ShieldAlert, Scale, Hash, Percent, DollarSign, TrendingUp } from "lucide-react";
 
 interface Pos {
   id: string; ticker: string; status: string; shares: number; original_shares: number | null;
@@ -123,20 +123,20 @@ export default function Reconciliation() {
             <section className="space-y-3">
               <h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wider">Health</h2>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                <MetricCard label="Last scan" value={lastScan ? `${ageLabel(lastScan)} ago` : "—"} />
-                <MetricCard label="Stale price data" value={`${staleCount} / ${rows.length}`} />
-                <MetricCard label="Below stop" value={String(belowStop)} />
-                <MetricCard label="Share mismatches" value={String(invariants)} />
+                <MetricCard label="Last scan" icon={Clock} value={lastScan ? `${ageLabel(lastScan)} ago` : "—"} />
+                <MetricCard label="Stale price data" icon={Database} value={`${staleCount} / ${rows.length}`} />
+                <MetricCard label="Below stop" icon={ShieldAlert} value={String(belowStop)} />
+                <MetricCard label="Share mismatches" icon={Scale} value={String(invariants)} />
               </div>
             </section>
 
             <section className="space-y-3">
               <h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wider">True performance (by whole trade)</h2>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                <MetricCard label="Trades" value={`${campaigns.n}`} />
-                <MetricCard label="Win rate" value={`${(campaigns.winRate * 100).toFixed(1)}%`} />
-                <MetricCard label="Avg per trade" value={money(campaigns.expectancy)} />
-                <MetricCard label="Profit factor" value={Number.isFinite(campaigns.pf) ? campaigns.pf.toFixed(2) : "—"} />
+                <MetricCard label="Trades" icon={Hash} value={`${campaigns.n}`} />
+                <MetricCard label="Win rate" icon={Percent} value={`${(campaigns.winRate * 100).toFixed(1)}%`} />
+                <MetricCard label="Avg per trade" icon={DollarSign} value={money(campaigns.expectancy)} />
+                <MetricCard label="Profit factor" icon={TrendingUp} value={Number.isFinite(campaigns.pf) ? campaigns.pf.toFixed(2) : "—"} />
               </div>
               <p className="text-xs text-muted-foreground">
                 Counting every partial sale separately gives {campaigns.rows} rows and a {(campaigns.rowWinRate * 100).toFixed(1)}% win rate.
