@@ -1051,7 +1051,7 @@ export function computePositionSize(
   const atrPctClamped = Math.min(0.06, Math.max(0.005, atrPct));
   const volScalar = applyVolScaling ? Math.min(1.5, targetVol / atrPctClamped) : 1;
   const raw = kellyBase * volScalar;
-  const capped = Math.min(0.25, Math.max(0, raw));
+  const capped = Math.min(0.20, Math.max(0, raw));
   return direction === "short" ? -capped : capped;
 }
 
@@ -1533,6 +1533,7 @@ function regimeMultiplier(strategy: string, regime: string): number {
     trend: { bull_quiet: 1.10, bull_volatile: 1.00, bear_quiet: 0.92, bear_volatile: 0.85, neutral: 1.00 },
     mean_reversion: { bull_quiet: 0.92, bull_volatile: 1.12, bear_quiet: 1.00, bear_volatile: 0.90, neutral: 1.00 },
     breakout: { bull_quiet: 1.10, bull_volatile: 1.00, bear_quiet: 0.88, bear_volatile: 0.85, neutral: 1.00 },
+    catalyst: { bull_quiet: 1.05, bull_volatile: 1.00, bear_quiet: 0.95, bear_volatile: 0.90, neutral: 1.00 },
   };
   const row = M[strategy];
   if (!row) return 1;
