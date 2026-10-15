@@ -5,7 +5,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import { requireCronOrUser } from "../_shared/cron-auth.ts";
 import { recordHeartbeat } from "../_shared/heartbeat.ts";
-import { loadRiskParams, tuneRiskParams } from "../_shared/adaptive-risk.ts";
+import { loadRiskParams, tuneRiskParams, MIN_SAMPLES } from "../_shared/adaptive-risk.ts";
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
