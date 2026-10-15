@@ -55,7 +55,7 @@ export default function Portfolio() {
   const sorted = data ? [...data.holdings].sort((a, b) => b.weightPct - a.weightPct) : [];
   const ageLabel = (h: Holding) => h.priceAgeDays == null ? "price unavailable" : h.priceAgeDays > 1 ? `price ${h.priceAgeDays}d old` : null;
   const cellColor = (c: number) => c >= 0
-    ? cellColor(c)
+    ? `hsl(var(--primary) / ${Math.max(0.05, Math.min(1, c)).toFixed(2)})`
     : `hsl(var(--destructive) / ${Math.max(0.05, Math.min(1, -c)).toFixed(2)})`;
   const ret = data ? (data.nav / data.startNav - 1) * 100 : 0;
 
