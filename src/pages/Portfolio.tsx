@@ -52,7 +52,7 @@ export default function Portfolio() {
 
   return (
     <div className="min-h-screen bg-background">
-      <SEO title="Portfolio — StockAI" description="Your whole book at a glance: risk, diversification and recommended actions." />
+      <SEO title="Portfolio — StockAI" description="Your whole book at a glance: risk, diversification and recommended actions." path="/portfolio" />
       <Navbar />
       <main className="container max-w-6xl mx-auto px-4 pt-24 pb-24 md:pb-12 space-y-6">
         <div className="flex items-end justify-between gap-4">
