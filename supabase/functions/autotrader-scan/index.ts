@@ -4311,6 +4311,8 @@ async function executeExit(
         atr_pct: entry > 0 && entryAtr > 0 ? entryAtr / entry : 0.02,
         market_regime: (pos.entry_feature_snapshot as Record<string, unknown> | null)?._market_regime as string | "neutral",
         source: "autotrader",
+        rel_strength: Number((pos.entry_feature_snapshot as Record<string, unknown> | null)?.rel_strength ?? 0) || 0,
+        sector_momentum: Number((pos.entry_feature_snapshot as Record<string, unknown> | null)?.sector_momentum ?? 0) || 0,
       },
       feature_snapshot: {
         // WS1: carry forward the entry-observable feature dict so the nightly
