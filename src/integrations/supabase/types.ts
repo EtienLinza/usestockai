@@ -2477,6 +2477,15 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      bars_freshness: {
+        Args: { _tickers: string[] }
+        Returns: {
+          as_of: string
+          last_close: number
+          ticker: string
+          updated_at: string
+        }[]
+      }
       claim_price_alert: { Args: { _alert_id: string }; Returns: boolean }
       constituents_as_of: {
         Args: { _as_of: string; _index_name: string }
