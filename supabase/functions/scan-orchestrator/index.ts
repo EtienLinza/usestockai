@@ -484,12 +484,19 @@ serve(async (req) => {
     }
 
     const elapsed = Date.now() - heartbeatStart;
+    const evaluated = survivors.length - skippedTickers.length;
+    const coveragePct = survivors.length > 0 ? Math.round((evaluated / survivors.length) * 100) : 100;
+    const coverageNote = skippedTickers.length > 0
+      ? `coverage ${coveragePct}% — ${skippedTickers.length} skipped: ${skippedTickers.slice(0, 40).join(",")}`
+      : null;
+    if (coveragePct < 70) console.error(`scan health: LOW COVERAGE ${coveragePct}%`);
     await setProgress({
       phase: "done", finished_at: new Date().toISOString(),
-      signals_found: allSignals.length, processed: survivors.length,
+      signals_found: allSignals.length, processed: evaluated,
+      ...(coverageNote ? { error: coverageNote } : {}),
     });
-    await recordHeartbeat("scan-orchestrator", heartbeatStart, "ok",
-      `signals=${allSignals.length} survivors=${survivors.length}/${allTickers.length} ` +
+    await recordHeartbeat("scan-orchestrator", heartbeatStart, coveragePct < 70 ? "degraded" : "ok",
+      `coverage=${coveragePct}% signals=${allSignals.length} survivors=${survivors.length}/${allTickers.length} ` +
       `cache=${cacheAge.newestAsOf ?? "none"}/${cacheAge.sameDayPct}%same-day ${elapsed}ms`);
 
     return new Response(JSON.stringify({
