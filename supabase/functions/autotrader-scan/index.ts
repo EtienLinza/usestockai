@@ -3155,6 +3155,49 @@ async function processUser(
     settings.starting_nav + cumulativeRealizedPnl + unrealizedToday,
   );
 
+  // ── LIVE SAFETY PASS (audit P0/P1) ───────────────────────────────────────
+  // 1) Stale-quote stop: the exit pass above runs on cached daily bars, which
+  //    let SWKS sit 4.5% below its stop. Re-check every open position against
+  //    a live quote and close at market if it is through its hard stop.
+  // 2) Concentration trim: price drift / add-ons can push one name past the
+  //    single-name cap; trim back to the cap once per day (idempotent ledger).
+  if (isMarketOpen()) {
+    try {
+      const { data: openNow } = await supabase.from("virtual_positions")
+        .select("*").eq("user_id", userId).eq("status", "open");
+      const nameCap = settings.risk_profile === "aggressive"
+        ? riskFor(settings.user_id).single_name_cap
+        : Math.min(HARD_SINGLE_NAME_WALL, Number(settings.max_single_name_pct ?? 15) / 100);
+      const dummyProfile = {} as ProfileParams;
+      for (const op of (openNow ?? []) as Position[]) {
+        const q = await fetchLiveQuote(op.ticker.toUpperCase()).catch(() => null);
+        if (!q || !(q.price > 0)) continue;
+        const isLongPos = op.position_type !== "short";
+        const stop = inferHardStopPrice(op);
+        if (stop != null && Number.isFinite(stop) && (isLongPos ? q.price <= stop : q.price >= stop)) {
+          await executeExit(supabase, op, {
+            kind: "FULL_EXIT",
+            reason: `Hard stop hit (live quote $${q.price.toFixed(2)} through stop $${Number(stop).toFixed(2)})`,
+            price: q.price,
+          }, dummyProfile, userSummary as any);
+          continue;
+        }
+        const valuePct = (q.price * Number(op.shares)) / currentNav;
+        if (valuePct > nameCap + CONCENTRATION_TRIM_TOLERANCE) {
+          const pct = Math.min(0.9, 1 - nameCap / valuePct);
+          await executeExit(supabase, op, {
+            kind: "PARTIAL_EXIT",
+            reason: `Concentration trim: ${op.ticker} ${(valuePct * 100).toFixed(1)}% of NAV > cap ${(nameCap * 100).toFixed(0)}%`,
+            price: q.price, pct,
+          }, dummyProfile, userSummary as any);
+        }
+      }
+    } catch (e) {
+      console.warn("live safety pass failed", e);
+    }
+  }
+
+
   // ── ENTRIES ─────────────────────────────────────────────────────────────
   // Only users with autotrader enabled get new entries. Users with disabled
   // autotrader still benefit from the exit pass above (manual buys auto-close).
