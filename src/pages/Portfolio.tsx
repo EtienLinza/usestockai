@@ -13,12 +13,13 @@ import { Loader2, Wallet, ShieldAlert, Layers, Activity, Percent, RefreshCw, Lig
 
 interface Holding {
   id: string; ticker: string; sector: string; shares: number; entry: number; last: number; value: number;
-  weightPct: number; pnl: number; pnlPct: number; stopDistPct: number | null; beta: number; riskSharePct: number; ageDays: number;
+  weightPct: number; pnl: number; pnlPct: number; stopDistPct: number | null; beta: number | null; riskSharePct: number; ageDays: number;
+  side?: "long" | "short"; priceDate?: string | null; priceAgeDays?: number | null;
 }
 interface Rec { priority: number; kind: string; ticker?: string; title: string; reason: string }
 interface Data {
   nav: number; cash: number; invested: number; startNav: number; n: number;
-  metrics: { beta: number; effNames: number; effBets: number; avgCorr: number; heatPct: number; varWeek95: number; volAnnualPct: number; cashPct: number; targetPositions: number; sectorCap: number; singleCapPct: number };
+  metrics: { beta: number | null; effNames: number; effBets: number; avgCorr: number; heatPct: number; varWeek95: number; volAnnualPct: number; cashPct: number; targetPositions: number; sectorCap: number; singleCapPct: number };
   sectors: { sector: string; pct: number }[];
   holdings: Holding[];
   correlation: { tickers: string[]; matrix: (number | null)[][] };
@@ -48,6 +49,11 @@ export default function Portfolio() {
   useEffect(() => { if (user) load(); }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const m = data?.metrics;
+  const sorted = data ? [...data.holdings].sort((a, b) => b.weightPct - a.weightPct) : [];
+  const ageLabel = (h: Holding) => h.priceAgeDays == null ? "price unavailable" : h.priceAgeDays > 1 ? `price ${h.priceAgeDays}d old` : null;
+  const cellColor = (c: number) => c >= 0
+    ? cellColor(c)
+    : `hsl(var(--destructive) / ${Math.max(0.05, Math.min(1, -c)).toFixed(2)})`;
   const ret = data ? (data.nav / data.startNav - 1) * 100 : 0;
 
   return (
@@ -74,7 +80,7 @@ export default function Portfolio() {
               <MetricCard label="Account value" value={money(data.nav)} subtext={`${ret >= 0 ? "+" : ""}${ret.toFixed(2)}% all-time`} icon={Wallet} />
               <MetricCard label="Invested / cash" value={`${(100 - m.cashPct).toFixed(0)}% / ${m.cashPct.toFixed(0)}%`} subtext={`${data.n} of ~${m.targetPositions} holdings`} icon={Percent} />
               <MetricCard label="Money at risk" value={`${m.heatPct.toFixed(1)}%`} subtext={`Bad week (95%): −${m.varWeek95.toFixed(1)}%`} icon={ShieldAlert} />
-              <MetricCard label="Independent bets" value={m.effBets.toFixed(1)} subtext={`Beta ${m.beta.toFixed(2)} · avg overlap ${m.avgCorr.toFixed(2)}`} icon={Layers} />
+              <MetricCard label="Independent bets" value={m.effBets.toFixed(1)} subtext={`Beta ${m.beta == null ? "—" : m.beta.toFixed(2)} · avg overlap ${m.avgCorr.toFixed(2)}`} icon={Layers} />
             </div>
 
             <div className="grid lg:grid-cols-2 gap-4">
@@ -123,15 +129,15 @@ export default function Portfolio() {
                     <th className="text-right">P&amp;L</th><th className="text-right">To stop</th><th className="text-right">Beta</th><th className="text-right">Risk share</th>
                   </tr></thead>
                   <tbody>
-                    {data.holdings.sort((a, b) => b.weightPct - a.weightPct).map((h) => (
+                    {sorted.map((h) => (
                       <tr key={h.id} className="border-t border-border/50">
-                        <td className="py-2"><TickerLink ticker={h.ticker} /></td>
+                        <td className="py-2"><TickerLink ticker={h.ticker} />{h.side === "short" && <Badge variant="outline" className="ml-1 text-[10px]">Short</Badge>}{ageLabel(h) && <span className="ml-1 text-[10px] text-destructive">{ageLabel(h)}</span>}</td>
                         <td className="text-muted-foreground">{h.sector}</td>
                         <td className="text-right">{money(h.value)}</td>
                         <td className={cn("text-right", h.weightPct > m.singleCapPct && "text-destructive")}>{h.weightPct.toFixed(1)}%</td>
                         <td className={cn("text-right", h.pnl >= 0 ? "text-primary" : "text-destructive")}>{money(h.pnl)} ({h.pnlPct.toFixed(1)}%)</td>
                         <td className={cn("text-right", h.stopDistPct != null && h.stopDistPct < 1.5 && "text-destructive")}>{h.stopDistPct == null ? "—" : `${h.stopDistPct.toFixed(1)}%`}</td>
-                        <td className="text-right">{h.beta.toFixed(2)}</td>
+                        <td className="text-right">{h.beta == null ? "—" : h.beta.toFixed(2)}</td>
                         <td className="text-right">{h.riskSharePct.toFixed(0)}%</td>
                       </tr>
                     ))}
@@ -139,9 +145,9 @@ export default function Portfolio() {
                 </table>
               </div>
               <div className="md:hidden grid gap-2">
-                {data.holdings.map((h) => (
+                {sorted.map((h) => (
                   <div key={h.id} className="rounded-md border border-border p-3 text-sm space-y-1">
-                    <div className="flex justify-between"><TickerLink ticker={h.ticker} /><span>{h.weightPct.toFixed(1)}%</span></div>
+                    <div className="flex justify-between"><span><TickerLink ticker={h.ticker} />{h.side === "short" && <Badge variant="outline" className="ml-1 text-[10px]">Short</Badge>}{ageLabel(h) && <span className="ml-1 text-[10px] text-destructive">{ageLabel(h)}</span>}</span><span>{h.weightPct.toFixed(1)}%</span></div>
                     <div className="flex justify-between text-xs text-muted-foreground"><span>{h.sector}</span><span className={h.pnl >= 0 ? "text-primary" : "text-destructive"}>{money(h.pnl)}</span></div>
                     <div className="flex justify-between text-xs text-muted-foreground"><span>To stop {h.stopDistPct == null ? "—" : `${h.stopDistPct.toFixed(1)}%`}</span><span>Risk {h.riskSharePct.toFixed(0)}%</span></div>
                   </div>
@@ -152,7 +158,7 @@ export default function Portfolio() {
             {data.correlation.tickers.length > 1 && (
               <Card className="p-5 space-y-3">
                 <h2 className="text-sm font-medium">Overlap map</h2>
-                <p className="text-xs text-muted-foreground">Darker = the two holdings tend to move together (last 60 days).</p>
+                <p className="text-xs text-muted-foreground">Green = the two holdings move together; red = they move in opposite directions and balance each other (last 60 days). Blank = not enough history.</p>
                 <div className="overflow-x-auto">
                   <table className="text-[10px]">
                     <thead><tr><th />{data.correlation.tickers.map((t) => <th key={t} className="px-1 font-normal text-muted-foreground">{t}</th>)}</tr></thead>
@@ -162,7 +168,7 @@ export default function Portfolio() {
                           <td className="pr-2 text-muted-foreground">{t}</td>
                           {data.correlation.matrix[i].map((c, j) => (
                             <td key={j} className="w-9 h-7 text-center rounded-sm"
-                              style={{ backgroundColor: c == null || i === j ? "hsl(var(--muted))" : `hsl(var(--primary) / ${Math.max(0.05, Math.min(1, c)).toFixed(2)})` }}>
+                              style={{ backgroundColor: c == null || i === j ? "hsl(var(--muted))" : cellColor(c) }}>
                               {i === j || c == null ? "" : c.toFixed(1)}
                             </td>
                           ))}
@@ -173,7 +179,7 @@ export default function Portfolio() {
                 </div>
               </Card>
             )}
-            <p className="text-[11px] text-muted-foreground">Prices from the latest saved daily close · {new Date(data.asOf).toLocaleString()}</p>
+            <p className="text-[11px] text-muted-foreground">Prices from the latest daily close (refreshed when older than a day) · {new Date(data.asOf).toLocaleString()}</p>
           </>
         )}
       </main>
