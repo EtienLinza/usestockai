@@ -34,6 +34,7 @@ export const Navbar = () => {
   // Primary nav (always visible on desktop)
   const navLinks = [
     { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+    { href: "/portfolio", label: "Portfolio", icon: PieChart },
     { href: "/watchlist", label: "Watchlist", icon: Heart },
     { href: "/backtest", label: "Backtest", icon: BarChart3 },
     { href: "/settings", label: "Settings", icon: Shield },
