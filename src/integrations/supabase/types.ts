@@ -1063,6 +1063,36 @@ export type Database = {
         }
         Relationships: []
       }
+      position_rule_fires: {
+        Row: {
+          bar_date: string
+          campaign_id: string
+          created_at: string
+          position_id: string | null
+          rule_id: string
+          shares: number | null
+          user_id: string
+        }
+        Insert: {
+          bar_date: string
+          campaign_id: string
+          created_at?: string
+          position_id?: string | null
+          rule_id: string
+          shares?: number | null
+          user_id: string
+        }
+        Update: {
+          bar_date?: string
+          campaign_id?: string
+          created_at?: string
+          position_id?: string | null
+          rule_id?: string
+          shares?: number | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       prediction_runs: {
         Row: {
           confidence: number
@@ -2290,6 +2320,7 @@ export type Database = {
           entry_profile: string | null
           entry_strategy: string | null
           entry_weekly_alloc: number | null
+          exit_cause: string | null
           exit_date: string | null
           exit_price: number | null
           exit_reason: string | null
@@ -2329,6 +2360,7 @@ export type Database = {
           entry_profile?: string | null
           entry_strategy?: string | null
           entry_weekly_alloc?: number | null
+          exit_cause?: string | null
           exit_date?: string | null
           exit_price?: number | null
           exit_reason?: string | null
@@ -2368,6 +2400,7 @@ export type Database = {
           entry_profile?: string | null
           entry_strategy?: string | null
           entry_weekly_alloc?: number | null
+          exit_cause?: string | null
           exit_date?: string | null
           exit_price?: number | null
           exit_reason?: string | null
