@@ -98,10 +98,10 @@ export default function Reconciliation() {
     const isLong = p.position_type !== "short";
     const toStop = stop ? (isLong ? (mark - stop) / mark : (stop - mark) / mark) * 100 : null;
     const value = mark * Number(p.shares);
-    return { p, mark, stop, toStop, value, navPct: (value / nav) * 100, age: b?.updated_at ?? null };
+    return { p, mark, stop, toStop, value, navPct: (value / nav) * 100, age: b?.as_of ?? null };
   }).sort((a, b) => b.value - a.value);
 
-  const staleCount = rows.filter((r) => !r.age || Date.now() - new Date(r.age).getTime() > 36 * 3.6e6).length;
+  const staleCount = rows.filter((r) => !r.age || Date.now() - new Date(r.age + "T21:00:00Z").getTime() > 3.2 * 86400000).length;
   const belowStop = rows.filter((r) => r.toStop != null && r.toStop < 0).length;
   const causes = closed.reduce<Record<string, number>>((m, p) => {
     if (p.exit_cause) m[p.exit_cause] = (m[p.exit_cause] ?? 0) + 1; return m;
@@ -153,7 +153,7 @@ export default function Reconciliation() {
                     <Card className="overflow-hidden">
                       <table className="w-full text-sm">
                         <thead className="text-xs text-muted-foreground border-b border-border/30">
-                          <tr>{["Ticker", "Shares", "Mark", "Stop", "To stop", "% of account", "Data age"].map((h) => <th key={h} className="text-left font-medium px-4 py-2">{h}</th>)}</tr>
+                          <tr>{["Ticker", "Shares", "Mark", "Stop", "To stop", "% of account", "Price as of"].map((h) => <th key={h} className="text-left font-medium px-4 py-2">{h}</th>)}</tr>
                         </thead>
                         <tbody>
                           {rows.map((r) => (
@@ -164,7 +164,7 @@ export default function Reconciliation() {
                               <td className="px-4 py-2">{r.stop ? `$${r.stop.toFixed(2)}` : "—"}</td>
                               <td className={cn("px-4 py-2", r.toStop != null && r.toStop < 0 ? "text-destructive" : r.toStop != null && r.toStop < 2 ? "text-warning" : "")}>{r.toStop != null ? `${r.toStop.toFixed(1)}%` : "—"}</td>
                               <td className={cn("px-4 py-2", r.navPct > 15 ? "text-warning" : "")}>{r.navPct.toFixed(1)}%</td>
-                              <td className="px-4 py-2 text-muted-foreground">{r.age ? ageLabel(r.age) : "none"}</td>
+                              <td className="px-4 py-2 text-muted-foreground">{r.age ? new Date(r.age + "T12:00:00Z").toLocaleDateString(undefined, { month: "short", day: "numeric" }) : "none"}</td>
                             </tr>
                           ))}
                         </tbody>
