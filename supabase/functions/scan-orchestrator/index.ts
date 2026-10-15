@@ -290,18 +290,37 @@ serve(async (req) => {
     const allSignals: any[] = [];
     const allRejected: any[] = [];
     let processed = 0;
+    const skippedTickers: string[] = [];
     for (let i = 0; i < chunks.length; i += WORKER_PARALLELISM) {
       const wave = chunks.slice(i, i + WORKER_PARALLELISM);
       const results = await Promise.all(wave.map(async (chunk) => {
-        const { data, error } = await supabase.functions.invoke("scan-worker", {
-          body: { ...workerPayloadBase, tickers: chunk },
-          headers: cronSecretHeader(),
-        });
-        if (error) { console.error("worker err", error); return { signals: [], rejected: [] }; }
-        return { signals: (data?.signals ?? []) as any[], rejected: (data?.rejected ?? []) as any[] };
+        // Retry on rate-limit (429) / transient errors, honoring Retry-After.
+        for (let attempt = 0; attempt < 4; attempt++) {
+          const { data, error } = await supabase.functions.invoke("scan-worker", {
+            body: { ...workerPayloadBase, tickers: chunk },
+            headers: cronSecretHeader(),
+          });
+          if (!error) {
+            return { ok: true, signals: (data?.signals ?? []) as any[], rejected: (data?.rejected ?? []) as any[] };
+          }
+          const ctx = (error as any)?.context;
+          const status = ctx?.status ?? 0;
+          const ra = Number(ctx?.headers?.get?.("retry-after"));
+          const waitMs = Math.min(35_000, Number.isFinite(ra) && ra > 0 ? ra * 1000 : 2000 * 2 ** attempt);
+          console.warn(`worker err (status ${status}, attempt ${attempt + 1}) — retry in ${waitMs}ms`);
+          if (attempt === 3 || (status && status !== 429 && status < 500)) break;
+          await new Promise((r) => setTimeout(r, waitMs));
+        }
+        console.error(`worker chunk skipped after retries: ${chunk.join(",")}`);
+        return { ok: false, chunk, signals: [], rejected: [] };
       }));
-      for (const r of results) { allSignals.push(...r.signals); allRejected.push(...r.rejected); }
+      for (const r of results) {
+        allSignals.push(...r.signals); allRejected.push(...r.rejected);
+        if (!r.ok) skippedTickers.push(...((r as any).chunk ?? []));
+      }
       processed += wave.reduce((a, c) => a + c.length, 0);
+      // Space waves out so we don't trip the platform limiter.
+      if (i + WORKER_PARALLELISM < chunks.length) await new Promise((r) => setTimeout(r, 400));
       await setProgress({ processed, signals_found: allSignals.length });
     }
 
