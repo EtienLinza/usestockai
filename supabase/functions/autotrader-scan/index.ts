@@ -1850,10 +1850,25 @@ async function runEntryDecision(
     : sig.kellyFraction * volScalar * edgeMult * convEdgeMult;
   const rpMult = AGGR ? riskParityMult((sig as any).atrPct) : 1;
   if (AGGR && Math.abs(rpMult - 1) > 0.01) aggrNotes.push(`riskpar×${rpMult.toFixed(2)}`);
+  // Audit fix (Oct 15): the Aggressive floor must only lift trades with a
+  // positive realized edge. A strategy whose expectancy (winRate·avgWin −
+  // lossRate·avgLoss) is ≤ 0 over ≥ 20 trades, or a conviction bucket with
+  // negative expectancy, gets NO floor and a quarter-size haircut instead.
+  const stratExp = edge && edge.sampleSize >= 20
+    ? (edge.winRate / 100) * edge.avgWin - (1 - edge.winRate / 100) * Math.abs(edge.avgLoss)
+    : null;
+  const negativeEdge = (stratExp !== null && stratExp <= 0) || convEdgeMult <= 0.35;
+  if (AGGR && negativeEdge) {
+    aggrNotes.push(`no-floor: ${stratExp !== null && stratExp <= 0 ? `strategy exp ${stratExp.toFixed(2)}%` : "losing score band"}`);
+  }
   const aggrFloor = entryFloorFor(RP, effectiveConviction) * rpMult;
   const baseFrac = AGGR
-    ? Math.max(Math.abs(rawFrac), aggrFloor) * Math.max(RP.haircut_floor, aggrHaircut)
-    : Math.max(Math.abs(rawFrac), MIN_ENTRY_FRAC);
+    ? (negativeEdge
+        ? Math.abs(rawFrac) * 0.25 * convEdgeMult
+        : Math.max(Math.abs(rawFrac) * convEdgeMult, aggrFloor * convEdgeMult)) * Math.max(RP.haircut_floor, aggrHaircut)
+    : negativeEdge
+      ? Math.abs(rawFrac) * 0.5
+      : Math.max(Math.abs(rawFrac), MIN_ENTRY_FRAC);
   // Wave 3: absolute single-name ceiling on top of the user setting. EVMT sat
   // at $16.3k (conviction 71) while DELL at 94 got $2.3k — concentration was
   // inversely correlated with edge. No single name exceeds 10% of NAV.
