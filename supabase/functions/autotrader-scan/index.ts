@@ -4092,6 +4092,8 @@ async function executeExit(
       exit_reason: action.reason,
       pnl,
       cooldown_until: cooldownUntil,
+      // Slippage vs stored stop (positive = filled worse than the stop).
+      stop_slippage_pct: isHardStop && gapSlipBps != null ? gapSlipBps / 100 : null,
     }).eq("id", pos.id);
 
     await supabase.from("autotrade_log").insert({
@@ -4230,6 +4232,8 @@ async function executeExit(
       user_id: pos.user_id, ticker: pos.ticker,
       entry_price: entry, shares: sharesToClose,
       position_type: pos.position_type, signal_id: pos.signal_id,
+      // Partial slices roll up into the parent campaign for honest win rates.
+      campaign_id: (pos as any).campaign_id ?? pos.id,
       status: "closed", exit_price: action.price,
       exit_date: new Date().toISOString(), closed_at: new Date().toISOString(),
       exit_reason: `partial: ${action.reason}`, pnl: partialPnl,
@@ -4356,7 +4360,16 @@ async function executeEntry(
     );
   }
 
+  const newPositionId = crypto.randomUUID();
+  // Lineage: link the position to the live signal that justified it.
+  let linkedSignalId: string | null = null;
+  try {
+    const { data: sigRow } = await supabase.from("live_signals").select("id")
+      .eq("ticker", ticker).order("created_at", { ascending: false }).limit(1).maybeSingle();
+    linkedSignalId = sigRow?.id ?? null;
+  } catch { /* lineage is best-effort; never block an entry */ }
   const { data: ins, error: insErr } = await supabase.from("virtual_positions").insert({
+    id: newPositionId, campaign_id: newPositionId, signal_id: linkedSignalId,
 
     user_id: settings.user_id, ticker, entry_price: fillPrice, shares,
     position_type: positionType,

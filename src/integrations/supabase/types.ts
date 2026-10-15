@@ -10,7 +10,7 @@ export type Database = {
   // Allows to automatically instantiate createClient with right options
   // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
-    PostgrestVersion: "14.5"
+    PostgrestVersion: "14.1"
   }
   public: {
     Tables: {
@@ -2231,6 +2231,7 @@ export type Database = {
         Row: {
           add_on_count: number
           breakout_failed_count: number
+          campaign_id: string | null
           closed_at: string | null
           cooldown_until: string | null
           created_at: string
@@ -2260,6 +2261,7 @@ export type Database = {
           shares: number
           signal_id: string | null
           status: string
+          stop_slippage_pct: number | null
           target_profit_pct: number | null
           ticker: string
           trailing_stop_price: number | null
@@ -2268,6 +2270,7 @@ export type Database = {
         Insert: {
           add_on_count?: number
           breakout_failed_count?: number
+          campaign_id?: string | null
           closed_at?: string | null
           cooldown_until?: string | null
           created_at?: string
@@ -2297,6 +2300,7 @@ export type Database = {
           shares: number
           signal_id?: string | null
           status?: string
+          stop_slippage_pct?: number | null
           target_profit_pct?: number | null
           ticker: string
           trailing_stop_price?: number | null
@@ -2305,6 +2309,7 @@ export type Database = {
         Update: {
           add_on_count?: number
           breakout_failed_count?: number
+          campaign_id?: string | null
           closed_at?: string | null
           cooldown_until?: string | null
           created_at?: string
@@ -2334,6 +2339,7 @@ export type Database = {
           shares?: number
           signal_id?: string | null
           status?: string
+          stop_slippage_pct?: number | null
           target_profit_pct?: number | null
           ticker?: string
           trailing_stop_price?: number | null
