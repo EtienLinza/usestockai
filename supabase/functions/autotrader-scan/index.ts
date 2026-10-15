@@ -920,6 +920,11 @@ function runLossExit(
       atrPctEntry > 0.05 &&
       pnlPct >= -0.01 &&
       (pos.partial_exits_taken ?? 0) === 0 &&
+      // Idempotency: the gap trim fires at most ONCE per position. Without
+      // this, every near-close scan re-trimmed (SWKS 50 → 2 shares over 9 trims)
+      // because this rule never advances partial_exits_taken.
+      (pos.original_shares == null || Number(pos.shares) >= Number(pos.original_shares)) &&
+      Number(pos.partial_trim_shares ?? 0) === 0 &&
       isNearMarketClose()
     ) {
       const barsHeldForTrim = businessDaysSince(pos.created_at);
@@ -4177,8 +4182,18 @@ async function executeExit(
 
   if (action.kind === "PARTIAL_EXIT") {
     summary.partials++;
-    const sharesToClose = Math.floor(Number(pos.shares) * action.pct);
+    let sharesToClose = Math.floor(Number(pos.shares) * action.pct);
     if (sharesToClose < 1) return;
+    // Sliver guard: never leave a residual under 3 shares or under $500 —
+    // close the whole thing instead of nursing a fragment past its stop.
+    const leftover = Number(pos.shares) - sharesToClose;
+    if (leftover > 0 && (leftover < 3 || leftover * action.price < 500)) {
+      sharesToClose = Number(pos.shares);
+    }
+    if (sharesToClose >= Number(pos.shares)) {
+      summary.partials = Math.max(0, summary.partials - 1);
+      return executeExit(supabase, pos, { kind: "FULL_EXIT", reason: `${action.reason} (sliver → full close)`, price: action.price }, profile, summary);
+    }
     const remaining = Number(pos.shares) - sharesToClose;
     const partialPnl = isLong
       ? (action.price - entry) * sharesToClose
