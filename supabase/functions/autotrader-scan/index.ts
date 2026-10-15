@@ -1,4 +1,4 @@
-import { loadRiskParams, entryFloorFor, summarize as summarizeRisk, RISK_DEFAULTS, type RiskParams, HARD_SECTOR_CAP_PCT, CONCENTRATION_TRIM_TOLERANCE, HARD_SINGLE_NAME_WALL } from "../_shared/adaptive-risk.ts";
+import { loadRiskParams, entryFloorFor, summarize as summarizeRisk, RISK_DEFAULTS, type RiskParams, HARD_SECTOR_CAP_PCT, CONCENTRATION_TRIM_TOLERANCE, HARD_SINGLE_NAME_WALL, diversityMult, riskParityMult } from "../_shared/adaptive-risk.ts";
 // ============================================================================
 // AUTOTRADER SCAN — fully automated trade lifecycle, runs every 10 min via cron
 //
@@ -1574,6 +1574,10 @@ async function runEntryDecision(
   // crashing together) without forcing the user to enforce sector caps manually.
   if (openTickers.length > 0) {
     const corr = maxCorrelationToBook(ticker, openTickers);
+    if (AGGR && corr) {
+      const dm = diversityMult(RP, corr.maxAbs);
+      if (dm < 0.999) { aggrHaircut *= dm; aggrNotes.push(`crowd${corr.maxAbs.toFixed(2)}×${dm.toFixed(2)}`); }
+    }
     const corrCutoff = Math.max(0.55, Math.min(0.95,
       adaptiveCorrThreshold(marketRegime, macro?.stressed ? "elevated" : "normal")
       - gateDelta(GATE_ADJ, "correlation_threshold")));
@@ -1844,7 +1848,9 @@ async function runEntryDecision(
   const rawFrac = AGGR
     ? sig.kellyFraction * volScalar
     : sig.kellyFraction * volScalar * edgeMult * convEdgeMult;
-  const aggrFloor = entryFloorFor(RP, effectiveConviction);
+  const rpMult = AGGR ? riskParityMult((sig as any).atrPct) : 1;
+  if (AGGR && Math.abs(rpMult - 1) > 0.01) aggrNotes.push(`riskpar×${rpMult.toFixed(2)}`);
+  const aggrFloor = entryFloorFor(RP, effectiveConviction) * rpMult;
   const baseFrac = AGGR
     ? Math.max(Math.abs(rawFrac), aggrFloor) * Math.max(RP.haircut_floor, aggrHaircut)
     : Math.max(Math.abs(rawFrac), MIN_ENTRY_FRAC);
