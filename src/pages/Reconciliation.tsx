@@ -49,10 +49,11 @@ export default function Reconciliation() {
       setInvariants(count ?? 0);
       const held = [...new Set(list.filter((p) => p.status === "open").map((p) => p.ticker.toUpperCase()))];
       if (held.length) {
-        const { data: b } = await supabase.from("ticker_bars_cache").select("ticker, as_of, updated_at, bars")
-          .in("ticker", held).order("as_of", { ascending: false });
+        const { data: b } = await supabase.rpc("bars_freshness", { _tickers: held });
         const m = new Map<string, Bars>();
-        for (const r of (b ?? []) as unknown as Bars[]) if (!m.has(r.ticker)) m.set(r.ticker, r);
+        for (const r of (b ?? []) as Array<{ ticker: string; as_of: string; updated_at: string; last_close: number }>) {
+          m.set(r.ticker, { ticker: r.ticker, as_of: r.as_of, updated_at: r.updated_at, bars: { close: [Number(r.last_close)] } });
+        }
         setBars(m);
       }
       setLoading(false);
