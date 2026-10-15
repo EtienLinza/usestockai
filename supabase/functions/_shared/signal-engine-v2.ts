@@ -248,11 +248,14 @@ export function classifyStock(close: number[], high: number[], low: number[], ti
 
   // Bug fix: was slicing `close` so we were really tracking "higher closing
   // prices" instead of actual higher highs. Read from the `high` array.
+  // Oct 2026 fix: windows were anchored at the START of history and stepped
+  // forward, so the newest 1–19 bars (up to ~4 weeks) were never counted.
+  // Anchor at the most recent bar and step backwards instead.
   const hhWindow = 20;
   let hhCount = 0, hhTotal = 0;
-  for (let i = hhWindow * 2; i < n; i += hhWindow) {
-    const currentHigh = Math.max(...high.slice(i - hhWindow, i));
-    const prevHigh = Math.max(...high.slice(i - hhWindow * 2, i - hhWindow));
+  for (let end = n; end - hhWindow * 2 >= 0; end -= hhWindow) {
+    const currentHigh = Math.max(...high.slice(end - hhWindow, end));
+    const prevHigh = Math.max(...high.slice(end - hhWindow * 2, end - hhWindow));
     hhTotal++;
     if (currentHigh > prevHigh) hhCount++;
   }
