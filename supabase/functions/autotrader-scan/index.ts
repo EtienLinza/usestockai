@@ -107,6 +107,45 @@ let GATE_ADJ: GateAdjustments | null = null;
 
 // Exit meta-labeler: empirical recovery-odds grid. Null → geometry-only exits.
 let EXIT_META: ExitMetaModel | null = null;
+// Per-user strategy auto-pause (set before each user's entry pass).
+let PAUSED_STRATEGIES: Map<string, string> = new Map();
+
+// A strategy pauses when the user's last ≤50 closed trades with it have
+// non-positive average P&L (min 20 trades). It resumes automatically once the
+// engine's shadow record (all tracked signals of that strategy, traded or not)
+// over the last 20 closed outcomes turns positive.
+async function loadPausedStrategies(supabase: any, userId: string): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  try {
+    const { data: rows } = await supabase.from("virtual_positions")
+      .select("entry_strategy, entry_price, exit_price, position_type, closed_at")
+      .eq("user_id", userId).eq("status", "closed").not("entry_strategy", "is", null)
+      .order("closed_at", { ascending: false }).limit(1000);
+    const by: Record<string, number[]> = {};
+    for (const r of (rows ?? []) as any[]) {
+      const e = Number(r.entry_price), x = Number(r.exit_price);
+      if (!(e > 0 && x > 0)) continue;
+      const k = String(r.entry_strategy);
+      (by[k] ??= []);
+      if (by[k].length < 50) by[k].push((r.position_type === "short" ? -1 : 1) * (x / e - 1) * 100);
+    }
+    for (const [strat, arr] of Object.entries(by)) {
+      if (arr.length < 20) continue;
+      const avg = arr.reduce((a, c) => a + c, 0) / arr.length;
+      if (avg > 0) continue;
+      const { data: shadow } = await supabase.from("signal_outcomes")
+        .select("realized_pnl_pct").eq("strategy", strat)
+        .in("status", ["closed", "stopped_out", "took_profit"])
+        .order("exit_date", { ascending: false }).limit(20);
+      const sp = ((shadow ?? []) as any[]).map((o) => Number(o.realized_pnl_pct)).filter(Number.isFinite);
+      const shadowAvg = sp.length >= 10 ? sp.reduce((a, c) => a + c, 0) / sp.length : null;
+      if (shadowAvg !== null && shadowAvg > 0) continue; // recovered → resume
+      out.set(strat, `${strat} paused: last ${arr.length} trades avg ${avg.toFixed(2)}%` +
+        (shadowAvg !== null ? `, shadow ${shadowAvg.toFixed(2)}%` : ""));
+    }
+  } catch (e) { console.warn("loadPausedStrategies failed", e); }
+  return out;
+}
 const EXIT_META_MIN_PWIN = 0.35;
 
 /** Thrown by the circuit breaker to abort the entire scan immediately. */
@@ -1625,6 +1664,8 @@ async function runEntryDecision(
   // its conviction floor is raised by floorBoost points until the trailing
   // record recovers. This is what stops a structurally bleeding strategy
   // (e.g. trend at 38% WR / −45% cumulative) from re-entering daily.
+  const pausedWhy = PAUSED_STRATEGIES.get(sig.strategy);
+  if (pausedWhy) return { kind: "BLOCKED", reason: `Strategy auto-paused — ${pausedWhy}` };
   const stratExp = strategyExpectancy?.[sig.strategy] ?? null;
   const benchBoost = stratExp?.benched ? Math.max(0, Number(stratExp.floorBoost ?? 10)) : 0;
 
@@ -3216,6 +3257,37 @@ async function processUser(
     } catch (e) {
       console.warn("live safety pass failed", e);
     }
+
+    // 3) Book-heat trim: once exposure passes 80% of the NAV cap, trim the
+    //    weakest holding by a third instead of just blocking new buys. One
+    //    trim per campaign per day via the rule-fire ledger in executeExit.
+    try {
+      const { data: openNow } = await supabase.from("virtual_positions")
+        .select("*").eq("user_id", userId).eq("status", "open");
+      const book = (openNow ?? []) as Position[];
+      let gross = 0;
+      const scored: { p: Position; px: number; pnlPct: number }[] = [];
+      for (const op of book) {
+        const q = await fetchLiveQuote(op.ticker.toUpperCase()).catch(() => null);
+        const px = q && q.price > 0 ? q.price : Number(op.entry_price);
+        gross += px * Number(op.shares);
+        const sign = op.position_type === "short" ? -1 : 1;
+        scored.push({ p: op, px, pnlPct: sign * (px / Number(op.entry_price) - 1) * 100 });
+      }
+      const expPct = currentNav > 0 ? (gross / currentNav) * 100 : 0;
+      const trigger = 0.8 * Number(settings.max_nav_exposure_pct ?? 100);
+      if (book.length >= 2 && expPct >= trigger) {
+        scored.sort((a, b) => a.pnlPct - b.pnlPct);
+        const weakest = scored[0];
+        await executeExit(supabase, weakest.p, {
+          kind: "PARTIAL_EXIT",
+          reason: `Book-heat trim: exposure ${expPct.toFixed(0)}% ≥ ${trigger.toFixed(0)}% — trimming weakest (${weakest.p.ticker} ${weakest.pnlPct.toFixed(1)}%)`,
+          price: weakest.px, pct: 0.33,
+        }, {} as ProfileParams, userSummary as any);
+      }
+    } catch (e) {
+      console.warn("book-heat trim failed", e);
+    }
   }
 
 
@@ -3255,6 +3327,8 @@ async function processUser(
   const todayPnlPct = ((realizedToday + unrealizedToday) / currentNav) * 100;
 
   const heldTickers = new Set(positions.map(p => p.ticker.toUpperCase()));
+  PAUSED_STRATEGIES = await loadPausedStrategies(supabase, userId);
+  if (PAUSED_STRATEGIES.size) console.log(`autotrader-scan: paused strategies for ${userId.slice(0, 8)}`, [...PAUSED_STRATEGIES.values()]);
 
 
   // ── CAPITAL ROTATION GATE ─────────────────────────────────────────────
