@@ -4361,8 +4361,15 @@ async function executeEntry(
   }
 
   const newPositionId = crypto.randomUUID();
+  // Lineage: link the position to the live signal that justified it.
+  let linkedSignalId: string | null = null;
+  try {
+    const { data: sigRow } = await supabase.from("live_signals").select("id")
+      .eq("ticker", ticker).order("created_at", { ascending: false }).limit(1).maybeSingle();
+    linkedSignalId = sigRow?.id ?? null;
+  } catch { /* lineage is best-effort; never block an entry */ }
   const { data: ins, error: insErr } = await supabase.from("virtual_positions").insert({
-    id: newPositionId, campaign_id: newPositionId,
+    id: newPositionId, campaign_id: newPositionId, signal_id: linkedSignalId,
 
     user_id: settings.user_id, ticker, entry_price: fillPrice, shares,
     position_type: positionType,
