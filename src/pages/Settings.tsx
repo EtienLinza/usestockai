@@ -1181,6 +1181,7 @@ function AdaptiveLimitsPanel() {
     ["Minimum buy score", `${p.min_conviction ?? "—"}`, "55–80"],
     ["Profit ceiling", `${p.tp_ceiling_pct ?? "—"}%`, "12–30%"],
     ["Drawdown brake at", `${p.dd_brake_pct ?? "—"}%`, "8–15%"],
+    ["Target holdings", `${p.target_positions ?? 22}`, "10–30"],
   ];
   return (
     <div className="mt-4 rounded-md border border-border p-3 space-y-2">
