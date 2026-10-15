@@ -166,3 +166,12 @@ export async function loadRiskParams(supabase: any, userId: string): Promise<Ris
 export function summarize(p: RiskParams): string {
   return `size${(p.min_entry_frac * 100).toFixed(1)}/${(p.top_entry_frac * 100).toFixed(1)}% cap${(p.single_name_cap * 100).toFixed(0)}% heat${p.heat_cap_pct.toFixed(1)} cvar${p.cvar_cap_pct.toFixed(1)} tp${p.tp_ceiling_pct.toFixed(0)}`;
 }
+
+// ── Portfolio concentration walls (audit Phase 4) — never adaptive ────────
+/** Max share of NAV one sector/correlated cluster may hold. */
+export const HARD_SECTOR_CAP_PCT = 30;
+/** Tolerance above the single-name cap (price drift / add-ons) before a
+ *  concentration trim fires back down to the cap. Fraction of NAV. */
+export const CONCENTRATION_TRIM_TOLERANCE = 0.02;
+/** Absolute single-name ceiling used for non-aggressive profiles. */
+export const HARD_SINGLE_NAME_WALL = 0.20;
