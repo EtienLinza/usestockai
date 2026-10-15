@@ -16,7 +16,7 @@ import {
 } from "../_shared/signal-engine-v2.ts";
 import { fetchDailyHistory, fetchPremarketQuote } from "../_shared/yahoo-history.ts";
 import { loadCachedBars, upsertBars } from "../_shared/bars-cache.ts";
-import { getSectorConvictionModifier, macroFloorAdjust, preScreen, type SectorMomentum, type MacroRegime } from "../_shared/scan-pipeline.ts";
+import { relStrengthFeature, sectorMomentumFeature, getSectorConvictionModifier, macroFloorAdjust, preScreen, type SectorMomentum, type MacroRegime } from "../_shared/scan-pipeline.ts";
 import { getEarningsBlackoutDays } from "../_shared/finnhub.ts";
 import { applyIsotonicCalibration, type IsotonicAnchor } from "../_shared/calibration.ts";
 import { requireCronOrUser } from "../_shared/cron-auth.ts";
@@ -334,8 +334,8 @@ serve(async (req) => {
         const metaScore = scoreMetaInline(metaModel, {
           conviction,
           atrPct,
-          relStrength: 0,
-          sectorMomentum: sectorMod.bonus,
+          relStrength: relStrengthFeature(data.close, macro?.spyClose),
+          sectorMomentum: sectorMomentumFeature(ticker, sectorMomentum),
           epsRevisionScore: sig.epsRevisionScore ?? 0,
           regime: marketRegime ?? sig.marketRegime ?? null,
           hourOfDay: (new Date().getUTCHours() + 19) % 24,

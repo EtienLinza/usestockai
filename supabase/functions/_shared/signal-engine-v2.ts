@@ -248,11 +248,14 @@ export function classifyStock(close: number[], high: number[], low: number[], ti
 
   // Bug fix: was slicing `close` so we were really tracking "higher closing
   // prices" instead of actual higher highs. Read from the `high` array.
+  // Oct 2026 fix: windows were anchored at the START of history and stepped
+  // forward, so the newest 1–19 bars (up to ~4 weeks) were never counted.
+  // Anchor at the most recent bar and step backwards instead.
   const hhWindow = 20;
   let hhCount = 0, hhTotal = 0;
-  for (let i = hhWindow * 2; i < n; i += hhWindow) {
-    const currentHigh = Math.max(...high.slice(i - hhWindow, i));
-    const prevHigh = Math.max(...high.slice(i - hhWindow * 2, i - hhWindow));
+  for (let end = n; end - hhWindow * 2 >= 0; end -= hhWindow) {
+    const currentHigh = Math.max(...high.slice(end - hhWindow, end));
+    const prevHigh = Math.max(...high.slice(end - hhWindow * 2, end - hhWindow));
     hhTotal++;
     if (currentHigh > prevHigh) hhCount++;
   }
@@ -555,7 +558,7 @@ export function computeStrategySignal(
   consensusScore: number;
   regime: string;
   confidence: number;
-  strategy: "trend" | "mean_reversion" | "breakout" | "none";
+  strategy: "trend" | "mean_reversion" | "breakout" | "catalyst" | "none";
   positionSizeMultiplier: number;
   atr: number;
   /** Entry-observable indicator readings — persisted into feature snapshots so
@@ -908,7 +911,7 @@ export function computeStrategySignal(
   // Select best strategy by conviction
   let bestSignal: "BUY" | "SHORT" | "HOLD" = "HOLD";
   let bestConviction = 0;
-  let bestStrategy: "trend" | "mean_reversion" | "breakout" | "none" = "none";
+  let bestStrategy: "trend" | "mean_reversion" | "breakout" | "catalyst" | "none" = "none";
 
   if (trendConviction > bestConviction && trendSignal !== "HOLD") {
     bestSignal = trendSignal; bestConviction = trendConviction; bestStrategy = "trend";
@@ -1030,9 +1033,14 @@ export function computePositionSize(
   // Prefer realized-edge Kelly when we have enough samples; fall back to the
   // conviction ramp otherwise. The ramp is intentionally conservative and
   // serves as the cold-start sizing model before calibration matures.
-  const kellyBase = (edge && edge.sampleSize >= 30 && edge.avgWin > 0 && edge.avgLoss > 0)
-    ? realKelly(edge)
-    : 0.10 + ((conviction - 60) / 40) * 0.15;
+  // Oct 2026 fix: unproven strategies used to reach 25% while proven ones
+  // cap at 20%. Cold-start now starts at 12% and grows toward the 20% proven
+  // cap as the strategy's track record fills in (0 → 30 trades).
+  const proven = !!(edge && edge.sampleSize >= 30 && edge.avgWin > 0 && edge.avgLoss > 0);
+  const coldCap = 0.12 + 0.08 * Math.min(1, Math.max(0, edge?.sampleSize ?? 0) / 30);
+  const kellyBase = proven
+    ? realKelly(edge as RealizedEdge)
+    : Math.min(coldCap, 0.10 + ((conviction - 60) / 40) * 0.15);
   // H-2 fix: clamp atrPct in the volScalar denominator so that sub-$5 names
   // (where tick discreteness inflates ATR%) and ultra-quiet names don't
   // collapse or balloon sizing. Floor 0.5% (avoids divide-by-tiny) and
@@ -1043,7 +1051,7 @@ export function computePositionSize(
   const atrPctClamped = Math.min(0.06, Math.max(0.005, atrPct));
   const volScalar = applyVolScaling ? Math.min(1.5, targetVol / atrPctClamped) : 1;
   const raw = kellyBase * volScalar;
-  const capped = Math.min(0.25, Math.max(0, raw));
+  const capped = Math.min(0.20, Math.max(0, raw));
   return direction === "short" ? -capped : capped;
 }
 
@@ -1066,7 +1074,7 @@ export interface EvaluateSignalResult {
   weeklyBias: WeeklyBias;
   profile: StockProfile;
   blendedParams: ProfileParams;
-  strategy: "trend" | "mean_reversion" | "breakout" | "none";
+  strategy: "trend" | "mean_reversion" | "breakout" | "catalyst" | "none";
   regime: string;
   /** Volatility-targeted Kelly fraction — single canonical sizing output.
    *  Range: 0…+0.25 for longs, 0…-0.25 for shorts. 0 when no entry. */
@@ -1355,6 +1363,51 @@ export function evaluateSignal(
     }
   }
 
+  // ── CATALYST strategy (4th strategy, Oct 2026) ─────────────────────────
+  // Trades post-earnings drift and estimate-revision momentum, which the
+  // three price strategies ignore. Fires in the weekly-bias direction only:
+  //   • gap trigger: open gapped 3–15% in-direction, price HOLDS after the
+  //     open (close beyond open and > half the gap retained), volume ≥1.5×.
+  //   • estimate trigger: in-direction EPS revision score ≥ 4 with price on
+  //     the right side of its 20-day average.
+  // Estimates pointing the other way (≤ −2) veto it. Only replaces the
+  // chosen strategy when its conviction is higher; all later gates apply.
+  let catalystFired = false;
+  if (weeklyBias.bias === "long" || weeklyBias.bias === "short") {
+    const n = data.close.length;
+    if (n >= 22) {
+      const dir = weeklyBias.bias === "long" ? 1 : -1;
+      const prevClose = data.close[n - 2];
+      const px = data.close[n - 1];
+      const open = data.open[n - 1] ?? px;
+      const avgVol = data.volume.slice(-21, -1).reduce((a, b) => a + (b || 0), 0) / 20;
+      const vr = avgVol > 0 ? (data.volume[n - 1] || 0) / avgVol : 1;
+      const gap = prevClose > 0 ? (open - prevClose) / prevClose : 0;
+      const gapAbs = Math.abs(gap);
+      const sma20 = data.close.slice(-20).reduce((a, b) => a + b, 0) / 20;
+      const eps = (typeof epsRevisionScore === "number" && Number.isFinite(epsRevisionScore)) ? epsRevisionScore : 0;
+      const epsAligned = eps * dir;
+      const holds = dir > 0
+        ? px >= open * 0.995 && px > prevClose * (1 + gapAbs * 0.5)
+        : px <= open * 1.005 && px < prevClose * (1 - gapAbs * 0.5);
+      const gapTrigger = Math.sign(gap) === dir && gapAbs >= 0.03 && gapAbs <= 0.15 && holds && vr >= 1.5;
+      const epsTrigger = epsAligned >= 4 && (dir > 0 ? px > sma20 : px < sma20);
+      if ((gapTrigger || epsTrigger) && epsAligned > -2) {
+        let c = 55;
+        if (gapTrigger) c += 10 + Math.min(8, (vr - 1.5) * 4);
+        c += Math.max(-6, Math.min(12, epsAligned * 1.2));
+        c = Math.round(Math.min(90, c));
+        const thresh = dir > 0 ? activeProfile.buyThreshold : activeProfile.shortThreshold;
+        if (c >= thresh && c > sig.confidence) {
+          sig.confidence = c;
+          sig.consensusScore = dir * c;
+          sig.strategy = "catalyst";
+          catalystFired = true;
+        }
+      }
+    }
+  }
+
   // Market-regime overlay — strategy-conditional conviction multiplier, capped
   // ±15%. SOFT tilt: never blocks, just biases conviction. Applied AFTER eps
   // revision so the calibration loop can attribute each layer separately.
@@ -1394,7 +1447,8 @@ export function evaluateSignal(
   // 4. Cross-check daily entry signal with the weekly bias direction
   const lastIdx = data.close.length - 1;
   const targetDir: "long" | "short" = weeklyBias.bias === "long" ? "long" : "short";
-  const dailyEntry = isLowVol
+  // Catalyst entries use the confirmed gap / estimate trend as their timing.
+  const dailyEntry = catalystFired || isLowVol
     ? hasDailyMeanReversionEntry(data.close, lastIdx, targetDir)
     : hasDailyEntrySignal(data.close, data.high, data.low, data.volume, lastIdx, targetDir);
 
@@ -1479,6 +1533,7 @@ function regimeMultiplier(strategy: string, regime: string): number {
     trend: { bull_quiet: 1.10, bull_volatile: 1.00, bear_quiet: 0.92, bear_volatile: 0.85, neutral: 1.00 },
     mean_reversion: { bull_quiet: 0.92, bull_volatile: 1.12, bear_quiet: 1.00, bear_volatile: 0.90, neutral: 1.00 },
     breakout: { bull_quiet: 1.10, bull_volatile: 1.00, bear_quiet: 0.88, bear_volatile: 0.85, neutral: 1.00 },
+    catalyst: { bull_quiet: 1.05, bull_volatile: 1.00, bear_quiet: 0.95, bear_volatile: 0.90, neutral: 1.00 },
   };
   const row = M[strategy];
   if (!row) return 1;

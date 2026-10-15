@@ -36,6 +36,7 @@ export const FUNCTION_AUTH_REGISTRY: Record<string, AuthMode> = {
   "delete-account": "user",
   "log-audit": "user",
   "portfolio-gate": "user",
+  "portfolio-analytics": "user",
   // Users may request shadow/paper/backtest intents; live mode is additionally
   // gated inside the function to the cron-controlled execution path.
   "quant-decision": "user",
@@ -61,6 +62,7 @@ export const FUNCTION_AUTH_REGISTRY: Record<string, AuthMode> = {
   "train-meta-labeler": "cron-admin",
   "train-user-models": "cron-admin",
   "tune-exit-params": "cron-admin",
+  "tune-risk-params": "cron-admin",
   "tune-signal-thresholds": "cron-admin",
   "weekly-digest": "cron-admin",
 };

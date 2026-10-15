@@ -69,6 +69,27 @@ export function getSectorConvictionModifier(ticker: string, sectorMomentum: Sect
   return { bonus: 0, label: "" };
 }
 
+/** Meta-labeler input: 20-day return of the stock minus SPY, in %. Clamped
+ *  ±30. Returns 0 when either series is too short. */
+export function relStrengthFeature(close: number[], spyClose: number[] | null | undefined, lb = 20): number {
+  const r = pctChange(close, lb);
+  const s = spyClose ? pctChange(spyClose, lb) : null;
+  if (r === null || s === null) return 0;
+  return Math.max(-30, Math.min(30, Math.round((r - s) * 10) / 10));
+}
+
+/** Meta-labeler input: the stock's sector ETF 20-day momentum minus the
+ *  median sector, in %. Clamped ±20. 0 when the sector is unknown. */
+export function sectorMomentumFeature(ticker: string, sm: SectorMomentum | null | undefined): number {
+  if (!sm) return 0;
+  const etf = TICKER_TO_SECTOR_ETF[ticker.toUpperCase()];
+  if (!etf || !Number.isFinite(sm[etf])) return 0;
+  const vals = Object.values(sm).filter(Number.isFinite).sort((a, b) => a - b);
+  if (!vals.length) return 0;
+  const med = vals[Math.floor(vals.length / 2)];
+  return Math.max(-20, Math.min(20, Math.round((sm[etf] - med) * 10) / 10));
+}
+
 // ── MACRO REGIME ────────────────────────────────────────────────────────────
 export interface MacroRegime {
   score: number; label: string;
@@ -305,18 +326,29 @@ export function preScreen(data: DataSet): boolean {
   const adv = dv / count;
   if (adv < 20_000_000) return false;
 
-  // Reject "unactionable" tape: today's gap > 6% (post-earnings whipsaw,
-  // M&A news, halts) — entry math is unreliable around these prints.
+  // Oct 2026: only EXTREME tape is thrown out (gap > 15%, range > 20% —
+  // M&A, halts). 6–15% gaps go through an "earnings move" check instead:
+  // the move must hold after the open on ≥1.5× volume, so these flow to the
+  // engine's catalyst strategy rather than being discarded.
   if (n >= 2) {
     const prevClose = close[n - 2];
     const todayOpen = data.open[n - 1] ?? close[n - 1];
+    const px = close[n - 1];
     if (prevClose > 0) {
-      const gapPct = Math.abs(todayOpen - prevClose) / prevClose;
-      if (gapPct > 0.06) return false;
+      const gap = (todayOpen - prevClose) / prevClose;
+      const gapPct = Math.abs(gap);
+      const range = (high[n - 1] - low[n - 1]) / prevClose;
+      if (gapPct > 0.15 || range > 0.20) return false;
+      if (gapPct > 0.06 || range > 0.10) {
+        let v = 0;
+        for (let i = n - 21; i < n - 1; i++) v += volume[i] || 0;
+        const vr = v > 0 ? (volume[n - 1] || 0) / (v / 20) : 0;
+        const holds = gap > 0
+          ? px >= todayOpen * 0.995 && px > prevClose * (1 + gapPct * 0.5)
+          : px <= todayOpen * 1.005 && px < prevClose * (1 - gapPct * 0.5);
+        return holds && vr >= 1.5;
+      }
     }
-    // Reject extreme intraday range too (>10% high-low vs prev close)
-    const range = (high[n - 1] - low[n - 1]) / prevClose;
-    if (range > 0.10) return false;
   }
 
   // Cheap signal probes
