@@ -71,10 +71,10 @@ export default function Portfolio() {
         {data && m && (
           <>
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-              <MetricCard label="Account value" value={money(data.nav)} subValue={`${ret >= 0 ? "+" : ""}${ret.toFixed(2)}% all-time`} icon={Wallet} />
-              <MetricCard label="Invested / cash" value={`${(100 - m.cashPct).toFixed(0)}% / ${m.cashPct.toFixed(0)}%`} subValue={`${data.n} of ~${m.targetPositions} holdings`} icon={Percent} />
-              <MetricCard label="Money at risk" value={`${m.heatPct.toFixed(1)}%`} subValue={`Bad week (95%): −${m.varWeek95.toFixed(1)}%`} icon={ShieldAlert} />
-              <MetricCard label="Independent bets" value={m.effBets.toFixed(1)} subValue={`Beta ${m.beta.toFixed(2)} · avg overlap ${m.avgCorr.toFixed(2)}`} icon={Layers} />
+              <MetricCard label="Account value" value={money(data.nav)} subtext={`${ret >= 0 ? "+" : ""}${ret.toFixed(2)}% all-time`} icon={Wallet} />
+              <MetricCard label="Invested / cash" value={`${(100 - m.cashPct).toFixed(0)}% / ${m.cashPct.toFixed(0)}%`} subtext={`${data.n} of ~${m.targetPositions} holdings`} icon={Percent} />
+              <MetricCard label="Money at risk" value={`${m.heatPct.toFixed(1)}%`} subtext={`Bad week (95%): −${m.varWeek95.toFixed(1)}%`} icon={ShieldAlert} />
+              <MetricCard label="Independent bets" value={m.effBets.toFixed(1)} subtext={`Beta ${m.beta.toFixed(2)} · avg overlap ${m.avgCorr.toFixed(2)}`} icon={Layers} />
             </div>
 
             <div className="grid lg:grid-cols-2 gap-4">
