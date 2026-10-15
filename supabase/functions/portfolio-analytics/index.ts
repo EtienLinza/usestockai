@@ -7,6 +7,7 @@
 // ============================================================================
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { loadCachedBars } from "../_shared/bars-cache.ts";
+import { fetchDailyHistory } from "../_shared/yahoo-history.ts";
 import { getSector } from "../_shared/finnhub.ts";
 import { loadRiskParams, HARD_SECTOR_CAP_PCT, RISK_DEFAULTS } from "../_shared/adaptive-risk.ts";
 
@@ -68,9 +69,21 @@ Deno.serve(async (req) => {
     const realized = (closed ?? []).reduce((s: number, r: any) => s + Number(r.pnl ?? 0), 0);
     const startNav = Number(settings?.starting_nav ?? 100000);
 
+    const today = new Date().toISOString().slice(0, 10);
+    const ageDays = (d?: string) => d ? Math.max(0, Math.floor((Date.parse(today) - Date.parse(d)) / 864e5)) : null;
     const rows = await Promise.all(open.map(async (p) => {
       const t = String(p.ticker).toUpperCase();
-      const close = bars.get(t)?.close ?? [];
+      const cachedSet = bars.get(t);
+      let close = cachedSet?.close ?? [];
+      let priceDate: string | undefined = cachedSet?.timestamps?.[cachedSet.timestamps.length - 1];
+      // Saved close older than a day (or missing) → fetch a fresh price.
+      if ((ageDays(priceDate) ?? 99) > 1) {
+        const fresh = await fetchDailyHistory(t, "3mo", 6000).catch(() => null);
+        if (fresh && fresh.close.length) {
+          close = fresh.close; priceDate = fresh.timestamps[fresh.timestamps.length - 1];
+        }
+      }
+      const priceStale = close.length === 0;
       const last = close.length ? close[close.length - 1] : Number(p.entry_price);
       const r = returns(close);
       const shares = Number(p.shares);
@@ -80,7 +93,7 @@ Deno.serve(async (req) => {
       const riskToStop = stop ? Math.max(0, sign * (last - stop) * shares) : value * 0.08;
       const beta = (() => {
         const c = corr(r, spyR); const s1 = sd(r), s2 = sd(spyR);
-        return c != null && s2 > 0 ? c * s1 / s2 : 1;
+        return c != null && s2 > 0 && r.length >= 20 ? c * s1 / s2 : null;
       })();
       let sector: string | null = null;
       try { sector = await getSector(t); } catch (_) { /* ignore */ }
@@ -89,16 +102,20 @@ Deno.serve(async (req) => {
         pnl: sign * (last - Number(p.entry_price)) * shares,
         pnlPct: Number(p.entry_price) > 0 ? sign * (last / Number(p.entry_price) - 1) * 100 : 0,
         stop, stopDistPct: stop && last > 0 ? sign * (last - stop) / last * 100 : null,
+        priceDate: priceDate ?? null, priceAgeDays: priceStale ? null : ageDays(priceDate),
         riskToStop, vol: sd(r), beta, sector: sector ?? "Other", r,
         ageDays: Math.floor((Date.now() - new Date(p.created_at).getTime()) / 864e5),
         conviction: p.entry_conviction ?? null,
       };
     }));
 
-    const invested = rows.reduce((s, x) => s + x.value, 0);
-    const costBasis = open.reduce((s, p) => s + Number(p.shares) * Number(p.entry_price), 0);
-    const cash = startNav + realized - costBasis;
-    const nav = cash + invested + 0; // value already includes unrealized
+    // Shorts: proceeds raise cash, the liability (shares × last) lowers NAV.
+    // NAV = start + realized + unrealized; cash = NAV − net market exposure.
+    const unrealized = rows.reduce((s, x) => s + x.pnl, 0);
+    const nav = startNav + realized + unrealized;
+    const netExposure = rows.reduce((s, x) => s + x.sign * x.value, 0);
+    const invested = rows.reduce((s, x) => s + x.value, 0); // gross
+    const cash = nav - netExposure;
     const n = rows.length;
 
     // Correlation matrix + portfolio variance
@@ -114,13 +131,14 @@ Deno.serve(async (req) => {
     // Correlation-adjusted bets: (Σ w σ)² / σ_p²
     const wsig = rows.reduce((s, x, i) => s + Math.abs(w[i]) * x.vol, 0);
     const effBets = pVar > 0 ? (wsig * wsig) / pVar : 0;
-    const beta = rows.reduce((s, x, i) => s + w[i] * x.beta, 0);
+    const betaKnown = rows.some((x) => x.beta != null);
+    const beta = betaKnown ? rows.reduce((s, x, i) => s + (x.beta != null ? w[i] * x.beta : 0), 0) : null;
     let avgCorr = 0, pairs = 0;
     for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) if (C[i][j] != null) { avgCorr += C[i][j]!; pairs++; }
     avgCorr = pairs ? avgCorr / pairs : 0;
 
     const sectors: Record<string, number> = {};
-    rows.forEach((x) => { sectors[x.sector] = (sectors[x.sector] ?? 0) + (nav > 0 ? x.value / nav * 100 : 0); });
+    rows.forEach((x) => { sectors[x.sector] = (sectors[x.sector] ?? 0) + (nav > 0 ? x.sign * x.value / nav * 100 : 0); });
     const sectorCap = HARD_SECTOR_CAP_PCT;
     const heatPct = nav > 0 ? rows.reduce((s, x) => s + x.riskToStop, 0) / nav * 100 : 0;
     const varWeek95 = 1.645 * pVolDaily * Math.sqrt(5) * 100;
@@ -154,7 +172,7 @@ Deno.serve(async (req) => {
     const missing = majors.filter((s) => !covered.has(s));
     if (missing.length >= 4) recs.push({ priority: 55, kind: "diversify", title: `Add exposure to ${missing.slice(0, 3).join(", ")}`,
       reason: `${missing.length} major sectors have no holdings — the book leans on a few themes.` });
-    if (beta > 1.4) recs.push({ priority: 65, kind: "beta", title: `Market sensitivity is high (beta ${beta.toFixed(2)})`,
+    if (beta != null && beta > 1.4) recs.push({ priority: 65, kind: "beta", title: `Market sensitivity is high (beta ${beta.toFixed(2)})`,
       reason: "A 5% market drop would cost roughly " + (beta * 5).toFixed(1) + "% of invested money. Favor steadier names next." });
     recs.sort((a, b) => b.priority - a.priority);
 
@@ -166,6 +184,7 @@ Deno.serve(async (req) => {
         id: x.id, ticker: x.ticker, sector: x.sector, shares: x.shares, entry: x.entry, last: x.last, value: x.value,
         weightPct: nav > 0 ? x.value / nav * 100 : 0, pnl: x.pnl, pnlPct: x.pnlPct, stopDistPct: x.stopDistPct,
         beta: x.beta, riskSharePct: pVar > 0 ? mrc[i] / pVar * 100 : 0, ageDays: x.ageDays,
+        side: x.sign < 0 ? "short" : "long", priceDate: x.priceDate, priceAgeDays: x.priceAgeDays,
       })),
       correlation: { tickers: rows.map((x) => x.ticker), matrix: C },
       recommendations: recs.slice(0, 10),
