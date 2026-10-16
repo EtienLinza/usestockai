@@ -1594,7 +1594,7 @@ async function runEntryDecision(
   if (AGGR && (settings.current_drawdown_pct >= RP.dd_brake_pct || settings.current_cdar_pct >= RP.dd_brake_pct)) {
     aggrHaircut *= RP.haircut_dd; aggrNotes.push(`dd-brake×${RP.haircut_dd.toFixed(2)}`);
   }
-  if (!AGGR && settings.current_drawdown_pct >= ROLLING_DD_HARD_BLOCK_PCT) {
+  if (settings.current_drawdown_pct >= ROLLING_DD_HARD_BLOCK_PCT) {
     return {
       kind: "BLOCKED",
       reason: `Rolling drawdown circuit breaker: 30d NAV dd ${settings.current_drawdown_pct.toFixed(1)}% ≥ ${ROLLING_DD_HARD_BLOCK_PCT}% — entries paused`,
@@ -1603,7 +1603,7 @@ async function runEntryDecision(
   // CDaR_0.95 circuit breaker (idea #13) — also runs in non-adaptive mode.
   // Catches sustained slow bleeds where the peak-to-current snapshot is mild
   // but the *average* worst-tail drawdown across the window is severe.
-  if (!AGGR && settings.current_cdar_pct >= CDAR_HARD_BLOCK_PCT) {
+  if (settings.current_cdar_pct >= CDAR_HARD_BLOCK_PCT) {
     return {
       kind: "BLOCKED",
       reason: `CDaR circuit breaker: 30d CDaR_0.95 ${settings.current_cdar_pct.toFixed(1)}% ≥ ${CDAR_HARD_BLOCK_PCT}% — entries paused`,
@@ -2056,7 +2056,8 @@ async function runEntryDecision(
   ));
   const riskPct = minRiskPct + (maxRiskPct - minRiskPct) * convBlend;
   const riskBudgetDollars = navForSizing * riskPct;
-  if (stopDist > 0 && !AGGR) {
+  // Risk-per-trade cap applies to EVERY profile (Aggressive bypass caused Oct 14–16 losses).
+  if (stopDist > 0) {
     const maxSharesByRisk = riskBudgetDollars / stopDist;
     const maxDollarsByRisk = maxSharesByRisk * currentPrice;
     if (targetDollars > maxDollarsByRisk) {
