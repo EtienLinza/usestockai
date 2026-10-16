@@ -1,13 +1,13 @@
 // ============================================================================
 // SIGNAL EXPLAINER — generates a short retail-friendly natural-language
-// explanation for a fired signal using Lovable AI Gateway (gemini-flash-lite).
+// explanation for a fired signal using Lovable AI Gateway (gemini-3.1-flash-lite).
 //
 // Pure helper. Non-blocking: callers should race this with a short timeout
 // and write empty string on any failure. NEVER blocks signal persistence.
 // ============================================================================
 
 const LOVABLE_AI_URL = "https://ai.gateway.lovable.dev/v1/chat/completions";
-const MODEL = "google/gemini-2.5-flash-lite";
+const MODEL = "google/gemini-3.1-flash-lite";
 const DEFAULT_TIMEOUT_MS = 8000;
 
 export interface ExplainerInput {
