@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
-import { motion } from "framer-motion";
+import { useState, useEffect, useRef } from "react";
+import { motion, useScroll, useSpring, useTransform, useReducedMotion } from "framer-motion";
 import { useNavigate, Link } from "react-router-dom";
 import { Navbar } from "@/components/Navbar";
 import { Button } from "@/components/ui/button";
@@ -61,6 +61,12 @@ const FAQS = [
 
 const Landing = () => {
   const navigate = useNavigate();
+  const heroRef = useRef<HTMLElement>(null);
+  const reducedMotion = useReducedMotion();
+  const { scrollYProgress } = useScroll({ target: heroRef, offset: ["start start", "end start"] });
+  const heroProgress = useSpring(scrollYProgress, { stiffness: 180, damping: 35 });
+  const heroY = useTransform(heroProgress, [0, 1], [0, 32]);
+  const heroScale = useTransform(heroProgress, [0, 1], [1, 0.98]);
   const [signalCount, setSignalCount] = useState<number | null>(null);
   const [previewSignals, setPreviewSignals] = useState<LiveSignalPreview[]>([]);
 
@@ -141,21 +147,21 @@ const Landing = () => {
       
       <main>
       {/* Hero Section */}
-      <section className="relative min-h-[85vh] sm:min-h-screen flex items-center justify-center overflow-hidden pt-16 sm:pt-0">
-        <div className="absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-primary/3 rounded-full blur-[120px]" />
+      <section ref={heroRef} className="relative flex items-center justify-center min-h-[620px] sm:min-h-[680px] pt-24 pb-12 sm:pb-16 overflow-hidden">
         
         <div className="container mx-auto px-4 sm:px-6 relative z-10">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6 }}
+            style={reducedMotion ? undefined : { y: heroY, scale: heroScale }}
             className="text-center max-w-3xl mx-auto"
           >
             <motion.div
               initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               transition={{ delay: 0.1 }}
-              className="flex justify-center mb-6 sm:mb-10"
+              className="flex justify-center mb-6 sm:mb-8"
             >
               <Logo size="lg" />
             </motion.div>
@@ -176,19 +182,17 @@ const Landing = () => {
             )}
             
             <h1 className="text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-medium mb-5 sm:mb-6 leading-tight tracking-tight">
-              AI Stock Predictions
-              <br />
-              <span className="text-gradient">& Live Trading Signals</span>
+              AI Trading Signals
             </h1>
             
-            <p className="text-base sm:text-lg text-muted-foreground mb-8 sm:mb-12 max-w-xl mx-auto leading-relaxed px-2">
+            <p className="text-base sm:text-lg text-muted-foreground mb-8 sm:mb-10 max-w-xl mx-auto leading-relaxed px-2">
               StockAI scans 6,000+ tickers in real time, generates high-conviction AI stock signals
               with calibrated confidence, and lets you backtest every strategy. Research only — no noise.
             </p>
             
             <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 justify-center px-4 sm:px-0">
               <Button
-                variant="glow"
+                variant="default"
                 size="xl"
                 onClick={() => navigate("/dashboard")}
                 className="group w-full sm:w-auto"
@@ -213,10 +217,10 @@ const Landing = () => {
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.35 + i * 0.05 }}
-                className="text-center rounded-lg border border-border/30 sm:border-0 py-3 sm:py-0 bg-card/30 sm:bg-transparent"
+                className="text-center py-3 sm:py-0"
               >
-                <div className="text-lg sm:text-xl font-bold font-mono tabular-nums text-primary">{stat.value}</div>
-                <div className="text-[10px] sm:text-xs text-muted-foreground uppercase tracking-wider mt-0.5">{stat.label}</div>
+                <div className="text-lg sm:text-xl font-bold font-mono tabular-nums text-foreground">{stat.value}</div>
+                <div className="text-xs text-muted-foreground mt-1">{stat.label}</div>
               </motion.div>
             ))}
           </motion.div>
@@ -597,7 +601,7 @@ const Landing = () => {
               Join StockAI and start making data-driven trading decisions with AI-powered market intelligence.
             </p>
             <div className="flex flex-col sm:flex-row gap-4 justify-center">
-              <Button variant="glow" size="xl" onClick={() => navigate("/auth?mode=signup")} className="group">
+              <Button variant="default" size="xl" onClick={() => navigate("/auth?mode=signup")} className="group">
                 Get Started Free
                 <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-1" />
               </Button>
