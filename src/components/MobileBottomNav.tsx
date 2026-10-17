@@ -35,7 +35,7 @@ export const MobileBottomNav = () => {
 
   return (
     <nav
-      className="md:hidden fixed bottom-0 left-0 right-0 z-40 border-t border-border/40 bg-background/80 backdrop-blur-xl supports-[backdrop-filter]:bg-background/60"
+      className="navigation-chrome md:hidden fixed bottom-0 left-0 right-0 z-40 border-t border-border/40"
       style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
       aria-label="Primary"
     >
@@ -51,7 +51,7 @@ export const MobileBottomNav = () => {
               <Link
                 to={item.href}
                 className={cn(
-                  "relative flex flex-col items-center justify-center gap-0.5 py-2.5 min-h-[56px] text-[10px] font-medium transition-colors",
+                  "control-feedback relative flex flex-col items-center justify-center gap-0.5 py-2.5 min-h-[56px] text-[10px] font-medium transition-colors",
                   isActive
                     ? "text-primary"
                     : "text-muted-foreground hover:text-foreground active:text-foreground",
@@ -61,8 +61,8 @@ export const MobileBottomNav = () => {
                 {isActive && (
                   <span className="absolute top-0 left-1/2 -translate-x-1/2 h-0.5 w-8 rounded-full bg-primary" />
                 )}
-                <Icon className={cn("w-5 h-5 transition-transform", isActive && "text-primary scale-110")} />
-                <span className="tracking-tight">{item.label}</span>
+                <Icon className={cn("w-5 h-5 transition-transform", isActive && "text-primary")} />
+                <span className="tracking-normal">{item.label}</span>
               </Link>
             </li>
           );
