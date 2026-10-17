@@ -4,3 +4,4 @@
 - In-app notifications are written only by database triggers via `public.notify_user` — never insert into `notifications` from app code, so every event source stays in one place.
 - Portfolio-level analytics (correlation, beta, effective bets, recommendations) are computed only in the `portfolio-analytics` edge function — the Portfolio page just renders them, so the math lives next to the engine's own data.
 - The signal engine has four strategies (trend, mean_reversion, breakout, catalyst); scan pre-screen only drops extreme tape (>15% gap / >20% range) so earnings moves reach the catalyst strategy.
+- Shared presentation uses global semantic chrome/surface tokens and Button feedback, with MotionConfig respecting user motion preferences; this keeps accessibility consistent without touching trading behavior.
