@@ -89,15 +89,13 @@ export const Navbar = () => {
                   </Button>
               );
             })}
-            <Link to="/pricing">
-              <Button
+              <Button asChild
                 variant={location.pathname === "/pricing" ? "secondary" : "ghost"}
                 size="sm"
                 className={location.pathname === "/pricing" ? "text-primary" : "text-muted-foreground hover:text-foreground"}
               >
-                Pricing
+                <Link to="/pricing" aria-current={location.pathname === "/pricing" ? "page" : undefined}>Pricing</Link>
               </Button>
-            </Link>
           </nav>
 
           <div className="flex items-center gap-2">
@@ -228,16 +226,12 @@ export const Navbar = () => {
               </DropdownMenu>
             ) : (
               <div className="hidden md:flex items-center gap-3">
-                <Link to="/auth">
-                  <Button variant="ghost" size="sm" className="text-muted-foreground">
-                    Sign In
+                  <Button asChild variant="ghost" size="sm" className="text-muted-foreground">
+                    <Link to="/auth">Sign In</Link>
                   </Button>
-                </Link>
-                <Link to="/auth?mode=signup">
-                  <Button variant="default" size="sm">
-                    Get Started
+                  <Button asChild variant="default" size="sm">
+                    <Link to="/auth?mode=signup">Get Started</Link>
                   </Button>
-                </Link>
               </div>
             )}
           </div>

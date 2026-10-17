@@ -147,7 +147,7 @@ const Landing = () => {
       
       <main>
       {/* Hero Section */}
-      <section ref={heroRef} className="relative flex items-center justify-center min-h-[620px] sm:min-h-[680px] pt-24 pb-12 sm:pb-16 overflow-hidden">
+      <section ref={heroRef} className="relative flex items-center justify-center min-h-[620px] sm:min-h-[680px] pt-24 pb-8 sm:pb-16 overflow-hidden">
         
         <div className="container mx-auto px-4 sm:px-6 relative z-10">
           <motion.div
@@ -209,7 +209,7 @@ const Landing = () => {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.3, duration: 0.6 }}
-            className="grid grid-cols-2 sm:flex sm:flex-wrap justify-center gap-4 sm:gap-10 mt-12 sm:mt-16 max-w-md sm:max-w-none mx-auto"
+            className="grid grid-cols-2 sm:flex sm:flex-wrap justify-center gap-2 sm:gap-10 mt-6 sm:mt-16 max-w-md sm:max-w-none mx-auto"
           >
             {stats.map((stat, i) => (
               <motion.div
