@@ -400,3 +400,52 @@
 .animate-slide-in {
   animation: slide-in 0.4s ease-out forwards;
 }
+
+/* ---- Apple-inspired touches (restrained) ---- */
+:root {
+  /* Spring curve (response ~0.35s, damping ~0.8) */
+  --ease-spring: linear(0, 0.18 6%, 0.55 16%, 0.86 28%, 1.01 40%, 1.04 50%, 1.02 62%, 1 100%);
+}
+
+/* Clear, consistent keyboard focus */
+:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Instant press feedback on buttons */
+button:not(:disabled), [role="button"] {
+  transition: transform 220ms var(--ease-spring), background-color 150ms, color 150ms, box-shadow 200ms;
+}
+button:not(:disabled):active, [role="button"]:active {
+  transform: scale(0.97);
+}
+
+/* Glass belongs to chrome (menus), not every card */
+.glass-card { backdrop-filter: none; }
+nav.fixed, header.fixed { backdrop-filter: blur(20px) saturate(180%); -webkit-backdrop-filter: blur(20px) saturate(180%); }
+
+/* Gentle scroll-linked reveal for page sections (no scroll hijacking) */
+@supports (animation-timeline: view()) {
+  @media (prefers-reduced-motion: no-preference) {
+    main section {
+      animation: fade-in-up linear both;
+      animation-timeline: view();
+      animation-range: entry 0% entry 35%;
+    }
+  }
+}
+
+/* Accessibility fallbacks */
+@media (prefers-reduced-transparency: reduce) {
+  nav.fixed, header.fixed { backdrop-filter: none; -webkit-backdrop-filter: none; background: hsl(var(--background)); }
+}
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
