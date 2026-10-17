@@ -63,39 +63,41 @@ export const Navbar = () => {
     <motion.header
       initial={{ y: -20, opacity: 0 }}
       animate={{ y: 0, opacity: 1 }}
-      className="navigation-chrome fixed top-0 left-0 right-0 z-50 border-b border-border/40"
+      className="fixed top-0 left-0 right-0 z-50 border-b border-border/40 bg-background/80 backdrop-blur-xl supports-[backdrop-filter]:bg-background/60"
     >
-      <div className="container mx-auto px-4 sm:px-6">
+      <div className="container mx-auto px-6">
         <div className="flex h-14 items-center justify-between">
           <Link to="/" className="flex items-center">
             <Logo size="sm" />
           </Link>
 
           {/* Desktop Navigation */}
-          <nav aria-label="Main navigation" className="hidden md:flex items-center gap-1">
+          <nav className="hidden md:flex items-center gap-1">
             {navLinks.map((link) => {
               const isActive = location.pathname === link.href;
               const Icon = link.icon;
               return (
-                <Button key={link.href} asChild
+                <Link key={link.href} to={link.href}>
+                  <Button
                     variant={isActive ? "secondary" : "ghost"}
                     size="sm"
                     className={`gap-2 ${isActive ? "text-primary" : "text-muted-foreground hover:text-foreground"}`}
                   >
-                    <Link to={link.href} aria-current={isActive ? "page" : undefined}>
-                      <Icon aria-hidden="true" className="w-4 h-4" />
-                      {link.label}
-                    </Link>
+                    <Icon className="w-4 h-4" />
+                    {link.label}
                   </Button>
+                </Link>
               );
             })}
-              <Button asChild
+            <Link to="/pricing">
+              <Button
                 variant={location.pathname === "/pricing" ? "secondary" : "ghost"}
                 size="sm"
                 className={location.pathname === "/pricing" ? "text-primary" : "text-muted-foreground hover:text-foreground"}
               >
-                <Link to="/pricing" aria-current={location.pathname === "/pricing" ? "page" : undefined}>Pricing</Link>
+                Pricing
               </Button>
+            </Link>
           </nav>
 
           <div className="flex items-center gap-2">
@@ -181,13 +183,13 @@ export const Navbar = () => {
             {user ? (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" size="sm" className="hidden sm:flex" aria-label="Account menu">
+                  <button className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 hover:bg-accent hover:text-accent-foreground h-9 px-3 hidden sm:flex">
                     <User className="w-4 h-4" />
                     <span className="max-w-[100px] truncate text-muted-foreground">
                       {user.email}
                     </span>
                     <TierBadge tier={tier} />
-                  </Button>
+                  </button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="w-56">
                   <div className="px-2 py-1.5 flex items-center justify-between gap-2">
@@ -226,12 +228,16 @@ export const Navbar = () => {
               </DropdownMenu>
             ) : (
               <div className="hidden md:flex items-center gap-3">
-                  <Button asChild variant="ghost" size="sm" className="text-muted-foreground">
-                    <Link to="/auth">Sign In</Link>
+                <Link to="/auth">
+                  <Button variant="ghost" size="sm" className="text-muted-foreground">
+                    Sign In
                   </Button>
-                  <Button asChild variant="default" size="sm">
-                    <Link to="/auth?mode=signup">Get Started</Link>
+                </Link>
+                <Link to="/auth?mode=signup">
+                  <Button variant="default" size="sm">
+                    Get Started
                   </Button>
+                </Link>
               </div>
             )}
           </div>
